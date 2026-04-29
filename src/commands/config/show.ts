@@ -3,21 +3,28 @@
  * Monday API token redacted to `<set>` / `<unset>` (`cli-design.md`
  * §7.1, `.claude/rules/security.md` "Redaction in output").
  *
- * Why this command doesn't call `loadConfig()`:
+ * Sources matter: `loadConfig()` (in `src/config/load.ts`) loads
+ * `.env` into the process env before reading values, but rejects
+ * on a missing token — wrong fit for a diagnostic command. We
+ * preload `.env` here with the same `override: false` semantics
+ * `loadConfig` uses (explicit shell exports win over file values),
+ * then read the documented vars directly so a `MONDAY_API_TOKEN`
+ * present only in `.env` reports as `auth: 'set'` rather than
+ * lying to the user.
  *
- *  - `loadConfig()` rejects on a missing token. That's the right
- *    behaviour for "I'm about to make an API call" but actively
- *    unhelpful for "show me what I have configured" — agents reach
- *    for `monday config show` to debug a missing-token state.
+ * Codex review §2 caught this: previously the command read
+ * `ctx.env` straight, never honoured `.env`, so a token in `.env`
+ * showed as unset while later API commands would happily use it.
  *
- *  - We instead read each documented env var directly and report
- *    presence + parsed value (where benign). The token is reduced
- *    to `<set>` / `<unset>`; non-secret values (`MONDAY_API_VERSION`,
- *    `MONDAY_API_URL`, `MONDAY_REQUEST_TIMEOUT_MS`) are echoed
- *    verbatim because exposing them is the whole point.
+ * Numeric coercion uses `z.coerce.number().int().positive()` —
+ * the same parser `loadConfig`'s env schema applies. This rejects
+ * `5000abc` (which `parseInt` would silently accept as `5000`)
+ * so the diagnostic matches the strict path.
  *
  * Idempotent: yes — repeated calls observe the same env state.
  */
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitSuccess } from '../emit.js';
@@ -74,19 +81,51 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * Pure — easy to unit-test against a synthetic env without spawning
  * commander.
  */
+export interface BuildConfigShowOptions {
+  /**
+   * Working directory used to locate `.env`. Defaults to
+   * `process.cwd()`. Tests pin a tmp dir to assert the load path
+   * behaves predictably.
+   */
+  readonly cwd?: string;
+  /**
+   * If true, look for and merge `.env` into `env` (without
+   * overriding existing entries). Defaults to true for parity with
+   * `loadConfig()` — agents asking "what's configured?" should see
+   * the same answer whichever path the CLI takes next.
+   */
+  readonly loadDotenv?: boolean;
+}
+
+const timeoutCoercion = z.coerce.number().int().positive();
+
 export const buildConfigShowOutput = (
   env: NodeJS.ProcessEnv,
+  options: BuildConfigShowOptions = {},
 ): ConfigShowOutput => {
+  const loadDotenv = options.loadDotenv ?? true;
+  if (loadDotenv) {
+    // `override: false` matches `loadConfig()` so explicit shell
+    // exports always win over file defaults — agents pinning a
+    // token in their shell aren't surprised by a stale `.env`.
+    dotenvConfig({
+      path: resolve(options.cwd ?? process.cwd(), '.env'),
+      processEnv: env,
+      override: false,
+      quiet: true,
+    });
+  }
+
   const token = env.MONDAY_API_TOKEN;
   const apiVersion = env.MONDAY_API_VERSION;
   const apiUrl = env.MONDAY_API_URL;
   const timeoutRaw = env.MONDAY_REQUEST_TIMEOUT_MS;
   const profile = env.MONDAY_PROFILE;
 
-  const timeoutNumber =
-    timeoutRaw !== undefined && timeoutRaw.length > 0
-      ? Number.parseInt(timeoutRaw, 10)
-      : Number.NaN;
+  // Use the same coercion `loadConfig`'s env schema applies — a
+  // value like `5000abc` is rejected (yields a `default` slot)
+  // rather than silently truncated to `5000` by `parseInt`.
+  const timeoutResult = timeoutCoercion.safeParse(timeoutRaw);
 
   return {
     auth: token !== undefined && token.length > 0 ? 'set' : 'unset',
@@ -98,10 +137,9 @@ export const buildConfigShowOutput = (
       apiUrl !== undefined && apiUrl.length > 0
         ? { state: 'explicit', value: apiUrl }
         : { state: 'default', value: DEFAULT_API_URL },
-    request_timeout_ms:
-      Number.isFinite(timeoutNumber) && timeoutNumber > 0
-        ? { state: 'explicit', value: timeoutNumber }
-        : { state: 'default', value: DEFAULT_TIMEOUT_MS },
+    request_timeout_ms: timeoutResult.success
+      ? { state: 'explicit', value: timeoutResult.data }
+      : { state: 'default', value: DEFAULT_TIMEOUT_MS },
     profile:
       profile !== undefined && profile.length > 0
         ? { state: 'explicit', value: profile }
