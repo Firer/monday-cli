@@ -68,3 +68,21 @@ the floor as the codebase grows; never lower it.
   no mutation).
 - **Skipping the unhappy path.** A test file that only covers the happy
   path is incomplete and will be sent back at review.
+- **Hand-shaping objects that production assembles from somewhere
+  else.** If a function consumes the result of `program.opts()`, the
+  test must build a real `Command`, parse argv through it, and pass
+  `program.opts()` through — not a hand-shaped record. The same
+  rule applies for any wire-format-derived input: GraphQL responses
+  go through fixture cassettes, not freehand objects; parsed config
+  comes from a tmp-dir `.env` file, not a literal `{}`. Hand-shaped
+  inputs lie about what production sees and let schema/runtime
+  drift sit unnoticed (M0's "every flag is unit-tested" claim
+  stayed green for two days because of this exact mistake — Codex
+  review §4–§6 caught it).
+- **Hand-thrown typed errors as "real path" coverage.** A test that
+  registers an action which `throw new ConfigError(...)` does not
+  prove that `loadConfig({})` actually produces a `ConfigError`. If
+  the contract says "exit 3 on missing token", drive the real
+  invocation that loads config and bypass any throw fixtures —
+  otherwise the test passes while the real path returns `internal_
+  error` / exit 2. Same pattern for `UsageError`, `ApiError`, etc.

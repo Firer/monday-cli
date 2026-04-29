@@ -203,13 +203,24 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `docs/api-reference.md` is supplementary cheat-sheet material — not
   a contract — but keep it in sync if you touch the underlying
   Monday concept.
-- **Two-AI review for non-trivial design decisions.** We use Codex
-  (gpt-5.5) as a second reviewer via `codex exec -m gpt-5.5
-  -s read-only - < .review-prompt.md > .review-output.md` with the
-  prompt explaining what to evaluate. `.review-*.md` is gitignored;
-  the resulting design changes go in normal commits. See the
-  `docs/cli-design.md` history (commits `ee3f288`, `5218ca0`) for
-  worked examples. Ask before adding new collaborators.
+- **Two-AI review for non-trivial design decisions AND per-milestone
+  implementation passes.** We use Codex (gpt-5.5) as a second reviewer
+  via `codex exec -m gpt-5.5 -s read-only - < .review-prompt.md >
+  .review-output.md` with a prompt explaining what to evaluate.
+  `.review-*.md` is gitignored; the resulting design / fix-up changes
+  go in normal commits. Two distinct triggers:
+  - **Design changes** to `docs/cli-design.md` or `docs/v0.1-plan.md`
+    get reviewed before merge. See `docs/cli-design.md` history
+    (commits `ee3f288`, `5218ca0`) for worked examples.
+  - **Implementation milestones** (M0, M1, … in `docs/v0.1-plan.md`)
+    get reviewed *before declaring the milestone done*. The M0 review
+    (post-mortem note in `v0.1-plan.md` §11) caught ten bugs the
+    coder missed — including a token-leak path, SIGINT not actually
+    aborting, schema/commander drift, and contract drift around
+    `meta.complexity` and the NDJSON trailer. **Don't skip this**;
+    the cost of one Codex run is far less than the cost of fixing
+    those bugs after M(N+1) builds on top.
+  Ask before adding new AI collaborators.
 - **Atomic, incremental commits.** Each commit is one self-contained
   unit of progress — small enough to revert cleanly, large enough to
   stand alone (e.g. one command + its tests + its doc update). Don't

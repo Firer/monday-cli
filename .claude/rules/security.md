@@ -47,16 +47,61 @@ If `loadConfig()` rejects (missing token, bad URL, etc.), the CLI exits
 
 ## Redaction in output
 
-When emitting structured output (errors, debug, dry-runs) that may
-contain headers or request bodies, redact via a single helper:
+Every output path funnels through `src/utils/redact.ts`. Two layers,
+**both required** — a key-based filter alone is not enough:
+
+1. **Key-based filter.** Values under sensitive keys (`apiToken`,
+   `Authorization`, `MONDAY_API_TOKEN`, plus a generic
+   `(token|secret|password|api[-_]?key)` regex) are replaced
+   wholesale.
+2. **Value-scanning filter.** When the runtime knows the token
+   value (loaded from env at startup), every string in the tree is
+   scanned and any occurrence of the literal token is replaced with
+   `[REDACTED]`. This is what catches the token landing in
+   `Error.message`, `Error.stack`, `Error.cause.message`, fetch
+   URLs, debug payloads — any unkeyed string.
+
+Why both: a key-only filter passed all the M0 tests but leaked tokens
+in `Error.message` (Codex review §1 caught this). The runner threads
+`MONDAY_API_TOKEN` from env into `redact()` via the `secrets` option
+so unkeyed string occurrences get scrubbed. Adversarial test shapes
+the redaction suite must cover:
+
+- token in a vanilla `Error.message`,
+- token in `Error.stack`,
+- token in `Error.cause.message` (chained),
+- token in a lowercase `authorization` header value,
+- token in a URL string,
+- token alongside other content (`auth=<tok> expired` → substring
+  replacement preserves debug context while removing the bytes).
+
+Tests **must** assert the literal token (`tok-leakcheck-xxxx`) is
+absent from every emitted byte across the suite. The M2 hardened
+regression test extends this discipline across integration / E2E.
+
+## Header lockdown
+
+Caller-supplied headers must NOT be able to override transport-owned
+headers. The header-construction order in `src/api/transport.ts` is:
 
 ```ts
-const redact = (obj: unknown): unknown => { /* deep-clone, replace any
-  value at a known-sensitive key with "[REDACTED]" */ };
+const requestHeaders = {
+  ...safeCallerHeaders,           // caller bag, with reserved names stripped
+  Authorization: config.apiToken, // wins
+  'API-Version': config.apiVersion,
+  'Content-Type': 'application/json',
+};
 ```
 
-The helper lives in `src/utils/redact.ts` (when added). Tests assert
-that known-sensitive shapes round-trip with the secret stripped.
+Plus a case-insensitive strip of any caller key whose lowercase form
+matches a reserved name (`authorization`, `api-version`,
+`content-type`). Without that, a caller could pass `authorization`
+(lowercase) and the literal-key spread would leave both `Authorization`
+*and* `authorization` in the final object — fetch impl picks a winner
+non-deterministically.
+
+The same rule applies to any future config-owned header. Add it to
+the reserved set; don't trust spread order alone.
 
 ## TLS
 

@@ -88,8 +88,43 @@ program
   });
 ```
 
-The top-level `program.parseAsync(argv).catch(...)` in `cli/index.ts`
+The top-level `program.parseAsync(argv).catch(...)` in `cli/run.ts`
 handles all rejections; never `process.exit(1)` from inside an action.
+
+## Commander's runtime option shape (don't trust the schema in your head)
+
+Commander's `program.opts()` does *not* match what your option
+declarations look like. Three traps caught by Codex review during
+M0 — the schema declared one shape, the runtime emitted another,
+and the tests passed because they fed hand-shaped objects rather
+than driving real argv:
+
+| Declaration | argv | `program.opts()` produces |
+|-------------|------|---------------------------|
+| `--no-cache` | `--no-cache` | `{ cache: false }` |
+| `--no-color` | `--no-color` | `{ color: false }` |
+| `--columns <list>` | `--columns id,name` | `{ columns: 'id,name' }` (string, **not** array — commander does not split) |
+| `--width <n>` | `--width 120` | `{ width: '120' }` (string — schema must coerce) |
+| `--retry <n>` | `--retry 3` | `{ retry: '3' }` (string) |
+| `--timeout <ms>` | `--timeout 5000` | `{ timeout: '5000' }` (string) |
+| `--json` | `--json` | `{ json: true }` |
+| `--json` | (absent) | `json` is `undefined` (schema must default) |
+
+Two consequences:
+
+1. **The zod schema for global flags must accept commander's actual
+   shape on the boundary**, not the consumer-friendly shape. Project
+   to the friendly shape (`noCache`, `noColor`, `columns: string[]`)
+   in a normaliser function below the schema, not in the schema
+   itself. See `src/types/global-flags.ts` (`globalFlagsRawSchema`
+   + `parseGlobalFlags`) for the pattern.
+2. **Tests that drive flags must drive real argv through commander.**
+   Hand-shaped objects (`schema.parse({ noCache: true })`) lie
+   about what production sees. The unit suite for global flags
+   builds a real `Command`, calls `program.parse(argv, { from:
+   'user' })`, then passes `program.opts()` to `parseGlobalFlags`.
+   If you skip this step, your "every flag has a unit test" claim
+   is hollow — that's exactly what M0 shipped before review.
 
 ## Versioning + commits
 

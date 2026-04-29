@@ -157,6 +157,49 @@ mode. A small helper in `src/utils/errors.ts` (when added) should:
   on stderr.
 - Always exit with the right exit code (config=3, usage=1, api=2).
 
+## Never bubble raw ZodError out of a parse boundary
+
+A raw `ZodError` reaching the runner's catch-all becomes
+`internal_error` (exit 2) — because it's not a `MondayCliError`.
+That's wrong: a config validation failure is `config_error` (exit 3),
+a flag validation failure is `usage_error` (exit 1). Wrap at every
+parse point:
+
+```ts
+// In src/config/load.ts — parsing env into Config
+const result = envSchema.safeParse(envInput);
+if (!result.success) {
+  const issues = result.error.issues.map((i) => ({
+    path: i.path.join('.'),
+    message: i.message,
+    code: i.code,
+  }));
+  throw new ConfigError(`invalid config: ...`, {
+    cause: result.error,
+    details: { issues, hint: 'set MONDAY_API_TOKEN ...' },
+  });
+}
+```
+
+```ts
+// In a command's argv parser
+const result = fooOptionsSchema.safeParse(opts);
+if (!result.success) {
+  throw new UsageError(`invalid flags: ${summarise(result.error)}`, {
+    cause: result.error,
+    details: { issues: ... },
+  });
+}
+```
+
+Codex review caught this gap in M0: `loadConfig` threw raw
+`ZodError`, the runner mapped it to `internal_error`, and the test
+that "verified" the missing-token path was a manually-thrown
+`ConfigError` (a fixture, not the real path). Lesson: a parse
+boundary always wraps. The `safeParse + wrap` pattern is mandatory
+at every entry point listed in "Boundaries that need validation"
+above.
+
 ## Anti-patterns
 
 - **Defensive re-validation.** Once a value is past its parser, downstream
