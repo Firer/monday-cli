@@ -1,6 +1,7 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { run, type RunOptions } from '../../../src/cli/run.js';
+import { loadConfig } from '../../../src/config/load.js';
 import {
   ApiError,
   ConfigError,
@@ -138,6 +139,42 @@ describe('run — error envelope from command actions', () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe('config_error');
     expect(envelope.error.message).toBe('MONDAY_API_TOKEN is required');
+  });
+
+  it('a real loadConfig({}) failure surfaces as config_error / exit 3', async () => {
+    // The M0 exit criterion: missing-token from loadConfig must produce
+    // the §6 envelope on stderr with exit 3 — not internal_error / 2.
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'self-test'],
+      env: {},
+      registerCommands: (program) => {
+        program
+          .command('self-test')
+          .action((_args: unknown, cmd: { parent: unknown }) => {
+            // Commander hands the parent program in as the second arg;
+            // we just need any path that calls loadConfig with a stripped env.
+            void cmd;
+            loadConfig({}, { loadDotenv: false });
+          });
+      },
+    });
+
+    const result = await run(options);
+    expect(result.exitCode).toBe(3);
+
+    const envelope = JSON.parse(captured.stderr()) as {
+      ok: boolean;
+      error: {
+        code: string;
+        details: { issues: { path: string }[]; hint: string };
+      };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.code).toBe('config_error');
+    expect(envelope.error.details.issues.map((i) => i.path)).toContain(
+      'MONDAY_API_TOKEN',
+    );
+    expect(envelope.error.details.hint).toMatch(/MONDAY_API_TOKEN/u);
   });
 
   it('UsageError → exit 1 with usage_error envelope', async () => {
