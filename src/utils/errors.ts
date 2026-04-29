@@ -93,9 +93,11 @@ export class MondayCliError extends Error {
  *
  * Exported because `monday schema` surfaces this per code so agents
  * can decide retry strategy without consuming a real error envelope
- * first (Codex review §3).
+ * first (Codex review §3). Frozen so a future import can't mutate
+ * the table out from under the schema emitter (the runtime view of
+ * the contract should be the same one across the process lifetime).
  */
-export const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
+export const CODE_RETRYABLE_DEFAULT: Readonly<Record<ErrorCode, boolean>> = Object.freeze({
   usage_error: false,
   confirmation_required: false,
   not_found: false,
@@ -122,7 +124,7 @@ export const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
   dev_not_configured: false,
   dev_board_misconfigured: false,
   internal_error: false,
-};
+});
 
 /**
  * Best-effort hint for the HTTP status the user would observe when
@@ -131,8 +133,10 @@ export const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
  * `null` here means "no fixed expectation; check the live envelope's
  * `http_status` field". Surfaced via `monday schema` so agents can
  * pre-build retry / backoff logic without observing an error first.
+ *
+ * Frozen for the same reason as `CODE_RETRYABLE_DEFAULT`.
  */
-export const CODE_TYPICAL_HTTP_STATUS: Record<ErrorCode, number | null> = {
+export const CODE_TYPICAL_HTTP_STATUS: Readonly<Record<ErrorCode, number | null>> = Object.freeze({
   usage_error: null,
   confirmation_required: null,
   not_found: 200,
@@ -159,7 +163,7 @@ export const CODE_TYPICAL_HTTP_STATUS: Record<ErrorCode, number | null> = {
   dev_not_configured: null,
   dev_board_misconfigured: null,
   internal_error: null,
-};
+});
 
 /** Bad flag / missing positional / mutually exclusive inputs. */
 export class UsageError extends MondayCliError {
