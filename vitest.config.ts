@@ -12,7 +12,6 @@ export default defineConfig({
       exclude: [
         'src/**/*.d.ts',
         'src/cli/index.ts', // thin entry — exercised by E2E tests
-        'src/types/**', // type-only modules
       ],
       thresholds: {
         // Floor — raise as the codebase grows. The standard is "every branch
