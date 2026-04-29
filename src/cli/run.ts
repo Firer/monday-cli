@@ -18,6 +18,8 @@ import {
   type RequestIdGenerator,
 } from '../utils/request-id.js';
 import type { Transport } from '../api/transport.js';
+import { commandRegistry } from '../commands/index.js';
+import type { CommandModule } from '../commands/types.js';
 
 /**
  * Testable CLI runner (`v0.1-plan.md` §3 M0).
@@ -52,15 +54,21 @@ export interface RunOptions {
    */
   readonly signal?: AbortSignal;
   /**
-   * Hook for tests and (later) milestones to register additional
-   * commands on the program. Receives the program *and* the live
-   * `RunContext` so registered actions can read `ctx.signal`,
-   * `ctx.transport`, `ctx.env`, etc. Codex review §9 caught the
-   * earlier (program-only) shape: `transport` was on `RunOptions`
-   * but never reachable from a registered action.
-   *
-   * M1+ replaces this hook with a static command registry; the
-   * `RunContext` argument stays.
+   * Test-only override of the static command registry. Production
+   * callers leave it unset and the runner walks `commandRegistry`
+   * (`src/commands/index.ts`). Tests pass a tailored list to
+   * register dummy `self-test`-style commands without touching the
+   * production registry — same `attach(program, ctx)` shape, same
+   * envelope path, no fork in the action plumbing.
+   */
+  readonly extraCommands?: readonly CommandModule[];
+  /**
+   * Lower-level hook for tests that want to drive commander
+   * directly (raw `program.command(...)` calls) without going
+   * through the `CommandModule` shape. Receives the program *and*
+   * the live `RunContext` so registered actions can read
+   * `ctx.signal`, `ctx.transport`, `ctx.env`, etc. Production
+   * callers leave it unset.
    */
   readonly registerCommands?: (program: Command, ctx: RunContext) => void;
 }
@@ -218,6 +226,15 @@ const buildProgram = (options: RunOptions, ctx: RunContext): Command => {
     .option('--query-file <path>', 'monday raw: read GraphQL query from a file (or -)')
     .option('--vars-file <path>', 'monday raw: read GraphQL variables from a file (or -)');
 
+  // Wire the static registry first, then any test-supplied extras /
+  // raw hooks. Tests can swap out the registry entirely by passing
+  // an empty `extraCommands` and using `registerCommands` for ad-hoc
+  // commands; production callers leave both unset and pick up the
+  // shipped surface.
+  const modules = options.extraCommands ?? commandRegistry;
+  for (const mod of modules) {
+    mod.attach(program, ctx);
+  }
   options.registerCommands?.(program, ctx);
 
   return program;
