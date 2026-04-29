@@ -97,9 +97,16 @@ export interface RunContext {
 /** Internal extension of `RunContext` with envelope-building bits. */
 interface InternalContext extends RunContext {
   readonly retrievedAt: string;
-  readonly secrets: readonly string[];
 }
 
+/**
+ * Collects literal secret values to scrub. Read from `env` lazily —
+ * `loadConfig()` populates `MONDAY_API_TOKEN` from `.env` *after* the
+ * runner builds its context, so a snapshot at construction time would
+ * miss tokens that exist only in the `.env` file (Codex review §1
+ * follow-up). `options.env` is shared by reference with the runner;
+ * re-reading at emit time observes any side-effecting load.
+ */
 const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
   const out: string[] = [];
   const token = env.MONDAY_API_TOKEN;
@@ -124,7 +131,10 @@ const writeErrorEnvelope = (
   ctx: InternalContext,
 ): void => {
   const envelope = buildError(err, buildBaseMeta(ctx));
-  const redacted = redact(envelope, { secrets: ctx.secrets });
+  // Re-read secrets at emit time, not at runner construction, so a
+  // token loaded from `.env` by `loadConfig()` mid-run is still in
+  // scope for the value-scan layer (Codex review §1 follow-up).
+  const redacted = redact(envelope, { secrets: collectSecrets(ctx.env) });
   ctx.stderr.write(`${JSON.stringify(redacted, null, 2)}\n`);
 };
 
@@ -242,7 +252,6 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     cliVersion: options.cliVersion,
     signal: combinedSignal,
     retrievedAt: clock().toISOString(),
-    secrets: collectSecrets(options.env),
   };
 
   const program = buildProgram(options, ctx);

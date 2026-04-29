@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { run, runWithSignals, type RunOptions } from '../../../src/cli/run.js';
@@ -310,6 +313,42 @@ describe('run — token redaction', () => {
     const stderr = captured.stderr();
     expect(stderr).not.toContain(literal);
     expect(stderr).toContain('[REDACTED]');
+  });
+
+  it('does not leak a token loaded mid-run from .env (lazy secrets)', async () => {
+    // Codex review follow-up: `ctx.secrets` used to snapshot at
+    // runner construction. If MONDAY_API_TOKEN lives only in .env,
+    // `loadConfig()` populates env *after* the snapshot, so a token
+    // landing in Error.message after that point would slip through.
+    // The fix re-reads env at emit time. This test fails without it.
+    const literal = 'tok-from-dotenv-yyyy';
+    const workDir = mkdtempSync(join(tmpdir(), 'monday-cli-runtest-'));
+    writeFileSync(join(workDir, '.env'), `MONDAY_API_TOKEN=${literal}\n`);
+
+    try {
+      const { options, captured } = baseOptions({
+        argv: ['node', 'monday', 'self-test'],
+        env: {}, // empty initially; .env populates it during the action
+        registerCommands: (program, ctx) => {
+          program
+            .command('self-test')
+            .action(() => {
+              loadConfig(ctx.env, { loadDotenv: true, cwd: workDir });
+              // After loadConfig, ctx.env.MONDAY_API_TOKEN is set
+              // (dotenv mutates by reference). Throw with the literal
+              // smuggled into Error.message — the value-scan path
+              // must redact it.
+              throw new Error(`upstream said auth=${literal}`);
+            });
+        },
+      });
+
+      await run(options);
+      expect(captured.stderr()).not.toContain(literal);
+      expect(captured.stderr()).toContain('[REDACTED]');
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
   });
 
   it('does not leak the token from Error.stack', async () => {
