@@ -21,10 +21,16 @@ import type { CommandModule } from './types.js';
 // M1 commands — local-only, no Monday API access.
 import { configShowCommand } from './config/show.js';
 import { configPathCommand } from './config/path.js';
+import { cacheListCommand } from './cache/list.js';
+import { cacheClearCommand } from './cache/clear.js';
+import { cacheStatsCommand } from './cache/stats.js';
 
 export const commandRegistry: readonly CommandModule[] = [
   configShowCommand,
   configPathCommand,
+  cacheListCommand,
+  cacheClearCommand,
+  cacheStatsCommand,
 ];
 
 export type { CommandModule } from './types.js';
