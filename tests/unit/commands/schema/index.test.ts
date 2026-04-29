@@ -45,6 +45,19 @@ describe('buildSchemaOutput — top-level shape', () => {
     expect(config?.exit_code).toBe(3);
   });
 
+  it('includes retryable + typical_http_status per §11.1 (Codex review §3)', () => {
+    const out = buildFull();
+    const rate = out.error_codes.find((e) => e.code === 'rate_limited');
+    expect(rate?.retryable).toBe(true);
+    expect(rate?.typical_http_status).toBe(200);
+    const unauthorized = out.error_codes.find((e) => e.code === 'unauthorized');
+    expect(unauthorized?.retryable).toBe(false);
+    expect(unauthorized?.typical_http_status).toBe(401);
+    const usage = out.error_codes.find((e) => e.code === 'usage_error');
+    expect(usage?.retryable).toBe(false);
+    expect(usage?.typical_http_status).toBeNull();
+  });
+
   it('includes the documented exit codes', () => {
     const out = buildFull();
     const numbers = out.exit_codes.map((e) => e.code).sort((a, b) => a - b);

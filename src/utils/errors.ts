@@ -90,8 +90,12 @@ export class MondayCliError extends Error {
  * `cli-design.md` §6.5 retryable column. Defaults only — callers
  * override when Monday's response says otherwise (e.g. a `cache_error`
  * that's auto-retried without cache becomes non-retryable to the user).
+ *
+ * Exported because `monday schema` surfaces this per code so agents
+ * can decide retry strategy without consuming a real error envelope
+ * first (Codex review §3).
  */
-const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
+export const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
   usage_error: false,
   confirmation_required: false,
   not_found: false,
@@ -118,6 +122,43 @@ const CODE_RETRYABLE_DEFAULT: Record<ErrorCode, boolean> = {
   dev_not_configured: false,
   dev_board_misconfigured: false,
   internal_error: false,
+};
+
+/**
+ * Best-effort hint for the HTTP status the user would observe when
+ * this error originates from Monday. Most Monday application errors
+ * arrive with `200 OK` and a GraphQL `errors[]` payload, so a
+ * `null` here means "no fixed expectation; check the live envelope's
+ * `http_status` field". Surfaced via `monday schema` so agents can
+ * pre-build retry / backoff logic without observing an error first.
+ */
+export const CODE_TYPICAL_HTTP_STATUS: Record<ErrorCode, number | null> = {
+  usage_error: null,
+  confirmation_required: null,
+  not_found: 200,
+  ambiguous_name: null,
+  ambiguous_column: null,
+  column_not_found: null,
+  user_not_found: null,
+  unsupported_column_type: null,
+  column_archived: 200,
+  unauthorized: 401,
+  forbidden: 403,
+  rate_limited: 200,
+  complexity_exceeded: 200,
+  daily_limit_exceeded: 200,
+  concurrency_exceeded: 200,
+  ip_rate_limited: 200,
+  resource_locked: 423,
+  validation_failed: 200,
+  stale_cursor: 200,
+  config_error: null,
+  cache_error: null,
+  network_error: null,
+  timeout: null,
+  dev_not_configured: null,
+  dev_board_misconfigured: null,
+  internal_error: null,
 };
 
 /** Bad flag / missing positional / mutually exclusive inputs. */

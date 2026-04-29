@@ -31,6 +31,8 @@
  */
 import { z } from 'zod';
 import {
+  CODE_RETRYABLE_DEFAULT,
+  CODE_TYPICAL_HTTP_STATUS,
   ERROR_CODES,
   exitCodeForError,
   UsageError,
@@ -62,6 +64,19 @@ const errorCodeEntrySchema = z
       z.literal(3),
       z.literal(130),
     ]),
+    /**
+     * Default retry policy per `cli-design.md` §6.5. Per-instance
+     * `error.retryable` may override (e.g. a Monday rate-limit
+     * response with a custom Retry-After) — agents check the live
+     * envelope first, fall back to this hint.
+     */
+    retryable: z.boolean(),
+    /**
+     * Typical HTTP status when this code originates from Monday's
+     * API. `null` for codes with no fixed expectation (config /
+     * cache / usage failures, anything originating local).
+     */
+    typical_http_status: z.number().int().nullable(),
   })
   .strict();
 
@@ -154,6 +169,8 @@ export const buildSchemaOutput = (options: BuildSchemaOptions): SchemaOutput => 
     error_codes: ERROR_CODES.map((code) => ({
       code,
       exit_code: exitCodeForError(code),
+      retryable: CODE_RETRYABLE_DEFAULT[code],
+      typical_http_status: CODE_TYPICAL_HTTP_STATUS[code],
     })),
     exit_codes: [...EXIT_CODES],
   };
