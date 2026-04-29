@@ -101,6 +101,78 @@ describe('createFetchTransport — request shape', () => {
     expect(headers.Authorization).toBe('tok-1234');
   });
 
+  it('refuses caller attempts to override Authorization (any case)', async () => {
+    const { fetch: fakeFetch, calls } = captureFetch(() =>
+      okResponse({ data: null }),
+    );
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok-real',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+
+    await transport.request({
+      query: '{ me { id } }',
+      headers: {
+        Authorization: 'tok-imposter',
+        authorization: 'tok-imposter-lower',
+        AUTHORIZATION: 'tok-imposter-shouty',
+      },
+    });
+
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('tok-real');
+    expect(Object.keys(headers).filter((k) => k.toLowerCase() === 'authorization'))
+      .toEqual(['Authorization']);
+  });
+
+  it('refuses caller attempts to override API-Version (any case)', async () => {
+    const { fetch: fakeFetch, calls } = captureFetch(() =>
+      okResponse({ data: null }),
+    );
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+
+    await transport.request({
+      query: '{ me { id } }',
+      headers: { 'api-version': '2024-12', 'API-VERSION': '2025-06' },
+    });
+
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers['API-Version']).toBe('2026-01');
+    expect(
+      Object.keys(headers).filter((k) => k.toLowerCase() === 'api-version'),
+    ).toEqual(['API-Version']);
+  });
+
+  it('refuses caller attempts to set a non-JSON Content-Type', async () => {
+    const { fetch: fakeFetch, calls } = captureFetch(() =>
+      okResponse({ data: null }),
+    );
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+
+    await transport.request({
+      query: '{ me { id } }',
+      headers: { 'content-type': 'text/plain' },
+    });
+
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
   it('omits variables from the body when none supplied', async () => {
     const { fetch: fakeFetch, calls } = captureFetch(() =>
       okResponse({ data: null }),

@@ -73,11 +73,31 @@ export const createFetchTransport = (
       signal,
       operationName,
     }) => {
+      // Header lockdown: caller-supplied headers spread first so the
+      // transport-owned set (`Authorization`, `API-Version`,
+      // `Content-Type`) always wins. The previous order let any
+      // caller — including a buggy command or an injected
+      // `FixtureTransport` request — override auth or the API
+      // version pin silently. We also strip any case-variant of
+      // those names from the caller bag so a lowercase
+      // `authorization` can't sneak past the literal-key spread.
+      const reservedHeaderLowerNames = new Set([
+        'authorization',
+        'api-version',
+        'content-type',
+      ]);
+      const callerHeaders = headers ?? {};
+      const safeCallerHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(callerHeaders)) {
+        if (!reservedHeaderLowerNames.has(key.toLowerCase())) {
+          safeCallerHeaders[key] = value;
+        }
+      }
       const requestHeaders: Record<string, string> = {
+        ...safeCallerHeaders,
         Authorization: config.apiToken,
         'API-Version': config.apiVersion,
         'Content-Type': 'application/json',
-        ...headers,
       };
 
       const body: Record<string, unknown> = { query };
