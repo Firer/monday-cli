@@ -30,3 +30,6 @@ npm-debug.log*
 
 # Local Claude state (per-developer)
 .claude/settings.local.json
+
+# Working files from collaborator reviews (codex/gemini/claude review outputs)
+.review-*.md
