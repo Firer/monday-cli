@@ -20,6 +20,22 @@ import { emitSuccess } from '../emit.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { UsageError } from '../../utils/errors.js';
 
+/**
+ * Numeric-string board id at the input boundary. The runtime layer
+ * additionally brands the value via `BoardIdSchema` before it crosses
+ * into the cache primitives; the schema here mirrors the runtime so
+ * `monday schema cache.clear` reports the actual accepted shape and
+ * agents don't get told `{ board: "../etc" }` is valid.
+ *
+ * Codex review §1 caught the original drift: the input declared
+ * `board?: string` (any non-empty string) while the runtime narrowed
+ * to a numeric regex. The lesson is the same as M0 review §4–§6 —
+ * the executable input schema must match the real boundary.
+ */
+const boardArgSchema = z
+  .string()
+  .regex(/^\d+$/u, { message: 'expected a numeric board ID' });
+
 export const cacheClearOutputSchema = z
   .object({
     root: z.string().min(1),
@@ -34,7 +50,7 @@ export type CacheClearOutput = z.infer<typeof cacheClearOutputSchema>;
 
 const inputSchema = z
   .object({
-    board: z.string().optional(),
+    board: boardArgSchema.optional(),
   })
   .strict();
 
@@ -62,19 +78,26 @@ export const cacheClearCommand: CommandModule<
         ['', 'Examples:', ...cacheClearCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
       )
       .action(async (opts: unknown) => {
-        const parsed = cacheClearCommand.inputSchema.parse(opts);
+        const result = cacheClearCommand.inputSchema.safeParse(opts);
+        if (!result.success) {
+          throw new UsageError(
+            `invalid --board: ${result.error.issues.map((i) => i.message).join('; ')}`,
+            { cause: result.error, details: { issues: result.error.issues } },
+          );
+        }
+        const parsed = result.data;
         const root = resolveCacheRoot({ env: ctx.env });
 
         if (parsed.board === undefined) {
-          const result = await clearAll(root);
+          const cleared = await clearAll(root);
           emitSuccess({
             ctx,
             data: {
               root,
               scope: 'all',
               board_id: null,
-              removed: result.removed,
-              bytes_freed: result.bytesFreed,
+              removed: cleared.removed,
+              bytes_freed: cleared.bytesFreed,
             },
             schema: cacheClearCommand.outputSchema,
             programOpts: program.opts(),
@@ -82,31 +105,21 @@ export const cacheClearCommand: CommandModule<
           return;
         }
 
-        // Validate the board id against the branded schema before
-        // letting it cross into the cache layer; surfaces invalid
-        // input as `usage_error` (exit 1), not `cache_error` (exit 2).
-        const boardResult = BoardIdSchema.safeParse(parsed.board);
-        if (!boardResult.success) {
-          throw new UsageError(
-            `--board must be a numeric board ID (got "${parsed.board}")`,
-            {
-              cause: boardResult.error,
-              details: { issues: boardResult.error.issues },
-            },
-          );
-        }
-        const result = await clearEntry(root, {
+        // Brand the validated string at the boundary so cache-layer
+        // callers receive a `BoardId`, not a plain string.
+        const boardId = BoardIdSchema.parse(parsed.board);
+        const cleared = await clearEntry(root, {
           kind: 'board',
-          boardId: boardResult.data,
+          boardId,
         });
         emitSuccess({
           ctx,
           data: {
             root,
             scope: 'board',
-            board_id: boardResult.data,
-            removed: result.removed,
-            bytes_freed: result.bytesFreed,
+            board_id: boardId,
+            removed: cleared.removed,
+            bytes_freed: cleared.bytesFreed,
           },
           schema: cacheClearCommand.outputSchema,
           programOpts: program.opts(),
