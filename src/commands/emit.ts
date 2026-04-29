@@ -3,6 +3,7 @@ import type { RunContext } from '../cli/run.js';
 import {
   buildMeta,
   buildSuccess,
+  type Complexity,
   type DataSource,
   type Meta,
   type Warning,
@@ -70,6 +71,21 @@ export interface EmitSuccessOptions<T> {
    * collection commands; M1 only emits collections from `cache list`.
    */
   readonly kind?: 'single' | 'collection';
+  /**
+   * `meta.complexity` payload for `--verbose` runs. `null` (or
+   * omitted) collapses to `cli-design.md` §6.1's default — the
+   * field is always present, the value is `null` until --verbose
+   * makes the GraphQL `complexity` selection.
+   */
+  readonly complexity?: Complexity | null;
+  /**
+   * Override `meta.api_version`. Network commands resolve this
+   * post-flag (`--api-version` > env > SDK pin) and pass the result
+   * through so the envelope reflects the actual `API-Version` header
+   * sent on the wire. Local-only commands leave it unset and inherit
+   * the env-or-SDK-pin default the runner already uses.
+   */
+  readonly apiVersion?: string;
 }
 
 /**
@@ -210,12 +226,17 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
   const envelope = buildSuccess(
     validated,
     buildMeta({
-      api_version: ctx.env.MONDAY_API_VERSION ?? '2026-01',
+      api_version:
+        options.apiVersion ?? ctx.env.MONDAY_API_VERSION ?? '2026-01',
       cli_version: ctx.cliVersion,
       request_id: ctx.requestId,
       source,
       retrieved_at: ctx.clock().toISOString(),
       cache_age_seconds: options.cacheAgeSeconds ?? null,
+      // §6.1: meta.complexity is always present; null until --verbose
+      // selects the GraphQL field. Carry the resolved value when the
+      // action provides one.
+      complexity: options.complexity ?? null,
     }),
     warnings,
   );

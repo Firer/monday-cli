@@ -36,6 +36,11 @@ import { cacheListCommand } from './cache/list.js';
 import { cacheClearCommand } from './cache/clear.js';
 import { cacheStatsCommand } from './cache/stats.js';
 import { schemaCommand } from './schema/index.js';
+// M2 commands — first network surface (`v0.1-plan.md` §3 M2).
+import { accountWhoamiCommand } from './account/whoami.js';
+import { accountInfoCommand } from './account/info.js';
+import { accountVersionCommand } from './account/version.js';
+import { accountComplexityCommand } from './account/complexity.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -47,6 +52,10 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     cacheClearCommand,
     cacheStatsCommand,
     schemaCommand,
+    accountWhoamiCommand,
+    accountInfoCommand,
+    accountVersionCommand,
+    accountComplexityCommand,
   ];
   return cached;
 };

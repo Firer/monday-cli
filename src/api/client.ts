@@ -87,34 +87,48 @@ export interface MondayResponse<T> {
  * wide — we project to the slim shape `cli-design.md` calls out.
  */
 export interface WhoamiData {
-  readonly me: {
-    readonly id: string;
-    readonly name: string;
-    readonly email: string;
-    readonly account: {
-      readonly id: string;
-      readonly name: string;
-      readonly slug: string | null;
-    };
-  };
+  /**
+   * `me` is nullable in the wire shape — Monday returns `null` when
+   * the token is valid syntactically but belongs to a guest /
+   * disabled user. Commands surface that case as `unauthorized`.
+   */
+  readonly me:
+    | {
+        readonly id: string;
+        readonly name: string;
+        readonly email: string;
+        readonly account: {
+          readonly id: string;
+          readonly name: string;
+          readonly slug: string | null;
+        };
+      }
+    | null;
 }
 
 export interface AccountData {
-  readonly account: {
-    readonly id: string;
-    readonly name: string;
-    readonly slug: string | null;
-    readonly country_code: string | null;
-    readonly first_day_of_the_week: string | null;
-    readonly active_members_count: number | null;
-    readonly logo: string | null;
-    readonly plan: {
-      readonly version: number;
-      readonly tier: string;
-      readonly max_users: number;
-      readonly period: string | null;
-    } | null;
-  };
+  /**
+   * Same nullability story as `me` above — Monday won't typically
+   * return a null account for a valid token, but the wire field is
+   * `Maybe<Account>` and the CLI treats null as `not_found`.
+   */
+  readonly account:
+    | {
+        readonly id: string;
+        readonly name: string;
+        readonly slug: string | null;
+        readonly country_code: string | null;
+        readonly first_day_of_the_week: string | null;
+        readonly active_members_count: number | null;
+        readonly logo: string | null;
+        readonly plan: {
+          readonly version: number;
+          readonly tier: string;
+          readonly max_users: number;
+          readonly period: string | null;
+        } | null;
+      }
+    | null;
 }
 
 export interface VersionsData {
@@ -190,6 +204,28 @@ const COMPLEXITY_PROBE_QUERY = `
   }
 `;
 
+/**
+ * Returns `data` with any top-level `complexity` field removed.
+ * Used in `--verbose` mode where the injected selection lands in
+ * the data object alongside the typed leaf — the per-command
+ * outputSchema (strict) doesn't model it.
+ *
+ * Non-mutating: `data` is returned unchanged when no field is
+ * present, otherwise a shallow copy minus the field.
+ */
+const stripComplexity = (data: unknown): unknown => {
+  if (
+    data === null ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    !('complexity' in data)
+  ) {
+    return data;
+  }
+  const { complexity: _complexity, ...rest } = data as Record<string, unknown>;
+  return rest;
+};
+
 export class MondayClient {
   private readonly transport: Transport;
   private readonly signal: AbortSignal;
@@ -248,7 +284,18 @@ export class MondayClient {
           const complexity = this.verbose
             ? parseComplexity(response.body)
             : null;
-          return { data: mapped.data, complexity };
+          // When --verbose injected `complexity { ... }`, Monday
+          // returns the field adjacent to whatever the operation
+          // selected. Strip it from `data` so the per-command zod
+          // validator (`emitSuccess`'s drift-catch) sees only the
+          // typed shape — meta.complexity carries the parsed value
+          // separately. Without this, every strict outputSchema
+          // would have to declare a `complexity` it doesn't own.
+          let cleanedData: T = mapped.data;
+          if (this.verbose && complexity !== null) {
+            cleanedData = stripComplexity(mapped.data) as T;
+          }
+          return { data: cleanedData, complexity };
         } catch (err) {
           // ApiError passes through unchanged; anything else (a bug
           // in the transport, a rogue throw from a future SDK retry
