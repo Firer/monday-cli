@@ -252,6 +252,7 @@ describe('withRetry', () => {
     try {
       await withRetry(
         async () => {
+          await Promise.resolve();
           throw new ApiError('rate_limited', 'wait briefly', { retryAfterSeconds: 0 });
         },
         {
@@ -309,6 +310,7 @@ describe('withRetry', () => {
     try {
       await withRetry(
         async () => {
+          await Promise.resolve();
           setTimeout(() => { ctrl.abort(reason); }, 20);
           throw new ApiError('rate_limited', 'transient');
         },
