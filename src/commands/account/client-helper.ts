@@ -72,5 +72,12 @@ export const resolveClient = (
     verbose: globalFlags.verbose,
   });
 
+  // Stash the resolved meta on the runner so an error envelope
+  // emitted by the catch-all carries the same api_version + source
+  // a success envelope would. Without this, `--api-version 2026-04
+  // account whoami` failing with HTTP 401 produced an error envelope
+  // claiming `api_version: "2026-01"` (Codex M2 review §2).
+  ctx.setMetaHint({ apiVersion, source: 'live' });
+
   return { client, globalFlags, apiVersion };
 };

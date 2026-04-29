@@ -100,11 +100,38 @@ export interface RunContext {
    * cooperatively when the signal fires.
    */
   readonly signal: AbortSignal;
+  /**
+   * Pre-throw meta hint. Actions that resolve their `api_version`
+   * (post-flag override) and intend a live API call call this
+   * *before* the network goes out — so an error envelope on the
+   * sad path still carries the right `meta.api_version` and
+   * `source: "live"` instead of the runner's defaults. Codex M2
+   * review §2: without this, `--api-version 2026-04 account whoami`
+   * failing with HTTP 401 produced an error envelope claiming
+   * `api_version: "2026-01"` / `source: "none"`.
+   *
+   * Any field passed wins over the runner's default; calling more
+   * than once is fine — fields merge (last write wins per key).
+   */
+  readonly setMetaHint: (hint: MetaHint) => void;
+}
+
+/** Action-supplied overrides for the error-path envelope's meta. */
+export interface MetaHint {
+  readonly apiVersion?: string;
+  readonly source?: 'live' | 'cache' | 'mixed' | 'none';
 }
 
 /** Internal extension of `RunContext` with envelope-building bits. */
 interface InternalContext extends RunContext {
   readonly retrievedAt: string;
+  /**
+   * Mutable: the runner reads from here when an action throws so
+   * the error envelope reflects what *would* have been on a
+   * success envelope's meta. The action contributes via
+   * `setMetaHint(...)`.
+   */
+  readonly metaHint: { apiVersion?: string; source?: MetaHint['source'] };
 }
 
 /**
@@ -126,10 +153,11 @@ const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
 
 const buildBaseMeta = (ctx: InternalContext): Meta =>
   buildMeta({
-    api_version: ctx.env.MONDAY_API_VERSION ?? '2026-01',
+    api_version:
+      ctx.metaHint.apiVersion ?? ctx.env.MONDAY_API_VERSION ?? '2026-01',
     cli_version: ctx.cliVersion,
     request_id: ctx.requestId,
-    source: 'none',
+    source: ctx.metaHint.source ?? 'none',
     retrieved_at: ctx.retrievedAt,
     cache_age_seconds: null,
   });
@@ -257,6 +285,16 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       ? internalAbort.signal
       : AbortSignal.any([options.signal, internalAbort.signal]);
 
+  const metaHint: { apiVersion?: string; source?: MetaHint['source'] } = {};
+  const setMetaHint = (hint: MetaHint): void => {
+    if (hint.apiVersion !== undefined) {
+      metaHint.apiVersion = hint.apiVersion;
+    }
+    if (hint.source !== undefined) {
+      metaHint.source = hint.source;
+    }
+  };
+
   const ctx: InternalContext = {
     env: options.env,
     stdout: options.stdout,
@@ -268,7 +306,9 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     requestId,
     cliVersion: options.cliVersion,
     signal: combinedSignal,
+    setMetaHint,
     retrievedAt: clock().toISOString(),
+    metaHint,
   };
 
   const program = buildProgram(options, ctx);
