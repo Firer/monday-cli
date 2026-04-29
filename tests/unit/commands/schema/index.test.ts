@@ -104,6 +104,15 @@ describe('buildSchemaOutput — per-command emission', () => {
     expect(validate({ board: '12345' })).toBe(true);
     // Unknown keys are rejected because the input schema is .strict().
     expect(validate({ bogus: true })).toBe(false);
+
+    // Codex review §1 (second pass): the schema must reject
+    // non-numeric `--board` values. The original drift had the
+    // input schema accept any string while the runtime narrowed
+    // separately — this test fails against that prior shape and
+    // pins the alignment.
+    expect(validate({ board: '../etc' })).toBe(false);
+    expect(validate({ board: 'abc' })).toBe(false);
+    expect(validate({ board: '' })).toBe(false);
   });
 });
 
