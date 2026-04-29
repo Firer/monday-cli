@@ -18,7 +18,7 @@ import {
   type RequestIdGenerator,
 } from '../utils/request-id.js';
 import type { Transport } from '../api/transport.js';
-import { commandRegistry } from '../commands/index.js';
+import { getCommandRegistry } from '../commands/index.js';
 import type { CommandModule } from '../commands/types.js';
 
 /**
@@ -231,7 +231,7 @@ const buildProgram = (options: RunOptions, ctx: RunContext): Command => {
   // an empty `extraCommands` and using `registerCommands` for ad-hoc
   // commands; production callers leave both unset and pick up the
   // shipped surface.
-  const modules = options.extraCommands ?? commandRegistry;
+  const modules = options.extraCommands ?? getCommandRegistry();
   for (const mod of modules) {
     mod.attach(program, ctx);
   }
