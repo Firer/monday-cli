@@ -160,6 +160,7 @@ const drive = async (
   stdout: string;
   stderr: string;
   remaining: number;
+  requests: number;
 }> => {
   const transport = createFixtureTransport(cassette);
   const { options, captured } = baseOptions({
@@ -173,6 +174,7 @@ const drive = async (
     stdout: captured.stdout(),
     stderr: captured.stderr(),
     remaining: transport.remaining(),
+    requests: transport.requests.length,
   };
 };
 
@@ -234,6 +236,32 @@ describe('monday account whoami (integration)', () => {
       remaining: 4_999_998,
       reset_in_seconds: 30,
     });
+  });
+
+  it('--api-version is also reflected in the error envelope meta', async () => {
+    // Codex M2 review §2: previously, the runner's catch-all built
+    // meta from env defaults so the error envelope claimed
+    // api_version: "2026-01" / source: "none" even when the
+    // action attempted a live call with --api-version 2026-04.
+    // The action now stashes a meta hint via ctx.setMetaHint
+    // before the network goes out; the error path reads it.
+    const out = await drive(
+      ['--api-version', '2026-04', 'account', 'whoami', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'Whoami',
+            http_status: 401,
+            response: {},
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('unauthorized');
+    expect(env.meta.api_version).toBe('2026-04');
+    expect(env.meta.source).toBe('live');
   });
 
   it('--api-version overrides the API-Version on the wire and in meta', async () => {
@@ -391,6 +419,36 @@ describe('monday account complexity (integration)', () => {
       reset_in_seconds: 30,
     });
   });
+
+  // Regression: --verbose against `account complexity` previously
+  // tripped the data-stripper that removes the injected `complexity`
+  // field — but `account complexity`'s own payload IS the
+  // `complexity` field, so removing it left `data` empty and the
+  // action threw `internal_error`. The fix tracks whether the
+  // injector actually added the field (it didn't here — the query
+  // already selected it) and only strips when we owned the
+  // injection. (Codex M2 review §1.)
+  it('--verbose preserves data while populating meta.complexity', async () => {
+    const out = await drive(
+      ['--verbose', 'account', 'complexity', '--json'],
+      { interactions: [complexityInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { before: number; used: number; remaining: number; reset_in_seconds: number };
+    };
+    expect(env.data).toEqual({
+      before: 5_000_000,
+      used: 1,
+      remaining: 4_999_999,
+      reset_in_seconds: 30,
+    });
+    expect(env.meta.complexity).toEqual({
+      used: 1,
+      remaining: 4_999_999,
+      reset_in_seconds: 30,
+    });
+  });
 });
 
 describe('error code coverage (§5.6 row M2)', () => {
@@ -398,11 +456,19 @@ describe('error code coverage (§5.6 row M2)', () => {
   // Drives `monday account whoami` because it's the simplest read
   // and the error is a property of the transport response, not the
   // command logic.
+  // `expectedAttempts` pins the retry-budget contract per code:
+  // retryable codes (rate_limited, complexity_exceeded, ...) MUST
+  // see the full N=retries+1 transport hits; non-retryable codes
+  // (daily_limit_exceeded, validation_failed) MUST see exactly 1.
+  // Without this, a future regression where the retry layer
+  // stopped retrying entirely would still satisfy the per-code
+  // exit/code assertion. (Codex M2 review §6.)
   const cases: readonly {
     readonly name: string;
     readonly cassette: Cassette;
     readonly code: string;
     readonly exit: number;
+    readonly expectedAttempts: number;
   }[] = [
     {
       name: 'unauthorized — HTTP 401',
@@ -417,6 +483,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'unauthorized',
       exit: 2,
+      expectedAttempts: 1,
     },
     {
       name: 'forbidden — HTTP 403',
@@ -431,6 +498,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'forbidden',
       exit: 2,
+      expectedAttempts: 1,
     },
     {
       name: 'rate_limited — Monday RATE_LIMIT_EXCEEDED',
@@ -454,6 +522,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'rate_limited',
       exit: 2,
+      expectedAttempts: 4,
     },
     {
       name: 'complexity_exceeded — Monday ComplexityException',
@@ -475,6 +544,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'complexity_exceeded',
       exit: 2,
+      expectedAttempts: 4,
     },
     {
       name: 'daily_limit_exceeded — non-retryable so single attempt',
@@ -495,6 +565,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'daily_limit_exceeded',
       exit: 2,
+      expectedAttempts: 1,
     },
     {
       name: 'concurrency_exceeded',
@@ -516,6 +587,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'concurrency_exceeded',
       exit: 2,
+      expectedAttempts: 4,
     },
     {
       name: 'ip_rate_limited',
@@ -537,6 +609,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'ip_rate_limited',
       exit: 2,
+      expectedAttempts: 4,
     },
     {
       name: 'resource_locked — HTTP 423 + Retry-After',
@@ -555,6 +628,7 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'resource_locked',
       exit: 2,
+      expectedAttempts: 4,
     },
     {
       name: 'validation_failed — Monday ColumnValueException',
@@ -575,11 +649,12 @@ describe('error code coverage (§5.6 row M2)', () => {
       },
       code: 'validation_failed',
       exit: 2,
+      expectedAttempts: 1,
     },
   ];
 
   for (const c of cases) {
-    it(`produces ${c.code}`, async () => {
+    it(`produces ${c.code} in exactly ${String(c.expectedAttempts)} transport attempt(s)`, async () => {
       const out = await drive(
         ['account', 'whoami', '--json'],
         c.cassette,
@@ -588,6 +663,11 @@ describe('error code coverage (§5.6 row M2)', () => {
       const env = parseEnvelope(out.stderr);
       expect(env.ok).toBe(false);
       expect(env.error?.code).toBe(c.code);
+      // Pin the retry-budget contract — without this, a future
+      // regression where the retry layer stopped retrying entirely
+      // would still satisfy the per-code exit/code assertion.
+      // (Codex M2 review §6.)
+      expect(out.requests).toBe(c.expectedAttempts);
     });
   }
 
