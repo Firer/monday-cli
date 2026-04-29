@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config/load.js';
 
 describe('loadConfig', () => {
@@ -40,5 +43,64 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_REQUEST_TIMEOUT_MS: '0' }),
     ).toThrow();
+  });
+});
+
+describe('loadConfig — dotenv loading', () => {
+  let workDir: string;
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'monday-cli-config-'));
+  });
+
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('reads values from a .env file in cwd when loadDotenv is on', () => {
+    writeFileSync(
+      join(workDir, '.env'),
+      'MONDAY_API_TOKEN=from-dotenv\nMONDAY_API_VERSION=2026-01\n',
+    );
+
+    const env: NodeJS.ProcessEnv = {};
+    const config = loadConfig(env, { loadDotenv: true, cwd: workDir });
+
+    expect(config.apiToken).toBe('from-dotenv');
+    expect(config.apiVersion).toBe('2026-01');
+  });
+
+  it('lets process-env values override .env defaults (existing-set wins)', () => {
+    writeFileSync(
+      join(workDir, '.env'),
+      'MONDAY_API_TOKEN=from-dotenv\nMONDAY_API_URL=https://example.test/dotenv\n',
+    );
+
+    const env: NodeJS.ProcessEnv = {
+      MONDAY_API_TOKEN: 'from-shell',
+    };
+    const config = loadConfig(env, { loadDotenv: true, cwd: workDir });
+
+    // Shell-exported value wins for an already-set key…
+    expect(config.apiToken).toBe('from-shell');
+    // …but unset keys still pick up the .env default.
+    expect(config.apiUrl).toBe('https://example.test/dotenv');
+  });
+
+  it('does not read a .env file when loadDotenv is off', () => {
+    writeFileSync(join(workDir, '.env'), 'MONDAY_API_TOKEN=from-dotenv\n');
+
+    expect(() =>
+      loadConfig({}, { loadDotenv: false, cwd: workDir }),
+    ).toThrow(/MONDAY_API_TOKEN/u);
+  });
+
+  it('silently no-ops when there is no .env file in cwd', () => {
+    const config = loadConfig(
+      { MONDAY_API_TOKEN: 'tok' },
+      { loadDotenv: true, cwd: workDir },
+    );
+
+    expect(config.apiToken).toBe('tok');
   });
 });
