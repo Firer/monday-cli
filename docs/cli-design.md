@@ -35,7 +35,7 @@ What that means in practice:
   messages.
 - **Cheap discovery.** An agent encountering the CLI for the first time
   can introspect everything it needs (`monday schema`, `monday board
-  describe`, `--help --output json`) without trial and error.
+  describe`, `monday schema [<command>]`) without trial and error.
 - **No telemetry, no surprise side-effects.** The only outbound calls
   go to Monday — never to anyone else — and only when a command needs
   them.
@@ -47,22 +47,35 @@ parallel "human-friendly" alternatives that could drift.
 
 ## 2. Monday's API in one page
 
-**API version pin.** The CLI pins to **Monday API `2026-04`** —
-matching the version the installed `@mondaydotcomorg/api@14.0.0` SDK
-was generated against. The pin is sent on every request via the
-`API-Version` header. Bumping the pin requires bumping the SDK in
-lockstep and is a SemVer-minor (or major if any output schema changes).
-The user can override the pin per-invocation with `--api-version` or
-per-environment with `MONDAY_API_VERSION`.
+**API version pin.** The CLI pins to **Monday API `2026-01`** —
+matching `CURRENT_VERSION` exported by the installed
+`@mondaydotcomorg/api@14.0.0` SDK (verifiable in
+`node_modules/@mondaydotcomorg/api/dist/esm/lib/constants/index.d.ts`).
+The pin is sent on every request via the `API-Version` header.
+Bumping the pin requires bumping the SDK in lockstep and is a
+SemVer-minor (or major if any output schema changes). The user can
+override the pin per-invocation with `--api-version` or per-environment
+with `MONDAY_API_VERSION` — useful for opting into newer Monday API
+versions (e.g. `2026-04`) ahead of an SDK bump, at the cost of needing
+raw GraphQL for any fields the SDK can't type.
 
 **SDK ↔ API drift.** Monday's live API moves quarterly; the SDK
-catches up on its own cadence. SDK 14.0.0 lacks several 2026-04 types
-(`BatteryValue` for status rollups, `hierarchy_type` / `is_leaf` /
-`capabilities` for multi-level boards). The CLI handles this by:
+catches up on its own cadence. Even at the pinned 2026-01 version,
+the SDK's typed surface lags Monday's actual schema in places —
+features like `BatteryValue` for status rollups,
+`hierarchy_type` / `is_leaf` / `capabilities` for multi-level boards
+appear in newer Monday versions but aren't typed by SDK 14.0.0. The
+CLI handles this by:
 1. Surfacing what the SDK types via the typed client (the common path).
 2. Falling back to `client.request<T>()` raw GraphQL for fields beyond
    the SDK's coverage (escape hatch in `src/api/`).
 3. Pinning to a tested SDK+API pair so the gaps are predictable.
+
+**Boundary-typing trap.** The SDK exports `QueryVariables = Record<string, any>`
+for raw `client.request()` arguments. The CLI's `src/api/` wrapper
+must wrap this so the `any` doesn't leak into `commands/*` — internal
+code should see `Record<string, unknown>` (or named GraphQL input
+types) and parse at the boundary. Tracked in §14.
 
 The schema map below was pulled from the live SDK types in
 `node_modules/@mondaydotcomorg/api`.
@@ -213,7 +226,7 @@ Error codes the CLI maps:
 
 \* Monday returns most application-level errors as HTTP 200 with an
 `errors` array in the body — the CLI normalises these to non-zero
-exit codes and a stderr error envelope (see §6.4).
+exit codes and a stderr error envelope (see §6.5).
 
 **Retry behaviour.** The CLI applies exponential backoff with jitter
 on `rate_limited`, `complexity_exceeded`, `concurrency_exceeded`,
@@ -244,10 +257,11 @@ boards (Tasks, Bugs, Sprints, Epics, Releases) wired together via
 configured a certain way. The CLI's `monday dev …` namespace is **pure
 convenience** that resolves the right board IDs from per-profile config.
 
-### 2.8 Multi-level boards and rollup columns (2026-04)
+### 2.8 Multi-level boards and rollup columns
 
-The 2026-04 API surfaces multi-level board hierarchies (up to **5
-subitem layers**) and rollup columns that aggregate values from
+Monday's recent API versions surface multi-level board hierarchies
+(up to **5 subitem layers**) and rollup columns that aggregate values
+from
 linked items. Two consequences:
 
 - **Status rollups read as `BatteryValue`, not `StatusValue`.**
@@ -289,9 +303,15 @@ linked items. Two consequences:
 
 ### 3.1 Agent-first ergonomics — the load-bearing rules
 
-1. **stdout is the result; everything else is stderr.** Spinners,
-   progress, debug logs, warnings → stderr. `monday item list | jq`
-   must always work.
+1. **stdout is the result; stderr is for human-only signal.**
+   Spinners, progress indicators, debug logs (under `--verbose`),
+   and TTY-mode follow-up hints all go to stderr. `monday item list
+   | jq` must always work — nothing the JSON consumer cares about
+   ends up on stderr. **Note:** structured warnings (the
+   `warnings: []` array in §6's envelope) are **part of the JSON
+   response** and ride on stdout — agents read them programmatically.
+   Stderr only carries human-readable rendering of those same
+   warnings, and only in TTY/table mode.
 2. **Default output: table on TTY, JSON when piped.** Pipes auto-switch
    to JSON so `monday item list | jq` Just Works without flags.
    Humans typing in a terminal see a friendly, truncated table.
@@ -305,7 +325,7 @@ linked items. Two consequences:
    adds them — but field *names* and *types* stay stable, and the
    `meta.schema_version` reflects the contract version.
 4. **Errors are a structured envelope on stderr with a stable `code`.**
-   See §6.4. Agents key off `error.code`, never English messages.
+   See §6.5. Agents key off `error.code`, never English messages.
 5. **Exit codes are part of the contract:** 0 success, 1 usage,
    2 API/network, 3 config, 130 SIGINT. Documented in
    `architecture.md`; this design doesn't change them.
@@ -404,150 +424,172 @@ Standard verbs across nouns (only used where they make sense):
 
 Below, `<bid>` = board ID, `<iid>` = item ID, `<cid>` = column ID, etc.
 Bracketed flags `[--xxx]` are optional; angle-bracketed `<arg>` are
-required positionals.
+required positionals. **Phase markers** in the right column show
+which release each command lands in. Agents reading this tree as
+ground truth should ignore commands beyond the active version.
 
 ```
+COMMAND                                                                      PHASE
+
 # === ACCOUNT ===
-monday account whoami                      # the connected user
-monday account info                        # account name, plan, limits
-monday account version                     # API version in use
-monday account complexity                  # remaining complexity budget
+monday account whoami                                                        v0.1
+monday account info                       # account name, plan, limits       v0.1
+monday account version                    # API version in use               v0.1
+monday account complexity                 # remaining complexity budget      v0.1
 
 # === WORKSPACE ===
-monday workspace list                      # all visible workspaces
-monday workspace get <wid>
-monday workspace create --name <n> [--kind open|closed]
-monday workspace update <wid> [--name <n>] [--kind ...]
-monday workspace delete <wid> --yes
-monday workspace folders <wid>             # folders inside workspace
-monday workspace add-users <wid> --users <id|email>,...
-monday workspace remove-users <wid> --users <id|email>,...
+monday workspace list                     # all visible workspaces           v0.1
+monday workspace get <wid>                                                   v0.1
+monday workspace folders <wid>            # folders inside workspace         v0.1
+monday workspace create --name <n> [--kind open|closed]                      v0.2
+monday workspace update <wid> [--name <n>] [--kind ...]                      v0.2
+monday workspace delete <wid> --yes                                          v0.2
+monday workspace add-users <wid> --users <id|email>,...                      v0.2
+monday workspace remove-users <wid> --users <id|email>,...                   v0.2
 
 # === BOARD ===
-monday board list [--workspace <wid>] [--state active|archived|all]
-monday board get <bid>
-monday board find <name> [--workspace <wid>] [--first]
-monday board describe <bid>                # full schema: columns, groups, statuses
-monday board create --name <n> [--workspace <wid>] [--kind public|private|share]
-monday board update <bid> [--name <n>] [--description <d>]
-monday board archive <bid> --yes
-monday board delete <bid> --yes
-monday board duplicate <bid> [--name <n>] [--workspace <wid>]
-monday board subscribers <bid>
-monday board add-users <bid> --users <id|email>,...
+monday board list [--workspace <wid>] [--state active|archived|all]          v0.1
+monday board get <bid>                                                       v0.1
+monday board find <name> [--workspace <wid>] [--first]                       v0.1
+monday board describe <bid>               # full schema; see §11.2           v0.1
+monday board doctor <bid>                 # diagnostics; see §11.2           v0.1
+monday board subscribers <bid>                                               v0.1
+monday board create --name <n> [--workspace <wid>] [--kind public|private|share]  v0.2
+monday board update <bid> [--name <n>] [--description <d>]                   v0.2
+monday board archive <bid> --yes                                             v0.2
+monday board delete <bid> --yes                                              v0.2
+monday board duplicate <bid> [--name <n>] [--workspace <wid>]                v0.2
+monday board add-users <bid> --users <id|email>,...                          v0.2
 
 # Columns (board-scoped)
-monday board columns <bid>                 # list columns
-monday board column-create <bid> --type <type> --title <t> [--description <d>]
-monday board column-update <bid> <cid> [--title <t>] [--description <d>]
-monday board column-delete <bid> <cid> --yes
+monday board columns <bid>                # list columns                     v0.1
+monday board column-create <bid> --type <type> --title <t> [--description <d>]   v0.2
+monday board column-update <bid> <cid> [--title <t>] [--description <d>]     v0.2
+monday board column-delete <bid> <cid> --yes                                 v0.2
 
 # Groups (board-scoped)
-monday board groups <bid>
-monday board group-create <bid> --name <n> [--position top|bottom]
-monday board group-update <bid> <gid> [--name <n>] [--color <c>]
-monday board group-archive <bid> <gid>
-monday board group-duplicate <bid> <gid>
-monday board group-delete <bid> <gid> --yes
+monday board groups <bid>                                                    v0.1
+monday board group-create <bid> --name <n> [--position top|bottom]           v0.2
+monday board group-update <bid> <gid> [--name <n>] [--color <c>]             v0.2
+monday board group-archive <bid> <gid>                                       v0.2
+monday board group-duplicate <bid> <gid>                                     v0.2
+monday board group-delete <bid> <gid> --yes                                  v0.2
 
 # === ITEM ===
-monday item list <bid> [--group <gid>] [--filter <expr>] [--state active|archived|all] [--all]
-monday item get <iid>                      # single item with column values
-monday item find <name> --board <bid> [--first]
-monday item search --board <bid> --where <col>=<val> [...]
-                                           # uses items_page_by_column_values
-monday item create <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--parent <iid>] [--position before|after --relative-to <iid>]
-monday item update <iid> [--name <n>] [--set <col>=<val>]... [--create-labels-if-missing]
-monday item set <iid> <col>=<val>          # shorthand: single column update
-monday item clear <iid> <col>              # clear a column's value
-monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]
-monday item duplicate <iid> [--with-updates]
-monday item archive <iid>
-monday item delete <iid> --yes
-                                           # No `restore` — Monday has no unarchive mutation.
-                                           # Recreating from archive is lossy (new ID, no
-                                           # updates/assets/automation history). See §5.4.
-monday item watch <iid> [--interval 30s] [--until-status <label>]
-                                           # polls; emits NDJSON change events. Deferred to v0.4.
+# All item commands take EITHER a positional <iid> OR can resolve the board
+# via --board <bid>. Some operations (item set/update with --set) require
+# board context — when not derivable from <iid>, --board is required.
+# See §5.3 for board_id resolution and §5.5 for --where filter rules.
+monday item list --board <bid> [--group <gid>] [--where <expr>]... [--filter-json <json>] [--state active|archived|all] [--all] [--limit <N>]   v0.1
+monday item get <iid>                     # single item with column values   v0.1
+monday item find <name> --board <bid> [--first]                              v0.1
+monday item search --board <bid> --where <col>=<val>...                      v0.1
+                                          # uses items_page_by_column_values
+monday item set <iid> <col>=<val> [--board <bid>]   # single column write    v0.1
+monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
+monday item update <iid> [--name <n>] [--set <col>=<val>]... [--board <bid>] [--create-labels-if-missing]   v0.1
+                                          # multi-column atomic update
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
+monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
+monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
+monday item duplicate <iid> [--with-updates]                                 v0.2
+monday item archive <iid>                                                    v0.2
+monday item delete <iid> --yes                                               v0.2
+                                          # No `restore` — see §5.4
+monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.4
+                                          # polls; emits NDJSON change events
 
 # Subitems
-monday item subitems <iid>                 # list children
-                                           # subitem creation = item create --parent <iid>
+monday item subitems <iid>                # list children                    v0.1
+                                          # subitem creation = item create --parent <iid> (v0.2)
 
 # === UPDATE (comments) ===
-monday update list <iid>                   # comments on an item
-monday update get <uid>
-monday update create <iid> --body <md>     # markdown rendered to HTML
-                                           # also: --body-file <path> | --body-file -
-monday update reply <uid> --body <md>      # also accepts --body-file
-monday update edit <uid> --body <md>       # also accepts --body-file
-monday update delete <uid> --yes
-monday update like <uid>
-monday update unlike <uid>
-monday update pin <uid>
-monday update unpin <uid>
-monday update clear-all <iid> --yes        # delete all updates on an item
+monday update list <iid>                  # comments on an item              v0.1
+monday update get <uid>                                                      v0.1
+monday update create <iid> --body <md> | --body-file <path>                  v0.1
+                                          # markdown rendered to HTML;
+                                          # in v0.1 because workflow shortcuts depend on it
+monday update reply <uid> --body <md> | --body-file <path>                   v0.2
+monday update edit <uid> --body <md> | --body-file <path>                    v0.2
+monday update delete <uid> --yes                                             v0.2
+monday update like <uid>                                                     v0.2
+monday update unlike <uid>                                                   v0.2
+monday update pin <uid>                                                      v0.2
+monday update unpin <uid>                                                    v0.2
+monday update clear-all <iid> --yes       # delete all updates on item       v0.2
 
 # === USER ===
-monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]
-monday user get <uid>
-monday user me                             # alias for `account whoami`
+monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]   v0.1
+monday user get <uid>                                                        v0.1
+monday user me                            # alias for `account whoami`       v0.1
 
 # Teams (nested under user)
-monday user team-list
-monday user team-get <tid>
-monday user team-create --name <n> [--description <d>] [--users <id>,...]
-monday user team-delete <tid> --yes
-monday user team-add-members <tid> --users <id|email>,...
-monday user team-remove-members <tid> --users <id|email>,...
+monday user team-list                                                        v0.4
+monday user team-get <tid>                                                   v0.4
+monday user team-create --name <n> [--description <d>] [--users <id>,...]    v0.4
+monday user team-delete <tid> --yes                                          v0.4
+monday user team-add-members <tid> --users <id|email>,...                    v0.4
+monday user team-remove-members <tid> --users <id|email>,...                 v0.4
 
-# === WEBHOOK ===
-monday webhook list <bid>
-monday webhook create <bid> --url <u> --event <e> [--config <json>]
-monday webhook delete <wid> --yes
+# === WEBHOOK (board-scoped; CLI never *receives*) ===
+monday webhook list <bid>                                                    v0.3
+monday webhook create <bid> --url <u> --event <e> [--config <json>]          v0.3
+monday webhook delete <wid> --yes                                            v0.3
 
-# === DOC ===
-monday doc list [--workspace <wid>]
-monday doc get <did>
+# === DOC (read-only in v0.4) ===
+monday doc list [--workspace <wid>]                                          v0.4
+monday doc get <did>                                                         v0.4
 
 # === NOTIFICATION ===
-monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>
+monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>   v0.3
 
-# === DEV (convenience over standard boards) ===
-monday dev sprint current                  # active sprint per profile config
-monday dev sprint list [--state active|past|future]
-monday dev sprint items <sid>              # items in this sprint
-monday dev epic list [--state active|done]
-monday dev epic items <eid>                # items linked to this epic
-monday dev release list
-monday dev task list [--mine] [--status not_done] [--sprint current]
-monday dev task start <iid>                # status → "Working on it"
-monday dev task done <iid> [--message <m>] # status → "Done", optional update
-monday dev task block <iid> --reason <r>   # status → "Stuck" + post update
+# === DEV (workflow shortcuts; see §5.2 carve-out, §5.9) ===
+monday dev discover [--apply]             # auto-detect & write config       v0.3
+monday dev configure [--tasks-board <bid>] [--sprints-board <bid>] ...       v0.3
+monday dev doctor                         # diagnostics; see §11.3           v0.3
+monday dev sprint current                                                    v0.3
+monday dev sprint list [--state active|past|future]                          v0.3
+monday dev sprint items <sid>                                                v0.3
+monday dev epic list [--state active|done]                                   v0.3
+monday dev epic items <eid>                                                  v0.3
+monday dev release list                                                      v0.3
+monday dev task list [--mine] [--status not_done] [--sprint current]         v0.3
+monday dev task start <iid>               # status → "Working on it"         v0.3
+monday dev task done <iid> [--message <m>] # status → "Done" + optional update v0.3
+monday dev task block <iid> --reason <r>  # status → "Stuck" + comment       v0.3
 
-# === RAW ===
-monday raw <query> [--vars <json>]         # arbitrary GraphQL escape hatch
-                                           # also: --query-file <path> | --query-file -
-                                           #       --vars-file <path>  | --vars-file -
+# === RAW (escape hatch) ===
+monday raw <query> [--vars <json>]                                           v0.1
+monday raw --query-file <path> [--vars-file <path>]                          v0.1
 
 # === SCHEMA ===
-monday schema                              # full CLI schema as JSON
-monday schema <command>                    # schema for a single command
+monday schema                             # full CLI schema as JSON Schema   v0.1
+monday schema <command>                   # JSON Schema for one command      v0.1
 
 # === CACHE ===
-monday cache list                          # what's cached
-monday cache clear [--board <bid>]
-monday cache stats
+monday cache list                         # what's cached                    v0.1
+monday cache clear [--board <bid>]                                           v0.1
+monday cache stats                                                           v0.1
 
 # === CONFIG ===
-monday config show                         # resolved config (token redacted)
-monday config path                         # location(s) considered
+monday config show                        # resolved config (token redacted) v0.1
+monday config path                        # location(s) considered           v0.1
 
 # === HELP / VERSION (commander defaults) ===
-monday --help
-monday --version
-monday <noun> --help
+monday --help                                                                v0.1
+monday --version                                                             v0.1
+monday <noun> --help                                                         v0.1
 ```
+
+**Positional vs `--board` convention.** Where a command operates on
+a single board (everything under `monday board`, `monday item list`,
+`monday item create`, `monday item search`, `monday item find`),
+the board is passed via `--board <bid>` rather than a positional —
+this keeps `<iid>` available as a positional on item-scoped
+commands without ambiguity. Item-scoped commands (`item get`,
+`item set`, `item update`, etc.) take the item ID as a positional;
+they only need `--board` when board context can't be derived from
+the item (see §5.3).
 
 ### 4.4 Global flags
 
@@ -567,7 +609,7 @@ Available on every command:
 | `--no-color` | auto (respects `NO_COLOR`, `FORCE_COLOR`, `CI`) | Disable colour. |
 | `--no-cache` | off | Skip the local board-metadata cache. |
 | `--profile <name>` | from `MONDAY_PROFILE` | Selects credentials/config block (deferred to v0.3). |
-| `--api-version <v>` | `2026-04` (pinned; from env to override) | Sets `API-Version` request header. |
+| `--api-version <v>` | `2026-01` (pinned to match SDK 14.0.0; override via env) | Sets `API-Version` request header. |
 | `--timeout <ms>` | from env / 30000 | Per-request timeout. |
 | `--retry <n>` | 3 | Max retries on transient errors (with backoff + jitter). |
 | `--dry-run` | off | Mutations: print planned change, don't execute. |
@@ -633,14 +675,44 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    When ambiguity is impossible (the agent already passed `--board`),
    the implicit lookup is skipped entirely. Raw mode (`--set-raw`)
    without `--board` is a `usage_error`.
-2. **Resolves `<col>` to a column ID.** Resolution order:
-   1. Exact match against column IDs on the board.
-   2. Exact match against column titles (case-insensitive).
-   3. Ambiguous title (multiple columns share the title) → emit
-      `error.code = "ambiguous_column"` with `details.candidates: [...]`.
-   4. No match → `error.code = "column_not_found"`.
-   The resolved `column_id` is **echoed in mutation output**
-   (§6.3) so agents can capture it for future calls.
+2. **Resolves `<col>` to a column ID.** Resolution rules:
+   1. **Exact match against column IDs** on the board (case-sensitive
+      — Monday IDs are stable, lowercase, snake-case strings).
+   2. **Exact match against column titles** with normalisation:
+      - Unicode NFC normalisation
+      - Surrounding whitespace trimmed
+      - Case-folded (Unicode-aware, locale-independent — equivalent
+        to `String.prototype.toLocaleLowerCase('und')`)
+      - Internal whitespace collapsed to single spaces
+   3. **ID/title collision** — if a token matches one column's ID
+      *and* another column's title, the ID match wins (deterministic),
+      and a `warnings: [{ code: "column_token_collision", ... }]`
+      entry is emitted. To force the title match in this case, use
+      explicit prefix syntax: `title:Status` (vs `id:status`).
+   4. **Ambiguous title** (multiple columns share the title after
+      normalisation) → `error.code = "ambiguous_column"` with
+      `details.candidates: [{id, title, type}, ...]`. Agents should
+      retry with the explicit `id:<column_id>` prefix.
+   5. **No match** → `error.code = "column_not_found"`. Before
+      surfacing the error, the CLI **refreshes the board metadata
+      cache once** (§8) and retries — guards against stale-cache
+      false negatives after a column is added.
+   6. **Archived columns** are not resolvable by default — they're
+      filtered out of the board metadata. Pass `--include-archived`
+      on read commands to see them; mutations against archived
+      columns return `column_archived` regardless.
+   7. **`me` token in people columns** — `--set Owner=me` and
+      `--where owner=me` resolve `me` to the connected user's ID
+      (same as `monday account whoami`). Per-column-type sugar.
+      Only applies to `people` columns.
+
+   The resolved `column_id` is **echoed in mutation output** (§6.4
+   `resolved_ids`) so agents can capture stable IDs for future calls.
+
+   **`--set` parser rules.** `--set <token>=<value>` splits on the
+   *first* `=`. Tokens containing `=` (rare but possible in column
+   IDs / titles) need shell quoting and either explicit prefix
+   syntax or quoted-equals form: `--set 'title:Plan A=B'=approved`.
 3. **v0.1 supported column types** (the friendly translation):
    - `text`, `long_text` — pass-through string.
    - `numbers` — pass-through (Monday quirk: stringified numeric).
@@ -666,12 +738,18 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    may extend the allowlist; the contract here is "we either know
    how to translate it, or we tell you exactly how to write it
    yourself". No silent partial support.
-5. **Picks the right mutation.** `change_simple_column_value` (plain
-   string) for `text`, `numbers`, `phone`, `email`, `link.text-only`,
-   `country`, `hour`. `change_column_value` (JSON) for everything
-   else. `change_multiple_column_values` when the same item has 2+
-   `--set` flags — saves a network round-trip and is atomic on
-   Monday's side.
+5. **Picks the right mutation.** Of the v0.1 allowlist:
+   - `change_simple_column_value` (plain string) — for `text`,
+     `long_text`, `numbers`. These types accept a bare string.
+   - `change_column_value` (JSON) — for `status`, `dropdown`, `date`,
+     `people`. These types need a JSON object.
+   - `change_multiple_column_values` — when the same item has 2+
+     `--set` flags. Saves a round-trip and is **atomic on Monday's
+     side** (all columns succeed together or all fail; never partial
+     success).
+   For non-allowlist types reached via `--set-raw`, the CLI uses
+   `change_column_value` for everything (the simple variant is just
+   an optimisation; the full variant accepts the same payloads).
 
 **Multi-column update:** `monday item update <iid> --set status=Done
 --set owner=alice@x.com --set due=2026-05-01` consolidates into one
@@ -687,19 +765,29 @@ users / agents that already know the shape.
 config (`MONDAY_TIMEZONE` env or `[profiles.<n>] timezone = "..."`),
 defaulting to the system timezone. The resolved absolute date is
 echoed in the dry-run output as `details.resolved_from` so agents
-can verify before applying:
+can verify before applying. The dry-run shape is the canonical one
+defined in §6.4 — always `data: null`, `meta.dry_run: true`,
+`planned_changes: [...]` (array even for single-item changes):
 
 ```json
-{ "ok": true, "dry_run": true,
-  "planned_change": {
-    "operation": "change_simple_column_value",
-    "item_id": "12345",
-    "column_id": "date_4",
-    "diff": { "due": { "from": "2026-04-25", "to": "2026-05-02" } },
-    "details": { "resolved_from": { "input": "+1w",
-                                    "timezone": "Europe/London",
-                                    "now": "2026-04-25T14:00:00+01:00" } }
-  } }
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "schema_version": "1", "api_version": "2026-01", ... },
+  "planned_changes": [
+    {
+      "operation": "change_simple_column_value",
+      "board_id": "67890",
+      "item_id": "12345",
+      "resolved_ids": { "due": "date_4" },
+      "diff": { "date_4": { "from": "2026-04-25", "to": "2026-05-02" } },
+      "details": { "resolved_from": { "input": "+1w",
+                                      "timezone": "Europe/London",
+                                      "now": "2026-04-25T14:00:00+01:00" } }
+    }
+  ],
+  "warnings": []
+}
 ```
 
 ### 5.4 No `restore` — archive is one-way (in v0.1)
@@ -804,15 +892,40 @@ between page N and the re-issued initial query the board may have
 changed (items archived, statuses updated). A silent re-issue can
 **duplicate** rows (item appeared in old page 1 and new page 1) or
 **skip** rows (item was reordered out of the new walk's range).
-Both are silent corruption. The agent restarts pagination explicitly,
-ideally with a filter that excludes already-processed IDs:
+Both are silent corruption.
 
-```
-monday item list <bid> --where 'created>=<last_processed_created_at>'
-```
+**Resume guidance (v0.1): there is no safe deterministic resume.**
+The naïve workarounds — filtering on `created_at >= last_seen` or on
+`id > last_seen` — are subtly wrong:
 
-Deterministic resume (server-side cursor checkpointing) is in §14
-as an open question; until then, fail-fast.
+- `created_at` is not unique (collisions on the boundary tick); ties
+  must be broken on a second key, and even then it only works if the
+  original walk was ordered by `created_at`.
+- Item `id` is not guaranteed to match Monday's internal walk order,
+  and `items_page` rules don't include a documented `id >` operator.
+
+If a walk has to be restarted, the agent's options in v0.1 are:
+1. Restart from scratch and use a filter that's known-stable (e.g.
+   `--where 'status:any_of(Done)'` for a frozen subset).
+2. Accept idempotent reprocessing — design downstream operations so
+   re-seeing an already-processed item is a no-op (the
+   `change_column_value` family is idempotent; `create_*` is not).
+3. Use `--filter-json` with an explicit `order_by` and the known last
+   sort tuple, then deduplicate client-side.
+
+A first-class deterministic resume token (query-digest + order-key +
+last-tuple, with optional bloom-filter for processed IDs) is in §14
+as a v0.2+ candidate. Until then, **fail-fast and let the caller
+choose the recovery strategy** — silent corruption is worse than a
+known restart.
+
+A second cursor-pagination caveat: the CLI's "deterministic ordering"
+rule (§3.1 #8) is **per-page only**. The CLI sorts each page's items
+by ID ascending before emitting, but the server-side cursor walk
+order is whatever Monday returns. Across an `--all` walk, items can
+appear in surprising relative positions if Monday's internal order
+isn't ID-sorted. Pass `--filter-json` with an explicit `order_by`
+clause for cross-page determinism.
 
 ### 5.7 IDs only on positional args; `find` for names
 
@@ -936,17 +1049,35 @@ or, on failure:
 | Field | Type | Notes |
 |-------|------|-------|
 | `schema_version` | string | Pin against this. Currently `"1"`. |
-| `api_version` | string | The pinned Monday API version, e.g. `"2026-04"`. |
+| `api_version` | string | The pinned Monday API version, e.g. `"2026-01"`. |
 | `cli_version` | string | The CLI's own SemVer. |
 | `request_id` | string | UUID generated per CLI invocation. Echoed in errors so users can correlate logs. |
-| `source` | `"live"` \| `"cache"` \| `"mixed"` | Whether the data is from a live API call, the local cache, or both. |
-| `cache_age_seconds` | number \| null | Age of the cached portion. `null` when `source === "live"`. |
+| `source` | `"live"` \| `"cache"` \| `"mixed"` \| `"none"` | Whether the data is from a live API call, the local cache, both, or neither. `"none"` is used for errors that fail before any read (usage, config, parser errors). |
+| `cache_age_seconds` | number \| null | Age of the cached portion. `null` when `source` is `"live"` or `"none"`. |
 | `retrieved_at` | string | ISO 8601 UTC timestamp. |
 | `complexity` | object \| null | When `--verbose`: `{ used, remaining, reset_in_seconds }` from Monday's `complexity` field. Always null without `--verbose` to avoid an extra GraphQL field on every query. |
 
-`warnings` is an array of `{ code, message, details? }`. Used for
-non-fatal degradations (e.g. one column in a multi-column update
-failed but the others succeeded).
+`warnings` is an array of `{ code, message, details? }`. Always
+delivered as part of the stdout JSON envelope. Used for non-fatal
+degradations:
+
+- Cache served stale data because a refresh failed (`code: "stale_cache"`).
+- A bulk operation skipped some items (`code: "bulk_partial_skip"`,
+  details lists the unprocessed IDs).
+- A `--verbose` complexity hint suggesting a more efficient query.
+- Something the user should know but that didn't fail the command.
+
+What `warnings` is **not** for: partial-success of a single
+`change_multiple_column_values` mutation. That mutation is atomic on
+Monday's side (all columns or none), so there's no per-column
+warning channel for it. Bulk multi-item ops via `--where` filters
+are different — they iterate one mutation per item, and partial
+failures across items go in `warnings` (or split into separate
+`successes`/`failures` arrays in the data — see §6.4).
+
+When stdout is a TTY (table mode), warnings are also rendered
+human-readably to stderr in yellow so the user notices them. JSON
+output mode never duplicates to stderr.
 
 ### 6.2 Single resource (`data` shape)
 
@@ -1008,7 +1139,7 @@ Rules:
   "data": [ <resource>, <resource>, ... ],
   "meta": {
     "schema_version": "1",
-    "api_version": "2026-04",
+    "api_version": "2026-01",
     "request_id": "...",
     "source": "live",
     "retrieved_at": "...",
@@ -1187,7 +1318,7 @@ default_profile = "work"
 
 [profiles.work]
 api_token_env = "MONDAY_API_TOKEN_WORK"     # never store the token in plaintext
-api_version = "2026-04"
+api_version = "2026-01"
 default_workspace = "1234567"
 
 [profiles.work.dev]
@@ -1232,8 +1363,23 @@ schema/version.json        # API version pin
 
 - TTL: 5 minutes per file by default; `--no-cache` bypasses.
 - Invalidated on cache-miss-then-write or via `monday cache clear`.
-- Per-profile, namespaced under the profile name in v2.
+- Per-profile, namespaced under the profile name in v0.3+.
 - File mode 0600. Never contains tokens.
+
+**Auto-refresh on resolution failure.** When the CLI is about to
+return `column_not_found`, `user_not_found`, `validation_failed`
+(from Monday — bad status label, bad person ID, etc.), or the
+column-resolution path otherwise dead-ends, it **first invalidates
+the relevant cache entry, refetches, and retries once**. If the
+retry still fails, the error is real and surfaced. This handles the
+common "user added a new column / status / member, agent's cache is
+stale, command would otherwise wrongly say 'no such thing'"
+scenario without requiring `--no-cache` discipline from agents.
+
+The refresh path is recorded in `meta.source = "mixed"` (cache
+served the first attempt, live served the retry) and a
+`warnings: [{ code: "stale_cache_refreshed", ... }]` entry is
+emitted so agents can see when the cache was misleading them.
 
 ## 9. Idempotency, dry-run, and concurrency
 
@@ -1251,18 +1397,31 @@ schema/version.json        # API version pin
 
 ### 9.2 Dry-run
 
-Every mutating command supports `--dry-run`. Output schema includes a
-`planned_change` object (§6.3). Implementation: the command runs all
-the read-side resolution (column lookups, ID resolution) and constructs
-the GraphQL request, then prints the request body instead of sending
-it.
+Every mutating command supports `--dry-run`. The output shape is
+defined once in §6.4: `data: null`, `meta.dry_run: true`,
+`planned_changes: [...]` — an array of one element for single-item
+mutations, N elements for bulk operations. Implementation: the
+command runs all the read-side resolution (column lookups, ID
+resolution, relative-date resolution) and constructs the GraphQL
+request body, then prints `planned_changes` instead of sending it.
 
-### 9.3 Concurrency
+`--dry-run` is **never** a partial-execute. Either every planned
+change is reported and zero are applied, or the command failed
+during read-side resolution and `data` is null with a populated
+`error`.
 
-The CLI is single-process and makes one outbound request at a time per
-command by default. `--concurrency <n>` on bulk operations enables
-parallel mutations (capped at Monday's per-account concurrency limit
-which the CLI probes on first use).
+### 9.3 Concurrency (deferred to v0.4)
+
+In v0.1–v0.3 the CLI is single-process and makes **one outbound
+request at a time** per command. Sequential is correct under
+Monday's complexity budget; a hot bulk loop with a tight
+`--where` filter saturates a single connection just fine and avoids
+hitting the per-account concurrency cap mid-walk.
+
+`--concurrency <n>` for parallel bulk mutations is deferred to v0.4
+(see §13). When implemented, it will probe Monday's
+`concurrency_exceeded` signal on first use, back off on failure, and
+respect the per-account ceiling.
 
 ## 10. Bulk and pipelines
 
@@ -1293,7 +1452,8 @@ monday item update --board <bid> --where status=Backlog \
   --set status=Working --dry-run
 ```
 
-`--dry-run` returns `planned_changes: [...]` (see §6.4) — the agent
+`--dry-run` returns `planned_changes: [...]` (see §6.4) — both
+single-item and bulk forms use the same envelope. The agent
 can review before re-running without `--dry-run`. Bulk mutations
 without `--dry-run` *and* without `--yes` fail with
 `code: "confirmation_required"`.
@@ -1392,8 +1552,8 @@ coverage before we extend it.
 
 ### v0.1 (alpha — "the read-only core + safe mutations")
 
-**Goal: an agent can read everything the CLI surfaces and make
-small, scoped, idempotent changes.**
+**Goal: an agent can read everything the CLI surfaces, make small
+scoped idempotent changes, and post comments narrating its work.**
 
 - `account whoami`, `account info`, `account version`,
   `account complexity`
@@ -1401,10 +1561,16 @@ small, scoped, idempotent changes.**
 - `board columns` / `board groups`
 - `item list/get/find/search` (with **narrow** `--where` filter +
   `--filter-json` escape; no boolean DSL yet, see §5.5)
-- `item set` and `item update --set` with **only** the v0.1 column
-  allowlist (`status`, `text`, `long_text`, `numbers`, `dropdown`,
-  `date`, `people`). Other types via `--set-raw`.
-- `update list/get`
+- `item subitems`
+- `item set`, `item clear`, and `item update --set` with **only** the
+  v0.1 column allowlist (`status`, `text`, `long_text`, `numbers`,
+  `dropdown`, `date`, `people`). Other types via `--set-raw`.
+- `update list/get/create` — read AND post comments. (`update create`
+  is in v0.1 because the agent workflow narrative — start a task,
+  do the work, post a result comment — is meaningfully degraded
+  without it. It's also a single non-idempotent mutation with no
+  column-type complexity, which makes it cheap to ship safely. Other
+  update mutations — reply/edit/delete/like/pin — wait for v0.2.)
 - `cache list/clear/stats`
 - `config show/path`
 - `schema` (with full JSON Schema), `raw` (with `--query-file`)
@@ -1417,7 +1583,8 @@ small, scoped, idempotent changes.**
 
 - `item create/move/archive/delete/duplicate`
 - `item upsert` (idempotency via `--match-by`; see §5.8)
-- `update create/reply/edit/delete/like/pin` (with `--body-file`)
+- `update reply/edit/delete/like/pin` (with `--body-file` where
+  applicable; `update create` already in v0.1)
 - `board create/archive/delete/duplicate`
 - `board column-create/column-update/column-delete`
 - `board group-create/group-update/group-archive/group-duplicate/group-delete`
@@ -1515,6 +1682,12 @@ readability (`...` indicates omitted `meta` fields).
 
 ### A.1 An agent picks up a task and finishes it
 
+> Note: `monday dev …` is a v0.3 namespace. In v0.1 / v0.2 the same
+> flow uses the underlying CRUD commands directly:
+> `monday item list --board <tasks-bid> --where status=Backlog --where owner=me`,
+> `monday item set <iid> status='Working on it'`,
+> `monday item set <iid> status=Done` + `monday update create <iid> --body "..."`.
+
 ```bash
 $ monday dev task list --mine --status not_done --json
 {
@@ -1523,12 +1696,12 @@ $ monday dev task list --mine --status not_done --json
     { "id": "5001", "name": "Refactor login", "board_id": "111",
       "url": "https://...",
       "columns": {
-        "status_4": { "id": "status_4", "type": "status", "label": "Backlog", "index": 0 },
-        "date4":    { "id": "date4", "type": "date", "date": "2026-05-01" }
+        "status_4": { "id": "status_4", "type": "status", "text": "Backlog",      "label": "Backlog",      "index": 0 },
+        "date4":    { "id": "date4",    "type": "date",   "text": "2026-05-01",   "date": "2026-05-01", "time": null }
       } }
   ],
   "meta": {
-    "schema_version": "1", "api_version": "2026-04",
+    "schema_version": "1", "api_version": "2026-01",
     "source": "live", "request_id": "...",
     "next_cursor": null, "has_more": false, "total_returned": 7,
     "columns": {
@@ -1544,9 +1717,10 @@ $ monday dev task start 5001 --json
   "ok": true,
   "data": { "id": "5001", "name": "Refactor login",
             "columns": { "status_4": { "id": "status_4", "type": "status",
-                                       "title": "Status", "label": "Working on it",
-                                       "index": 1 } } },
-  "meta": { ... }
+                                       "title": "Status", "text": "Working on it",
+                                       "label": "Working on it", "index": 1 } } },
+  "meta": { ... },
+  "warnings": []
 }
 
 # ... agent edits code, opens PR ...
@@ -1556,9 +1730,10 @@ $ monday dev task done 5001 --message "Shipped in PR #1234" --json
   "ok": true,
   "data": { "id": "5001",
             "columns": { "status_4": { "id": "status_4", "type": "status",
-                                       "title": "Status", "label": "Done",
-                                       "index": 2 } } },
+                                       "title": "Status", "text": "Done",
+                                       "label": "Done", "index": 2 } } },
   "meta": { ... },
+  "warnings": [],
   "side_effects": [
     { "kind": "update_created", "id": "u_77", "item_id": "5001",
       "body": "Shipped in PR #1234" }
@@ -1568,6 +1743,11 @@ $ monday dev task done 5001 --message "Shipped in PR #1234" --json
 
 ### A.2 Bulk re-triage (dry-run then apply)
 
+> The `me` token in `--where owner=me` resolves to the connected user's
+> ID (the same value `monday account whoami` returns). It's a special
+> token recognized by people-column resolution; ordinary email/ID input
+> is also accepted (see §5.3).
+
 ```bash
 $ monday item update --board 12345 \
     --where status=Backlog --where owner=me \
@@ -1575,14 +1755,14 @@ $ monday item update --board 12345 \
 {
   "ok": true,
   "data": null,
-  "meta": { "dry_run": true, "schema_version": "1", ... },
+  "meta": { "dry_run": true, "schema_version": "1", "api_version": "2026-01", ... },
   "planned_changes": [
-    { "operation": "change_simple_column_value",
+    { "operation": "change_column_value",
       "board_id": "12345", "item_id": "5001",
       "resolved_ids": { "status": "status_4" },
       "diff": { "status_4": { "from": { "label": "Backlog", "index": 0 },
                               "to":   { "label": "Working on it", "index": 1 } } } },
-    { "operation": "change_simple_column_value",
+    { "operation": "change_column_value",
       "board_id": "12345", "item_id": "5002",
       "resolved_ids": { "status": "status_4" },
       "diff": { "status_4": { "from": { "label": "Backlog", "index": 0 },
@@ -1594,9 +1774,16 @@ $ monday item update --board 12345 \
 $ monday item update --board 12345 \
     --where status=Backlog --where owner=me \
     --set status=Working --yes --json
-{ "ok": true,
-  "data": { "applied": 2, "failed": 0, "items": ["5001", "5002"] },
-  "meta": { ... }, "warnings": [] }
+{
+  "ok": true,
+  "data": {
+    "applied": 2, "failed": 0,
+    "successes": [{ "item_id": "5001" }, { "item_id": "5002" }],
+    "failures": []
+  },
+  "meta": { ... },
+  "warnings": []
+}
 ```
 
 ### A.3 Discovery for a fresh agent
@@ -1649,11 +1836,17 @@ monday item list --board 111 --filter-json '{"rules":[{
   | xargs -n1 monday item archive --yes
 ```
 
-### A.5 Cursor-expiry handling
+### A.5 Cursor-expiry handling (no safe deterministic resume in v0.1)
 
 ```bash
-$ monday item list --board 12345 --all --output ndjson > items.ndjson
+# Capture data on stdout, errors on stderr separately.
+$ monday item list --board 12345 --all --output ndjson \
+    > items.ndjson 2> items.err
+
 # ... 90 minutes of network problems mid-walk ...
+
+# The error envelope is on stderr (never mixed into the data stream).
+$ cat items.err
 {
   "ok": false,
   "error": {
@@ -1661,18 +1854,34 @@ $ monday item list --board 12345 --all --output ndjson > items.ndjson
     "message": "Cursor expired (60 min lifetime). Restart pagination.",
     "retryable": false,
     "details": {
-      "cursor_age_seconds": 5400, "items_returned_so_far": 1500,
+      "cursor_age_seconds": 5400,
+      "items_returned_so_far": 1500,
       "last_item_id": "5042"
-    }
+    },
+    "request_id": "..."
   },
-  "meta": { ... }
+  "meta": { "schema_version": "1", "api_version": "2026-01", "source": "mixed", ... }
 }
 
-# Agent reads the trailer from items.ndjson, restarts with a filter:
-$ tail -n1 items.ndjson | jq -r '._meta.last_item_id'
-5042
-$ monday item list --board 12345 --where 'id>5042' --all --output ndjson \
-    >> items.ndjson
+# v0.1 has no safe deterministic resume (see §5.6). Recovery options:
+#
+# Option 1 — Restart from scratch with idempotent downstream ops.
+#   The agent's downstream code must tolerate seeing already-processed
+#   items again (i.e. status changes are idempotent; comment posting is not).
+$ monday item list --board 12345 --all --output ndjson > items.ndjson 2> items.err
+
+# Option 2 — Restart with a filter that's known-stable for THIS walk's purpose.
+#   E.g. if the agent only cares about Backlog items, the filter is the
+#   stability guarantee.
+$ monday item list --board 12345 --where status=Backlog --all \
+    --output ndjson > items.ndjson 2> items.err
+
+# Option 3 — Use --filter-json with explicit order_by and dedupe client-side.
+#   For agents that need an exhaustive walk and can dedupe on item ID.
+$ monday item list --board 12345 \
+    --filter-json '{"order_by":[{"column_id":"__creation_log__","direction":"asc"}]}' \
+    --all --output ndjson \
+  | jq -s 'unique_by(.id) | .[]' > items.ndjson
 ```
 
 ---
