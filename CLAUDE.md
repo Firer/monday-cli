@@ -79,6 +79,7 @@ docs/
   api-reference.md  # Monday concepts cheat sheet — supplementary; the
                     #   canonical schema summary is cli-design.md §2
   development.md    # Local dev workflow, how to add a new command
+  examples.md       # Worked agent sessions — instructional, not contract
 .claude/
   rules/       # Path-scoped rule files for Claude Code agents
 .github/
