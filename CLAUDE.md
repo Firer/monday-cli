@@ -19,7 +19,9 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 Pre-zero. Repo is initialised with toolchain, lint/typecheck/test wiring,
 and a directory skeleton — but **no Monday commands are wired up yet**.
-Adding commands is the next phase of work.
+The full design lives in [`docs/cli-design.md`](./docs/cli-design.md);
+implementation follows that blueprint. Updates to the design land via
+PRs that argue for the change.
 
 ## Commands
 

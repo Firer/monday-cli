@@ -49,6 +49,7 @@ For now, only `--help` and `--version` are available.
 ## Documentation
 
 - [CLAUDE.md](./CLAUDE.md) — agent-facing project context, conventions, workflow.
+- [docs/cli-design.md](./docs/cli-design.md) — full CLI design (command surface, output contract, divergences from the Monday API). **Start here** if you want to understand what the CLI will look like.
 - [docs/architecture.md](./docs/architecture.md) — module boundaries and design.
 - [docs/api-reference.md](./docs/api-reference.md) — Monday concepts cheat sheet.
 - [docs/development.md](./docs/development.md) — local dev, tests, adding commands.
