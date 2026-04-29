@@ -1281,6 +1281,7 @@ removals are major bumps.
 | `column_not_found` | `--set` matched no column | No |
 | `user_not_found` | Email lookup failed | No |
 | `unsupported_column_type` | Tried `--set` on a type not in v0.1 allowlist | No |
+| `column_archived` | `--set` against a column archived on the board | No |
 | `unauthorized` | Token missing/invalid | No |
 | `forbidden` | Token valid, lacks permission | No |
 | `rate_limited` | Per-minute quota | Yes |
