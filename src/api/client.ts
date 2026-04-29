@@ -259,7 +259,16 @@ export class MondayClient {
     variables: Readonly<Record<string, unknown>> | undefined,
     options: MondayRequestOptions = {},
   ): Promise<MondayResponse<T>> => {
-    const finalQuery = this.verbose ? injectComplexity(query) : query;
+    // Only the verbose path injects the `complexity { ... }`
+    // selection at the operation root. We track whether we actually
+    // *added* it (vs the query already having it as a deliberate
+    // selection — e.g. `account complexity` queries the field as
+    // its only payload) so we know whether to strip it from `data`
+    // afterwards.
+    const injection = this.verbose
+      ? injectComplexity(query)
+      : { query, injected: false };
+    const finalQuery = injection.query;
     const operationName = options.operationName;
 
     const result = await withRetry(
@@ -284,15 +293,15 @@ export class MondayClient {
           const complexity = this.verbose
             ? parseComplexity(response.body)
             : null;
-          // When --verbose injected `complexity { ... }`, Monday
-          // returns the field adjacent to whatever the operation
-          // selected. Strip it from `data` so the per-command zod
-          // validator (`emitSuccess`'s drift-catch) sees only the
-          // typed shape — meta.complexity carries the parsed value
-          // separately. Without this, every strict outputSchema
-          // would have to declare a `complexity` it doesn't own.
+          // Strip the `complexity` field from `data` *only* if we
+          // injected it ourselves — Monday returns the selection
+          // adjacent to whatever the operation requested, and the
+          // per-command outputSchema (strict) doesn't model it.
+          // When the caller's own query selects `complexity`
+          // directly (e.g. `account complexity`), leave it in
+          // place so the typed leaf survives.
           let cleanedData: T = mapped.data;
-          if (this.verbose && complexity !== null) {
+          if (injection.injected && complexity !== null) {
             cleanedData = stripComplexity(mapped.data) as T;
           }
           return { data: cleanedData, complexity };

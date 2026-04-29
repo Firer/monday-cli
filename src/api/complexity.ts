@@ -122,28 +122,47 @@ const findOperationBodyClose = (query: string): number | undefined => {
   return undefined;
 };
 
+export interface ComplexityInjectionResult {
+  /** The (possibly modified) GraphQL document. */
+  readonly query: string;
+  /**
+   * True if a `complexity { ... }` selection was added by this
+   * call. False when the document already contained one (no-op) or
+   * when the injector couldn't find a single recognisable operation
+   * body. Callers use this to know whether to strip the field from
+   * the response (it was theirs to add) or leave it (it was the
+   * caller's own selection — e.g. `account complexity` directly
+   * queries the field as its only payload).
+   */
+  readonly injected: boolean;
+}
+
 /**
- * Returns `query` with the complexity selection appended inside the
- * operation body. If the document doesn't have a single top-level
- * operation we can identify, returns the input unchanged.
+ * Returns `query` (possibly modified) plus a flag indicating
+ * whether the injector actually appended the selection. If the
+ * document doesn't have a single top-level operation we can
+ * identify, returns the input unchanged with `injected: false`.
  */
 export const injectComplexity = (
   query: string,
   options: ComplexityInjectionOptions = {},
-): string => {
+): ComplexityInjectionResult => {
   if (hasComplexitySelection(query)) {
-    return query;
+    return { query, injected: false };
   }
   const selection = options.selection ?? DEFAULT_COMPLEXITY_SELECTION;
   const close = findOperationBodyClose(query);
   if (close === undefined) {
-    return query;
+    return { query, injected: false };
   }
   // Insert before the closing `}` with surrounding whitespace so the
   // result still parses cleanly. Don't try to indent — Monday's
   // server doesn't care, and aligning to existing whitespace would
   // double the cost of this function for no observable difference.
-  return `${query.slice(0, close)} ${selection} ${query.slice(close)}`;
+  return {
+    query: `${query.slice(0, close)} ${selection} ${query.slice(close)}`,
+    injected: true,
+  };
 };
 
 /**

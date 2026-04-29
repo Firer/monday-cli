@@ -4,61 +4,73 @@ import { injectComplexity, parseComplexity } from '../../../src/api/complexity.j
 describe('injectComplexity', () => {
   it('appends the selection inside a simple anonymous query', () => {
     const out = injectComplexity('{ me { id } }');
-    expect(out).toContain('complexity { before after query reset_in_x_seconds }');
-    expect(out.endsWith('}')).toBe(true);
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity { before after query reset_in_x_seconds }');
+    expect(out.query.endsWith('}')).toBe(true);
     // Sanity: balanced braces.
-    expect((out.match(/\{/gu) ?? []).length).toBe((out.match(/\}/gu) ?? []).length);
+    expect((out.query.match(/\{/gu) ?? []).length).toBe(
+      (out.query.match(/\}/gu) ?? []).length,
+    );
   });
 
   it('handles named query with variable declarations', () => {
     const out = injectComplexity(
       'query GetItem($id: ID!) { items(ids: [$id]) { id name } }',
     );
-    expect(out).toContain('complexity {');
-    expect(out).toMatch(/items\(ids: \[\$id\]\) \{ id name \}/u);
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity {');
+    expect(out.query).toMatch(/items\(ids: \[\$id\]\) \{ id name \}/u);
   });
 
   it('does not duplicate when complexity is already present', () => {
     const q = '{ me { id } complexity { before after query reset_in_x_seconds } }';
-    expect(injectComplexity(q)).toBe(q);
+    const out = injectComplexity(q);
+    expect(out.query).toBe(q);
+    expect(out.injected).toBe(false);
   });
 
   it('handles mutations', () => {
     const out = injectComplexity(
       'mutation X { change_simple_column_value(item_id: 1, board_id: 2, column_id: "x", value: "y") { id } }',
     );
-    expect(out).toContain('complexity {');
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity {');
   });
 
   it('returns the input unchanged when no operation body is recognised', () => {
-    expect(injectComplexity('not graphql')).toBe('not graphql');
-    expect(injectComplexity('')).toBe('');
+    expect(injectComplexity('not graphql')).toEqual({
+      query: 'not graphql',
+      injected: false,
+    });
+    expect(injectComplexity('')).toEqual({ query: '', injected: false });
   });
 
   it('does not get confused by braces inside string literals', () => {
     const q = 'query X { account { name(suffix: "{") } }';
     const out = injectComplexity(q);
-    expect(out).toContain('complexity {');
-    expect(out).toMatch(/name\(suffix: "\{"\)/u);
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity {');
+    expect(out.query).toMatch(/name\(suffix: "\{"\)/u);
   });
 
   it('skips block-string literals when scanning braces', () => {
     const q = 'query Z { board(id: "1") { description(default: """{stuff}""") } }';
     const out = injectComplexity(q);
-    expect(out).toContain('complexity {');
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity {');
   });
 
   it('respects an explicit selection override', () => {
     const out = injectComplexity('{ me { id } }', {
       selection: 'complexity { query }',
     });
-    expect(out).toContain('complexity { query }');
-    expect(out).not.toContain('reset_in_x_seconds');
+    expect(out.query).toContain('complexity { query }');
+    expect(out.query).not.toContain('reset_in_x_seconds');
   });
 
   it('returns input unchanged on unbalanced braces (defensive)', () => {
     const q = '{ me { id }';
-    expect(injectComplexity(q)).toBe(q);
+    expect(injectComplexity(q)).toEqual({ query: q, injected: false });
   });
 });
 
