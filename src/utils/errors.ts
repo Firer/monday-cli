@@ -174,6 +174,19 @@ export type AbortReason =
   | { readonly kind: 'cancel'; readonly reason?: string };
 
 /**
+ * Compile-time guard: forces a `never` to be reachable, so any path
+ * that hits it in practice is a bug. Used as the trailing branch of
+ * exhaustive switches over discriminated unions — adding a new case
+ * to the union without updating the switch fails type-checking
+ * locally rather than only at the call site.
+ */
+const assertNever = (value: never, context: string): never => {
+  throw new InternalError(
+    `unreachable: ${context} reached with ${JSON.stringify(value)}`,
+  );
+};
+
+/**
  * Maps an error code to the exit code documented in `cli-design.md`
  * §3.1 #5. Note `confirmation_required` is *not* exit 1 — it's a
  * usage-style error that still wants a non-zero exit, but the design
@@ -211,6 +224,8 @@ export const exitCodeForError = (code: ErrorCode): ExitCode => {
     case 'dev_board_misconfigured':
     case 'internal_error':
       return 2;
+    default:
+      return assertNever(code, 'exitCodeForError');
   }
 };
 
@@ -241,5 +256,7 @@ export const errorForAbortReason = (reason: AbortReason): MondayCliError => {
         reason.reason ?? 'cancelled',
         { details: { abort_reason: 'cancel' } },
       );
+    default:
+      return assertNever(reason, 'errorForAbortReason');
   }
 };
