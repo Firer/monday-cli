@@ -23,13 +23,14 @@ thing reviewers spot in five seconds.
 
 ## Exit codes (stable, documented surface)
 
-| Code | Meaning |
-|------|---------|
-| `0`  | Success |
-| `1`  | Usage error — bad flags, missing required args, unknown command |
-| `2`  | API error — Monday returned an error or the network failed |
-| `3`  | Config error — missing/invalid token, malformed config |
-| `>3` | Reserved for future use |
+| Code  | Meaning |
+|-------|---------|
+| `0`   | Success |
+| `1`   | Usage error — bad flags, missing required args, unknown command, `confirmation_required` |
+| `2`   | API error — Monday returned an error or the network failed |
+| `3`   | Config error — missing/invalid token, malformed config |
+| `130` | SIGINT (Ctrl-C). Set by the SIGINT handler before exit. No envelope on stderr — the exit code is the signal. |
+| other | Reserved for future use |
 
 Document these in the README and never reuse codes for different
 meanings. Agents key off them.

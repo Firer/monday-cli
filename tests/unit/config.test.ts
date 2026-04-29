@@ -29,16 +29,42 @@ describe('loadConfig', () => {
     }
   });
 
-  it('throws ConfigError on malformed apiVersion', () => {
-    expect(() =>
-      loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_API_VERSION: 'spring-2026' }),
-    ).toThrow(ConfigError);
+  it('throws ConfigError on malformed apiVersion (with version-specific hint)', () => {
+    try {
+      loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_API_VERSION: 'spring-2026' });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const cfgErr = err as ConfigError;
+      // Hint is conditional: don't mislead toward MONDAY_API_TOKEN
+      // when the actual failure is the version field.
+      expect(String(cfgErr.details?.hint)).toMatch(/MONDAY_API_VERSION/u);
+      expect(String(cfgErr.details?.hint)).not.toMatch(/MONDAY_API_TOKEN/u);
+    }
   });
 
-  it('throws ConfigError on non-URL apiUrl', () => {
-    expect(() =>
-      loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_API_URL: 'not-a-url' }),
-    ).toThrow(ConfigError);
+  it('throws ConfigError on non-URL apiUrl (with URL-specific hint)', () => {
+    try {
+      loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_API_URL: 'not-a-url' });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      expect(String((err as ConfigError).details?.hint)).toMatch(
+        /MONDAY_API_URL/u,
+      );
+    }
+  });
+
+  it('throws ConfigError on bad timeout (with timeout-specific hint)', () => {
+    try {
+      loadConfig({ MONDAY_API_TOKEN: 'tok', MONDAY_REQUEST_TIMEOUT_MS: '0' });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      expect(String((err as ConfigError).details?.hint)).toMatch(
+        /MONDAY_REQUEST_TIMEOUT_MS/u,
+      );
+    }
   });
 
   it('attaches structured issues to ConfigError.details', () => {

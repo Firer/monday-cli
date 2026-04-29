@@ -77,12 +77,24 @@ export const loadConfig = (
     const summary = issues
       .map((i) => (i.path ? `${i.path}: ${i.message}` : i.message))
       .join('; ');
+    const failedPaths = new Set(issues.map((i) => i.path));
+    // Conditional hint: only point at MONDAY_API_TOKEN when the
+    // missing-token path is what failed. For malformed
+    // version/URL/timeout we name the right env var per-issue
+    // instead of misleading the agent toward an unrelated fix.
+    const details: Record<string, unknown> = { issues };
+    if (failedPaths.has('MONDAY_API_TOKEN')) {
+      details.hint = 'set MONDAY_API_TOKEN in your shell or .env';
+    } else if (failedPaths.has('MONDAY_API_VERSION')) {
+      details.hint = 'MONDAY_API_VERSION must match YYYY-MM (e.g. 2026-01)';
+    } else if (failedPaths.has('MONDAY_API_URL')) {
+      details.hint = 'MONDAY_API_URL must be a valid URL';
+    } else if (failedPaths.has('MONDAY_REQUEST_TIMEOUT_MS')) {
+      details.hint = 'MONDAY_REQUEST_TIMEOUT_MS must be a positive integer (ms)';
+    }
     throw new ConfigError(
       `invalid Monday CLI config: ${summary}`,
-      {
-        cause: result.error,
-        details: { issues, hint: 'set MONDAY_API_TOKEN in your shell or .env' },
-      },
+      { cause: result.error, details },
     );
   }
 

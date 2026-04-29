@@ -277,10 +277,7 @@ describe('redact — value-scanning (Codex review §1)', () => {
     expect(out.note).toBe('hello world');
   });
 
-  it('handles a Headers-like object (Map-style entries)', () => {
-    // `Headers` from undici/fetch isn't a plain object — but the
-    // redactor accepts any iterable of [key, value] pairs after
-    // the caller normalises. Verify the typical shape.
+  it('handles a plain header-shaped record', () => {
     const headersObj = {
       authorization: TOKEN,
       'content-type': 'application/json',
@@ -289,6 +286,33 @@ describe('redact — value-scanning (Codex review §1)', () => {
       headers: { authorization: string };
     };
     expect(out.headers.authorization).toBe('[REDACTED]');
+  });
+
+  it('scrubs the token from a real Headers instance (key path strips it)', () => {
+    // `Headers` is not a plain object — `Object.entries` returns
+    // empty. Callers that pass `Headers` directly get a deep-clone
+    // that drops the entries; the token never reaches output. This
+    // documents the actual behaviour rather than claiming Headers
+    // gets walked like a Map.
+    const headers = new Headers({ authorization: TOKEN });
+    const out = redact({ headers }, { secrets: [TOKEN] }) as {
+      headers: Record<string, unknown>;
+    };
+    expect(JSON.stringify(out)).not.toContain(TOKEN);
+  });
+
+  it('scrubs the token from a Map of headers via value-scan', () => {
+    // Map isn't walked as an object either, but if a caller has
+    // already converted to a plain `{key: value}` shape (which the
+    // transport does) and the token is in any string value, the
+    // value-scan layer catches it.
+    const flat = Object.fromEntries(
+      new Map<string, string>([['authorization', TOKEN]]),
+    );
+    const out = redact(flat, { secrets: [TOKEN] }) as Record<string, string>;
+    // Both the key path AND the value-scan path apply.
+    expect(out.authorization).toBe('[REDACTED]');
+    expect(JSON.stringify(out)).not.toContain(TOKEN);
   });
 
   it('does not over-scrub when secret is empty', () => {
