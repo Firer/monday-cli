@@ -223,6 +223,33 @@ describe('mapResponse', () => {
       expect(result.error.httpStatus).toBe(502);
     });
 
+    it('429 with body.error_code IP_RATE_LIMIT_EXCEEDED → ip_rate_limited (not rate_limited)', () => {
+      // Codex M2 review §3 — the body's top-level error_code is a
+      // higher-priority signal than the bare HTTP status.
+      const result = mapResponse({
+        status: 429,
+        headers: okHeaders({ 'retry-after': '9' }),
+        body: {
+          error_code: 'IP_RATE_LIMIT_EXCEEDED',
+          error_message: 'ip cap',
+        },
+      });
+      if (result.ok) throw new Error('expected error');
+      expect(result.error.code).toBe('ip_rate_limited');
+      expect(result.error.mondayCode).toBe('IP_RATE_LIMIT_EXCEEDED');
+      expect(result.error.retryAfterSeconds).toBe(9);
+    });
+
+    it('429 without body.error_code → rate_limited fallback', () => {
+      const result = mapResponse({
+        status: 429,
+        headers: okHeaders({ 'retry-after': '3' }),
+        body: {},
+      });
+      if (result.ok) throw new Error('expected error');
+      expect(result.error.code).toBe('rate_limited');
+    });
+
     it('400 with body.error_message → validation_failed with mondayCode', () => {
       const result = mapResponse({
         status: 400,

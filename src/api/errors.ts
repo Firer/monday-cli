@@ -269,6 +269,35 @@ const messageForCode = (
 };
 
 /**
+ * Maps Monday's top-level `error_code` (present on some non-200
+ * responses, parallel to `extensions.code` on the GraphQL path) to
+ * a CLI code. Used as a higher-priority signal than the bare HTTP
+ * status — a 429 carrying `error_code: "IP_RATE_LIMIT_EXCEEDED"`
+ * is `ip_rate_limited`, not the generic `rate_limited` the status
+ * alone would suggest. (Codex M2 review §3.)
+ */
+const mapTopLevelErrorCode = (
+  code: string | undefined,
+): MondayCliError['code'] | undefined => {
+  if (code === undefined) return undefined;
+  const upper = code.toUpperCase();
+  if (upper === 'IP_RATE_LIMIT_EXCEEDED') return 'ip_rate_limited';
+  if (upper === 'RATE_LIMIT_EXCEEDED' || upper === 'MINUTE_LIMIT_EXCEEDED') {
+    return 'rate_limited';
+  }
+  if (upper === 'DAILY_LIMIT_EXCEEDED') return 'daily_limit_exceeded';
+  if (upper === 'CONCURRENCY_LIMIT_EXCEEDED') return 'concurrency_exceeded';
+  if (upper === 'COMPLEXITYEXCEPTION') return 'complexity_exceeded';
+  if (upper === 'UNAUTHORIZED' || upper === 'AUTHENTICATION_ERROR') {
+    return 'unauthorized';
+  }
+  if (upper === 'FORBIDDEN' || upper === 'PERMISSION_DENIED') {
+    return 'forbidden';
+  }
+  return undefined;
+};
+
+/**
  * Maps an HTTP status (with no usable GraphQL `errors`) to a CLI
  * error code. Used when Monday returns a non-200 with no structured
  * payload — usually proxies or load balancers between us and the
@@ -431,7 +460,17 @@ export const mapResponse = <T = unknown>(input: MapInput): MapResult<T> => {
   // 3. Non-success HTTP without GraphQL errors. Treat the body as
   //    opaque (it might be an HTML error page from a proxy).
   if (input.status < 200 || input.status >= 300) {
-    const fallback = mapHttpStatus(input.status) ?? 'network_error';
+    // The body's top-level `error_code` is more specific than the
+    // HTTP status — a 429 carrying `IP_RATE_LIMIT_EXCEEDED` is
+    // `ip_rate_limited`, not `rate_limited` (Codex M2 review §3).
+    // Fall back to the status when the body has no error_code or
+    // it doesn't match a known signal.
+    const topLevelErrorCode =
+      typeof body?.error_code === 'string' ? body.error_code : undefined;
+    const fallback =
+      mapTopLevelErrorCode(topLevelErrorCode) ??
+      mapHttpStatus(input.status) ??
+      'network_error';
     const details: Record<string, unknown> = {};
     // Monday occasionally returns top-level `error_code` /
     // `error_message` for non-200s.
