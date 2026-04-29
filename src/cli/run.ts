@@ -9,6 +9,7 @@ import {
   MondayCliError,
   UsageError,
   exitCodeForError,
+  type AbortReason,
   type ExitCode,
 } from '../utils/errors.js';
 import { redact } from '../utils/redact.js';
@@ -44,32 +45,58 @@ export interface RunOptions {
   readonly transport?: Transport;
   readonly requestIdGenerator?: RequestIdGenerator;
   /**
-   * Hook for tests and (later) milestones to register additional
-   * commands on the program. M1+ will replace this with a static
-   * registry — for M0 it's the seam that keeps `run.ts` testable
-   * before any command exists.
+   * External abort source. `runWithSignals` provides one tied to
+   * `SIGINT`; tests pass their own to drive the cancel path
+   * deterministically. The runner combines this with its own
+   * controller so either side can trigger a clean shutdown.
    */
-  readonly registerCommands?: (program: Command) => void;
+  readonly signal?: AbortSignal;
+  /**
+   * Hook for tests and (later) milestones to register additional
+   * commands on the program. Receives the program *and* the live
+   * `RunContext` so registered actions can read `ctx.signal`,
+   * `ctx.transport`, `ctx.env`, etc. Codex review §9 caught the
+   * earlier (program-only) shape: `transport` was on `RunOptions`
+   * but never reachable from a registered action.
+   *
+   * M1+ replaces this hook with a static command registry; the
+   * `RunContext` argument stays.
+   */
+  readonly registerCommands?: (program: Command, ctx: RunContext) => void;
 }
 
 export interface RunResult {
   readonly exitCode: ExitCode;
 }
 
-interface RunContext {
+/**
+ * Public per-invocation context every command receives. Built by
+ * `run()` once per call; threaded into `registerCommands(program,
+ * ctx)` so actions can pull the signal, transport, env, and logging
+ * surfaces without re-deriving them.
+ */
+export interface RunContext {
+  readonly env: NodeJS.ProcessEnv;
+  readonly stdout: NodeJS.WritableStream;
+  readonly stderr: NodeJS.WritableStream;
+  readonly stdin?: NodeJS.ReadableStream;
+  readonly isTTY: boolean;
+  readonly clock: () => Date;
+  readonly transport: Transport | undefined;
   readonly requestId: string;
   readonly cliVersion: string;
-  readonly retrievedAt: string;
-  readonly stderr: NodeJS.WritableStream;
-  readonly env: NodeJS.ProcessEnv;
   /**
-   * Literal secret values to scrub from any string the runner emits
-   * (envelopes, logs). Sourced from env at runner construction so a
-   * token in `Error.message` or a fetch URL still gets redacted.
-   * The list is best-effort: if the user hasn't set MONDAY_API_TOKEN,
-   * there's nothing to scan for, but key-based redaction still
-   * catches the common shapes.
+   * Aborts when the runner is shutting down — caller cancel,
+   * SIGINT, or future timeout. Commands awaiting long work should
+   * thread this into `transport.request({signal})` and bail
+   * cooperatively when the signal fires.
    */
+  readonly signal: AbortSignal;
+}
+
+/** Internal extension of `RunContext` with envelope-building bits. */
+interface InternalContext extends RunContext {
+  readonly retrievedAt: string;
   readonly secrets: readonly string[];
 }
 
@@ -82,7 +109,7 @@ const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
   return out;
 };
 
-const buildBaseMeta = (ctx: RunContext): Meta =>
+const buildBaseMeta = (ctx: InternalContext): Meta =>
   buildMeta({
     api_version: ctx.env.MONDAY_API_VERSION ?? '2026-01',
     cli_version: ctx.cliVersion,
@@ -94,7 +121,7 @@ const buildBaseMeta = (ctx: RunContext): Meta =>
 
 const writeErrorEnvelope = (
   err: MondayCliError,
-  ctx: RunContext,
+  ctx: InternalContext,
 ): void => {
   const envelope = buildError(err, buildBaseMeta(ctx));
   const redacted = redact(envelope, { secrets: ctx.secrets });
@@ -123,7 +150,15 @@ const toMondayError = (err: unknown): MondayCliError => {
   return new InternalError('unknown error', { cause: err });
 };
 
-const buildProgram = (options: RunOptions): Command => {
+const isSigintReason = (reason: unknown): boolean => {
+  if (typeof reason !== 'object' || reason === null) {
+    return false;
+  }
+  const tagged = reason as { kind?: unknown };
+  return tagged.kind === 'sigint';
+};
+
+const buildProgram = (options: RunOptions, ctx: RunContext): Command => {
   const program = new Command();
   program
     .name('monday')
@@ -173,7 +208,7 @@ const buildProgram = (options: RunOptions): Command => {
     .option('--query-file <path>', 'monday raw: read GraphQL query from a file (or -)')
     .option('--vars-file <path>', 'monday raw: read GraphQL variables from a file (or -)');
 
-  options.registerCommands?.(program);
+  options.registerCommands?.(program, ctx);
 
   return program;
 };
@@ -183,21 +218,50 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     options.requestIdGenerator ?? defaultRequestIdGenerator
   )();
   const clock = options.clock ?? (() => new Date());
-  const ctx: RunContext = {
+
+  // Internal abort controller, optionally combined with a caller-
+  // supplied signal so either side can trigger shutdown. Commands
+  // read `ctx.signal`; the runner inspects `signal.reason` after
+  // the action returns to distinguish SIGINT (exit 130) from other
+  // aborts (caller-defined).
+  const internalAbort = new AbortController();
+  const combinedSignal: AbortSignal =
+    options.signal === undefined
+      ? internalAbort.signal
+      : AbortSignal.any([options.signal, internalAbort.signal]);
+
+  const ctx: InternalContext = {
+    env: options.env,
+    stdout: options.stdout,
+    stderr: options.stderr,
+    ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
+    isTTY: options.isTTY,
+    clock,
+    transport: options.transport,
     requestId,
     cliVersion: options.cliVersion,
+    signal: combinedSignal,
     retrievedAt: clock().toISOString(),
-    stderr: options.stderr,
-    env: options.env,
     secrets: collectSecrets(options.env),
   };
 
-  const program = buildProgram(options);
+  const program = buildProgram(options, ctx);
 
   try {
     await program.parseAsync(options.argv);
+    if (combinedSignal.aborted && isSigintReason(combinedSignal.reason)) {
+      return { exitCode: 130 };
+    }
     return { exitCode: 0 };
   } catch (err) {
+    // SIGINT-during-action takes precedence: the design says exit
+    // 130 with no envelope on stderr. The action's thrown error is
+    // a downstream consequence of the abort; surfacing it would
+    // muddle the contract.
+    if (combinedSignal.aborted && isSigintReason(combinedSignal.reason)) {
+      return { exitCode: 130 };
+    }
+
     if (isCommanderError(err)) {
       // commander.helpDisplayed / commander.version are success-style;
       // treat them as exit 0 with no envelope.
@@ -213,27 +277,29 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
 };
 
 /**
- * Wraps `run()` with `process.on('SIGINT', ...)` so a Ctrl-C between
- * commander's parse and the command's action triggers a graceful
- * 130 exit. This is the production surface; tests call `run()`
- * directly without the signal wiring.
+ * Wraps `run()` with `process.on('SIGINT', ...)` so a Ctrl-C
+ * triggers a real abort: an `AbortController` fires with reason
+ * `{kind:'sigint'}` and the signal is threaded into `ctx.signal`
+ * via `RunOptions.signal`. Commands awaiting transport requests
+ * see the abort and can bail; the runner then returns 130 without
+ * an envelope per `cli-design.md` §3.1 #5.
+ *
+ * This is the production surface; unit tests typically call `run()`
+ * directly with their own `signal` to deterministically drive the
+ * cancel path.
  */
 export const runWithSignals = async (
   options: RunOptions,
 ): Promise<RunResult> => {
-  const state: { interrupted: boolean } = { interrupted: false };
+  const ctrl = new AbortController();
   const onInt = (): void => {
-    state.interrupted = true;
+    const reason: AbortReason = { kind: 'sigint' };
+    ctrl.abort(reason);
   };
   process.on('SIGINT', onInt);
   try {
-    const result = await run(options);
-    if (state.interrupted) {
-      return { exitCode: 130 };
-    }
-    return result;
+    return await run({ ...options, signal: ctrl.signal });
   } finally {
     process.off('SIGINT', onInt);
   }
 };
-

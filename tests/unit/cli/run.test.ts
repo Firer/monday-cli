@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { run, type RunOptions } from '../../../src/cli/run.js';
+import { run, runWithSignals, type RunOptions } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/config/load.js';
 import {
   ApiError,
@@ -330,6 +330,163 @@ describe('run — token redaction', () => {
 
     await run(options);
     expect(captured.stderr()).not.toContain(literal);
+  });
+});
+
+describe('run — RunContext threading', () => {
+  it('passes RunContext into registerCommands so actions see ctx.signal/transport/env', async () => {
+    let observed: { hasSignal: boolean; envToken?: string; transport?: unknown } | null = null;
+
+    const { options } = baseOptions({
+      argv: ['node', 'monday', 'self-test'],
+      env: { MONDAY_API_TOKEN: 'tok' },
+      transport: { request: () => Promise.resolve({ status: 200, headers: {}, body: {} }) },
+      registerCommands: (program, ctx) => {
+        program
+          .command('self-test')
+          .action(() => {
+            observed = {
+              hasSignal: ctx.signal instanceof AbortSignal,
+              ...(ctx.env.MONDAY_API_TOKEN !== undefined
+                ? { envToken: ctx.env.MONDAY_API_TOKEN }
+                : {}),
+              transport: ctx.transport,
+            };
+          });
+      },
+    });
+
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+    expect(observed).not.toBeNull();
+    expect(observed!.hasSignal).toBe(true);
+    expect(observed!.envToken).toBe('tok');
+    expect(observed!.transport).toBeDefined();
+  });
+});
+
+describe('run — abort handling (SIGINT path)', () => {
+  it('a caller-supplied signal aborted with kind:sigint exits 130 with no envelope', async () => {
+    const ctrl = new AbortController();
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'hang'],
+      signal: ctrl.signal,
+      registerCommands: (program, ctx) => {
+        program
+          .command('hang')
+          .action(async () => {
+            // Action that respects ctx.signal and bails when aborted.
+            await new Promise<void>((resolve, reject) => {
+              ctx.signal.addEventListener('abort', () => {
+                reject(new Error('aborted'));
+              });
+              // safety timeout: reject if test forgets to abort
+              setTimeout(() => {
+                resolve();
+              }, 5_000);
+            });
+          });
+      },
+    });
+
+    // Fire the abort before parseAsync would otherwise complete.
+    setTimeout(() => {
+      ctrl.abort({ kind: 'sigint' });
+    }, 10);
+
+    const result = await run(options);
+    expect(result.exitCode).toBe(130);
+    // No envelope on stderr for SIGINT — exit code is the signal.
+    expect(captured.stderr()).toBe('');
+    expect(captured.stdout()).toBe('');
+  });
+
+  it('a caller-supplied signal with a non-sigint reason still surfaces the action error', async () => {
+    const ctrl = new AbortController();
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'hang'],
+      signal: ctrl.signal,
+      registerCommands: (program, ctx) => {
+        program
+          .command('hang')
+          .action(async () => {
+            await new Promise<void>((_resolve, reject) => {
+              ctx.signal.addEventListener('abort', () => {
+                reject(new Error('client cancelled'));
+              });
+              setTimeout(() => {
+                _resolve();
+              }, 5_000);
+            });
+          });
+      },
+    });
+
+    setTimeout(() => {
+      ctrl.abort({ kind: 'cancel', reason: 'client cancelled' });
+    }, 10);
+
+    const result = await run(options);
+    // Non-sigint abort: action's thrown error becomes internal_error /
+    // exit 2, with the §6 envelope on stderr.
+    expect(result.exitCode).toBe(2);
+    expect(captured.stderr()).toContain('"code": "internal_error"');
+  });
+
+  it('without an abort, a normal action returns its own exit code', async () => {
+    const { options } = baseOptions({
+      argv: ['node', 'monday', 'echo'],
+      registerCommands: (program) => {
+        program
+          .command('echo')
+          .action(() => {
+            // pass — exit 0
+          });
+      },
+    });
+
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+describe('runWithSignals — SIGINT integration', () => {
+  it('a real SIGINT during action exits 130 with no envelope', async () => {
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'hang'],
+      registerCommands: (program, ctx) => {
+        program
+          .command('hang')
+          .action(async () => {
+            await new Promise<void>((resolve, reject) => {
+              ctx.signal.addEventListener('abort', () => {
+                reject(new Error('aborted'));
+              });
+              setTimeout(() => {
+                resolve();
+              }, 5_000);
+            });
+          });
+      },
+    });
+
+    setTimeout(() => {
+      // Simulate a real SIGINT — runWithSignals listens for it and
+      // aborts its internal controller with reason {kind:'sigint'}.
+      process.emit('SIGINT');
+    }, 10);
+
+    const result = await runWithSignals(options);
+    expect(result.exitCode).toBe(130);
+    expect(captured.stderr()).toBe('');
+  });
+
+  it('without SIGINT, runWithSignals delegates to run() exit codes', async () => {
+    const { options } = baseOptions({
+      argv: ['node', 'monday', '--version'],
+    });
+    const result = await runWithSignals(options);
+    expect(result.exitCode).toBe(0);
   });
 });
 
