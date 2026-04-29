@@ -17,17 +17,24 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**Design complete; v0.1 implementation is the next phase.** Repo has
+**Design complete; v0.1 implementation in progress.** Repo has
 toolchain, lint/typecheck/test wiring, a directory skeleton, and one
-working module (`src/config/load.ts`). The canonical CLI contract —
-command surface, output envelope, error codes, deferral list, every
-single design decision — lives in
-**[`docs/cli-design.md`](./docs/cli-design.md) (~1,900 lines)**.
+working module (`src/config/load.ts`). Two binding documents:
 
-> **If you're implementing anything in this repo, read `docs/cli-design.md`
-> before writing code.** It has been through two AI-collaborator review
-> passes and is internally consistent. The contract there is binding —
-> changes land via PRs that argue for the change, not by drift.
+- **[`docs/cli-design.md`](./docs/cli-design.md)** (~1,700 lines) —
+  the canonical CLI contract: command surface, output envelope,
+  error codes (26 stable), deferral list, every single design
+  decision. Two AI-collaborator review passes; internally consistent.
+- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,000 lines) —
+  the implementation plan for v0.1: nine sequenced milestones
+  (M0–M7 with M5 split), per-milestone deliverables, testing-pyramid
+  commitments, risk register, exit checklist. One Codex review pass.
+
+> **If you're implementing anything in this repo, read
+> `docs/cli-design.md` for the contract and `docs/v0.1-plan.md` for
+> the active milestone before writing code.** The design contract is
+> binding — changes land via PRs that argue for the change, not by
+> drift. The plan is a living doc; update it when scope shifts.
 
 Updates to the design also update this file's "Contract at a glance"
 section below so a future fresh agent doesn't have to read the whole
@@ -75,6 +82,9 @@ docs/
   cli-design.md     # ★ CANONICAL CONTRACT — read first. Command surface,
                     #   output envelope, error codes, divergences from
                     #   Monday's API, v0.1/v0.2/v0.3/v0.4 phasing.
+  v0.1-plan.md      # ★ ACTIVE IMPLEMENTATION PLAN — milestones M0–M7,
+                    #   per-milestone deliverables + tests + exit criteria.
+                    #   Read after cli-design.md before any v0.1 code.
   architecture.md   # Module boundaries (commands→api→SDK separation)
   api-reference.md  # Monday concepts cheat sheet — supplementary; the
                     #   canonical schema summary is cli-design.md §2
@@ -143,9 +153,10 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
   `retrieved_at`. Adding fields is non-breaking; removing/renaming is a
   major-version bump. (§6.1)
-- **Stable error codes** (24 of them — `usage_error`, `not_found`,
-  `ambiguous_column`, `unsupported_column_type`, `rate_limited`,
-  `complexity_exceeded`, `stale_cursor`, etc.). Errors carry
+- **Stable error codes** (26 of them — `usage_error`, `not_found`,
+  `ambiguous_column`, `column_archived`, `unsupported_column_type`,
+  `rate_limited`, `complexity_exceeded`, `stale_cursor`, etc.).
+  Errors carry
   `code`, `message`, `http_status`, `monday_code`, `request_id`,
   `retryable`, `retry_after_seconds`. Agents key off `code`, never
   English. (§6.5)
