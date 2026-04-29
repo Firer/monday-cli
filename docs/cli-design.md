@@ -609,9 +609,9 @@ live in `docs/output-shapes.md` (to be added per command).
   "created_at": "2026-04-29T10:00:00Z",
   "updated_at": "2026-04-29T11:00:00Z",
   "columns": {
-    "status": { "type": "status", "label": "Working on it", "index": 1 },
-    "owner":  { "type": "people", "people": [{ "id": "1", "name": "Alice", "email": "..." }] },
-    "due":    { "type": "date",   "date": "2026-05-01", "time": null }
+    "status_4": { "type": "status", "title": "Status",   "label": "Working on it", "index": 1 },
+    "person":   { "type": "people", "title": "Owner",    "people": [{ "id": "1", "name": "Alice", "email": "..." }] },
+    "date4":    { "type": "date",   "title": "Due date", "date": "2026-05-01", "time": null }
   }
 }
 ```
@@ -620,12 +620,19 @@ Notes:
 - IDs are always strings (Monday returns numeric IDs but they exceed
   JS-safe integer range). Always quote.
 - Timestamps are ISO 8601 in UTC.
-- `columns` is keyed by **column ID** (not title) for stability — titles
-  can change. A separate `column_titles` map sits alongside if the
-  command was invoked with `--include-titles`.
+- `columns` is keyed by **column ID** (Monday's stable identifier — does
+  not change when the user renames the column). Each value also carries
+  `title` as descriptive metadata so a single response is
+  self-interpretable for an LLM agent without an extra
+  `board describe` round-trip. The title rides along as a *value*, not
+  a key, so it can change freely without breaking caller logic that
+  keys off the ID.
 - Each column value carries `type` so consumers know how to interpret it.
 - Read-only columns (mirror, formula, dependency) include the resolved
   display value as `text` and a typed payload where possible.
+- `--minimal` drops `title` (and other non-essential descriptive fields)
+  for callers that genuinely need to minimise bytes — e.g. NDJSON
+  streaming over very large item sets. The default keeps the title.
 
 ### 6.2 Collection
 
