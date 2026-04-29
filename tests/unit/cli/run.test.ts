@@ -268,7 +268,7 @@ describe('run — error envelope from command actions', () => {
 });
 
 describe('run — token redaction', () => {
-  it('does not leak the token through error envelopes', async () => {
+  it('does not leak the token through error envelopes (key path)', async () => {
     const literal = 'tok-leakcheck-xxxx';
     const { options, captured } = baseOptions({
       argv: ['node', 'monday', 'self-test'],
@@ -281,6 +281,49 @@ describe('run — token redaction', () => {
             const inner = new Error('boom');
             Object.assign(inner, { apiToken: literal });
             throw new ApiError('forbidden', 'no', { cause: inner });
+          });
+      },
+    });
+
+    await run(options);
+    expect(captured.stderr()).not.toContain(literal);
+  });
+
+  it('does not leak the token landing in Error.message (value-scan path)', async () => {
+    const literal = 'tok-leakcheck-xxxx';
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'self-test'],
+      env: { MONDAY_API_TOKEN: literal },
+      registerCommands: (program) => {
+        program
+          .command('self-test')
+          .action(() => {
+            // Adversarial: token in a vanilla error message — no
+            // sensitively-named key in sight. Without value-scanning
+            // the runner would copy it straight into envelope.message.
+            throw new Error(`upstream said auth=${literal} expired`);
+          });
+      },
+    });
+
+    await run(options);
+    const stderr = captured.stderr();
+    expect(stderr).not.toContain(literal);
+    expect(stderr).toContain('[REDACTED]');
+  });
+
+  it('does not leak the token from Error.stack', async () => {
+    const literal = 'tok-leakcheck-xxxx';
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'self-test'],
+      env: { MONDAY_API_TOKEN: literal },
+      registerCommands: (program) => {
+        program
+          .command('self-test')
+          .action(() => {
+            const err = new Error('boom');
+            err.stack = `Error: boom (auth=${literal})\n    at frame:1`;
+            throw err;
           });
       },
     });

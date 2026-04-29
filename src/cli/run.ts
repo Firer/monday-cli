@@ -62,7 +62,25 @@ interface RunContext {
   readonly retrievedAt: string;
   readonly stderr: NodeJS.WritableStream;
   readonly env: NodeJS.ProcessEnv;
+  /**
+   * Literal secret values to scrub from any string the runner emits
+   * (envelopes, logs). Sourced from env at runner construction so a
+   * token in `Error.message` or a fetch URL still gets redacted.
+   * The list is best-effort: if the user hasn't set MONDAY_API_TOKEN,
+   * there's nothing to scan for, but key-based redaction still
+   * catches the common shapes.
+   */
+  readonly secrets: readonly string[];
 }
+
+const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
+  const out: string[] = [];
+  const token = env.MONDAY_API_TOKEN;
+  if (token !== undefined && token.length > 0) {
+    out.push(token);
+  }
+  return out;
+};
 
 const buildBaseMeta = (ctx: RunContext): Meta =>
   buildMeta({
@@ -79,7 +97,7 @@ const writeErrorEnvelope = (
   ctx: RunContext,
 ): void => {
   const envelope = buildError(err, buildBaseMeta(ctx));
-  const redacted = redact(envelope);
+  const redacted = redact(envelope, { secrets: ctx.secrets });
   ctx.stderr.write(`${JSON.stringify(redacted, null, 2)}\n`);
 };
 
@@ -168,6 +186,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     retrievedAt: clock().toISOString(),
     stderr: options.stderr,
     env: options.env,
+    secrets: collectSecrets(options.env),
   };
 
   const program = buildProgram(options);

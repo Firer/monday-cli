@@ -7,12 +7,19 @@
  * error messages, debug payloads, JSON envelopes. Every output
  * path funnels through this function.
  *
- * The default sensitive-key list covers the names we know about
- * (`apiToken`, `Authorization`, `MONDAY_API_TOKEN`) plus a generic
- * `(token|secret|password|api[-_]?key)` pattern that catches
- * future-named secrets without an extra audit step. Callers extend
- * the list when they have local context (e.g. a credentials cache
- * field name).
+ * Two independent layers (a key-based filter alone is not enough —
+ * Codex review §1 caught this gap):
+ *
+ *  - **Key-based filter.** Values under sensitive keys (`apiToken`,
+ *    `Authorization`, `MONDAY_API_TOKEN`, plus a generic
+ *    `(token|secret|password|api[-_]?key)` regex) are replaced
+ *    wholesale.
+ *  - **Value-scanning filter.** When the caller provides a `secrets`
+ *    list (typically the literal Monday API token loaded at startup),
+ *    every string in the tree is scanned and any occurrence of any
+ *    listed secret is replaced with the placeholder. This catches
+ *    `Error.message`, `Error.stack`, fetch URLs, debug payloads —
+ *    anywhere a token could land outside a sensitively-named key.
  *
  * Circular references are tracked via a `WeakSet` and replaced
  * with a `[Circular]` marker — never the original value, never a
@@ -30,6 +37,13 @@ const DEFAULT_SENSITIVE_PATTERN = /(token|secret|password|api[-_]?key)/iu;
 const REDACTED = '[REDACTED]';
 const CIRCULAR = '[Circular]';
 
+/** Secrets shorter than this are skipped to avoid pathological */
+/* false positives (e.g. a single-character token literally appearing */
+/* everywhere). Real Monday tokens are 40+ chars; this floor leaves   */
+/* plenty of room for realistic tokens while filtering out useless   */
+/* "ab"/"x" entries. */
+const MIN_SECRET_LENGTH = 8;
+
 export interface RedactOptions {
   /** Extra exact-match key names to redact (case-insensitive). */
   readonly extraKeys?: readonly string[];
@@ -37,6 +51,14 @@ export interface RedactOptions {
   readonly extraPattern?: RegExp;
   /** Marker substituted in place of the redacted value. */
   readonly placeholder?: string;
+  /**
+   * Literal secret values to scrub from any string anywhere in the
+   * tree. Typically the loaded Monday API token; the runner threads
+   * it through so a token landing in `Error.message` or a fetch URL
+   * still gets redacted before emit. Entries shorter than 8 chars
+   * are ignored (false-positive risk).
+   */
+  readonly secrets?: readonly string[];
 }
 
 const isSensitiveKey = (
@@ -64,25 +86,50 @@ const isSensitiveKey = (
   return false;
 };
 
-const redactInternal = (
-  value: unknown,
-  seen: WeakSet<object>,
-  extraKeys: readonly string[],
-  extraPattern: RegExp | undefined,
+const scrubSecretsInString = (
+  value: string,
+  secrets: readonly string[],
   placeholder: string,
-): unknown => {
-  if (value === null || typeof value !== 'object') {
+): string => {
+  let scrubbed = value;
+  for (const secret of secrets) {
+    if (secret.length < MIN_SECRET_LENGTH) {
+      continue;
+    }
+    if (scrubbed.includes(secret)) {
+      scrubbed = scrubbed.split(secret).join(placeholder);
+    }
+  }
+  return scrubbed;
+};
+
+interface InternalContext {
+  readonly seen: WeakSet<object>;
+  readonly extraKeys: readonly string[];
+  readonly extraPattern: RegExp | undefined;
+  readonly placeholder: string;
+  readonly secrets: readonly string[];
+}
+
+const redactInternal = (value: unknown, ctx: InternalContext): unknown => {
+  if (value === null) {
     return value;
   }
-  if (seen.has(value)) {
+  if (typeof value === 'string') {
+    return ctx.secrets.length > 0
+      ? scrubSecretsInString(value, ctx.secrets, ctx.placeholder)
+      : value;
+  }
+  if (typeof value !== 'object') {
+    return value;
+  }
+  if (ctx.seen.has(value)) {
     return CIRCULAR;
   }
-  seen.add(value);
+  ctx.seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((entry) =>
-      redactInternal(entry, seen, extraKeys, extraPattern, placeholder),
-    );
+    return value.map((entry) => redactInternal(entry, ctx));
   }
 
   // Errors carry `cause`/`message`/`stack` that may have been
@@ -98,52 +145,42 @@ const redactInternal = (
       cloned.stack = value.stack;
     }
     if (value.cause !== undefined) {
-      cloned.cause = redactInternal(
-        value.cause,
-        seen,
-        extraKeys,
-        extraPattern,
-        placeholder,
-      );
+      cloned.cause = redactInternal(value.cause, ctx);
     }
     for (const key of Object.keys(value)) {
       // Copy own enumerable properties (preserves `code`, `details`, etc.).
       cloned[key] = (value as unknown as Record<string, unknown>)[key];
     }
-    return redactInternal(cloned, seen, extraKeys, extraPattern, placeholder);
+    return redactInternal(cloned, ctx);
   }
 
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    if (isSensitiveKey(key, extraKeys, extraPattern)) {
-      result[key] = placeholder;
+    if (isSensitiveKey(key, ctx.extraKeys, ctx.extraPattern)) {
+      result[key] = ctx.placeholder;
       continue;
     }
-    result[key] = redactInternal(
-      child,
-      seen,
-      extraKeys,
-      extraPattern,
-      placeholder,
-    );
+    result[key] = redactInternal(child, ctx);
   }
   return result;
 };
 
 /**
  * Deep-clone `value`, replacing values under sensitive keys with
- * `[REDACTED]`. The input is never mutated. Circular references
- * resolve to `[Circular]`. Returns `unknown` because the redaction
- * step erases type information about which keys were present —
- * callers cast at the consumption point if they know the shape.
+ * `[REDACTED]` and any literal secrets in `options.secrets` with
+ * the same placeholder. The input is never mutated. Circular
+ * references resolve to `[Circular]`. Returns `unknown` because the
+ * redaction step erases type information about which keys were
+ * present — callers cast at the consumption point if they know the
+ * shape.
  */
 export const redact = (value: unknown, options: RedactOptions = {}): unknown => {
-  const seen = new WeakSet<object>();
-  return redactInternal(
-    value,
-    seen,
-    options.extraKeys ?? [],
-    options.extraPattern,
-    options.placeholder ?? REDACTED,
-  );
+  const ctx: InternalContext = {
+    seen: new WeakSet<object>(),
+    extraKeys: options.extraKeys ?? [],
+    extraPattern: options.extraPattern,
+    placeholder: options.placeholder ?? REDACTED,
+    secrets: options.secrets ?? [],
+  };
+  return redactInternal(value, ctx);
 };

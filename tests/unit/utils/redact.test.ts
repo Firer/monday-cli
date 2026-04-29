@@ -202,3 +202,99 @@ describe('redact — token-string scrub end-to-end', () => {
     expect(stringified.includes(literal)).toBe(false);
   });
 });
+
+describe('redact — value-scanning (Codex review §1)', () => {
+  const TOKEN = 'tok-leakcheck-xxxx';
+
+  it('scrubs the token from a plain string value', () => {
+    const out = redact({ url: `https://api.monday.com?t=${TOKEN}` }, {
+      secrets: [TOKEN],
+    }) as { url: string };
+    expect(out.url).toBe('https://api.monday.com?t=[REDACTED]');
+  });
+
+  it('scrubs multiple occurrences in a single string', () => {
+    const out = redact(
+      { line: `${TOKEN} ${TOKEN} ${TOKEN}` },
+      { secrets: [TOKEN] },
+    ) as { line: string };
+    expect(out.line).toBe('[REDACTED] [REDACTED] [REDACTED]');
+  });
+
+  it('scrubs the token from Error.message', () => {
+    const err = new Error(`request failed with token=${TOKEN}`);
+    const out = redact(err, { secrets: [TOKEN] }) as { message: string };
+    expect(out.message).toBe('request failed with token=[REDACTED]');
+  });
+
+  it('scrubs the token from Error.stack', () => {
+    const err = new Error('boom');
+    err.stack = `Error: boom (auth=${TOKEN})\n    at frame:1`;
+    const out = redact(err, { secrets: [TOKEN] }) as { stack: string };
+    expect(out.stack.includes(TOKEN)).toBe(false);
+    expect(out.stack).toContain('[REDACTED]');
+  });
+
+  it('scrubs the token from a chained Error.cause.message', () => {
+    const inner = new Error(`upstream said: ${TOKEN}`);
+    const outer = new Error('outer', { cause: inner });
+    const out = redact(outer, { secrets: [TOKEN] }) as {
+      cause: { message: string };
+    };
+    expect(out.cause.message).toBe('upstream said: [REDACTED]');
+  });
+
+  it('scrubs the token from logger string payloads', () => {
+    const out = redact(`auth=${TOKEN}`, { secrets: [TOKEN] }) as string;
+    expect(out).toBe('auth=[REDACTED]');
+  });
+
+  it('scrubs the token even when it appears under a non-sensitive key', () => {
+    const out = redact(
+      { description: `created with auth=${TOKEN}`, id: '5001' },
+      { secrets: [TOKEN] },
+    ) as { description: string; id: string };
+    expect(out.description).toBe('created with auth=[REDACTED]');
+    expect(out.id).toBe('5001');
+  });
+
+  it('scrubs lowercase `authorization` header values via key path AND value-scan as belt-and-braces', () => {
+    // Already key-redacted; just confirm secret-scanning doesn't
+    // accidentally undo the [REDACTED] marker on re-application.
+    const out = redact(
+      { headers: { authorization: TOKEN, 'x-trace': `tagged-${TOKEN}` } },
+      { secrets: [TOKEN] },
+    ) as { headers: { authorization: string; 'x-trace': string } };
+    expect(out.headers.authorization).toBe('[REDACTED]');
+    expect(out.headers['x-trace']).toBe('tagged-[REDACTED]');
+  });
+
+  it('ignores secrets shorter than the floor (false-positive guard)', () => {
+    const out = redact({ note: 'hello world' }, { secrets: ['o'] }) as {
+      note: string;
+    };
+    // Single-char secret skipped — note left intact.
+    expect(out.note).toBe('hello world');
+  });
+
+  it('handles a Headers-like object (Map-style entries)', () => {
+    // `Headers` from undici/fetch isn't a plain object — but the
+    // redactor accepts any iterable of [key, value] pairs after
+    // the caller normalises. Verify the typical shape.
+    const headersObj = {
+      authorization: TOKEN,
+      'content-type': 'application/json',
+    };
+    const out = redact({ headers: headersObj }, { secrets: [TOKEN] }) as {
+      headers: { authorization: string };
+    };
+    expect(out.headers.authorization).toBe('[REDACTED]');
+  });
+
+  it('does not over-scrub when secret is empty', () => {
+    const out = redact({ note: 'hello' }, { secrets: [''] }) as {
+      note: string;
+    };
+    expect(out.note).toBe('hello');
+  });
+});
