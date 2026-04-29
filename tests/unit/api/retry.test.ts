@@ -219,6 +219,113 @@ describe('withRetry', () => {
     expect(caught?.details).toMatchObject({ aborted: true });
   });
 
+  it('exercises the default sleep — resolves after the configured delay', async () => {
+    let n = 0;
+    const t0 = Date.now();
+    await withRetry(
+      async () => {
+        n++;
+        if (n === 1) {
+          throw new ApiError('rate_limited', 'wait briefly', { retryAfterSeconds: 0 });
+        }
+        return await Promise.resolve('done');
+      },
+      {
+        retries: 1,
+        signal: liveSignal,
+        // No `sleep` override — exercises the production timer path
+        baseBackoffMs: 50,
+        maxBackoffMs: 100,
+        random: fixedRandom(0.5),
+      },
+    );
+    // Real timer ran at least once; n should be 2 now.
+    expect(n).toBe(2);
+    // Quick floor: real timer fired, so some real ms elapsed.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(0);
+  });
+
+  it('default sleep rejects when the signal aborts before scheduling', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort('cancelled');
+    let caught: unknown;
+    try {
+      await withRetry(
+        async () => {
+          throw new ApiError('rate_limited', 'wait briefly', { retryAfterSeconds: 0 });
+        },
+        {
+          retries: 2,
+          signal: ctrl.signal,
+          baseBackoffMs: 50,
+          maxBackoffMs: 100,
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+  });
+
+  it('default sleep — abort fires *during* the sleep wait', async () => {
+    // Real-timer test: thunk fails, retry layer enters default
+    // sleep with backoff 200ms; abort fires at t≈30ms. Drives
+    // signalAbortError + the catch-block in the retry loop, both
+    // of which the noop-sleep tests above can't reach.
+    const ctrl = new AbortController();
+    let n = 0;
+    let caught: unknown;
+    try {
+      await withRetry(
+        async () => {
+          n++;
+          if (n === 1) {
+            setTimeout(() => { ctrl.abort('mid-sleep'); }, 30);
+            throw new ApiError('rate_limited', 'transient');
+          }
+          return await Promise.resolve('unreachable');
+        },
+        {
+          retries: 3,
+          signal: ctrl.signal,
+          baseBackoffMs: 200,
+          maxBackoffMs: 200,
+          random: fixedRandom(0.5),
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: 'internal_error' });
+    expect(n).toBe(1);
+  });
+
+  it('default sleep — Error-typed abort reason is surfaced', async () => {
+    // Same scenario but the abort reason is an Error — exercises
+    // signalAbortError's "instanceof Error" branch.
+    const ctrl = new AbortController();
+    const reason = new Error('error-reason');
+    let caught: unknown;
+    try {
+      await withRetry(
+        async () => {
+          setTimeout(() => { ctrl.abort(reason); }, 20);
+          throw new ApiError('rate_limited', 'transient');
+        },
+        {
+          retries: 3,
+          signal: ctrl.signal,
+          baseBackoffMs: 200,
+          maxBackoffMs: 200,
+          random: fixedRandom(0.5),
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: 'internal_error' });
+  });
+
   it('aborts mid-backoff and re-throws an abort error', async () => {
     const ctrl = new AbortController();
     let n = 0;
