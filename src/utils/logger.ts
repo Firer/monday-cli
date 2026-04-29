@@ -19,6 +19,16 @@ export interface LoggerOptions {
   readonly isTTY: boolean;
   readonly verbose: boolean;
   readonly quiet: boolean;
+  /**
+   * Process env, used to auto-collect known sensitive values for
+   * the redactor's value-scan layer. When set, the logger pulls
+   * `MONDAY_API_TOKEN` (if non-empty) and merges it into
+   * `redactOptions.secrets`. This is the default-safe path for
+   * `--verbose` debug output — without it, a future caller that
+   * forgets to thread `redactOptions.secrets` through would leak
+   * the token verbatim into stderr (Codex M2 review §5).
+   */
+  readonly env?: NodeJS.ProcessEnv;
   readonly redactOptions?: RedactOptions;
 }
 
@@ -40,10 +50,23 @@ const formatPayload = (payload: unknown): string => {
 };
 
 export const createLogger = (options: LoggerOptions): Logger => {
-  const { stderr, isTTY, verbose, quiet, redactOptions } = options;
+  const { stderr, isTTY, verbose, quiet, redactOptions, env } = options;
 
+  // Re-read env at write-time so a token loaded by `loadConfig`'s
+  // dotenv after the logger was constructed still gets scrubbed —
+  // matches the runner's collectSecrets-on-emit pattern.
+  const envForSecrets = env;
   const write = (level: LogLevel, payload: unknown): void => {
-    const redacted = redact(payload, redactOptions);
+    const explicitSecrets = redactOptions?.secrets ?? [];
+    const envToken = envForSecrets?.MONDAY_API_TOKEN;
+    const envSecrets =
+      typeof envToken === 'string' && envToken.length > 0 ? [envToken] : [];
+    const mergedSecrets = [...explicitSecrets, ...envSecrets];
+    const effectiveOptions: RedactOptions =
+      mergedSecrets.length > 0
+        ? { ...(redactOptions ?? {}), secrets: mergedSecrets }
+        : redactOptions ?? {};
+    const redacted = redact(payload, effectiveOptions);
     stderr.write(`monday: [${level}] ${formatPayload(redacted)}\n`);
   };
 
