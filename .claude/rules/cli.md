@@ -99,6 +99,45 @@ handles all rejections; never `process.exit(1)` from inside an action.
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, `refactor:`,
   `test:`, `chore:`). Generates a changelog cleanly when we automate
   releases.
+- **Atomic and incremental.** Each commit is one self-contained unit
+  of progress: small enough to revert cleanly, large enough to stand
+  alone (one command + its tests + its docs is the canonical chunk).
+  Don't bundle unrelated changes into one commit; don't split a
+  coherent change into many. If a commit's diff doesn't tell a single
+  story, split it.
+- **Messages explain WHY and HOW, not WHAT.** The diff is the WHAT;
+  beautiful self-documenting code with named identifiers reinforces
+  it. The message is for the *motivation* (constraint, bug, decision
+  forcing the change) and the *approach* (the load-bearing design
+  choice, the alternative we rejected). "added X, removed Y" prose
+  is wasted lines.
+
+  Bad:
+
+  ```
+  feat: add item set command
+
+  - Adds src/commands/item/set.ts
+  - Adds tests for the set command
+  - Wires it up in cli/index.ts
+  ```
+
+  Good:
+
+  ```
+  feat: add item set — single-column writes via the friendly translator
+
+  Lands the smallest user-visible mutation so the column-value
+  abstraction (§5.3) gets exercised against real fixtures before
+  multi-column bulk and dry-run pile on. Picks the simple-vs-rich
+  mutation per column type so dry-run reports the right operation.
+  Errors `unsupported_column_type` for non-allowlisted types with the
+  literal `--set-raw` example in `details` — agents shouldn't have to
+  guess the JSON shape.
+  ```
+
+  If a change doesn't have a meaningful why/how worth saying, the
+  subject line alone is fine. Short beats padded.
 - One feature/fix per PR. Keeps the changelog readable.
 
 ## Dependencies

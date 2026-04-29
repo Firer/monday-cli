@@ -199,11 +199,23 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   the resulting design changes go in normal commits. See the
   `docs/cli-design.md` history (commits `ee3f288`, `5218ca0`) for
   worked examples. Ask before adding new collaborators.
-- **Commit cadence:** commit after each useful chunk of progress
-  (one command + tests + docs is a good chunk). Never commit broken `main`.
-- **Conventional Commits + SemVer.** `feat:` / `fix:` / `docs:` / `refactor:` /
-  `test:` / `chore:`. Major bump for breaking output/exit-code changes,
-  minor for new commands, patch for bug fixes.
+- **Atomic, incremental commits.** Each commit is one self-contained
+  unit of progress — small enough to revert cleanly, large enough to
+  stand alone (e.g. one command + its tests + its doc update). Don't
+  bundle unrelated changes; don't split a coherent change. Never
+  commit broken `main`.
+- **Commit messages explain WHY and HOW, not WHAT.** A reader of the
+  diff already sees what changed; pretty self-documenting code makes
+  that obvious. Spend the message on:
+  - *Why* — the motivation, the constraint, the user-facing reason.
+  - *How* — the approach, the trade-off, the rejected alternative.
+  If there's no meaningful why/how to add, the conventional-commit
+  subject line alone is fine — better short than padded with
+  "added X, removed Y" prose. See `git log --grep='Why:'` for shape.
+- **Conventional Commits + SemVer.** Subject: `feat:` / `fix:` /
+  `docs:` / `refactor:` / `test:` / `chore:`. Major bump for breaking
+  output/exit-code changes, minor for new commands, patch for bug
+  fixes.
 - **CI gates everything.** `.github/workflows/ci.yml` runs typecheck +
   lint + test (with coverage threshold) + build smoke-test on Node 22
   and 24. Don't merge red.
