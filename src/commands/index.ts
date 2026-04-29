@@ -18,7 +18,14 @@ import type { CommandModule } from './types.js';
  * sorted lexicographically there, so registration order has no
  * user-visible effect.
  */
-export const commandRegistry: readonly CommandModule[] = [];
+// M1 commands — local-only, no Monday API access.
+import { configShowCommand } from './config/show.js';
+import { configPathCommand } from './config/path.js';
+
+export const commandRegistry: readonly CommandModule[] = [
+  configShowCommand,
+  configPathCommand,
+];
 
 export type { CommandModule } from './types.js';
 export { ensureSubcommand } from './types.js';
