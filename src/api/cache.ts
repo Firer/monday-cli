@@ -99,6 +99,18 @@ const assertSafeIdentifier = (value: string, label: string): void => {
       details: { hint: 'cache key segments must match [A-Za-z0-9._-]' },
     });
   }
+  // The character class accepts `.` and `..` literally — both are
+  // path-traversal sentinels on every common filesystem, and a
+  // future caller using `.` / `..` as a cache key would happily
+  // resolve to a parent directory. Defence in depth (Codex review
+  // suggestion): reject the bare-dots forms even though current
+  // M1 callers (board ids via `BoardIdSchema`) can't reach this.
+  if (value === '.' || value === '..') {
+    throw new CacheError(
+      `invalid ${label}: cache key segments may not be "." or "..", got ${JSON.stringify(value)}`,
+      { details: { hint: 'use a non-sentinel identifier' } },
+    );
+  }
 };
 
 interface CacheEnvelopeOnDisk<T> {

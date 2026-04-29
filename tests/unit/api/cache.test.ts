@@ -74,6 +74,19 @@ describe('cacheKeyToRelativePath', () => {
       cacheKeyToRelativePath({ kind: 'board', boardId: '1/2' }),
     ).toThrow(/invalid board id/u);
   });
+
+  it('rejects the bare-dot path-traversal sentinels', () => {
+    // Codex review suggestion: the safe-identifier regex allows `.`
+    // and `..` literally because `.` is in the character class.
+    // Belt-and-braces reject the sentinels so a future caller
+    // can't accidentally cause traversal into the cache parent.
+    expect(() =>
+      cacheKeyToRelativePath({ kind: 'board', boardId: '.' }),
+    ).toThrow(/may not be/u);
+    expect(() =>
+      cacheKeyToRelativePath({ kind: 'board', boardId: '..' }),
+    ).toThrow(/may not be/u);
+  });
 });
 
 describe('readEntry / writeEntry round-trip', () => {
