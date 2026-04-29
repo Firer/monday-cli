@@ -67,7 +67,7 @@ describe('renderNdjson', () => {
     expect((JSON.parse(lines[0]!) as { _meta: object })._meta).toBeDefined();
   });
 
-  it('attaches warnings as a sibling field of _meta when present', () => {
+  it('does not add a warnings sibling to the trailer (§6.3 literal)', () => {
     const { stream, read } = collect();
     renderNdjson(
       {
@@ -78,16 +78,14 @@ describe('renderNdjson', () => {
       stream,
     );
     const lines = read();
-    const trailer = JSON.parse(lines[lines.length - 1]!) as {
-      _meta: object;
-      warnings: { code: string }[];
-    };
-    expect(trailer.warnings).toEqual([
-      { code: 'stale_cache', message: 'served from cache' },
-    ]);
+    const trailer = JSON.parse(lines[lines.length - 1]!) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(trailer)).toEqual(['_meta']);
   });
 
-  it('omits the warnings sibling when there are none', () => {
+  it('produces only `_meta` keys regardless of warnings', () => {
     const { stream, read } = collect();
     renderNdjson(
       { data: [{ id: '1' }], meta: buildMeta(baseMetaInput), warnings: [] },
@@ -98,7 +96,7 @@ describe('renderNdjson', () => {
       string,
       unknown
     >;
-    expect('warnings' in trailer).toBe(false);
+    expect(Object.keys(trailer)).toEqual(['_meta']);
   });
 
   it('does not pretty-print resource lines (one item = one line)', () => {

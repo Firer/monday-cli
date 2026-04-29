@@ -58,7 +58,13 @@ export interface Meta {
   readonly source: DataSource;
   readonly cache_age_seconds: number | null;
   readonly retrieved_at: string;
-  readonly complexity?: Complexity | null;
+  /**
+   * `cli-design.md` §6.1: "Always null without `--verbose` to avoid
+   * an extra GraphQL field on every query." So this field is always
+   * **present**; it's just `null` until `--verbose` makes the
+   * GraphQL `complexity` selection.
+   */
+  readonly complexity: Complexity | null;
   readonly dry_run?: true;
   readonly next_cursor?: string | null;
   readonly has_more?: boolean;
@@ -125,7 +131,7 @@ export const buildMeta = (input: MetaInput): Meta => {
     source: DataSource;
     cache_age_seconds: number | null;
     retrieved_at: string;
-    complexity?: Complexity | null;
+    complexity: Complexity | null;
     dry_run?: true;
     next_cursor?: string | null;
     has_more?: boolean;
@@ -139,11 +145,12 @@ export const buildMeta = (input: MetaInput): Meta => {
     source: input.source,
     cache_age_seconds: input.cache_age_seconds ?? null,
     retrieved_at: input.retrieved_at,
+    // §6.1: complexity is always present; null until --verbose
+    // selects the GraphQL field. Insert it at this fixed position
+    // so the canonical key order doesn't depend on the input.
+    complexity: input.complexity ?? null,
   };
 
-  if (input.complexity !== undefined) {
-    meta.complexity = input.complexity;
-  }
   if (input.dry_run === true) {
     meta.dry_run = true;
   }
@@ -240,10 +247,8 @@ const metaInputFromMeta = (meta: Meta): MetaInput => {
     source: meta.source,
     retrieved_at: meta.retrieved_at,
     cache_age_seconds: meta.cache_age_seconds,
+    complexity: meta.complexity,
   };
-  if (meta.complexity !== undefined) {
-    input.complexity = meta.complexity;
-  }
   if (meta.next_cursor !== undefined) {
     input.next_cursor = meta.next_cursor;
   }

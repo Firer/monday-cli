@@ -29,6 +29,7 @@ describe('buildMeta', () => {
       'source',
       'cache_age_seconds',
       'retrieved_at',
+      'complexity',
     ]);
     expect(meta.schema_version).toBe(CURRENT_SCHEMA_VERSION);
   });
@@ -43,7 +44,22 @@ describe('buildMeta', () => {
     ).toBe(42);
   });
 
-  it('inserts optional fields in the canonical position', () => {
+  it('always emits complexity (null without --verbose, object with)', () => {
+    // §6.1 contract: "Always null without --verbose to avoid an
+    // extra GraphQL field on every query." Field is always present.
+    expect(buildMeta(baseMetaInput).complexity).toBeNull();
+    const withComp = buildMeta({
+      ...baseMetaInput,
+      complexity: { used: 1, remaining: 2, reset_in_seconds: 3 },
+    });
+    expect(withComp.complexity).toEqual({
+      used: 1,
+      remaining: 2,
+      reset_in_seconds: 3,
+    });
+  });
+
+  it('inserts collection fields in the canonical position after complexity', () => {
     const meta = buildMeta({
       ...baseMetaInput,
       complexity: { used: 1, remaining: 2, reset_in_seconds: 3 },
