@@ -4,6 +4,7 @@ import {
   buildMeta,
   buildSuccess,
   type DataSource,
+  type Meta,
   type Warning,
 } from '../utils/output/envelope.js';
 import { renderJson } from '../utils/output/json.js';
@@ -167,11 +168,16 @@ const renderForFormat = <T>(
       return;
     case 'ndjson':
       // Only reachable for collections (single-resource case rejected
-      // by `ensureFormatApplies` upstream).
+      // by `ensureFormatApplies` upstream). The trailer is built from
+      // the redacted envelope, not the raw one — Codex review §4
+      // caught a path where literal secrets in `meta` (e.g., a
+      // future `meta.next_cursor` carrying user-supplied state)
+      // would slip through unscrubbed because the original code
+      // passed `envelope.meta` instead of `(redacted as ...).meta`.
       renderNdjson(
         {
           data: redactedData as readonly unknown[],
-          meta: envelope.meta,
+          meta: (redacted as { meta: Meta }).meta,
           warnings,
         },
         ctx.stdout,

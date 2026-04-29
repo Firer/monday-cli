@@ -264,6 +264,49 @@ describe('emitSuccess — JSON envelope', () => {
     expect(trailer._meta.schema_version).toBe('1');
   });
 
+  it('redacts the literal token from the ndjson trailer (Codex review §4)', async () => {
+    const literal = 'tok-leakcheck-xxxx';
+    // A synthetic command whose meta surfaces user-influenced state
+    // — simulates a future M3+ collection emitting `next_cursor`
+    // built from caller-supplied data. The trailer must not leak the
+    // runtime token even if the meta value contains it verbatim.
+    const leakyModule: CommandModule<unknown, readonly { id: string }[]> = {
+      name: 'demo.leak',
+      summary: 'returns rows whose meta carries a token literal',
+      examples: ['monday demo leak'],
+      idempotent: true,
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.array(z.object({ id: z.string() })),
+      attach: (program, ctx) => {
+        const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+        noun
+          .command('leak')
+          .description(leakyModule.summary)
+          .action(() => {
+            // Manually call emitSuccess with a token-bearing meta; this
+            // mimics how a future collection command might thread an
+            // attacker-controlled `next_cursor` through.
+            emitSuccess({
+              ctx,
+              data: [{ id: `leaked=${ctx.env.MONDAY_API_TOKEN ?? ''}` }],
+              schema: leakyModule.outputSchema,
+              programOpts: program.opts(),
+              kind: 'collection',
+            });
+          });
+      },
+    };
+
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'leak', '--output', 'ndjson'],
+      extraCommands: [leakyModule],
+      env: { MONDAY_API_TOKEN: literal },
+    });
+    await run(options);
+    expect(captured.stdout()).not.toContain(literal);
+    expect(captured.stdout()).toContain('[REDACTED]');
+  });
+
   it('renders collection table layout when format is table', async () => {
     const collectionModule = makeCollectionModule();
     const { options, captured } = baseOptions({
