@@ -1,5 +1,10 @@
 # Architecture
 
+> **Canonical contract:** the binding decisions about command surface,
+> output envelope, error codes, and divergences from Monday's API live
+> in [`cli-design.md`](./cli-design.md). This file describes the
+> *internal* module structure that implements that contract.
+
 ## Goals (in priority order)
 
 1. **AI-agent ergonomics.** Output should be predictable, parseable

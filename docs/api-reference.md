@@ -1,9 +1,15 @@
 # Monday API — concepts cheat sheet
 
+> **Supplementary reference, not contract.** The canonical schema view
+> for the CLI is [`cli-design.md`](./cli-design.md) §2 (which was
+> generated from the live SDK types and verified against the docs).
+> This file is a quick orientation cheat sheet — keep in sync, but
+> don't treat it as authoritative for design decisions.
+
 This is a quick reference for the entities the CLI cares about. The
-canonical docs are at https://developer.monday.com/api-reference/ — this
-file exists so an agent reading the repo can get oriented without leaving
-the working directory.
+canonical Monday docs are at https://developer.monday.com/api-reference/ —
+this file exists so an agent reading the repo can get oriented without
+leaving the working directory.
 
 ## Endpoint & auth
 

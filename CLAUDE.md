@@ -17,11 +17,21 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-Pre-zero. Repo is initialised with toolchain, lint/typecheck/test wiring,
-and a directory skeleton — but **no Monday commands are wired up yet**.
-The full design lives in [`docs/cli-design.md`](./docs/cli-design.md);
-implementation follows that blueprint. Updates to the design land via
-PRs that argue for the change.
+**Design complete; v0.1 implementation is the next phase.** Repo has
+toolchain, lint/typecheck/test wiring, a directory skeleton, and one
+working module (`src/config/load.ts`). The canonical CLI contract —
+command surface, output envelope, error codes, deferral list, every
+single design decision — lives in
+**[`docs/cli-design.md`](./docs/cli-design.md) (~1,900 lines)**.
+
+> **If you're implementing anything in this repo, read `docs/cli-design.md`
+> before writing code.** It has been through two AI-collaborator review
+> passes and is internally consistent. The contract there is binding —
+> changes land via PRs that argue for the change, not by drift.
+
+Updates to the design also update this file's "Contract at a glance"
+section below so a future fresh agent doesn't have to read the whole
+design doc to orient.
 
 ## Commands
 
@@ -62,11 +72,17 @@ tests/
   e2e/         # Spawns the compiled CLI and asserts on stdout/exit codes
   fixtures/    # Recorded GraphQL responses, sample column values, etc.
 docs/
-  architecture.md   # Design decisions, module boundaries
-  api-reference.md  # Monday concepts (boards/items/columns/sprints/epics)
-  development.md    # How to add a new command
+  cli-design.md     # ★ CANONICAL CONTRACT — read first. Command surface,
+                    #   output envelope, error codes, divergences from
+                    #   Monday's API, v0.1/v0.2/v0.3/v0.4 phasing.
+  architecture.md   # Module boundaries (commands→api→SDK separation)
+  api-reference.md  # Monday concepts cheat sheet — supplementary; the
+                    #   canonical schema summary is cli-design.md §2
+  development.md    # Local dev workflow, how to add a new command
 .claude/
   rules/       # Path-scoped rule files for Claude Code agents
+.github/
+  workflows/ci.yml  # typecheck + lint + test + build smoke on Node 22 / 24
 ```
 
 ## Conventions
@@ -108,13 +124,80 @@ Headlines:
   `export const command: CommandModule = { ... }`. `cli/index.ts` registers
   them.
 
+## Contract at a glance
+
+A summary of what the design doc commits to. **None of these is
+negotiable without a doc revision and PR-style argument.** Read the
+linked sections of `docs/cli-design.md` for the full reasoning.
+
+- **Primary user is AI coding agents.** Humans are second-class. When
+  the two conflict, agent ergonomics win. (§1)
+- **Output:** table when stdout is a TTY, JSON when piped — preserves
+  `monday item list | jq` without flags. Agents in pseudo-TTYs use
+  `--json` (an explicit alias for `--output json`). Tables truncate
+  long values; `--full` disables; JSON output never truncates. (§3.1, §3.2)
+- **Universal envelope on every command.** Success:
+  `{ok: true, data, meta, warnings}`. Failure: `{ok: false, error, meta}`.
+  `meta` always carries `schema_version`, `api_version`, `request_id`,
+  `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
+  `retrieved_at`. Adding fields is non-breaking; removing/renaming is a
+  major-version bump. (§6.1)
+- **Stable error codes** (24 of them — `usage_error`, `not_found`,
+  `ambiguous_column`, `unsupported_column_type`, `rate_limited`,
+  `complexity_exceeded`, `stale_cursor`, etc.). Errors carry
+  `code`, `message`, `http_status`, `monday_code`, `request_id`,
+  `retryable`, `retry_after_seconds`. Agents key off `code`, never
+  English. (§6.5)
+- **Exit codes:** 0 success, 1 usage, 2 API/network, 3 config, 130 SIGINT.
+- **No interactive prompts. Ever.** Destructive ops without `--yes`
+  return `confirmation_required`. (§3.1)
+- **Monday API pinned to `2026-01`** matching SDK 14.0.0's
+  `CURRENT_VERSION`. The pin goes on every request via the
+  `API-Version` header. Override via `--api-version` for newer-API
+  features (will need raw GraphQL where the SDK doesn't type them). (§2)
+- **Column-value abstraction (§5.3)** is what makes `--set` work.
+  v0.1 allowlist: `status`, `text`, `long_text`, `numbers`, `dropdown`,
+  `date`, `people`. Other types return `unsupported_column_type` with a
+  `--set-raw` example. The CLI resolves `<col>` as ID > NFC-normalised
+  exact title > `ambiguous_column`. `me` is a recognised token for
+  people columns.
+- **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
+  is lossy (new ID, no updates/assets/automation history). Don't add a
+  misleading "restore" command — see §5.4 for what a future explicit
+  recreate command would look like.
+- **Two-level command depth** (`monday <noun> <verb>`) for CRUD
+  surfaces, **with `dev` carved out** as a workflow namespace allowed
+  three levels deep (`monday dev sprint current`). (§5.2)
+- **Pagination cursor expires at 60 min.** Fail-fast with
+  `stale_cursor` rather than silently re-issuing — silent re-issue can
+  duplicate or skip rows. There's no safe deterministic resume in v0.1;
+  callers restart with idempotent operations or a known-stable filter.
+  (§5.6)
+- **v0.1 is read-heavy:** account info, board list/get/find/describe/
+  doctor, item list/get/find/search/set/clear/update (single mutation —
+  no create/delete/move/archive yet), update list/get/create, schema,
+  raw, cache, config. Mutations expand in v0.2. Monday Dev shortcuts
+  arrive in v0.3. Watch and concurrency are v0.4. **See §13 of
+  cli-design.md for the full phase markers — every command in §4.3
+  also carries its phase.**
+
 ## Workflow Rules
 
 - **Auto-test:** run `npm run typecheck && npm run lint && npm test` after
   any change. Failing gates block the change.
-- **Auto-document:** when adding a command, update `docs/api-reference.md`
-  with the Monday concepts it touches. When making structural changes,
-  update this CLAUDE.md.
+- **Auto-document:** when adding a command, also update
+  `docs/cli-design.md` (§4.3 command tree + any contract changes) and
+  this CLAUDE.md's "Contract at a glance" if a binding decision moved.
+  `docs/api-reference.md` is supplementary cheat-sheet material — not
+  a contract — but keep it in sync if you touch the underlying
+  Monday concept.
+- **Two-AI review for non-trivial design decisions.** We use Codex
+  (gpt-5.5) as a second reviewer via `codex exec -m gpt-5.5
+  -s read-only - < .review-prompt.md > .review-output.md` with the
+  prompt explaining what to evaluate. `.review-*.md` is gitignored;
+  the resulting design changes go in normal commits. See the
+  `docs/cli-design.md` history (commits `ee3f288`, `5218ca0`) for
+  worked examples. Ask before adding new collaborators.
 - **Commit cadence:** commit after each useful chunk of progress
   (one command + tests + docs is a good chunk). Never commit broken `main`.
 - **Conventional Commits + SemVer.** `feat:` / `fix:` / `docs:` / `refactor:` /
@@ -129,23 +212,41 @@ Headlines:
 
 ## Monday API Notes
 
+> The full picture is `cli-design.md` §2. Headlines for orientation:
+
 - **Endpoint:** `https://api.monday.com/v2` (GraphQL, POST).
 - **Auth:** `Authorization: <api_token>` header (no `Bearer ` prefix).
-  Tokens come from the user's Monday admin panel; guests cannot mint one.
-- **API versioning:** Monday cuts a new version each quarter (`YYYY-MM`).
-  Pin via the `API-Version` header when reproducibility matters; otherwise
-  Monday returns its current stable version. The SDK's exported types
-  correspond to the version that shipped with that SDK release, so bump
-  the SDK when bumping the pin.
-- **Pagination:** `items_page` is the modern paginated query (≤500 items
-  per page, returns a `cursor`). The flat `items` query is deprecated.
-- **Rate limits:** Monday enforces complexity-based rate limits — large
-  selections cost more than small ones. The wrapper in `src/api/` should
-  surface `429`/complexity errors with actionable messages.
+  Tokens from the user's Monday admin panel; guests can't mint one.
+  CLI loads `MONDAY_API_TOKEN` from env or `.env`.
+- **API version PINNED to `2026-01`.** Matches the
+  `CURRENT_VERSION` exported by `@mondaydotcomorg/api@14.0.0`
+  (verifiable in `node_modules/.../constants/index.d.ts`). Sent on
+  every request via the `API-Version` header. Override per-request
+  with `--api-version` or per-environment with `MONDAY_API_VERSION`.
+  Bumping the pin requires bumping the SDK and is a SemVer-minor (or
+  major if output schema changes).
+- **SDK ↔ API drift.** The SDK's typed surface lags Monday's actual
+  schema. SDK 14.0.0 types `2026-01` but doesn't expose
+  `BatteryValue` (status rollups), `hierarchy_type`, `is_leaf`,
+  `capabilities` — those need raw GraphQL via `client.request<T>()`
+  in `src/api/` (see `cli-design.md` §2.8 / §2.9).
+- **Boundary-typing trap.** SDK exports
+  `QueryVariables = Record<string, any>`. The `src/api/` wrapper must
+  wrap this so `any` doesn't leak into `commands/*` — internal code
+  sees `Record<string, unknown>` (or named GraphQL input types) and
+  parses at the boundary.
+- **Pagination:** `items_page(limit ≤500, cursor)` →
+  `next_items_page(cursor)`. **60-minute cursor lifetime from the
+  initial call.** Stale cursor returns `stale_cursor` error — never
+  silently re-issued. The flat `items` query is deprecated.
+- **Rate limits and error codes** — six distinct limits
+  (per-minute, complexity, daily, concurrency, IP, locked-resource).
+  All carry `retry_in_seconds` (or HTTP `Retry-After`). Mapped to
+  CLI `error.code` values listed in `cli-design.md` §2.5 / §6.5.
 
 ## References
 
 - Monday API reference: https://developer.monday.com/api-reference/
 - Official Node SDK: https://github.com/mondaycom/monday-graphql-api
-  (`@mondaydotcomorg/api` on npm, currently 14.x).
+  (`@mondaydotcomorg/api` on npm, **pinned to 14.0.0**).
 - API changelog: https://developer.monday.com/api-reference/changelog

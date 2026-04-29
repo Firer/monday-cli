@@ -5,21 +5,30 @@ Monday Dev — designed first for AI coding agents (Claude Code, Codex, etc.)
 that need to pull tasks, file backlog items, and edit boards from the
 terminal, with humans as a welcome second audience.
 
-> **Status:** pre-zero. Toolchain and skeleton only — no commands wired up
-> yet. See [CLAUDE.md](./CLAUDE.md) for the build plan.
+> **Status:** design complete; v0.1 implementation pending.
+> The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
+> if you want to know what the CLI looks like end-to-end.
+> See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.
 
 ## Requirements
 
 - Node.js ≥ 22
 - A Monday.com API token (admin or member; guests cannot mint one)
 
-## Install (once published)
+## Install
+
+Not yet published to npm. For local install during development:
 
 ```bash
-npm install -g monday-cli
+git clone <repo-url> monday-cli
+cd monday-cli
+npm install
+npm run build
+npm link        # exposes the `monday` bin in your PATH
 ```
 
-For local development, see [docs/development.md](./docs/development.md).
+For the dev workflow (no build step), see
+[docs/development.md](./docs/development.md).
 
 ## Configuration
 
@@ -32,27 +41,74 @@ export MONDAY_API_TOKEN="<your-token>"
 A `.env` file in the working directory is also picked up. See
 [`.env.example`](./.env.example) for the full set of supported variables.
 
-## Usage
+## Usage (planned — v0.1 in progress)
 
-Once commands are wired up, the CLI surface will look like:
+The CLI follows a `monday <noun> <verb>` shape with singular nouns:
 
 ```bash
-monday boards list
-monday items get <item-id>
-monday items create --board <id> --name "..."
-monday dev sprint current
-# ...
+# Discovery (run once to orient)
+monday account whoami
+monday board list
+monday board describe <board-id>      # full board schema with column types
+
+# Reading items
+monday item list --board <board-id>
+monday item list --board <board-id> --where status=Backlog --where owner=me
+monday item get <item-id>
+monday item find "Refactor login" --board <board-id>
+
+# Updating items (v0.1: in-place updates only; create/move/archive in v0.2)
+monday item set <item-id> status=Done
+monday item update <item-id> --set status=Done --set 'Due date'=+1w
+
+# Comments
+monday update list <item-id>
+monday update create <item-id> --body "Shipped in PR #1234"
+
+# Schemas (the agent's discovery hammer)
+monday schema                          # full CLI command schema as JSON Schema
+monday schema item-set                 # one command's schema
 ```
 
-For now, only `--help` and `--version` are available.
+### Output format
+
+- **TTY (you in a terminal):** human-friendly tables, truncated to fit width.
+- **Pipe / redirect:** JSON, no flags needed — `monday item list | jq` works.
+- **Agent in pseudo-TTY:** pass `--json` (alias for `--output json`) to force
+  JSON regardless of terminal detection. JSON output is never truncated.
+
+Every JSON response uses the same envelope:
+
+```json
+{ "ok": true, "data": ..., "meta": { ... }, "warnings": [] }
+```
+
+Errors carry a stable `error.code` (e.g. `not_found`, `rate_limited`,
+`unsupported_column_type`) — agents key off the code, never the message.
+The full envelope contract is locked in `docs/cli-design.md` §6.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Usage error (bad args) |
+| 2 | API or network error |
+| 3 | Config error (missing token, etc.) |
+| 130 | SIGINT |
 
 ## Documentation
 
-- [CLAUDE.md](./CLAUDE.md) — agent-facing project context, conventions, workflow.
-- [docs/cli-design.md](./docs/cli-design.md) — full CLI design (command surface, output contract, divergences from the Monday API). **Start here** if you want to understand what the CLI will look like.
-- [docs/architecture.md](./docs/architecture.md) — module boundaries and design.
-- [docs/api-reference.md](./docs/api-reference.md) — Monday concepts cheat sheet.
-- [docs/development.md](./docs/development.md) — local dev, tests, adding commands.
+- [CLAUDE.md](./CLAUDE.md) — agent-facing project context and conventions.
+- **[docs/cli-design.md](./docs/cli-design.md)** — canonical CLI contract.
+  **Start here** if you want to understand what the CLI does, what's in
+  v0.1 vs deferred, or what the JSON envelope shape is.
+- [docs/architecture.md](./docs/architecture.md) — module boundaries
+  (commands → api → SDK).
+- [docs/api-reference.md](./docs/api-reference.md) — Monday concepts cheat
+  sheet (supplementary; the canonical schema view is `cli-design.md` §2).
+- [docs/development.md](./docs/development.md) — local dev workflow,
+  adding a new command.
 
 ## License
 

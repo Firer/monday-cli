@@ -1,5 +1,10 @@
 # Development
 
+> **Before writing code:** read [`cli-design.md`](./cli-design.md). It
+> defines the command surface, output envelope, error codes, and what's
+> in v0.1 vs deferred. Implementation follows that contract; changes
+> to the contract land via PRs that argue for the change.
+
 ## First-time setup
 
 ```bash
