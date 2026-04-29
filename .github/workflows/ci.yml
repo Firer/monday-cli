@@ -71,3 +71,37 @@ jobs:
         run: |
           node dist/cli/index.js --version
           node dist/cli/index.js --help
+
+      # `npm pack` produces the same tarball `npm publish` would
+      # upload — extracting and running the bin from there catches
+      # `package.json` "files"/"bin" regressions that `dist/`-relative
+      # smoke tests miss. Lifted from M7 to M2 per `v0.1-plan.md`
+      # §8 decision 4: it costs nothing to run early, and a
+      # broken-tarball regression discovered at release is far more
+      # painful than one discovered now.
+      - name: Pack tarball
+        id: pack
+        run: |
+          tarball=$(npm pack --silent)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "Built $tarball"
+
+      - name: Smoke-test packed tarball
+        run: |
+          set -eux
+          rm -rf /tmp/monday-cli-pack-test
+          mkdir -p /tmp/monday-cli-pack-test
+          cd /tmp/monday-cli-pack-test
+          tar -xzf "$GITHUB_WORKSPACE/${{ steps.pack.outputs.tarball }}"
+          # The tarball extracts into ./package — verify the bin
+          # entry resolves and the binary actually runs.
+          node package/dist/cli/index.js --version
+          node package/dist/cli/index.js --help
+          # The published tarball must be self-contained: the bin
+          # must work when invoked from a fresh dir with the runtime
+          # deps installed. --ignore-scripts skips the `prepare`
+          # hook that would re-run `tsc` (devDep, not present here);
+          # the tarball already ships dist/.
+          cd package
+          npm install --omit=dev --ignore-scripts --no-package-lock --silent
+          node dist/cli/index.js --version
