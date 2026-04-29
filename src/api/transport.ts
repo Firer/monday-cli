@@ -142,9 +142,15 @@ export const createFetchTransport = (
       try {
         parsed = await response.json();
       } catch (err) {
+        // Don't interpolate `config.endpoint` into the message —
+        // a misconfigured URL containing the token (e.g. someone
+        // setting MONDAY_API_URL=...?token=...) would land here.
+        // The redactor would catch it on emit, but security.md
+        // explicitly forbids putting the token into Error.message
+        // in the first place. (Codex M2 review §4.)
         throw new ApiError(
           'network_error',
-          `non-JSON response from ${config.endpoint} (status ${String(response.status)})`,
+          `non-JSON response (status ${String(response.status)})`,
           { cause: err, httpStatus: response.status },
         );
       }

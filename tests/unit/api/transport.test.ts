@@ -238,6 +238,38 @@ describe('createFetchTransport — response handling', () => {
       httpStatus: 502,
     });
   });
+
+  // Codex M2 review §4: the non-JSON-response error path used to
+  // interpolate `config.endpoint` into the message, which would
+  // leak a token if a misconfigured URL contained one
+  // (e.g. ?token=...). The redactor would catch it on emit, but
+  // security.md explicitly forbids putting the token into
+  // Error.message in the first place.
+  it('non-JSON error message does not interpolate the endpoint URL', async () => {
+    const { fetch: fakeFetch } = captureFetch(
+      () =>
+        new Response('<html>oops</html>', {
+          status: 502,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+    );
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2?token=tok-leakcheck-deadbeef-canary',
+      apiToken: 'tok-leakcheck-deadbeef-canary',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+
+    let caught: { code?: string; message?: string } = {};
+    try {
+      await transport.request({ query: '{ me { id } }' });
+    } catch (err) {
+      caught = err as { code?: string; message?: string };
+    }
+    expect(caught.code).toBe('network_error');
+    expect(caught.message).not.toContain('tok-leakcheck-deadbeef-canary');
+  });
 });
 
 describe('createFetchTransport — failure shapes', () => {
