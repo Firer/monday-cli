@@ -7,7 +7,10 @@ terminal, with humans as a welcome second audience.
 
 > **Status:** v0.1 in progress — M0–M4 shipped (account / workspace /
 > board / user / update / item *reads* + filter DSL + cursor
-> pagination); M5a (column-value writers) is next.
+> pagination). M5a (column-value writers) is in progress: the shared
+> `column-types.ts` allowlist + simple-type translators
+> (`text` / `long_text` / `numbers`) have landed; status / dropdown /
+> date / people translators ship in follow-up sessions.
 > The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
 > if you want to know what the CLI looks like end-to-end.
 > See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.

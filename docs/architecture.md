@@ -162,6 +162,33 @@
   types; other types surface `text + value`. `idFromRawItem`
   exposes the defensive id-reader the cursor walker needs for the
   per-page sort.
+- `api/column-types.ts` (M5a R8) — single source of truth for
+  the v0.1 writable allowlist. Exports `WRITABLE_COLUMN_TYPES`
+  (frozen `as const` array — order is part of the contract;
+  tests iterate it), `isWritableColumnType` (type guard
+  narrowing to the `WritableColumnType` union), and
+  `parseColumnSettings` (defensive `settings_str` JSON parser
+  that returns `null` on null/empty/malformed input). Two
+  consumers: `commands/board/describe.ts` (writable +
+  example_set) and `api/column-values.ts` (the writer). Adding
+  a v0.2 type is one entry's worth of edit.
+- `api/column-values.ts` (M5a, in progress) — write half of
+  §5.3.3. `translateColumnValue({ column, value }) →
+  TranslatedColumnValue` returns `columnId`, `columnType`,
+  `rawInput`, and a discriminated `payload` —
+  `{ format: 'simple', value: string }` for the bare-string form
+  (`change_simple_column_value`) or `{ format: 'rich', value:
+  object }` for the JSON-object form (`change_column_value` /
+  per-column entry of `change_multiple_column_values`).
+  **Skeleton ships `text` / `long_text` / `numbers`** (all
+  `format: 'simple'`); status / dropdown / date / people surface
+  `unsupported_column_type` (same code as truly non-allowlisted
+  types) until follow-up sessions land their translators.
+  **Monday `JSON` scalar discipline:** every payload is a plain
+  JS value; the SDK / fetch layer stringifies at the wire
+  boundary. The translator never `JSON.stringify`s — pinned by
+  a regression test so a future contributor doesn't introduce
+  double-encoding.
 
 ### Hard rules
 

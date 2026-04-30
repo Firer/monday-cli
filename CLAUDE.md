@@ -17,7 +17,9 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M4 shipped.** The CLI has a
+**v0.1 implementation in progress; M0–M4 shipped, M5a in progress
+(skeleton: `column-types.ts` + simple-type writers landed; rich
+types deferred).** The CLI has a
 working network surface across 5 nouns (account / workspace / board /
 user / update / item reads), local-only commands (cache / config /
 schema), filter DSL (`--where` + `--filter-json`), cursor-based
@@ -48,7 +50,8 @@ Two binding documents:
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a / M5b | next / future | column-value writers + dry-run; `item set/clear/update`, `update create` |
+| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` skeleton (text / long_text / numbers translators + `unsupported_column_type` error path). Status / dropdown / date / people translators, mutation-selection helper, and `dry-run.ts` deferred to follow-up sessions. |
+| M5b | future | `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
 
@@ -203,6 +206,32 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   step 5; the refresh-then-resolve case sets `meta.source: "mixed"`
   with a `stale_cache_refreshed` warning. ID/title collisions on the
   ID-match path emit a `column_token_collision` warning (§5.3 step 3).
+- **Column-type contract (M5a R8).** `src/api/column-types.ts` is
+  the single source of truth for the v0.1 writable allowlist:
+  `WRITABLE_COLUMN_TYPES` (frozen `as const` array — order is part
+  of the contract; tests iterate it), `isWritableColumnType` (type
+  guard narrowing to the `WritableColumnType` union),
+  `parseColumnSettings` (defensive `settings_str` JSON parser that
+  returns `null` on null/empty/malformed input rather than
+  throwing). Two consumers: `commands/board/describe.ts`
+  (writable + example_set) and `api/column-values.ts` (the
+  writer). Adding a v0.2 type is one entry's worth of edit.
+- **Column-value writer (M5a, in progress).** `src/api/column-values.ts`
+  is the write half of §5.3.3. `translateColumnValue({ column,
+  value })` returns a `TranslatedColumnValue` carrying `columnId`,
+  `columnType`, `rawInput`, and a discriminated `payload` —
+  `{ format: 'simple', value: <bare-string> }` for the simple-form
+  mutation path or `{ format: 'rich', value: <plain-object> }` for
+  the JSON-object form. **Skeleton ships `text` / `long_text` /
+  `numbers`** (all simple); status / dropdown / date / people
+  surface `unsupported_column_type` (same code as truly non-
+  allowlisted types) until follow-up sessions land their
+  translators. **Monday `JSON` scalar discipline:** every payload
+  is a plain JS value; the SDK / fetch layer stringifies at the
+  wire boundary. The translator never `JSON.stringify`s — pinned
+  by a regression test so a future contributor doesn't introduce
+  double-encoding. Fixture-pinned wire shape per type so M5b's
+  bulk surface and v0.2 inherit unchanged.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
   misleading "restore" command — see §5.4 for what a future explicit
