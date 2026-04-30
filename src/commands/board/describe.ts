@@ -269,7 +269,7 @@ export const boardDescribeCommand: CommandModule<
           programOpts: program.opts(),
           source: result.source,
           apiVersion,
-          complexity: null,
+          complexity: result.complexity,
           cacheAgeSeconds: result.cacheAgeSeconds,
         });
       });

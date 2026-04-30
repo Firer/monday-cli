@@ -107,10 +107,14 @@ export const boardColumnsCommand: CommandModule<
           schema: boardColumnsCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
+          // The board metadata payload is fetched in a single
+          // request — Monday returns every column at once — so
+          // `has_more` is unconditionally false (§6.3).
+          hasMore: false,
           source: result.source,
           apiVersion,
           // Cache hits never have complexity (no GraphQL call ran).
-          complexity: null,
+          complexity: result.complexity,
           cacheAgeSeconds: result.cacheAgeSeconds,
         });
       });

@@ -20,6 +20,12 @@ import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { UsageError } from '../../utils/errors.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const WORKSPACE_LIST_QUERY = `
   query WorkspaceList($limit: Int, $page: Int, $kind: WorkspaceKind, $state: State) {
@@ -59,6 +65,7 @@ const inputSchema = z
     kind: z.enum(['open', 'closed']).optional(),
     state: z.enum(['active', 'archived', 'deleted', 'all']).optional(),
     all: z.boolean().optional(),
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
 
@@ -94,6 +101,10 @@ export const workspaceListCommand: CommandModule<
       .option('--kind <k>', 'filter by kind: open|closed')
       .option('--state <s>', 'filter by state: active|archived|deleted|all')
       .option('--all', 'walk every page')
+      .option(
+        '--limit-pages <n>',
+        `max pages under --all (1-500, default ${String(DEFAULT_MAX_PAGES)})`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...workspaceListCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -106,50 +117,39 @@ export const workspaceListCommand: CommandModule<
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
         const limit = parsed.limit ?? 25;
-        const collected: unknown[] = [];
-        let page = parsed.page ?? 1;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<RawWorkspaces>>>;
-        let hasMore: boolean;
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        const result = await walkPages<unknown, RawWorkspaces>({
+          fetchPage: (page) => {
+            const variables: Record<string, unknown> = { limit, page };
+            if (parsed.kind !== undefined) variables.kind = parsed.kind;
+            if (parsed.state !== undefined) variables.state = parsed.state;
+            return client.raw<RawWorkspaces>(
+              WORKSPACE_LIST_QUERY,
+              variables,
+              { operationName: 'WorkspaceList' },
+            );
+          },
+          extractItems: (r) => r.data.workspaces ?? [],
+          pageSize: limit,
+          all: parsed.all === true,
+          startPage: parsed.page ?? 1,
+          maxPages,
+        });
 
-        for (;;) {
-          const variables: Record<string, unknown> = { limit, page };
-          if (parsed.kind !== undefined) {
-            variables.kind = parsed.kind;
-          }
-          if (parsed.state !== undefined) {
-            variables.state = parsed.state;
-          }
-          const response = await client.raw<RawWorkspaces>(
-            WORKSPACE_LIST_QUERY,
-            variables,
-            { operationName: 'WorkspaceList' },
-          );
-          lastResponse = response;
-          const pageData = response.data.workspaces ?? [];
-          if (pageData.length === 0) {
-            hasMore = false;
-            break;
-          }
-          collected.push(...pageData);
-          hasMore = pageData.length === limit;
-          if (parsed.all !== true || !hasMore) {
-            break;
-          }
-          page++;
+        const projected = projectMany(result.items);
+        const warnings: Warning[] = [];
+        if (parsed.all === true && result.hasMore) {
+          warnings.push(buildCapWarning(result.pagesFetched));
         }
-
-        const projected = projectMany(collected);
         emitSuccess({
           ctx,
           data: projected,
           schema: workspaceListCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
-          // Page-based — no cursor surface. `has_more` is best-effort:
-          // when the last page came back full at the requested limit
-          // there might be more; a short page guarantees not.
-          hasMore: parsed.all === true ? false : hasMore,
-          ...toEmit(lastResponse),
+          hasMore: result.hasMore,
+          warnings,
+          ...toEmit(result.lastResponse),
         });
       });
   },

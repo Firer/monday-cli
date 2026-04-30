@@ -52,6 +52,11 @@ interface FakeClientStats {
   calls: number;
 }
 
+interface FakeResponse {
+  readonly data: unknown;
+  readonly complexity?: { used: number; remaining: number; reset_in_seconds: number } | null;
+}
+
 const buildFakeClient = (
   responses: readonly unknown[],
   stats: FakeClientStats,
@@ -64,6 +69,22 @@ const buildFakeClient = (
       cursor = Math.min(cursor + 1, responses.length - 1);
       if (next instanceof Error) {
         return Promise.reject(next);
+      }
+      // Loose detection: if the response shape has the explicit
+      // `data` + `complexity` slot, use it directly; otherwise treat
+      // the value as the data payload (legacy test shape).
+      if (
+        typeof next === 'object' &&
+        next !== null &&
+        'data' in next &&
+        'complexity' in next
+      ) {
+        const w = next as FakeResponse;
+        return Promise.resolve({
+          data: w.data as T,
+          complexity: w.complexity ?? null,
+          stats: { attempts: 1, totalSleepMs: 0 },
+        });
       }
       return Promise.resolve({
         data: next as T,
@@ -121,7 +142,40 @@ describe('loadBoardMetadata — cache miss + cache hit', () => {
     expect(result.source).toBe('live');
     expect(result.cacheAgeSeconds).toBeNull();
     expect(result.metadata.id).toBe('111');
+    expect(result.complexity).toBeNull();
     expect(stats.calls).toBe(1);
+  });
+
+  it('surfaces complexity from --verbose live responses (Codex M3 finding 3)', async () => {
+    const stats: FakeClientStats = { calls: 0 };
+    const complexity = { used: 1, remaining: 4_999_999, reset_in_seconds: 30 };
+    const client = buildFakeClient(
+      [{ data: { boards: [sampleBoard] }, complexity }],
+      stats,
+    );
+    const result = await loadBoardMetadata({
+      client,
+      boardId: '111',
+      env: xdgEnv(),
+    });
+    expect(result.complexity).toEqual(complexity);
+  });
+
+  it('cache hits never report complexity (no live request ran)', async () => {
+    const stats: FakeClientStats = { calls: 0 };
+    const complexity = { used: 1, remaining: 4_999_999, reset_in_seconds: 30 };
+    const client = buildFakeClient(
+      [{ data: { boards: [sampleBoard] }, complexity }],
+      stats,
+    );
+    await loadBoardMetadata({ client, boardId: '111', env: xdgEnv() });
+    const cached = await loadBoardMetadata({
+      client,
+      boardId: '111',
+      env: xdgEnv(),
+    });
+    expect(cached.source).toBe('cache');
+    expect(cached.complexity).toBeNull();
   });
 
   it('serves from cache on the second call (no network)', async () => {

@@ -15,6 +15,12 @@ import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { UsageError } from '../../utils/errors.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const USER_LIST_QUERY = `
   query UserList(
@@ -79,6 +85,7 @@ const inputSchema = z
     limit: z.coerce.number().int().positive().max(100).optional(),
     page: z.coerce.number().int().positive().optional(),
     all: z.boolean().optional(),
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
 
@@ -112,6 +119,10 @@ export const userListCommand: CommandModule<
       .option('--limit <n>', 'page size (1-100, default 25)')
       .option('--page <n>', '1-indexed page')
       .option('--all', 'walk every page')
+      .option(
+        '--limit-pages <n>',
+        `max pages under --all (1-500, default ${String(DEFAULT_MAX_PAGES)})`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...userListCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -123,40 +134,37 @@ export const userListCommand: CommandModule<
         }
         const { client, toEmit } = resolveClient(ctx, program.opts());
         const limit = parsed.limit ?? 25;
-        const collected: unknown[] = [];
-        let hasMore: boolean;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<RawUsers>>>;
-        let page = parsed.page ?? 1;
-        for (;;) {
-          const variables: Record<string, unknown> = { limit, page };
-          if (parsed.kind !== undefined) variables.kind = parsed.kind;
-          if (parsed.name !== undefined) variables.name = parsed.name;
-          if (parsed.email !== undefined) variables.emails = [parsed.email];
-          const response = await client.raw<RawUsers>(
-            USER_LIST_QUERY,
-            variables,
-            { operationName: 'UserList' },
-          );
-          lastResponse = response;
-          const data = response.data.users ?? [];
-          if (data.length === 0) {
-            hasMore = false;
-            break;
-          }
-          collected.push(...data);
-          hasMore = data.length === limit;
-          if (parsed.all !== true || !hasMore) break;
-          page++;
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        const result = await walkPages<unknown, RawUsers>({
+          fetchPage: (page) => {
+            const variables: Record<string, unknown> = { limit, page };
+            if (parsed.kind !== undefined) variables.kind = parsed.kind;
+            if (parsed.name !== undefined) variables.name = parsed.name;
+            if (parsed.email !== undefined) variables.emails = [parsed.email];
+            return client.raw<RawUsers>(USER_LIST_QUERY, variables, {
+              operationName: 'UserList',
+            });
+          },
+          extractItems: (r) => r.data.users ?? [],
+          pageSize: limit,
+          all: parsed.all === true,
+          startPage: parsed.page ?? 1,
+          maxPages,
+        });
+        const warnings: Warning[] = [];
+        if (parsed.all === true && result.hasMore) {
+          warnings.push(buildCapWarning(result.pagesFetched));
         }
 
         emitSuccess({
           ctx,
-          data: userListCommand.outputSchema.parse(collected),
+          data: userListCommand.outputSchema.parse(result.items),
           schema: userListCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
-          hasMore: parsed.all === true ? false : hasMore,
-          ...toEmit(lastResponse),
+          hasMore: result.hasMore,
+          warnings,
+          ...toEmit(result.lastResponse),
         });
       });
   },

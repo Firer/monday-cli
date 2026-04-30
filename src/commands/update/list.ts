@@ -15,6 +15,12 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const UPDATE_LIST_QUERY = `
   query UpdateList($itemIds: [ID!], $limit: Int, $page: Int) {
@@ -86,6 +92,7 @@ const inputSchema = z
     limit: z.coerce.number().int().positive().max(100).optional(),
     page: z.coerce.number().int().positive().optional(),
     all: z.boolean().optional(),
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
 
@@ -114,6 +121,10 @@ export const updateListCommand: CommandModule<
       .option('--limit <n>', 'page size (1-100, default 25)')
       .option('--page <n>', '1-indexed page')
       .option('--all', 'walk every page')
+      .option(
+        '--limit-pages <n>',
+        `max pages under --all (1-500, default ${String(DEFAULT_MAX_PAGES)})`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...updateListCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -129,51 +140,50 @@ export const updateListCommand: CommandModule<
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
         const limit = parsed.limit ?? 25;
-        const collected: unknown[] = [];
-        let hasMore: boolean;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<RawItems>>>;
-        let page = parsed.page ?? 1;
-        let firstPage = true;
-        for (;;) {
-          const response = await client.raw<RawItems>(
-            UPDATE_LIST_QUERY,
-            { itemIds: [parsed.itemId], limit, page },
-            { operationName: 'UpdateList' },
-          );
-          lastResponse = response;
-          const items = response.data.items ?? [];
-          // Distinguish "item not found" (Monday returns []) from
-          // "item exists with no updates" (Monday returns [{...}]
-          // with empty `updates`). Only do this on page 1; pagination
-          // past a known item shouldn't 404 on a page that happens
-          // to be empty.
-          if (firstPage && items.length === 0) {
-            throw new ApiError(
-              'not_found',
-              `Monday returned no item for id ${parsed.itemId}`,
-              { details: { item_id: parsed.itemId } },
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        let pageCounter = 0;
+        const result = await walkPages<unknown, RawItems>({
+          fetchPage: async (page) => {
+            const response = await client.raw<RawItems>(
+              UPDATE_LIST_QUERY,
+              { itemIds: [parsed.itemId], limit, page },
+              { operationName: 'UpdateList' },
             );
-          }
-          firstPage = false;
-          const updates = items[0]?.updates ?? [];
-          if (updates.length === 0) {
-            hasMore = false;
-            break;
-          }
-          collected.push(...updates);
-          hasMore = updates.length === limit;
-          if (parsed.all !== true || !hasMore) break;
-          page++;
+            pageCounter++;
+            // Distinguish "item not found" (Monday returns []) from
+            // "item exists with no updates" (Monday returns [{...}]
+            // with empty `updates`). Only the first page hands a
+            // not_found — page > 1 against a known item legitimately
+            // can return zero items if the cursor walked past.
+            if (pageCounter === 1 && (response.data.items ?? []).length === 0) {
+              throw new ApiError(
+                'not_found',
+                `Monday returned no item for id ${parsed.itemId}`,
+                { details: { item_id: parsed.itemId } },
+              );
+            }
+            return response;
+          },
+          extractItems: (r) => r.data.items?.[0]?.updates ?? [],
+          pageSize: limit,
+          all: parsed.all === true,
+          startPage: parsed.page ?? 1,
+          maxPages,
+        });
+        const warnings: Warning[] = [];
+        if (parsed.all === true && result.hasMore) {
+          warnings.push(buildCapWarning(result.pagesFetched));
         }
 
         emitSuccess({
           ctx,
-          data: updateListCommand.outputSchema.parse(collected),
+          data: updateListCommand.outputSchema.parse(result.items),
           schema: updateListCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
-          hasMore: parsed.all === true ? false : hasMore,
-          ...toEmit(lastResponse),
+          hasMore: result.hasMore,
+          warnings,
+          ...toEmit(result.lastResponse),
         });
       });
   },

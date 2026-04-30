@@ -261,6 +261,28 @@ const sampleBoardPayload = (columns: readonly BoardColumn[]): { boards: unknown[
   ],
 });
 
+describe('resolveColumn — ID/title collision detection (Codex M3 finding 4)', () => {
+  it('flags collisionCandidates when ID matches a column whose token also matches another title', () => {
+    // Token "status" matches col_a's id exactly, AND col_b's title
+    // (after case-fold). §5.3 step 3: ID match wins, but caller
+    // gets a column_token_collision signal.
+    const meta = board([
+      col({ id: 'status', title: 'Original' }),
+      col({ id: 'col_b', title: 'Status' }),
+    ]);
+    const m = resolveColumn(meta, 'status');
+    expect(m.via).toBe('id');
+    expect(m.column.id).toBe('status');
+    expect(m.collisionCandidates.map((c) => c.id)).toEqual(['col_b']);
+  });
+
+  it('emits no collisionCandidates when ID match is unambiguous', () => {
+    const meta = board([col({ id: 'status_4', title: 'Status' })]);
+    const m = resolveColumn(meta, 'status_4');
+    expect(m.collisionCandidates).toEqual([]);
+  });
+});
+
 describe('resolveColumnWithRefresh — auto-refresh once on column_not_found', () => {
   it('retries the load with refresh:true when the cache misses the column', async () => {
     const stats = { calls: 0 };
@@ -325,6 +347,57 @@ describe('resolveColumnWithRefresh — auto-refresh once on column_not_found', (
       }),
     ).rejects.toMatchObject({ code: 'column_not_found' });
     expect(stats.calls).toBe(1);
+  });
+
+  it('returns source=mixed + stale_cache_refreshed warning after refresh resolves a missing column', async () => {
+    const stats = { calls: 0 };
+    const stale = sampleBoardPayload([col({ id: 'status_4', title: 'Status' })]);
+    const fresh = sampleBoardPayload([
+      col({ id: 'status_4', title: 'Status' }),
+      col({ id: 'priority', title: 'Priority' }),
+    ]);
+    const client = buildClient([stale, fresh], stats);
+    await resolveColumnWithRefresh({
+      client,
+      boardId: '111',
+      token: 'Status',
+      env: xdgEnv(),
+    });
+    const result = await resolveColumnWithRefresh({
+      client,
+      boardId: '111',
+      token: 'Priority',
+      env: xdgEnv(),
+    });
+    expect(result.source).toBe('mixed');
+    expect(result.warnings.map((w) => w.code)).toContain(
+      'stale_cache_refreshed',
+    );
+  });
+
+  it('cache-hit path reports source=cache and surfaces collisions', async () => {
+    const stats = { calls: 0 };
+    const payload = sampleBoardPayload([
+      col({ id: 'status', title: 'Header' }),
+      col({ id: 'col_b', title: 'Status' }),
+    ]);
+    const client = buildClient([payload], stats);
+    // Seed cache.
+    await resolveColumnWithRefresh({
+      client,
+      boardId: '111',
+      token: 'status',
+      env: xdgEnv(),
+    });
+    expect(stats.calls).toBe(1);
+    const result = await resolveColumnWithRefresh({
+      client,
+      boardId: '111',
+      token: 'status',
+      env: xdgEnv(),
+    });
+    expect(result.source).toBe('cache');
+    expect(result.warnings[0]?.code).toBe('column_token_collision');
   });
 
   it('does not refresh when the failure is ambiguous_column (refresh would not help)', async () => {

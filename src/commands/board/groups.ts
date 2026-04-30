@@ -91,9 +91,12 @@ export const boardGroupsCommand: CommandModule<
           schema: boardGroupsCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
+          // Single-fetch payload (Monday returns the full group list
+          // in one request), so `has_more` is unconditionally false.
+          hasMore: false,
           source: result.source,
           apiVersion,
-          complexity: null,
+          complexity: result.complexity,
           cacheAgeSeconds: result.cacheAgeSeconds,
         });
       });

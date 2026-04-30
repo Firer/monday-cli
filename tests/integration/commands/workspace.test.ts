@@ -154,6 +154,33 @@ describe('monday workspace list (integration)', () => {
     expect(out.remaining).toBe(0);
   });
 
+  it('--limit-pages caps the walk and emits a pagination_cap_reached warning', async () => {
+    // Codex M3 pass-1 finding 1: prior versions looped indefinitely
+    // when every page came back full. The cap stops the walk; the
+    // warning tells agents the result is truncated.
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleWorkspace,
+      id: String(100 + i),
+    }));
+    const out = await drive(
+      ['workspace', 'list', '--all', '--limit', '25', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          { ...listInteraction(fullPage, 1) },
+          { ...listInteraction(fullPage, 2) },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly { readonly code: string; readonly details: { readonly pages_walked: number } }[];
+    };
+    expect(env.meta.has_more).toBe(true);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
+    expect(env.warnings[0]?.details.pages_walked).toBe(2);
+    expect(out.requests).toBe(2);
+  });
+
   it('--all walks pages until a short page lands', async () => {
     const fullPage = Array.from({ length: 25 }, (_, i) => ({
       ...sampleWorkspace,

@@ -13,6 +13,12 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { UsageError } from '../../utils/errors.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const BOARD_LIST_QUERY = `
   query BoardList(
@@ -66,6 +72,7 @@ const inputSchema = z
     limit: z.coerce.number().int().positive().max(100).optional(),
     page: z.coerce.number().int().positive().optional(),
     all: z.boolean().optional(),
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
 
@@ -97,6 +104,10 @@ export const boardListCommand: CommandModule<
       .option('--limit <n>', 'page size (1-100, default 25)')
       .option('--page <n>', '1-indexed page')
       .option('--all', 'walk every page')
+      .option(
+        '--limit-pages <n>',
+        `max pages under --all (1-500, default ${String(DEFAULT_MAX_PAGES)})`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...boardListCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -109,43 +120,39 @@ export const boardListCommand: CommandModule<
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
         const limit = parsed.limit ?? 25;
-        const collected: unknown[] = [];
-        let page = parsed.page ?? 1;
-        let hasMore: boolean;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<RawBoards>>>;
-        for (;;) {
-          const variables: Record<string, unknown> = { limit, page };
-          if (parsed.workspace !== undefined) {
-            variables.workspaceIds = [parsed.workspace];
-          }
-          if (parsed.state !== undefined) {
-            variables.state = parsed.state;
-          }
-          const response = await client.raw<RawBoards>(
-            BOARD_LIST_QUERY,
-            variables,
-            { operationName: 'BoardList' },
-          );
-          lastResponse = response;
-          const pageData = response.data.boards ?? [];
-          if (pageData.length === 0) {
-            hasMore = false;
-            break;
-          }
-          collected.push(...pageData);
-          hasMore = pageData.length === limit;
-          if (parsed.all !== true || !hasMore) break;
-          page++;
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        const result = await walkPages<unknown, RawBoards>({
+          fetchPage: (page) => {
+            const variables: Record<string, unknown> = { limit, page };
+            if (parsed.workspace !== undefined) {
+              variables.workspaceIds = [parsed.workspace];
+            }
+            if (parsed.state !== undefined) variables.state = parsed.state;
+            return client.raw<RawBoards>(BOARD_LIST_QUERY, variables, {
+              operationName: 'BoardList',
+            });
+          },
+          extractItems: (r) => r.data.boards ?? [],
+          pageSize: limit,
+          all: parsed.all === true,
+          startPage: parsed.page ?? 1,
+          maxPages,
+        });
+
+        const projected = boardListCommand.outputSchema.parse(result.items);
+        const warnings: Warning[] = [];
+        if (parsed.all === true && result.hasMore) {
+          warnings.push(buildCapWarning(result.pagesFetched));
         }
-        const projected = boardListCommand.outputSchema.parse(collected);
         emitSuccess({
           ctx,
           data: projected,
           schema: boardListCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
-          hasMore: parsed.all === true ? false : hasMore,
-          ...toEmit(lastResponse),
+          hasMore: result.hasMore,
+          warnings,
+          ...toEmit(result.lastResponse),
         });
       });
   },

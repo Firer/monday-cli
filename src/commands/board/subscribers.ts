@@ -95,6 +95,12 @@ export const boardSubscribersCommand: CommandModule<
           schema: boardSubscribersCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
+          // Subscribers come back inline with no pagination — the
+          // GraphQL `subscribers` field returns the full set in one
+          // request. `has_more` is unconditionally false; agents
+          // expecting the §6.3 collection meta read this rather
+          // than infer it from a missing key.
+          hasMore: false,
           ...toEmit(response),
         });
       });

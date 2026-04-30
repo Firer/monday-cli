@@ -17,6 +17,12 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { UsageError } from '../../utils/errors.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const WORKSPACE_FOLDERS_QUERY = `
   query WorkspaceFolders($workspaceIds: [ID], $limit: Int, $page: Int) {
@@ -66,6 +72,7 @@ const inputSchema = z
     limit: z.coerce.number().int().positive().max(100).optional(),
     page: z.coerce.number().int().positive().optional(),
     all: z.boolean().optional(),
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
 
@@ -94,6 +101,10 @@ export const workspaceFoldersCommand: CommandModule<
       .option('--limit <n>', 'max folders per page (1-100)')
       .option('--page <n>', 'page number (1-indexed)')
       .option('--all', 'walk every page')
+      .option(
+        '--limit-pages <n>',
+        `max pages under --all (1-500, default ${String(DEFAULT_MAX_PAGES)})`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...workspaceFoldersCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -109,41 +120,35 @@ export const workspaceFoldersCommand: CommandModule<
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
         const limit = parsed.limit ?? 25;
-        const collected: unknown[] = [];
-        let page = parsed.page ?? 1;
-        let hasMore: boolean;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<RawFolders>>>;
-        for (;;) {
-          const response = await client.raw<RawFolders>(
-            WORKSPACE_FOLDERS_QUERY,
-            {
-              workspaceIds: [parsed.workspaceId],
-              limit,
-              page,
-            },
-            { operationName: 'WorkspaceFolders' },
-          );
-          lastResponse = response;
-          const pageData = response.data.folders ?? [];
-          if (pageData.length === 0) {
-            hasMore = false;
-            break;
-          }
-          collected.push(...pageData);
-          hasMore = pageData.length === limit;
-          if (parsed.all !== true || !hasMore) break;
-          page++;
-        }
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        const result = await walkPages<unknown, RawFolders>({
+          fetchPage: (page) =>
+            client.raw<RawFolders>(
+              WORKSPACE_FOLDERS_QUERY,
+              { workspaceIds: [parsed.workspaceId], limit, page },
+              { operationName: 'WorkspaceFolders' },
+            ),
+          extractItems: (r) => r.data.folders ?? [],
+          pageSize: limit,
+          all: parsed.all === true,
+          startPage: parsed.page ?? 1,
+          maxPages,
+        });
 
-        const projected = workspaceFoldersCommand.outputSchema.parse(collected);
+        const projected = workspaceFoldersCommand.outputSchema.parse(result.items);
+        const warnings: Warning[] = [];
+        if (parsed.all === true && result.hasMore) {
+          warnings.push(buildCapWarning(result.pagesFetched));
+        }
         emitSuccess({
           ctx,
           data: projected,
           schema: workspaceFoldersCommand.outputSchema,
           programOpts: program.opts(),
           kind: 'collection',
-          hasMore: parsed.all === true ? false : hasMore,
-          ...toEmit(lastResponse),
+          hasMore: result.hasMore,
+          warnings,
+          ...toEmit(result.lastResponse),
         });
       });
   },

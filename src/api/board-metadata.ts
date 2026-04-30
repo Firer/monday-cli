@@ -44,6 +44,7 @@ import {
 import type { MondayClient } from './client.js';
 import { BoardIdSchema, type BoardId } from '../types/ids.js';
 import { ApiError } from '../utils/errors.js';
+import type { Complexity } from '../utils/output/envelope.js';
 
 const BOARD_METADATA_QUERY = `
   query BoardMetadata($ids: [ID!]!) {
@@ -175,6 +176,15 @@ export interface BoardMetadataLoadResult {
   readonly metadata: BoardMetadata;
   readonly source: 'live' | 'cache';
   readonly cacheAgeSeconds: number | null;
+  /**
+   * `meta.complexity` payload from the live request when one ran;
+   * `null` for cache hits and for non-`--verbose` live calls (Monday
+   * doesn't include `complexity` unless the operation selects it).
+   * Surfacing this here is what lets cache-backed commands report
+   * accurate complexity in `--verbose` mode (Codex M3 pass-1 §3 —
+   * the original projection threw the value away).
+   */
+  readonly complexity: Complexity | null;
 }
 
 const projectBoard = (raw: unknown): BoardMetadata =>
@@ -183,10 +193,15 @@ const projectBoard = (raw: unknown): BoardMetadata =>
 const parseCacheEntry = (raw: unknown): BoardMetadata =>
   boardMetadataSchema.parse(raw);
 
+interface LiveFetchResult {
+  readonly metadata: BoardMetadata;
+  readonly complexity: Complexity | null;
+}
+
 const fetchLive = async (
   client: MondayClient,
   boardId: string,
-): Promise<BoardMetadata> => {
+): Promise<LiveFetchResult> => {
   const response = await client.raw<BoardMetadataQueryResult>(
     BOARD_METADATA_QUERY,
     { ids: [boardId] },
@@ -204,7 +219,7 @@ const fetchLive = async (
       { details: { board_id: boardId } },
     );
   }
-  return projectBoard(first);
+  return { metadata: projectBoard(first), complexity: response.complexity };
 };
 
 /**
@@ -247,22 +262,28 @@ export const loadBoardMetadata = async (
         metadata: hit.data,
         source: 'cache',
         cacheAgeSeconds: hit.ageSeconds,
+        complexity: null,
       };
     }
   }
 
-  const metadata = await fetchLive(inputs.client, boardId);
+  const live = await fetchLive(inputs.client, boardId);
 
   if (inputs.noCache !== true) {
     try {
-      await writeEntry(root, { kind: 'board', boardId }, metadata);
+      await writeEntry(root, { kind: 'board', boardId }, live.metadata);
     } catch {
       // Cache-write failures don't block the user — the live data is
       // good and a future call will simply re-fetch.
     }
   }
 
-  return { metadata, source: 'live', cacheAgeSeconds: null };
+  return {
+    metadata: live.metadata,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: live.complexity,
+  };
 };
 
 /**

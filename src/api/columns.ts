@@ -61,7 +61,27 @@ export interface ColumnMatch {
    *     `id:`/`title:` prefix; deterministic regardless of collision.
    */
   readonly via: 'id' | 'title' | 'case_fold' | 'prefix_id' | 'prefix_title';
+  /**
+   * Per `cli-design.md` §5.3 step 3: when a token matches a column's
+   * ID *and* another column's title (after normalisation), the ID
+   * match wins (deterministic) but a `column_token_collision`
+   * warning surfaces so the caller can emit it on the envelope.
+   * Empty when no collision exists or `via` isn't `id` /
+   * `prefix_id`.
+   */
+  readonly collisionCandidates: readonly { readonly id: string; readonly title: string; readonly type: string }[];
 }
+
+const detectCollision = (
+  visible: readonly BoardColumn[],
+  match: BoardColumn,
+): readonly { readonly id: string; readonly title: string; readonly type: string }[] => {
+  const target = caseFold(normaliseTitle(match.id));
+  const candidates = visible.filter(
+    (c) => c.id !== match.id && caseFold(normaliseTitle(c.title)) === target,
+  );
+  return candidates.map((c) => ({ id: c.id, title: c.title, type: c.type }));
+};
 
 /**
  * NFC-normalises, trims, and collapses internal runs of whitespace
@@ -147,7 +167,7 @@ export const resolveColumn = (
   // visible set so an archived column doesn't resolve via its id.
   const idMatch = visible.find((c) => c.id === token);
   if (idMatch !== undefined) {
-    return { column: idMatch, via: 'id' };
+    return { column: idMatch, via: 'id', collisionCandidates: detectCollision(visible, idMatch) };
   }
 
   // Step 2: NFC-normalised exact title match.
@@ -160,7 +180,7 @@ export const resolveColumn = (
   }
   const [titleOnly] = titleMatches;
   if (titleOnly !== undefined) {
-    return { column: titleOnly, via: 'title' };
+    return { column: titleOnly, via: 'title', collisionCandidates: [] };
   }
 
   // Step 3: case-fold fallback. We only fall here when the
@@ -174,7 +194,7 @@ export const resolveColumn = (
   }
   const [foldedOnly] = foldedMatches;
   if (foldedOnly !== undefined) {
-    return { column: foldedOnly, via: 'case_fold' };
+    return { column: foldedOnly, via: 'case_fold', collisionCandidates: [] };
   }
 
   throw notFound(token, metadata, includeArchived);
@@ -190,7 +210,11 @@ const resolvePrefixed = (
     if (exact === undefined) {
       throw notFoundForToken(rawToken, visible);
     }
-    return { column: exact, via: 'prefix_id' };
+    return {
+      column: exact,
+      via: 'prefix_id',
+      collisionCandidates: detectCollision(visible, exact),
+    };
   }
   const target = normaliseTitle(prefix.value);
   const exactMatches = visible.filter(
@@ -201,7 +225,7 @@ const resolvePrefixed = (
   }
   const [exactOnly] = exactMatches;
   if (exactOnly !== undefined) {
-    return { column: exactOnly, via: 'prefix_title' };
+    return { column: exactOnly, via: 'prefix_title', collisionCandidates: [] };
   }
   const folded = caseFold(target);
   const foldedMatches = visible.filter(
@@ -212,7 +236,7 @@ const resolvePrefixed = (
   }
   const [foldedOnly] = foldedMatches;
   if (foldedOnly !== undefined) {
-    return { column: foldedOnly, via: 'prefix_title' };
+    return { column: foldedOnly, via: 'prefix_title', collisionCandidates: [] };
   }
   throw notFoundForToken(rawToken, visible);
 };
@@ -271,6 +295,54 @@ export interface ResolveColumnWithRefreshInputs {
   readonly noCache?: boolean;
 }
 
+export interface ResolveColumnWithRefreshResult {
+  readonly match: ColumnMatch;
+  readonly metadata: BoardMetadata;
+  /**
+   * `cli-design.md` §6.1 `meta.source` for the resolution payload:
+   *   - `live`  — the metadata was fetched live (cache miss / refresh /
+   *     `--no-cache`).
+   *   - `cache` — the cache served and the resolution succeeded.
+   *   - `mixed` — the cache served but missed the column, then a
+   *     refresh produced the resolution. Per §8 / Codex M3 pass-1 §4
+   *     this is the case that warrants the `stale_cache_refreshed`
+   *     warning so the caller knows the cache was wrong.
+   */
+  readonly source: 'live' | 'cache' | 'mixed';
+  readonly cacheAgeSeconds: number | null;
+  /**
+   * Resolver-emitted warnings the caller should fold into its envelope:
+   *   - `column_token_collision` (§5.3 step 3) — the token matched a
+   *     column ID *and* another column's title; the ID match won.
+   *   - `stale_cache_refreshed` — auto-refresh fired and resolved the
+   *     missing column.
+   */
+  readonly warnings: readonly ResolverWarning[];
+}
+
+export interface ResolverWarning {
+  readonly code: 'column_token_collision' | 'stale_cache_refreshed';
+  readonly message: string;
+  readonly details: Readonly<Record<string, unknown>>;
+}
+
+const collisionWarning = (
+  match: ColumnMatch,
+): ResolverWarning | undefined => {
+  if (match.collisionCandidates.length === 0) return undefined;
+  return {
+    code: 'column_token_collision',
+    message:
+      `Token matched column id "${match.column.id}" and ` +
+      `${String(match.collisionCandidates.length)} title(s); the ID match wins.`,
+    details: {
+      via: match.via,
+      resolved_id: match.column.id,
+      candidates: match.collisionCandidates,
+    },
+  };
+};
+
 /**
  * Resolves a column token, auto-refreshing the board metadata cache
  * **once** on `column_not_found` per §5.3 step 5. Other resolution
@@ -283,7 +355,7 @@ export interface ResolveColumnWithRefreshInputs {
  */
 export const resolveColumnWithRefresh = async (
   inputs: ResolveColumnWithRefreshInputs,
-): Promise<{ readonly match: ColumnMatch; readonly metadata: BoardMetadata }> => {
+): Promise<ResolveColumnWithRefreshResult> => {
   const env = inputs.env ?? process.env;
   const includeArchived = inputs.includeArchived ?? false;
 
@@ -296,7 +368,16 @@ export const resolveColumnWithRefresh = async (
 
   try {
     const match = resolveColumn(first.metadata, inputs.token, { includeArchived });
-    return { match, metadata: first.metadata };
+    const warnings: ResolverWarning[] = [];
+    const collision = collisionWarning(match);
+    if (collision !== undefined) warnings.push(collision);
+    return {
+      match,
+      metadata: first.metadata,
+      source: first.source,
+      cacheAgeSeconds: first.cacheAgeSeconds,
+      warnings,
+    };
   } catch (err) {
     const isMissing =
       err instanceof ApiError && err.code === 'column_not_found';
@@ -312,6 +393,25 @@ export const resolveColumnWithRefresh = async (
     const match = resolveColumn(refreshed.metadata, inputs.token, {
       includeArchived,
     });
-    return { match, metadata: refreshed.metadata };
+    const warnings: ResolverWarning[] = [
+      {
+        code: 'stale_cache_refreshed',
+        message:
+          'Cache miss for token; refreshed board metadata to resolve.',
+        details: {
+          board_id: refreshed.metadata.id,
+          token: inputs.token,
+        },
+      },
+    ];
+    const collision = collisionWarning(match);
+    if (collision !== undefined) warnings.push(collision);
+    return {
+      match,
+      metadata: refreshed.metadata,
+      source: 'mixed',
+      cacheAgeSeconds: null,
+      warnings,
+    };
   }
 };
