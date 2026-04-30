@@ -50,7 +50,7 @@ Two binding documents:
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` skeleton (text / long_text / numbers translators + `unsupported_column_type` error path). Status / dropdown / date / people translators, mutation-selection helper, and `dry-run.ts` deferred to follow-up sessions. |
+| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (text / long_text / numbers / status / dropdown translators + `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard). Date + people translators and `dry-run.ts` deferred to follow-up sessions. |
 | M5b | future | `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
@@ -217,20 +217,38 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   (writable + example_set) and `api/column-values.ts` (the
   writer). Adding a v0.2 type is one entry's worth of edit.
 - **Column-value writer (M5a, in progress).** `src/api/column-values.ts`
-  is the write half of §5.3.3. `translateColumnValue({ column,
+  is the write half of §5.3. `translateColumnValue({ column,
   value })` returns a `TranslatedColumnValue` carrying `columnId`,
   `columnType`, `rawInput`, and a discriminated `payload` —
   `{ format: 'simple', value: <bare-string> }` for the simple-form
   mutation path or `{ format: 'rich', value: <plain-object> }` for
-  the JSON-object form. **Skeleton ships `text` / `long_text` /
-  `numbers`** (all simple); status / dropdown / date / people
-  surface `unsupported_column_type` (same code as truly non-
-  allowlisted types) until follow-up sessions land their
-  translators. **Monday `JSON` scalar discipline:** every payload
-  is a plain JS value; the SDK / fetch layer stringifies at the
-  wire boundary. The translator never `JSON.stringify`s — pinned
-  by a regression test so a future contributor doesn't introduce
-  double-encoding. Fixture-pinned wire shape per type so M5b's
+  the JSON-object form. **Five of seven v0.1 types translate today**:
+  `text` / `long_text` / `numbers` (all simple) and `status` /
+  `dropdown` (rich); `date` and `people` surface
+  `unsupported_column_type` (same code as truly non-allowlisted
+  types) until follow-up sessions land their translators.
+  **Status payload**: label-first (`{label:<verbatim>}`) with
+  non-negative integer fallback (`{index:N}`, JS number). **Dropdown
+  payload**: comma-split, per-segment trimmed, empties dropped;
+  all-numeric → `{ids:[N1,N2]}` (numbers), any non-numeric →
+  `{labels:[s1,s2]}` (strings). **Safe-integer guard**: numeric
+  input > 2^53 - 1 throws `usage_error` rather than silently
+  rounding via `Number(raw)` and corrupting the wire payload.
+  **Mutation selection** (`selectMutation`, §5.3 step 5):
+  1 simple → `change_simple_column_value`; 1 rich →
+  `change_column_value`; N (any combo) →
+  `change_multiple_column_values` (atomic). Inside the multi
+  mutation, `long_text` is re-wrapped as `{text:<value>}`
+  because Monday's per-column blob there requires the object
+  form (logged as a spec gap in v0.1-plan §3 M5a; pinned via
+  fixture). Duplicate column IDs in a multi bundle throw
+  `usage_error` (last-write-wins is silent corruption).
+  **Monday `JSON` scalar discipline:** every payload is a
+  plain JS value; the SDK / fetch layer stringifies at the
+  wire boundary. The translator never `JSON.stringify`s —
+  pinned by regression tests per category so a future
+  contributor doesn't introduce double-encoding.
+  Fixture-pinned wire shape per (count × type) cell so M5b's
   bulk surface and v0.2 inherit unchanged.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
