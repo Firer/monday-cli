@@ -16,16 +16,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PassThrough } from 'node:stream';
-import { run, type RunOptions } from '../../../src/cli/run.js';
-import { fixedRequestIdGenerator } from '../../../src/utils/request-id.js';
+import type { Cassette, Interaction } from '../../fixtures/load.js';
 import {
-  createFixtureTransport,
-  type Cassette,
-  type Interaction,
-} from '../../fixtures/load.js';
-
-const LEAK_CANARY = 'tok-leakcheck-deadbeef-canary';
+  assertEnvelopeContract,
+  drive as driveBase,
+  parseEnvelope,
+  FIXTURE_API_URL,
+  LEAK_CANARY,
+  type DriveResult,
+  type EnvelopeShape,
+} from '../helpers.js';
+import type { RunOptions } from '../../../src/cli/run.js';
 
 let xdgRoot: string;
 
@@ -37,101 +38,24 @@ afterEach(async () => {
   await rm(xdgRoot, { recursive: true, force: true });
 });
 
-const baseOptions = (
-  overrides: Partial<RunOptions> = {},
-): {
-  options: RunOptions;
-  captured: { stdout: () => string; stderr: () => string };
-} => {
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
-  stdout.on('data', (c: Buffer) => stdoutChunks.push(c));
-  stderr.on('data', (c: Buffer) => stderrChunks.push(c));
-  const options: RunOptions = {
-    argv: ['node', 'monday'],
-    env: {
-      MONDAY_API_TOKEN: LEAK_CANARY,
-      MONDAY_API_URL: 'https://api.monday.com/v2',
-      XDG_CACHE_HOME: xdgRoot,
-    },
-    stdout,
-    stderr,
-    isTTY: false,
-    cliVersion: '0.0.0-test',
-    cliDescription: 'CLI under test',
-    requestIdGenerator: fixedRequestIdGenerator(['fixed-req-id']),
-    clock: () => new Date('2026-04-30T10:00:00Z'),
-    ...overrides,
-  };
-  return {
-    options,
-    captured: {
-      stdout: () => Buffer.concat(stdoutChunks).toString('utf8'),
-      stderr: () => Buffer.concat(stderrChunks).toString('utf8'),
-    },
-  };
-};
-
-interface EnvelopeShape {
-  readonly ok: boolean;
-  readonly data?: unknown;
-  readonly error?: { readonly code: string };
-  readonly meta: {
-    readonly schema_version: '1';
-    readonly api_version: string;
-    readonly cli_version: string;
-    readonly request_id: string;
-    readonly source: string;
-    readonly cache_age_seconds: number | null;
-    readonly retrieved_at: string;
-    readonly complexity: unknown;
-    readonly has_more?: boolean;
-    readonly total_returned?: number;
-  };
-  readonly warnings?: readonly { readonly code: string }[];
-}
-
-const parseEnvelope = (s: string): EnvelopeShape =>
-  JSON.parse(s) as EnvelopeShape;
-
-const assertEnvelopeContract = (env: EnvelopeShape): void => {
-  expect(env.meta.schema_version).toBe('1');
-  expect(typeof env.meta.api_version).toBe('string');
-  expect(typeof env.meta.cli_version).toBe('string');
-  expect(typeof env.meta.request_id).toBe('string');
-  expect(typeof env.meta.source).toBe('string');
-  expect(env.meta).toHaveProperty('cache_age_seconds');
-  expect(env.meta).toHaveProperty('retrieved_at');
-  expect(env.meta).toHaveProperty('complexity');
-};
-
+/**
+ * `board.test.ts` exercises cache-aware reads (`board describe` /
+ * `columns` / `groups`) so each `drive` call needs a per-test
+ * isolated `XDG_CACHE_HOME`. The wrapper reads `xdgRoot` from the
+ * `beforeEach` closure so the helper signature stays the same as
+ * `tests/integration/helpers.ts` `drive(...)`.
+ */
 const drive = async (
   argv: readonly string[],
   cassette: Cassette,
   overrides: Partial<RunOptions> = {},
-): Promise<{
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  remaining: number;
-  requests: number;
-}> => {
-  const transport = createFixtureTransport(cassette);
-  const { options, captured } = baseOptions({
-    argv: ['node', 'monday', ...argv],
-    transport,
-    ...overrides,
-  });
-  const result = await run(options);
-  return {
-    exitCode: result.exitCode,
-    stdout: captured.stdout(),
-    stderr: captured.stderr(),
-    remaining: transport.remaining(),
-    requests: transport.requests.length,
+): Promise<DriveResult> => {
+  const env = {
+    MONDAY_API_TOKEN: LEAK_CANARY,
+    MONDAY_API_URL: FIXTURE_API_URL,
+    XDG_CACHE_HOME: xdgRoot,
   };
+  return driveBase(argv, cassette, { env, ...overrides });
 };
 
 const sampleBoard = {
