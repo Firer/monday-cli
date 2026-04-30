@@ -5,7 +5,9 @@ Monday Dev — designed first for AI coding agents (Claude Code, Codex, etc.)
 that need to pull tasks, file backlog items, and edit boards from the
 terminal, with humans as a welcome second audience.
 
-> **Status:** design complete; v0.1 implementation pending.
+> **Status:** v0.1 in progress — M0–M4 shipped (account / workspace /
+> board / user / update / item *reads* + filter DSL + cursor
+> pagination); M5a (column-value writers) is next.
 > The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
 > if you want to know what the CLI looks like end-to-end.
 > See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.
@@ -41,7 +43,7 @@ export MONDAY_API_TOKEN="<your-token>"
 A `.env` file in the working directory is also picked up. See
 [`.env.example`](./.env.example) for the full set of supported variables.
 
-## Usage (planned — v0.1 in progress)
+## Usage (v0.1 in progress — read commands + safe mutations shipping)
 
 The CLI follows a `monday <noun> <verb>` shape with singular nouns:
 
@@ -54,8 +56,11 @@ monday board describe <board-id>      # full board schema with column types
 # Reading items
 monday item list --board <board-id>
 monday item list --board <board-id> --where status=Backlog --where owner=me
+monday item list --board <board-id> --all --output ndjson | jq '...'
 monday item get <item-id>
 monday item find "Refactor login" --board <board-id>
+monday item search --board <board-id> --where status=Done
+monday item subitems <item-id>
 
 # Updating items (v0.1: in-place updates only; create/move/archive in v0.2)
 monday item set <item-id> status=Done

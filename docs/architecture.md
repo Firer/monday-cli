@@ -78,6 +78,12 @@
 - `commands/<noun>/<verb>.ts` — the action. Parses argv via
   `parseArgv`, calls into `api/`, projects to the strict output
   schema, calls `emitSuccess({ ...toEmit(result) })`.
+- `commands/run-by-id-lookup.ts` (M4 R7) — shared get-by-id action
+  helper covering the `parseArgv → resolveClient → client.raw →
+  not_found-on-empty → emit` shape used by `workspace get`,
+  `board get`, `user get`, `update get`, `item get`. Optional
+  `project` callback for shapes that need a parse-then-project step
+  (item get uses it for the column-value projection).
 
 ### `api/` (network + cache)
 
@@ -114,9 +120,48 @@
   M5a's people-column writes.
 - `api/walk-pages.ts` (M3) — page-based pagination walker with
   `--limit-pages` cap + `pagination_cap_reached` warning. Used by
-  every page-based list command. Cursor pagination (M4 `item list`)
-  will get its own walker — the `stale_cursor` fail-fast contract
-  (§5.6) doesn't apply to page-based reads.
+  every page-based list command (`workspace` / `board` / `user` /
+  `update`). Cursor-based pagination has a fundamentally different
+  contract (§5.6 stale-cursor fail-fast, no silent re-issue) and
+  ships in its own module — see `api/pagination.ts` below.
+- `api/pagination.ts` (M4) — cursor-based pagination walker for
+  `items_page` / `next_items_page`. `paginate({fetchInitial,
+  fetchNext, extractPage, getId, all, limit, pageSize, onItem,
+  now})` honours the §5.6 contract: 60-min cursor lifetime,
+  fail-fast on `stale_cursor` with enriched
+  `details.cursor_age_seconds / items_returned_so_far /
+  last_item_id`, never silently re-issued. Per-call effective
+  limit = `min(pageSize, remainingBudget)` so Monday's cursor
+  advances over exactly the rows the walker emits — no silent skip
+  on `--limit < pageSize` resume. `onItem` is the streaming hook
+  for `item list --output ndjson`. Used by `item list / search /
+  find`.
+- `api/filters.ts` (M4) — `--where` parser + `--filter-json`
+  passthrough. `parseWhereSyntax(raw)` is pure (testable without
+  network); `buildFilterRules({metadata, resolveMe, clauses,
+  onColumnNotFound})` resolves tokens via M3's column resolver and
+  emits Monday's `query_params.rules`. `onColumnNotFound` fires
+  once on a cache-miss to honour §5.3 step 5; the result's
+  `refreshed` flag drives the caller's `meta.source: 'mixed'`
+  decision. Operator allowlist: `=`, `!=`, `~=`, `<`, `<=`, `>`,
+  `>=`, `:is_empty`, `:is_not_empty`. `--where` / `--filter-json`
+  are mutually exclusive.
+- `api/sort.ts` (M4) — per-page numeric-ID-asc sort
+  (`compareNumericId` + `sortByIdAsc`). Length-then-lex tuple
+  handles IDs past 2^53 correctly (string-lex sort fails: `"9" >
+  "10"`; `Number.parseInt` loses precision on large IDs).
+  Centralised here so the rule applies identically across `item
+  list / search / find / subitems` per §3.1 #8.
+- `api/item-projection.ts` (M4) — `rawItemSchema` (parse boundary
+  for items_page item shapes) + `projectItem({raw, columnTitles?,
+  omitColumnTitles?})` (canonical §6.2 single-item shape). Single-
+  resource calls keep per-cell `title` inline (§6.2); collection
+  calls drop per-cell `title` and let `meta.columns` carry the
+  canonical view (§6.3). Typed inline fields (`label/index`,
+  `date/time`, `people: [...]`) for the v0.1-allowlisted writable
+  types; other types surface `text + value`. `idFromRawItem`
+  exposes the defensive id-reader the cursor walker needs for the
+  per-page sort.
 
 ### Hard rules
 
@@ -206,6 +251,11 @@ failure at the right boundary surfaces as `usage_error` / `config_error`.
   literal canary token is absent from every emitted byte across 9
   failure shapes (Error.message, Error.stack, cause chains,
   redirected URLs, retry-decorator details, etc.).
+- **`tests/integration/helpers.ts`** (M4 R6) — shared
+  `baseOptions / EnvelopeShape / parseEnvelope /
+  assertEnvelopeContract / drive` scaffolding extracted from the M3
+  per-noun integration test files. New M5+ test files start at one
+  import line.
 
 E2E tests that hit the real Monday API must be gated behind
 `RUN_LIVE_TESTS=1` and use a dedicated test workspace — the default

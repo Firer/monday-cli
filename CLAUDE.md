@@ -145,8 +145,9 @@ Headlines:
   product. Use the logger in `utils/` for anything structured.
 - **Tests cover every branch.** Happy path, edge cases, error cases, format
   variations. Non-trivial commands need an E2E test that spawns the binary.
-  Coverage thresholds are 90% across lines/branches/functions/statements;
-  raise the floor as the codebase grows, never lower it.
+  Coverage thresholds are **95% lines / functions / statements + 94% branches**
+  (post-M3 ratchet, sustained through M4); raise the floor as the codebase
+  grows, never lower it.
 - **Mock at the network boundary, not internal modules.** Stub
   `fetch`/`undici` (or the SDK's `request` method) — never reach into
   `commands/*` from a unit test to monkey-patch internal helpers.
@@ -214,14 +215,24 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   duplicate or skip rows. There's no safe deterministic resume in v0.1;
   callers restart with idempotent operations or a known-stable filter.
   (§5.6) M3 commands are page-based (Monday's `workspaces` / `boards`
-  / `users` / `updates` use `limit` + `page`, not cursors). Cursor
-  pagination lands in M4 (`item list` via `items_page` →
-  `next_items_page`). Page-based `--all` walks cap at
-  `--limit-pages` (default 50, max 500); a cap-hit on a still-full
-  page emits a `pagination_cap_reached` warning so agents can widen
-  the cap or narrow the query. **Spec gap (logged in v0.1-plan §3
-  M3 for backfill):** `--limit-pages` and `pagination_cap_reached`
-  aren't in cli-design.md yet; both are additive / non-breaking.
+  / `users` / `updates` use `limit` + `page`, not cursors). M4 added
+  cursor pagination (`item list` / `search` via `items_page` →
+  `next_items_page`) through `src/api/pagination.ts`'s `paginate`
+  walker — fail-fast on `stale_cursor` with enriched
+  `details.cursor_age_seconds / items_returned_so_far / last_item_id`,
+  per-call effective `limit = min(pageSize, remainingBudget)` so
+  Monday's cursor advances over exactly the rows the walker emits
+  (no silent-skip on `--limit < pageSize` resume), and an injected
+  clock so tests pin expiry without wall-clock waits. Page-based
+  `--all` walks cap at `--limit-pages` (default 50, max 500); a
+  cap-hit on a still-full page emits a `pagination_cap_reached`
+  warning so agents can widen the cap or narrow the query. M4 reuses
+  the same warning code on `item find` when the cap-bounded scan was
+  truncated and uniqueness can't be verified. **Spec gaps (logged in
+  v0.1-plan §3 M3 / §3 M4 for backfill):** `--limit-pages` /
+  `pagination_cap_reached` aren't in cli-design.md yet; same for the
+  M4 `--state` deferral and the find-cap variant of the warning. All
+  additive / non-breaking.
 - **v0.1 is read-heavy:** account info, board list/get/find/describe/
   doctor, item list/get/find/search/set/clear/update (single mutation —
   no create/delete/move/archive yet), update list/get/create, schema,
@@ -234,16 +245,59 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   construct `--set <token>=<value>` calls for every M5b-writable
   column on the board without consulting external Monday docs. Lives
   at `src/commands/board/describe.ts`.
-- **Cross-noun resolver patterns (M3 share-out).** `findOne(scope,
-  query)` in `src/api/resolvers.ts` powers every `find` verb (M3:
-  boards; M4 will add items) with identical NFC + case-fold + `--first`
-  semantics. `userByEmail` in the same module owns the directory-cache
-  + `users(emails:)` fallback that M5a's `--set Owner=<email>` value
-  translator will reuse.
-- **Page-walking helper.** Every page-based list command goes through
-  `walkPages` in `src/api/walk-pages.ts` — single source of truth for
-  `--all` semantics, the `--limit-pages` cap, and the
-  `pagination_cap_reached` warning.
+- **Cross-noun resolver patterns (M3 share-out, extended M4).**
+  `findOne(scope, query)` in `src/api/resolvers.ts` powers every
+  `find` verb (boards in M3; items in M4) with identical NFC +
+  case-fold + `--first` semantics. `userByEmail` in the same module
+  owns the directory-cache + `users(emails:)` fallback that M5a's
+  `--set Owner=<email>` value translator will reuse; M4's `--where
+  owner=me` resolves through `client.whoami()` instead (cached for
+  the lifetime of one filter-build call).
+- **Pagination helpers.** Two walkers, one contract per Monday
+  shape:
+  - `walkPages` (`src/api/walk-pages.ts`) — page-based (`limit:` +
+    `page:`), used by `workspace` / `board` / `user` / `update`
+    list commands. Owns `--all` semantics, the `--limit-pages` cap,
+    and the `pagination_cap_reached` warning.
+  - `paginate` (`src/api/pagination.ts`) — cursor-based
+    (`items_page` → `next_items_page`), used by M4 `item list` /
+    `item search` / `item find`. Owns `--all` + `--limit` +
+    streaming `onItem` + the §5.6 stale-cursor fail-fast contract.
+    Result type carries every §6.1 + §6.3 meta slot from day one
+    (`source / cacheAgeSeconds / complexity / warnings /
+    nextCursor / hasMore / totalReturned / pagesFetched /
+    lastResponse`) — §14 M3 prophylactic.
+- **Filter DSL parser (M4).** `src/api/filters.ts` —
+  `parseWhereSyntax` (pure syntax) + `buildFilterRules` (with
+  `onColumnNotFound` cache-miss-refresh callback per §5.3 step 5) +
+  `buildQueryParams` (top-level helper used by `item list`). Operator
+  allowlist `=`, `!=`, `~=`, `<`, `<=`, `>`, `>=`, `:is_empty`,
+  `:is_not_empty`. Splits on first operator per §5.3 step 2.b;
+  operator-in-title columns route through `--filter-json` (the
+  `title:`/`id:` prefix doesn't disambiguate post-split — see the
+  module header). `me` sugar restricted to `people` columns;
+  resolves through the injected `resolveMe` callback. `--where`
+  and `--filter-json` mutually exclusive. Result type carries
+  `warnings + refreshed` so callers fold `stale_cache_refreshed`
+  into the envelope and flip `meta.source` to `'mixed'`.
+- **Item projection (M4).** `src/api/item-projection.ts` —
+  `rawItemSchema` (parse boundary) + `projectItem({raw,
+  columnTitles?, omitColumnTitles?})` (canonical §6.2 shape).
+  Single-resource calls (`item get`) keep per-cell `title` inline;
+  collection calls (`item list / search`) drop per-cell `title`
+  and consolidate into `meta.columns` per §6.3. Typed inline
+  fields for the v0.1-allowlisted writable types (status / date /
+  people); other types surface `text + value`.
+- **Get-by-id action helper (M4 R7).** `src/commands/run-by-id-lookup.ts`
+  compresses the parseArgv → resolveClient → client.raw → not_found
+  → emit shape into one call; used by `workspace get`, `board get`,
+  `user get`, `update get`, `item get`. Optional `project` callback
+  for shapes that need a parse-then-project step (item get uses
+  it for the column projection).
+- **Integration test helpers (M4 R6).** `tests/integration/helpers.ts`
+  — `baseOptions / EnvelopeShape / parseEnvelope /
+  assertEnvelopeContract / drive` shared by every M2+ integration
+  test file. New M5+ test files should start at one import line.
 
 ## Workflow Rules
 

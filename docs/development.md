@@ -127,9 +127,20 @@ multiple commands need it. Either way, the GraphQL string + the
 projection schema live in `src/api/`, never in `commands/*`.
 
 For shared cross-command logic (caching, name resolution, paginated
-walks), add a focused module to `src/api/` rather than duplicating it
-across commands. M3 added `board-metadata.ts`, `columns.ts`,
-`resolvers.ts`, `walk-pages.ts` for exactly this reason.
+walks, filter parsing, item projection), add a focused module to
+`src/api/` rather than duplicating it across commands. M3 added
+`board-metadata.ts`, `columns.ts`, `resolvers.ts`, `walk-pages.ts`;
+M4 added `pagination.ts` (cursor walker), `filters.ts` (`--where`
+parser), `sort.ts` (per-page ID-asc), `item-projection.ts`
+(canonical §6.2 / §6.3 item shape) for the same reason.
+
+For commands sharing a *full action shape* (not just a logic helper),
+the lightweight pattern is `src/commands/run-by-id-lookup.ts` (M4 R7)
+— compresses `parseArgv → resolveClient → client.raw → not_found →
+emit` into one call. Used by all five v0.1 get-by-id commands. Pick
+this over per-command boilerplate when the shape is identical and
+the only variation is the GraphQL query + collection key + error
+detail key.
 
 ### 3. Page-based collections: use `walkPages`
 
@@ -153,9 +164,51 @@ if (parsed.all === true && result.hasMore) {
 }
 ```
 
-Cursor-based pagination (M4 `item list` via `items_page`) gets its
-own walker — the §5.6 stale-cursor fail-fast contract doesn't apply
-to page-based reads.
+### 3a. Cursor-based collections: use `paginate`
+
+Cursor-based commands (`item list`, `item search`, `item find` —
+anything via `items_page` → `next_items_page`) go through the
+cursor walker in `src/api/pagination.ts`:
+
+```ts
+const result = await paginate<unknown, InitialResponse | NextResponse>({
+  fetchInitial: (effectiveLimit) => client.raw<InitialResponse>(
+    QUERY,
+    { ..., limit: effectiveLimit },
+    { operationName: 'X' },
+  ),
+  fetchNext: (cursor, effectiveLimit) => client.raw<NextResponse>(
+    NEXT_QUERY,
+    { cursor, limit: effectiveLimit },
+    { operationName: 'XNext' },
+  ),
+  extractPage: (r) => /* shape into { cursor, items } */,
+  getId: idFromRawItem,
+  now: ctx.clock,                 // injected for deterministic
+                                  // stale-cursor age tests
+  all: parsed.all === true,
+  ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+  pageSize: parsed.pageSize ?? DEFAULT_PAGE_SIZE,
+  // For NDJSON streaming:
+  // onItem: (raw) => stdout.write(JSON.stringify(redact(project(raw))) + '\n'),
+});
+```
+
+Hard rules:
+
+- **`fetchInitial` / `fetchNext` MUST honour `effectiveLimit`** —
+  the walker passes `min(pageSize, remainingBudget)` so Monday's
+  cursor advances over exactly the rows the walker emits. Passing a
+  larger constant `limit:` corrupts cursor state on `--limit <
+  pageSize` resume (Codex M4 pass-2 §1).
+- **`now: ctx.clock` is mandatory** — the §5.6 stale-cursor age
+  computation uses this. Wall-clock breaks deterministic tests and
+  can give wrong answers if the system clock skews mid-walk.
+- **Don't catch `stale_cursor` and retry.** §5.6 forbids it
+  (silent re-issue can duplicate or skip rows). The walker enriches
+  the error with `details.cursor_age_seconds /
+  items_returned_so_far / last_item_id` and re-throws; the runner's
+  catch-all surfaces the §6.5 envelope.
 
 ### 4. Register
 
@@ -178,8 +231,13 @@ The pyramid:
   `run({ transport: FixtureTransport })` end-to-end. Each command
   needs at least: happy path, one error code per noun (M2's pattern
   — `unauthorized` via HTTP 401 also pins the
-  `--api-version 2026-04` → error envelope meta agreement), parse-
-  boundary `usage_error` for any non-trivial input shape.
+  `--api-version 2026-04` → error envelope meta agreement, including
+  on pre-`resolveClient` `usage_error` paths via the program's
+  preAction hook — Codex M4 pass-2 §3), parse-boundary `usage_error`
+  for any non-trivial input shape. Shared scaffolding lives in
+  `tests/integration/helpers.ts` (M4 R6 — `baseOptions / drive /
+  EnvelopeShape / parseEnvelope / assertEnvelopeContract`); new test
+  files import from there.
 - `tests/e2e/<area>.test.ts` — spawn the compiled binary against
   the in-process fixture HTTP server (`tests/e2e/fixture-server.ts`)
   for one command per noun. M3's E2E suite lives in
