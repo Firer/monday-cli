@@ -93,15 +93,24 @@ jobs:
           mkdir -p /tmp/monday-cli-pack-test
           cd /tmp/monday-cli-pack-test
           tar -xzf "$GITHUB_WORKSPACE/${{ steps.pack.outputs.tarball }}"
-          # The tarball extracts into ./package — verify the bin
-          # entry resolves and the binary actually runs.
-          node package/dist/cli/index.js --version
-          node package/dist/cli/index.js --help
-          # The published tarball must be self-contained: the bin
-          # must work when invoked from a fresh dir with the runtime
-          # deps installed. --ignore-scripts skips the `prepare`
-          # hook that would re-run `tsc` (devDep, not present here);
-          # the tarball already ships dist/.
+          # The tarball extracts into ./package. `npm pack` tarballs
+          # don't (and shouldn't) include node_modules, and the bin
+          # imports commander at startup — so we have to install
+          # runtime deps before the bin can run at all. The
+          # post-install invocation pulls double duty:
+          #   1. "bin entry resolves" — a future change that drops
+          #      dist/ from package.json "files" surfaces here as
+          #      `Cannot find module '.../dist/cli/index.js'`,
+          #      which is distinct from the missing-package error
+          #      you'd see if a runtime dep was unlisted.
+          #   2. "runtime dep set is complete" — installing with
+          #      --omit=dev catches a refactor that accidentally
+          #      imports a devDep on a runtime path, before it
+          #      reaches end users.
+          # --ignore-scripts skips the `prepare` hook that would
+          # re-run `tsc` (devDep, not present here); the tarball
+          # already ships dist/.
           cd package
           npm install --omit=dev --ignore-scripts --no-package-lock --silent
           node dist/cli/index.js --version
+          node dist/cli/index.js --help
