@@ -430,12 +430,19 @@ describe('translateColumnValue — dropdown (rich)', () => {
     });
   });
 
-  it('one safe + one unsafe ID in mixed input still throws', () => {
+  it('one safe + one unsafe ID in mixed input still throws (with the safe-integer message)', () => {
     // The all-numeric branch maps each segment; the first unsafe
     // segment short-circuits with usage_error. Pinned so a future
-    // "filter unsafe and continue" refactor surfaces loudly.
+    // "filter unsafe and continue" refactor surfaces loudly. The
+    // message regex is the same one the standalone unsafe-ID test
+    // uses so a wrong usage_error path (e.g. an empty-input throw
+    // happening to fire on the same input) cannot satisfy this
+    // assertion. Codex review pass-2 finding.
     const huge = '9'.repeat(20);
     expect(() => translate('dropdown', `1,${huge}`, 'tags')).toThrow(UsageError);
+    expect(() => translate('dropdown', `1,${huge}`, 'tags')).toThrow(
+      /exceeds JavaScript's safe-integer range/u,
+    );
   });
 });
 

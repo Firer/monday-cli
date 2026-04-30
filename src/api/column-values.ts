@@ -108,15 +108,22 @@ export interface TranslateColumnValueInputs {
  * Translates a single `<column>=<value>` pair into the Monday wire
  * payload. Throws `ApiError('unsupported_column_type')` for any
  * column type not in the v0.1 friendly-translator allowlist —
- * including allowlisted-but-not-yet-implemented types in this
- * skeleton. The error carries `column_id`, `type`, and a literal
- * `--set-raw` example so an agent that hits an unsupported type
- * can paste a working command without consulting Monday's docs.
+ * including allowlisted-but-not-yet-implemented types. The error
+ * carries `column_id`, `type`, and a literal `--set-raw` example
+ * so an agent that hits an unsupported type can paste a working
+ * command without consulting Monday's docs.
  *
  * **Throws** `ApiError`:
  *   - `unsupported_column_type` — type not in the friendly
- *     allowlist, or in the allowlist but awaiting M5a implementation
- *     (status / dropdown / date / people, currently).
+ *     allowlist, or in the allowlist but awaiting M5a follow-up
+ *     (`date` / `people`, currently).
+ *
+ * **Throws** `UsageError`:
+ *   - `usage_error` — for status / dropdown numeric input that
+ *     exceeds `Number.MAX_SAFE_INTEGER`, or for dropdown input
+ *     that contains no labels and no IDs after trim + filter.
+ *     See `unsafeIntegerError` and the dropdown empty-input
+ *     branch for the documented messages.
  */
 export const translateColumnValue = (
   inputs: TranslateColumnValueInputs,
@@ -294,18 +301,28 @@ const unsafeIntegerError = (
   raw: string,
 ): UsageError => {
   const titled = columnType === 'status' ? 'Status' : 'Dropdown';
+  // status uses indexes ("first label is index 0"); dropdown uses
+  // numeric IDs from settings_str.labels[].id. Different word in
+  // the message so an agent doesn't see "smaller ID" on a status
+  // column where the concept is "index", not "ID".
   const noun = columnType === 'status' ? 'indexes' : 'IDs';
+  const smaller = columnType === 'status' ? 'a smaller index' : 'a smaller ID';
+  // Hints interpolate the actual `columnId` so an agent can
+  // paste-and-edit. Status hint uses the literal word "label"
+  // because the label-vs-index split lives in cli-design.md §5.3
+  // step 3; dropdown hint shows both the labels and IDs forms.
   const hint =
     columnType === 'status'
-      ? 'use a status label (e.g. --set status=Done) or an index < 2^53'
-      : 'use dropdown labels (--set tags=Backend,Frontend) or IDs < 2^53';
+      ? `use a status label (e.g. --set ${columnId}=Done) or an index < 2^53`
+      : `use dropdown labels (e.g. --set ${columnId}=Backend,Frontend) ` +
+        `or IDs < 2^53`;
   return new UsageError(
     `${titled} column "${columnId}" got numeric input "${raw}" that ` +
-      `exceeds JavaScript's safe-integer range (2^53 - 1). Number(raw) ` +
-      `would lose precision or yield Infinity, corrupting the wire ` +
-      `shape. Monday's ${columnType} ${noun} are small non-negative ` +
-      `integers — pass a label, a smaller ID, or --set-raw to bypass ` +
-      `the translator entirely.`,
+      `exceeds JavaScript's safe-integer range (2^53 - 1, i.e. ` +
+      `9007199254740991). Number(raw) would lose precision or yield ` +
+      `Infinity, corrupting the wire shape. Monday's ${columnType} ` +
+      `${noun} are small non-negative integers — pass a label, ` +
+      `${smaller}, or --set-raw to bypass the translator entirely.`,
     {
       details: {
         column_id: columnId,
