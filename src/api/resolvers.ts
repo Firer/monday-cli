@@ -37,7 +37,7 @@ import {
   DEFAULT_CACHE_TTL_SECONDS,
 } from './cache.js';
 import type { MondayClient } from './client.js';
-import type { UserId } from '../types/ids.js';
+import { DECIMAL_USER_ID_PATTERN, type UserId } from '../types/ids.js';
 
 const normalise = (s: string): string =>
   s.normalize('NFC').trim().replace(/\s+/gu, ' ');
@@ -201,19 +201,15 @@ const resolveMulti = <T>(
  * `"1e3"` / `"42 "` into the directory cache where they'd silently
  * corrupt every later consumer's `Number(id)` conversion.
  *
- * The same regex shape lives in `api/people.ts`'s
- * `DECIMAL_NON_NEGATIVE` (which validates AT the translator's
- * boundary as a defence-in-depth layer per Codex review pass-1
- * finding F2). Tightening the schema here means the translator's
- * defence rarely fires for a real Monday response — only on
- * resolver-wiring bugs or directly-constructed `UserByEmail` mocks.
- * Codex pass-2 finding.
+ * The validating regex (`DECIMAL_USER_ID_PATTERN`, `src/types/
+ * ids.ts`) is also imported by `api/people.ts`'s `idStringToNumber`
+ * for a defence-in-depth check at the translator boundary — same
+ * rule, two layers (R16 consolidated the two prior verbatim copies
+ * onto a single source of truth).
  */
-const USER_ID_PATTERN = /^(0|[1-9]\d*)$/u;
-
 const userDirectoryEntrySchema = z
   .object({
-    id: z.string().regex(USER_ID_PATTERN, {
+    id: z.string().regex(DECIMAL_USER_ID_PATTERN, {
       message: 'user id must be a decimal non-negative integer string',
     }),
     name: z.string(),

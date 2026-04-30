@@ -296,7 +296,7 @@ describe('userByEmail — directory cache + live fallback', () => {
       // directory cache where they'd silently corrupt every later
       // consumer's `Number(id)` conversion. The translator's
       // defence-in-depth helper (parsePeopleInput's
-      // DECIMAL_NON_NEGATIVE check) catches the wire path, but the
+      // DECIMAL_USER_ID_PATTERN check) catches the wire path, but the
       // cache poisoning would still affect any future consumer.
       // Tightened the schema to use the same regex; pin via test
       // that malformed IDs from the live fetch fail to parse.

@@ -39,6 +39,7 @@ import {
 } from '../../api/board-metadata.js';
 import { parseWhereSyntax, type WhereClause } from '../../api/filters.js';
 import { resolveColumn, type ColumnMatch } from '../../api/columns.js';
+import { isMeToken } from '../../api/me-token.js';
 import { ApiError } from '../../utils/errors.js';
 import {
   DEFAULT_PAGE_SIZE,
@@ -228,15 +229,12 @@ const buildColumnQueries = async (
       throw new UsageError(`internal: missing value for ${clause.raw}`);
     }
     let value = clause.value;
-    // Case-insensitive `me` matching mirrors filters.ts (`item list
-    // --where`) and api/people.ts (`--set Owner=me`) — one rule
-    // across all three surfaces per cli-design §5.3 step 3 line
-    // 704-707. Codex review pass-2 finding: pass 1 fixed
-    // filters.ts but this surface was overlooked.
-    if (
-      match.column.type === 'people' &&
-      value.trim().toLowerCase() === 'me'
-    ) {
+    // `isMeToken` is the shared (`api/me-token.ts`, R15) recogniser
+    // used by all three `me`-aware surfaces — `--where Owner=me`
+    // in filters.ts, `--set Owner=me` in api/people.ts, and this
+    // search-side filter. One rule across read filters and `--set`
+    // writes per cli-design §5.3 step 3 line 704-707.
+    if (match.column.type === 'people' && isMeToken(value)) {
       value = await me();
     }
     const existing = byColumn.get(match.column.id);

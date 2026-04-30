@@ -57,6 +57,7 @@
 import { z } from 'zod';
 import { ApiError, UsageError } from '../utils/errors.js';
 import { resolveColumn, type ColumnMatch } from './columns.js';
+import { isMeToken } from './me-token.js';
 import type { BoardColumn, BoardMetadata } from './board-metadata.js';
 import type { Warning } from '../utils/output/envelope.js';
 
@@ -400,13 +401,15 @@ const resolveCompareValue = async (
   // surfaces as Monday's validation_failed rather than a silent
   // identity swap.
   //
-  // Case-insensitive matching mirrors the people *write* surface
-  // (`api/people.ts`'s `parsePeopleInput`) so an agent's
-  // `--where Owner=ME` resolves the same as `--set Owner=ME` —
-  // one `me` rule across read filters and `--set` writes per
-  // cli-design §5.3 step 3 line 704-707. Codex pass-1 finding.
-  const meTokens = ['me'];
-  if (column.type === 'people' && meTokens.includes(rawValue.trim().toLowerCase())) {
+  // `isMeToken` is the shared (`api/me-token.ts`, R15) recogniser
+  // used by all three `me`-aware surfaces — `--where Owner=me`
+  // here, `item search --where Owner=me` in commands/item/search.ts,
+  // and `--set Owner=me` in api/people.ts. One rule across read
+  // filters and `--set` writes per cli-design §5.3 step 3 line
+  // 704-707. cli-design doesn't pin case-sensitivity explicitly;
+  // the people-session Codex passes settled on case-insensitive
+  // (logged as a v0.1-plan §3 M5a spec gap for backfill).
+  if (column.type === 'people' && isMeToken(rawValue)) {
     const id = await resolveMe();
     return wrapForOperator([id], operator);
   }

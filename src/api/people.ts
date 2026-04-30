@@ -44,9 +44,21 @@
  * "personsAndTeams": [{"id": 12345, "kind": "person"}]}'` so
  * agents that already have a user ID can paste-and-edit. cli-
  * design doesn't say either way; logged as a spec gap.
+ *
+ * **Shared seams.** `isMeToken` lives in `src/api/me-token.ts`
+ * (R15) — same helper backs `--where Owner=me` (filters.ts) and
+ * `item search --where Owner=me` (commands/item/search.ts).
+ * `DECIMAL_USER_ID_PATTERN` lives in `src/types/ids.ts` (R16) —
+ * same regex backs the resolver-side `userDirectoryEntrySchema`
+ * brand in resolvers.ts. Both lifts replaced verbatim copies that
+ * had drifted independently across the people-session Codex
+ * passes; consolidating the source of truth prevents the next
+ * drift outright.
  */
 
 import { ApiError, UsageError } from '../utils/errors.js';
+import { DECIMAL_USER_ID_PATTERN } from '../types/ids.js';
+import { isMeToken } from './me-token.js';
 
 /**
  * Wire payload shape for a `people` column. Matches Monday's
@@ -180,15 +192,6 @@ export const parsePeopleInput = async (
 };
 
 /**
- * Case-insensitive `me` recognition. cli-design.md §5.3 step 3
- * line 704-707 says `--set Owner=me` resolves to the connected
- * user — the translator is generous with case (`ME` / `Me` /
- * `mE` all match) so an agent's all-caps shouting style works
- * the same as a filter's `--where owner=me`. Pinned via test.
- */
-const isMeToken = (token: string): boolean => token.toLowerCase() === 'me';
-
-/**
  * Non-negative integer: matches `0`, `42`, `1234567` but not `-1`,
  * `0.5`, `1e3`. Used to gate numeric-token rejection on people
  * input. Same regex `column-values.ts` uses for status indexes /
@@ -203,7 +206,8 @@ const NON_NEGATIVE_INTEGER = /^\d+$/u;
  * number for the `personsAndTeams[].id` wire field. Two layers
  * of validation, both required:
  *
- *   1. **Decimal-shape regex** (`DECIMAL_NON_NEGATIVE`). `Number()`
+ *   1. **Decimal-shape regex** (`DECIMAL_USER_ID_PATTERN` from
+ *      `src/types/ids.ts`, R16-shared). `Number()`
  *      alone accepts hex (`"0x2a"` → 42), scientific notation
  *      (`"1e3"` → 1000), empty strings (`""` → 0), and signed
  *      forms (`"-1"` → -1) — none of which are valid Monday user
@@ -223,7 +227,7 @@ const NON_NEGATIVE_INTEGER = /^\d+$/u;
  * shows which email/me-token resolved to the unsafe ID.
  */
 const idStringToNumber = (id: string, columnId: string, token: string): number => {
-  if (!DECIMAL_NON_NEGATIVE.test(id)) {
+  if (!DECIMAL_USER_ID_PATTERN.test(id)) {
     // Resolver returned something that isn't a decimal non-negative
     // integer string. This is a data-integrity problem with the
     // directory, not a user-input fault — surface as internal_error
@@ -271,21 +275,6 @@ const idStringToNumber = (id: string, columnId: string, token: string): number =
   return parsed;
 };
 
-/**
- * Decimal non-negative integer string: matches `0`, `42`,
- * `1234567`. Rejects `"-1"` (signed), `"0x2a"` (hex), `"1e3"`
- * (scientific), `""` (empty), `"01"` (leading zeros — defensible
- * to allow but Monday's IDs don't have them, so the strict shape
- * catches data corruption sooner). Used by `idStringToNumber` as
- * the resolver-output validator.
- *
- * Note this is intentionally stricter than `NON_NEGATIVE_INTEGER`
- * (which accepts `"00042"`) — the input-side regex is forgiving
- * because users type sloppy numbers; the resolver-side regex is
- * strict because the directory should never return `"00042"` for
- * a real user.
- */
-const DECIMAL_NON_NEGATIVE = /^(0|[1-9]\d*)$/u;
 
 /**
  * Builds the `usage_error` for empty input — no emails, no `me`,
