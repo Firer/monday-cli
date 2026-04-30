@@ -9,9 +9,7 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
-import { ApiError } from '../../utils/errors.js';
+import { runByIdLookup } from '../run-by-id-lookup.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 
@@ -53,10 +51,6 @@ export type BoardGetOutput = z.infer<typeof boardGetOutputSchema>;
 
 const inputSchema = z.object({ boardId: BoardIdSchema }).strict();
 
-interface RawBoards {
-  readonly boards: readonly unknown[] | null;
-}
-
 export const boardGetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   BoardGetOutput
@@ -81,26 +75,16 @@ export const boardGetCommand: CommandModule<
       )
       .action(async (boardId: unknown) => {
         const parsed = parseArgv(boardGetCommand.inputSchema, { boardId });
-        const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<RawBoards>(
-          BOARD_GET_QUERY,
-          { ids: [parsed.boardId] },
-          { operationName: 'BoardGet' },
-        );
-        const first = response.data.boards?.[0];
-        if (first === undefined || first === null) {
-          throw new ApiError(
-            'not_found',
-            `Monday returned no board for id ${parsed.boardId}`,
-            { details: { board_id: parsed.boardId } },
-          );
-        }
-        emitSuccess({
+        await runByIdLookup({
           ctx,
-          data: boardGetCommand.outputSchema.parse(first),
-          schema: boardGetCommand.outputSchema,
           programOpts: program.opts(),
-          ...toEmit(response),
+          query: BOARD_GET_QUERY,
+          operationName: 'BoardGet',
+          collectionKey: 'boards',
+          id: parsed.boardId,
+          errorDetailKey: 'board_id',
+          kind: 'board',
+          schema: boardGetCommand.outputSchema,
         });
       });
   },

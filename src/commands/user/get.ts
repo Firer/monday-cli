@@ -5,9 +5,7 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
-import { ApiError } from '../../utils/errors.js';
+import { runByIdLookup } from '../run-by-id-lookup.js';
 import { UserIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 
@@ -57,10 +55,6 @@ export type UserGetOutput = z.infer<typeof userGetOutputSchema>;
 
 const inputSchema = z.object({ userId: UserIdSchema }).strict();
 
-interface RawUsers {
-  readonly users: readonly unknown[] | null;
-}
-
 export const userGetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   UserGetOutput
@@ -82,26 +76,16 @@ export const userGetCommand: CommandModule<
       )
       .action(async (userId: unknown) => {
         const parsed = parseArgv(userGetCommand.inputSchema, { userId });
-        const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<RawUsers>(
-          USER_GET_QUERY,
-          { ids: [parsed.userId] },
-          { operationName: 'UserGet' },
-        );
-        const first = response.data.users?.[0];
-        if (first === undefined) {
-          throw new ApiError(
-            'not_found',
-            `Monday returned no user for id ${parsed.userId}`,
-            { details: { user_id: parsed.userId } },
-          );
-        }
-        emitSuccess({
+        await runByIdLookup({
           ctx,
-          data: userGetCommand.outputSchema.parse(first),
-          schema: userGetCommand.outputSchema,
           programOpts: program.opts(),
-          ...toEmit(response),
+          query: USER_GET_QUERY,
+          operationName: 'UserGet',
+          collectionKey: 'users',
+          id: parsed.userId,
+          errorDetailKey: 'user_id',
+          kind: 'user',
+          schema: userGetCommand.outputSchema,
         });
       });
   },

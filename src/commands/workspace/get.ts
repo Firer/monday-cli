@@ -10,9 +10,7 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
-import { ApiError } from '../../utils/errors.js';
+import { runByIdLookup } from '../run-by-id-lookup.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 
@@ -70,10 +68,6 @@ const inputSchema = z
   })
   .strict();
 
-interface RawWorkspaces {
-  readonly workspaces: readonly unknown[] | null;
-}
-
 export const workspaceGetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   WorkspaceGetOutput
@@ -98,26 +92,16 @@ export const workspaceGetCommand: CommandModule<
       )
       .action(async (workspaceId: unknown) => {
         const parsed = parseArgv(workspaceGetCommand.inputSchema, { workspaceId });
-        const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<RawWorkspaces>(
-          WORKSPACE_GET_QUERY,
-          { ids: [parsed.workspaceId] },
-          { operationName: 'WorkspaceGet' },
-        );
-        const first = response.data.workspaces?.[0];
-        if (first === undefined || first === null) {
-          throw new ApiError(
-            'not_found',
-            `Monday returned no workspace for id ${parsed.workspaceId}`,
-            { details: { workspace_id: parsed.workspaceId } },
-          );
-        }
-        emitSuccess({
+        await runByIdLookup({
           ctx,
-          data: workspaceGetCommand.outputSchema.parse(first),
-          schema: workspaceGetCommand.outputSchema,
           programOpts: program.opts(),
-          ...toEmit(response),
+          query: WORKSPACE_GET_QUERY,
+          operationName: 'WorkspaceGet',
+          collectionKey: 'workspaces',
+          id: parsed.workspaceId,
+          errorDetailKey: 'workspace_id',
+          kind: 'workspace',
+          schema: workspaceGetCommand.outputSchema,
         });
       });
   },

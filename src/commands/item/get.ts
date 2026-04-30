@@ -11,9 +11,7 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
-import { ApiError } from '../../utils/errors.js';
+import { runByIdLookup } from '../run-by-id-lookup.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import {
@@ -51,10 +49,6 @@ export type ItemGetOutput = ProjectedItem;
 
 const inputSchema = z.object({ itemId: ItemIdSchema }).strict();
 
-interface RawItems {
-  readonly items: readonly unknown[] | null;
-}
-
 export const itemGetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemGetOutput
@@ -79,28 +73,20 @@ export const itemGetCommand: CommandModule<
       )
       .action(async (itemId: unknown) => {
         const parsed = parseArgv(itemGetCommand.inputSchema, { itemId });
-        const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<RawItems>(
-          ITEM_GET_QUERY,
-          { ids: [parsed.itemId] },
-          { operationName: 'ItemGet' },
-        );
-        const first = response.data.items?.[0];
-        if (first === undefined || first === null) {
-          throw new ApiError(
-            'not_found',
-            `Monday returned no item for id ${parsed.itemId}`,
-            { details: { item_id: parsed.itemId } },
-          );
-        }
-        const raw = rawItemSchema.parse(first);
-        const data = projectItem({ raw });
-        emitSuccess({
+        await runByIdLookup({
           ctx,
-          data,
-          schema: itemGetCommand.outputSchema,
           programOpts: program.opts(),
-          ...toEmit(response),
+          query: ITEM_GET_QUERY,
+          operationName: 'ItemGet',
+          collectionKey: 'items',
+          id: parsed.itemId,
+          errorDetailKey: 'item_id',
+          kind: 'item',
+          schema: itemGetCommand.outputSchema,
+          // Item-specific projection: parse the raw GraphQL element
+          // through the wider rawItemSchema first, then derive the
+          // §6.2 typed column shape via projectItem.
+          project: (raw) => projectItem({ raw: rawItemSchema.parse(raw) }),
         });
       });
   },

@@ -6,9 +6,7 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
-import { ApiError } from '../../utils/errors.js';
+import { runByIdLookup } from '../run-by-id-lookup.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 
@@ -76,10 +74,6 @@ export type UpdateGetOutput = z.infer<typeof updateGetOutputSchema>;
 
 const inputSchema = z.object({ updateId: UpdateIdSchema }).strict();
 
-interface RawUpdates {
-  readonly updates: readonly unknown[] | null;
-}
-
 export const updateGetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   UpdateGetOutput
@@ -101,26 +95,16 @@ export const updateGetCommand: CommandModule<
       )
       .action(async (updateId: unknown) => {
         const parsed = parseArgv(updateGetCommand.inputSchema, { updateId });
-        const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<RawUpdates>(
-          UPDATE_GET_QUERY,
-          { ids: [parsed.updateId] },
-          { operationName: 'UpdateGet' },
-        );
-        const first = response.data.updates?.[0];
-        if (first === undefined) {
-          throw new ApiError(
-            'not_found',
-            `Monday returned no update for id ${parsed.updateId}`,
-            { details: { update_id: parsed.updateId } },
-          );
-        }
-        emitSuccess({
+        await runByIdLookup({
           ctx,
-          data: updateGetCommand.outputSchema.parse(first),
-          schema: updateGetCommand.outputSchema,
           programOpts: program.opts(),
-          ...toEmit(response),
+          query: UPDATE_GET_QUERY,
+          operationName: 'UpdateGet',
+          collectionKey: 'updates',
+          id: parsed.updateId,
+          errorDetailKey: 'update_id',
+          kind: 'update',
+          schema: updateGetCommand.outputSchema,
         });
       });
   },
