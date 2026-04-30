@@ -1603,6 +1603,36 @@ describe('monday item set (integration, M5b)', () => {
       },
     );
     expect(out.exitCode).toBe(0);
+    // Pass-2 minor: assert resolved_ids on the simple-mutation path
+    // too (F1 was originally only pinned via the rich path).
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ text_1: 'text_1' });
+  });
+
+  it('F1: resolved_ids keys by agent-supplied token (id:status_4 input echoes the explicit prefix)', async () => {
+    // Pass-2 minor: pin the resolved_ids slot's key/value semantics
+    // so a future swap (key by column ID instead of token) fails
+    // loudly. Agent input was `id:status_4`; resolved column ID is
+    // `status_4`. The slot keys by the verbatim agent token.
+    const out = await drive(
+      ['item', 'set', '12345', 'id:status_4=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: updatedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ 'id:status_4': 'status_4' });
   });
 
   it('live: column_not_found surfaces typed error envelope (exit 2)', async () => {
@@ -2174,6 +2204,44 @@ describe('monday item set (integration, M5b)', () => {
         (w) => w.code === 'stale_cache_refreshed',
       ),
     ).toBe(true);
+  });
+
+  it('F3 (pass-2): malformed board.id in lookup response surfaces typed internal_error', async () => {
+    // Pass-2 tightening: pre-fix the lookup schema validated
+    // board.id as `z.string().min(1)`, so a payload like
+    // `{ board: { id: "not-a-board-id" } }` slipped past and hit
+    // `BoardIdSchema.parse` in loadBoardMetadata as a raw ZodError.
+    // Now the schema brands board.id with BoardIdSchema so the
+    // failing field path lands on details.issues at the lookup
+    // boundary.
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: {
+                items: [
+                  { id: '12345', board: { id: 'not-a-board-id' } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { issues?: readonly { path: string }[] };
+      };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    const issues = env.error?.details?.issues ?? [];
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((i) => i.path.includes('board.id'))).toBe(true);
   });
 
   it('F3: malformed ItemBoardLookup response surfaces typed internal_error (Codex pass-1)', async () => {

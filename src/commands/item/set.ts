@@ -124,13 +124,19 @@ const CHANGE_COLUMN_VALUE_MUTATION = `
 // parse`, contrary to validation.md "Never bubble raw ZodError
 // out of a parse boundary". Now the parse boundary lives at the
 // item-set entry point with `unwrapOrThrow`.
+//
+// Pass-2 finding: validate id-shaped fields with the branded
+// schemas (BoardIdSchema / ItemIdSchema) — a `z.string().min(1)`
+// would let `"not-a-board-id"` through, escaping the parse
+// boundary and surfacing downstream as a raw ZodError from
+// `BoardIdSchema.parse` in `loadBoardMetadata`.
 const boardLookupResponseSchema = z
   .object({
     items: z
       .array(
         z.object({
-          id: z.string().min(1),
-          board: z.object({ id: z.string().min(1) }).nullable(),
+          id: ItemIdSchema,
+          board: z.object({ id: BoardIdSchema }).nullable(),
         }),
       )
       .nullable(),
