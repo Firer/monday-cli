@@ -1,22 +1,20 @@
 import { Command, CommanderError } from 'commander';
 import {
-  buildError,
-  buildMeta,
-  type Meta,
-} from '../utils/output/envelope.js';
-import {
-  InternalError,
-  MondayCliError,
-  UsageError,
   exitCodeForError,
   type AbortReason,
   type ExitCode,
 } from '../utils/errors.js';
-import { redact } from '../utils/redact.js';
 import {
   defaultRequestIdGenerator,
   type RequestIdGenerator,
 } from '../utils/request-id.js';
+import {
+  buildBaseMeta,
+  createMetaBuilder,
+  toMondayError,
+  writeErrorEnvelope,
+  type MetaBuilder,
+} from './envelope-out.js';
 import type { Transport } from '../api/transport.js';
 import { getCommandRegistry } from '../commands/index.js';
 import type { CommandModule } from '../commands/types.js';
@@ -101,100 +99,15 @@ export interface RunContext {
    */
   readonly signal: AbortSignal;
   /**
-   * Pre-throw meta hint. Actions that resolve their `api_version`
-   * (post-flag override) and intend a live API call call this
-   * *before* the network goes out — so an error envelope on the
-   * sad path still carries the right `meta.api_version` and
-   * `source: "live"` instead of the runner's defaults. Codex M2
-   * review §2: without this, `--api-version 2026-04 account whoami`
-   * failing with HTTP 401 produced an error envelope claiming
-   * `api_version: "2026-01"` / `source: "none"`.
-   *
-   * Any field passed wins over the runner's default; calling more
-   * than once is fine — fields merge (last write wins per key).
+   * Action-resolved meta for both the success and error paths.
+   * Network commands call `ctx.meta.setApiVersion(v)` /
+   * `ctx.meta.setSource('live')` once they've resolved the values
+   * the request will carry; an error envelope on the sad path then
+   * reports the same `api_version` / `source` a success envelope
+   * would. See `envelope-out.ts` for the rationale (M2.5 R2).
    */
-  readonly setMetaHint: (hint: MetaHint) => void;
+  readonly meta: MetaBuilder;
 }
-
-/** Action-supplied overrides for the error-path envelope's meta. */
-export interface MetaHint {
-  readonly apiVersion?: string;
-  readonly source?: 'live' | 'cache' | 'mixed' | 'none';
-}
-
-/** Internal extension of `RunContext` with envelope-building bits. */
-interface InternalContext extends RunContext {
-  readonly retrievedAt: string;
-  /**
-   * Mutable: the runner reads from here when an action throws so
-   * the error envelope reflects what *would* have been on a
-   * success envelope's meta. The action contributes via
-   * `setMetaHint(...)`.
-   */
-  readonly metaHint: { apiVersion?: string; source?: MetaHint['source'] };
-}
-
-/**
- * Collects literal secret values to scrub. Read from `env` lazily —
- * `loadConfig()` populates `MONDAY_API_TOKEN` from `.env` *after* the
- * runner builds its context, so a snapshot at construction time would
- * miss tokens that exist only in the `.env` file (Codex review §1
- * follow-up). `options.env` is shared by reference with the runner;
- * re-reading at emit time observes any side-effecting load.
- */
-const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
-  const out: string[] = [];
-  const token = env.MONDAY_API_TOKEN;
-  if (token !== undefined && token.length > 0) {
-    out.push(token);
-  }
-  return out;
-};
-
-const buildBaseMeta = (ctx: InternalContext): Meta =>
-  buildMeta({
-    api_version:
-      ctx.metaHint.apiVersion ?? ctx.env.MONDAY_API_VERSION ?? '2026-01',
-    cli_version: ctx.cliVersion,
-    request_id: ctx.requestId,
-    source: ctx.metaHint.source ?? 'none',
-    retrieved_at: ctx.retrievedAt,
-    cache_age_seconds: null,
-  });
-
-const writeErrorEnvelope = (
-  err: MondayCliError,
-  ctx: InternalContext,
-): void => {
-  const envelope = buildError(err, buildBaseMeta(ctx));
-  // Re-read secrets at emit time, not at runner construction, so a
-  // token loaded from `.env` by `loadConfig()` mid-run is still in
-  // scope for the value-scan layer (Codex review §1 follow-up).
-  const redacted = redact(envelope, { secrets: collectSecrets(ctx.env) });
-  ctx.stderr.write(`${JSON.stringify(redacted, null, 2)}\n`);
-};
-
-const isCommanderError = (err: unknown): err is CommanderError =>
-  err instanceof CommanderError;
-
-const toMondayError = (err: unknown): MondayCliError => {
-  if (err instanceof MondayCliError) {
-    return err;
-  }
-  if (isCommanderError(err)) {
-    // Commander surfaces both --help/--version and parsing failures
-    // as CommanderError. The success-style ones carry exitCode 0;
-    // those aren't errors and we never reach this function with one.
-    if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
-      return new InternalError(`unexpected commander success: ${err.code}`);
-    }
-    return new UsageError(err.message);
-  }
-  if (err instanceof Error) {
-    return new InternalError(err.message, { cause: err });
-  }
-  return new InternalError('unknown error', { cause: err });
-};
 
 const isSigintReason = (reason: unknown): boolean => {
   if (typeof reason !== 'object' || reason === null) {
@@ -273,6 +186,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     options.requestIdGenerator ?? defaultRequestIdGenerator
   )();
   const clock = options.clock ?? (() => new Date());
+  const retrievedAt = clock().toISOString();
 
   // Internal abort controller, optionally combined with a caller-
   // supplied signal so either side can trigger shutdown. Commands
@@ -285,17 +199,9 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       ? internalAbort.signal
       : AbortSignal.any([options.signal, internalAbort.signal]);
 
-  const metaHint: { apiVersion?: string; source?: MetaHint['source'] } = {};
-  const setMetaHint = (hint: MetaHint): void => {
-    if (hint.apiVersion !== undefined) {
-      metaHint.apiVersion = hint.apiVersion;
-    }
-    if (hint.source !== undefined) {
-      metaHint.source = hint.source;
-    }
-  };
+  const meta = createMetaBuilder();
 
-  const ctx: InternalContext = {
+  const ctx: RunContext = {
     env: options.env,
     stdout: options.stdout,
     stderr: options.stderr,
@@ -306,9 +212,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     requestId,
     cliVersion: options.cliVersion,
     signal: combinedSignal,
-    setMetaHint,
-    retrievedAt: clock().toISOString(),
-    metaHint,
+    meta,
   };
 
   const program = buildProgram(options, ctx);
@@ -328,16 +232,24 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       return { exitCode: 130 };
     }
 
-    if (isCommanderError(err)) {
-      // commander.helpDisplayed / commander.version are success-style;
-      // treat them as exit 0 with no envelope.
-      if (err.exitCode === 0) {
-        return { exitCode: 0 };
-      }
+    // commander.helpDisplayed / commander.version are success-style;
+    // treat them as exit 0 with no envelope.
+    if (err instanceof CommanderError && err.exitCode === 0) {
+      return { exitCode: 0 };
     }
 
     const cliError = toMondayError(err);
-    writeErrorEnvelope(cliError, ctx);
+    writeErrorEnvelope(cliError, {
+      stderr: options.stderr,
+      env: options.env,
+      meta: buildBaseMeta({
+        snapshot: meta.snapshot(),
+        env: options.env,
+        cliVersion: options.cliVersion,
+        requestId,
+        retrievedAt,
+      }),
+    });
     return { exitCode: exitCodeForError(cliError.code) };
   }
 };

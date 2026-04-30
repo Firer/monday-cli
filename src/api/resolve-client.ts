@@ -77,12 +77,16 @@ export const resolveClient = (
     verbose: globalFlags.verbose,
   });
 
-  // Stash the resolved meta on the runner so an error envelope
-  // emitted by the catch-all carries the same api_version + source
-  // a success envelope would. Without this, `--api-version 2026-04
-  // account whoami` failing with HTTP 401 produced an error envelope
-  // claiming `api_version: "2026-01"` (Codex M2 review §2).
-  ctx.setMetaHint({ apiVersion, source: 'live' });
+  // Commit the resolved meta to the per-invocation builder so an
+  // error envelope emitted by the runner's catch-all carries the
+  // same api_version + source a success envelope would. Without
+  // this, `--api-version 2026-04 account whoami` failing with HTTP
+  // 401 produced an error envelope claiming `api_version: "2026-01"`
+  // (Codex M2 review §2). The builder replaced the M2-era
+  // `setMetaHint` callback in M2.5 R2 — same data flow, typed
+  // setters in place of an open record.
+  ctx.meta.setApiVersion(apiVersion);
+  ctx.meta.setSource('live');
 
   return { client, globalFlags, apiVersion };
 };

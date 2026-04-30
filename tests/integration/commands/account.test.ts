@@ -243,7 +243,7 @@ describe('monday account whoami (integration)', () => {
     // meta from env defaults so the error envelope claimed
     // api_version: "2026-01" / source: "none" even when the
     // action attempted a live call with --api-version 2026-04.
-    // The action now stashes a meta hint via ctx.setMetaHint
+    // The action now commits the resolved meta to ctx.meta
     // before the network goes out; the error path reads it.
     const out = await drive(
       ['--api-version', '2026-04', 'account', 'whoami', '--json'],
