@@ -26,22 +26,10 @@ import {
   loadBoardMetadata,
   type BoardColumn,
 } from '../../api/board-metadata.js';
-
-/**
- * v0.1 writable column types per `cli-design.md` §5.3 step 3 + §6.5
- * `unsupported_column_type`. Anything outside this allowlist gets
- * `example_set: null` + `unsupported: true` in `describe` output —
- * agents see immediately whether a `--set` call would work.
- */
-const WRITABLE_TYPES = new Set<string>([
-  'text',
-  'long_text',
-  'numbers',
-  'status',
-  'dropdown',
-  'date',
-  'people',
-]);
+import {
+  isWritableColumnType,
+  parseColumnSettings,
+} from '../../api/column-types.js';
 
 interface StatusSettings {
   readonly labels?: Readonly<Record<string, string>>;
@@ -51,15 +39,6 @@ interface DropdownSettings {
   readonly labels?: readonly { readonly id: number; readonly name: string }[];
 }
 
-const tryParse = (raw: string | null): unknown => {
-  if (raw === null || raw.length === 0) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
-
 /**
  * Exported for unit testing. Produces a per-column suggestion list
  * the agent can copy-paste as `--set` flags. Returns `null` for
@@ -67,7 +46,7 @@ const tryParse = (raw: string | null): unknown => {
  * round-trip" can be asserted.
  */
 export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
-  if (!WRITABLE_TYPES.has(column.type)) return null;
+  if (!isWritableColumnType(column.type)) return null;
   switch (column.type) {
     case 'text':
       return [`--set ${column.id}='Refactor login'`];
@@ -76,7 +55,7 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
     case 'numbers':
       return [`--set ${column.id}=42`];
     case 'status': {
-      const settings = (tryParse(column.settings_str) ?? {}) as StatusSettings;
+      const settings = (parseColumnSettings(column.settings_str) ?? {}) as StatusSettings;
       const labels = settings.labels ?? {};
       const labelEntries = Object.entries(labels);
       if (labelEntries.length === 0) {
@@ -102,7 +81,7 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
       ];
     }
     case 'dropdown': {
-      const settings = (tryParse(column.settings_str) ?? {}) as DropdownSettings;
+      const settings = (parseColumnSettings(column.settings_str) ?? {}) as DropdownSettings;
       const labels = settings.labels ?? [];
       if (labels.length === 0) {
         return [`--set ${column.id}='Backend,Frontend'`];
@@ -124,8 +103,9 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         `--set ${column.id}=alice@example.com`,
         `--set ${column.id}=me`,
       ];
-    /* c8 ignore next 2 — unreachable: WRITABLE_TYPES gates the entry,
-       so any column.type that lands here is one of the cases above. */
+    /* c8 ignore next 2 — unreachable: isWritableColumnType gates the
+       entry, so any column.type that lands here is one of the cases
+       above. */
     default:
       return null;
   }
@@ -252,8 +232,8 @@ export const boardDescribeCommand: CommandModule<
             description: c.description,
             archived: c.archived,
             width: c.width,
-            settings: tryParse(c.settings_str),
-            writable: WRITABLE_TYPES.has(c.type),
+            settings: parseColumnSettings(c.settings_str),
+            writable: isWritableColumnType(c.type),
             example_set: exampleSetForColumn(c),
           })),
           groups: groups.map((g) => ({
