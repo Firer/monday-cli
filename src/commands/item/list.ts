@@ -258,13 +258,12 @@ const initialFetcher = (
   client: MondayClient,
   boardId: string,
   group: string | undefined,
-  pageSize: number,
   queryParams: Readonly<Record<string, unknown>> | undefined,
-): (() => Promise<MondayResponse<InitialResponse>>) => {
-  return () => {
+): ((effectiveLimit: number) => Promise<MondayResponse<InitialResponse>>) => {
+  return (effectiveLimit) => {
     const variables: Record<string, unknown> = {
       boardId,
-      limit: pageSize,
+      limit: effectiveLimit,
     };
     if (queryParams !== undefined) {
       variables.queryParams = queryParams;
@@ -283,12 +282,11 @@ const initialFetcher = (
 
 const nextFetcher = (
   client: MondayClient,
-  pageSize: number,
-): ((cursor: string) => Promise<MondayResponse<NextResponse>>) => {
-  return (cursor) =>
+): ((cursor: string, effectiveLimit: number) => Promise<MondayResponse<NextResponse>>) => {
+  return (cursor, effectiveLimit) =>
     client.raw<NextResponse>(
       NEXT_ITEMS_PAGE_QUERY,
-      { cursor, limit: pageSize },
+      { cursor, limit: effectiveLimit },
       { operationName: 'NextItemsPage' },
     );
 };
@@ -509,8 +507,8 @@ export const itemListCommand: CommandModule<
             cacheAgeSeconds: effectiveCacheAge,
           });
           const result = await paginate<unknown, InitialResponse | NextResponse>({
-            fetchInitial: initialFetcher(client, parsed.board, parsed.group, pageSize, queryParams),
-            fetchNext: nextFetcher(client, pageSize),
+            fetchInitial: initialFetcher(client, parsed.board, parsed.group, queryParams),
+            fetchNext: nextFetcher(client),
             now: ctx.clock,
             extractPage: (r): PaginatedPage<unknown> => {
               if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
@@ -535,8 +533,9 @@ export const itemListCommand: CommandModule<
         // Non-streaming path — collect, project, emit through the
         // standard envelope.
         const result = await paginate<unknown, InitialResponse | NextResponse>({
-          fetchInitial: initialFetcher(client, parsed.board, parsed.group, pageSize, queryParams),
-          fetchNext: nextFetcher(client, pageSize),
+          fetchInitial: initialFetcher(client, parsed.board, parsed.group, queryParams),
+          fetchNext: nextFetcher(client),
+          now: ctx.clock,
           extractPage: (r): PaginatedPage<unknown> => {
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);

@@ -249,25 +249,23 @@ const buildColumnQueries = async (
 const initialFetcher = (
   client: MondayClient,
   boardId: string,
-  pageSize: number,
   columns: readonly ColumnQuery[],
-): (() => Promise<MondayResponse<InitialResponse>>) => {
-  return () =>
+): ((effectiveLimit: number) => Promise<MondayResponse<InitialResponse>>) => {
+  return (effectiveLimit) =>
     client.raw<InitialResponse>(
       ITEMS_PAGE_BY_COLUMN_VALUES_QUERY,
-      { boardId, limit: pageSize, columns },
+      { boardId, limit: effectiveLimit, columns },
       { operationName: 'ItemsByColumnValues' },
     );
 };
 
 const nextFetcher = (
   client: MondayClient,
-  pageSize: number,
-): ((cursor: string) => Promise<MondayResponse<NextResponse>>) => {
-  return (cursor) =>
+): ((cursor: string, effectiveLimit: number) => Promise<MondayResponse<NextResponse>>) => {
+  return (cursor, effectiveLimit) =>
     client.raw<NextResponse>(
       ITEMS_BY_COLUMN_VALUES_NEXT_QUERY,
-      { cursor, limit: pageSize },
+      { cursor, limit: effectiveLimit },
       { operationName: 'ItemsByColumnValuesNext' },
     );
 };
@@ -391,8 +389,8 @@ export const itemSearchCommand: CommandModule<
         const effectiveCacheAge = meta.cacheAgeSeconds;
 
         const result = await paginate<unknown, InitialResponse | NextResponse>({
-          fetchInitial: initialFetcher(client, parsed.board, pageSize, columns),
-          fetchNext: nextFetcher(client, pageSize),
+          fetchInitial: initialFetcher(client, parsed.board, columns),
+          fetchNext: nextFetcher(client),
           now: ctx.clock,
           extractPage: (r): PaginatedPage<unknown> => {
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);

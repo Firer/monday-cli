@@ -26,9 +26,17 @@
  * disambiguate — `--where Plan A=B=approved` splits on the *first*
  * `=` per §5.3 step 2.b, so the token resolves as `Plan A` and the
  * value is `B=approved`. This is documented behaviour, not a bug.
- * The escape hatch is the explicit `title:` / `id:` prefix or
- * `--filter-json`. The unit suite asserts the documented split
- * verbatim so a future "be clever about it" patch fails loudly.
+ * The `title:`/`id:` prefix doesn't help here either — `parseWhereSyntax`
+ * splits on the first operator before `parseColumnTokenPrefix`
+ * sees the token, so `title:Plan A=B=approved` still cleaves at
+ * the first `=`. The supported escape hatch for operator-in-title
+ * columns is `--filter-json`, where the agent passes the literal
+ * Monday `query_params` JSON; the rule's `column_id` is unambiguous
+ * and the value carries through verbatim. Codex M4 pass-2 §4
+ * surfaced this as a documentation backfill item — logged in
+ * v0.1-plan.md §3 M4 spec-gaps. The unit suite asserts the
+ * documented split verbatim so a future "be clever about it"
+ * patch fails loudly.
  *
  * **`me` sugar.** Per §5.5 + §5.3, `--where owner=me` against a
  * `people` column resolves through the directory cache to the

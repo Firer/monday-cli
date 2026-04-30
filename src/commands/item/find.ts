@@ -158,10 +158,9 @@ const initialFetcher = (
   client: MondayClient,
   boardId: string,
   group: string | undefined,
-  pageSize: number,
-): (() => Promise<MondayResponse<InitialResponse>>) => {
-  return () => {
-    const variables: Record<string, unknown> = { boardId, limit: pageSize };
+): ((effectiveLimit: number) => Promise<MondayResponse<InitialResponse>>) => {
+  return (effectiveLimit) => {
+    const variables: Record<string, unknown> = { boardId, limit: effectiveLimit };
     if (group !== undefined) {
       variables.groupId = group;
       return client.raw<InitialResponse>(ITEM_FIND_BY_GROUP_QUERY, variables, {
@@ -176,12 +175,11 @@ const initialFetcher = (
 
 const nextFetcher = (
   client: MondayClient,
-  pageSize: number,
-): ((cursor: string) => Promise<MondayResponse<NextResponse>>) => {
-  return (cursor) =>
+): ((cursor: string, effectiveLimit: number) => Promise<MondayResponse<NextResponse>>) => {
+  return (cursor, effectiveLimit) =>
     client.raw<NextResponse>(
       ITEM_FIND_NEXT_QUERY,
-      { cursor, limit: pageSize },
+      { cursor, limit: effectiveLimit },
       { operationName: 'ItemFindNext' },
     );
 };
@@ -246,8 +244,8 @@ export const itemFindCommand: CommandModule<
         // approximate "scan up to cap pages" by passing
         // limit = cap × pageSize.
         const result = await paginate<unknown, InitialResponse | NextResponse>({
-          fetchInitial: initialFetcher(client, parsed.board, parsed.group, pageSize),
-          fetchNext: nextFetcher(client, pageSize),
+          fetchInitial: initialFetcher(client, parsed.board, parsed.group),
+          fetchNext: nextFetcher(client),
           now: ctx.clock,
           extractPage: (r): PaginatedPage<unknown> => {
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);

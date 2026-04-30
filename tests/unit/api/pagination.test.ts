@@ -131,6 +131,34 @@ describe('paginate — --all walking', () => {
     expect(result.pagesFetched).toBe(2);
   });
 
+  it('shrinks the per-call limit to remaining budget (REGRESSION: Codex M4 pass-2 §1)', async () => {
+    // --limit=2, pageSize=100 should fetch with limit=2 on the
+    // initial call so Monday's cursor advances over only the
+    // emitted rows. Without this fix the walker would request 100,
+    // emit 2, and surface a cursor pointing past row 100 — agents
+    // resuming from that cursor skip rows 3-100.
+    const limits: number[] = [];
+    const result = await paginate({
+      fetchInitial: (effectiveLimit) => {
+        limits.push(effectiveLimit);
+        return Promise.resolve(respond('C2', ['1', '2']));
+      },
+      fetchNext: (_c, effectiveLimit) => {
+        limits.push(effectiveLimit);
+        return Promise.resolve(respond(null, []));
+      },
+      extractPage: project,
+      getId,
+      all: true,
+      limit: 2,
+      pageSize: 100,
+    });
+    expect(limits[0]).toBe(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.nextCursor).toBe('C2');
+    expect(result.hasMore).toBe(true);
+  });
+
   it('reports has_more=true when --limit truncates a terminal (cursor=null) page (REGRESSION: Codex M4 §3)', async () => {
     // Page returns 3 items + cursor=null (terminal). --limit=2
     // means the third item is unconsumed; even though Monday says

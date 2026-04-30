@@ -19,6 +19,8 @@
 
 import { Command } from 'commander';
 import { getCommandRegistry } from '../commands/index.js';
+import { parseGlobalFlags } from '../types/global-flags.js';
+import { PINNED_API_VERSION } from '../api/client.js';
 import type { RunContext, RunOptions } from './run.js';
 
 /**
@@ -100,6 +102,35 @@ export const buildProgram = (
     mod.attach(program, ctx);
   }
   options.registerCommands?.(program, ctx);
+
+  // Commit the resolved `--api-version` to the per-invocation meta
+  // builder BEFORE any subcommand action runs. The success path
+  // re-commits via `resolveClient`; this preAction hook covers the
+  // pre-`resolveClient` failure surface — `parseArgv` throwing a
+  // `UsageError` on a bad positional, or any other zod-rejection at
+  // the action boundary. Without this, `monday --api-version 2026-04
+  // item get bad-id --json` produced a usage_error envelope claiming
+  // `meta.api_version: "2026-01"` (the SDK pin), losing the
+  // `--api-version` agents passed (Codex M4 pass-2 §3).
+  //
+  // Resolution priority matches `resolveClient`: explicit flag > env
+  // > SDK pin. We don't load config here (that surfaces a separate
+  // `config_error` if the token is missing); the apiVersion override
+  // is independent of token resolution.
+  program.hook('preAction', () => {
+    try {
+      const flags = parseGlobalFlags(program.opts(), ctx.env);
+      const resolvedVersion =
+        flags.apiVersion ??
+        ctx.env.MONDAY_API_VERSION ??
+        PINNED_API_VERSION;
+      ctx.meta.setApiVersion(resolvedVersion);
+    } catch {
+      // Bad global-flag shape is already a usage_error path the
+      // runner's catch-all will surface; the preAction hook just
+      // tries best-effort.
+    }
+  });
 
   return program;
 };

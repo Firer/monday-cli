@@ -96,16 +96,22 @@ interface PageOutcome<T, R> {
 
 export interface PaginateInputs<T, R> {
   /**
-   * Issues the initial `items_page` request. Receives the page-
-   * size (variables shape is the caller's concern) and returns the
-   * typed Monday response.
+   * Issues the initial `items_page` request with the supplied
+   * effective limit. Variables shape is the caller's concern;
+   * `effectiveLimit` is the per-request `limit:` to send on the
+   * GraphQL query. Codex M4 pass-2 §1: when `--limit < pageSize`
+   * the walker shrinks the request to the remaining budget so
+   * Monday's cursor doesn't advance past un-emitted rows.
    */
-  readonly fetchInitial: () => Promise<MondayResponse<R>>;
+  readonly fetchInitial: (effectiveLimit: number) => Promise<MondayResponse<R>>;
   /**
-   * Issues a `next_items_page(cursor:)` request. Receives the
-   * cursor returned alongside the previous page's items.
+   * Issues a `next_items_page(cursor:, limit:)` request with the
+   * supplied effective limit. Same rationale as `fetchInitial`.
    */
-  readonly fetchNext: (cursor: string) => Promise<MondayResponse<R>>;
+  readonly fetchNext: (
+    cursor: string,
+    effectiveLimit: number,
+  ) => Promise<MondayResponse<R>>;
   /**
    * Projects a Monday response into the items + next cursor for one
    * page. Returns `cursor: null` to terminate the walk.
@@ -237,12 +243,28 @@ export const paginate = async <T, R>(
   let lastResponse: MondayResponse<R>;
   let cursor: string | null;
 
+  /**
+   * Per-call effective limit = `min(pageSize, remainingBudget)` so
+   * Monday's cursor advances over exactly the rows the walker emits.
+   * Without this, `--limit 2 --page-size 100` fetches 100 items,
+   * emits 2, and reports a cursor pointing past row 100 — agents
+   * resuming would skip rows 3-100 (Codex M4 pass-2 §1).
+   */
+  const callLimit = (collectedSoFar: number): number => {
+    if (limit === undefined) return pageSize;
+    const remaining = limit - collectedSoFar;
+    return remaining < pageSize ? remaining : pageSize;
+  };
+
   // Initial request always runs. Wrap so a stale_cursor on the
   // *initial* request still gets the standard envelope (Monday is
   // unlikely to return that here — you'd have to re-use a cursor
   // across processes — but the contract is symmetric).
   try {
-    const first = await fetchPage<T, R>(inputs.fetchInitial, inputs.extractPage);
+    const first = await fetchPage<T, R>(
+      () => inputs.fetchInitial(callLimit(0)),
+      inputs.extractPage,
+    );
     lastResponse = first.response;
     pagesFetched = 1;
     const sorted = sortByIdAsc(first.page.items, inputs.getId);
@@ -281,7 +303,7 @@ export const paginate = async <T, R>(
       const cursorAt = cursor;
       try {
         const next = await fetchPage<T, R>(
-          () => inputs.fetchNext(cursorAt),
+          () => inputs.fetchNext(cursorAt, callLimit(collected.length)),
           inputs.extractPage,
         );
         lastResponse = next.response;

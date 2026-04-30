@@ -161,6 +161,21 @@ describe('monday item get (integration)', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
   });
+
+  it('--api-version reaches the usage_error envelope on parseArgv failure (REGRESSION: Codex M4 pass-2 §3)', async () => {
+    // Pass-2 §3: pre-`resolveClient` errors (parseArgv throwing on
+    // a bad positional) previously fell back to the SDK pin. The
+    // preAction hook in program.ts now commits the resolved
+    // `--api-version` before any subcommand action runs.
+    const out = await drive(
+      ['--api-version', '2026-04', 'item', 'get', 'not-a-number', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.meta.api_version).toBe('2026-04');
+  });
 });
 
 const sampleBoardMetadata = {
