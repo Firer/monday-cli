@@ -1431,3 +1431,626 @@ describe('monday item subitems (integration)', () => {
     expect(env.error?.code).toBe('not_found');
   });
 });
+
+describe('monday item set (integration, M5b)', () => {
+  // Sample item with status: Backlog → after the set call returns
+  // updated state: status: Done. The mutation response is the full
+  // item shape (Monday returns the post-mutation item per its
+  // `change_*_column_value` schema).
+  const updatedItem = {
+    ...sampleItem,
+    column_values: [
+      {
+        id: 'status_4',
+        type: 'status',
+        text: 'Done',
+        value: '{"label":"Done","index":1}',
+        column: { title: 'Status' },
+      },
+      sampleItem.column_values[1],
+    ],
+  };
+
+  it('live: --board explicit + status (rich) mutation succeeds; projected item envelope emitted', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: {
+              data: { change_column_value: updatedItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        id: string;
+        columns: Record<string, { type: string; label?: string }>;
+      };
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    expect(env.data.columns.status_4).toMatchObject({
+      type: 'status',
+      label: 'Done',
+    });
+    // Resolution succeeded from a live BoardMetadata fetch — source
+    // is 'live' (not 'mixed', since no cache leg was involved).
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: implicit --board lookup surfaces not_found when item is missing', async () => {
+    const out = await drive(
+      ['item', 'set', '99999', 'status=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: { data: { items: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: implicit --board lookup surfaces not_found when item.board is null (no read access)', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: { items: [{ id: '12345', board: null }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: implicit --board lookup fires when --board omitted', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: { items: [{ id: '12345', board: { id: '111' } }] },
+            },
+          },
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: {
+              data: { change_column_value: updatedItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('12345');
+  });
+
+  it('live: text column → change_simple_column_value mutation', async () => {
+    const textBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'text_1',
+          title: 'Notes',
+          type: 'text',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithText = {
+      ...sampleItem,
+      column_values: [
+        ...sampleItem.column_values,
+        {
+          id: 'text_1',
+          type: 'text',
+          text: 'updated',
+          value: '"updated"',
+          column: { title: 'Notes' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'set', '12345', 'text_1=updated', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [textBoard] } },
+          },
+          {
+            operation_name: 'ItemSetSimple',
+            response: {
+              data: { change_simple_column_value: itemWithText },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: column_not_found surfaces typed error envelope (exit 2)', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'NotAColumn=x', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('column_not_found');
+  });
+
+  it('live: ambiguous_column surfaces typed error with details.candidates', async () => {
+    const ambiguousBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'col_a',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+        {
+          id: 'col_b',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'set', '12345', 'Owner=alice@example.com', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [ambiguousBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { candidates?: readonly { id: string }[] };
+      };
+    };
+    expect(env.error?.code).toBe('ambiguous_column');
+    expect(env.error?.details?.candidates?.length).toBeGreaterThan(0);
+  });
+
+  it('live: column_archived surfaces with details.resolver_warnings preserved across cache refresh', async () => {
+    // Pre-archived board (cache seed) → live refresh returns the
+    // archived column. The resolver fires `stale_cache_refreshed`
+    // which folds into details.resolver_warnings on the
+    // column_archived throw.
+    const cachedBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const refreshedBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'archived_col',
+          title: 'OldStatus',
+          type: 'status',
+          description: null,
+          archived: true,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    // Seed the cache by running an item list first, so the next
+    // resolveColumnWithRefresh sees a cache hit + has to refresh on
+    // miss.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedBoard] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: null, items: [] } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    // Now item set against the archived column — cache hit returns
+    // the cachedBoard (no archived_col), refresh fetches refreshedBoard.
+    const out = await drive(
+      ['item', 'set', '12345', 'OldStatus=x', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { resolver_warnings?: readonly { code: string }[] };
+      };
+    };
+    expect(env.error?.code).toBe('column_archived');
+    expect(
+      env.error?.details?.resolver_warnings?.some(
+        (w) => w.code === 'stale_cache_refreshed',
+      ),
+    ).toBe(true);
+  });
+
+  it('live: unsupported_column_type surfaces with --set-raw hint', async () => {
+    const formulaBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'formula_1',
+          title: 'Computed',
+          type: 'formula',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'set', '12345', 'formula_1=x', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [formulaBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { set_raw_example?: string };
+      };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.set_raw_example).toMatch(/--set-raw/);
+  });
+
+  it('--dry-run: emits the §6.4 envelope with planned_changes, no mutation fires', async () => {
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'status=Done',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+          // No ItemSetRich / ItemSetSimple — dry-run must NOT fire
+          // any mutation.
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        item_id: string;
+        resolved_ids: Readonly<Record<string, string>>;
+        diff: Readonly<Record<string, unknown>>;
+      }[];
+    };
+    assertEnvelopeContract(env);
+    expect(env.data).toBeNull();
+    expect((env.meta as { dry_run?: boolean }).dry_run).toBe(true);
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_column_value');
+    expect(plan?.board_id).toBe('111');
+    expect(plan?.item_id).toBe('12345');
+    expect(plan?.resolved_ids).toEqual({ status: 'status_4' });
+    expect(plan?.diff.status_4).toMatchObject({
+      from: { label: 'Done', index: 1 },
+      to: { label: 'Done' },
+    });
+    // Cassette must be fully consumed except for the unfired
+    // mutation interaction (which we didn't include) — so remaining
+    // is 0.
+    expect(out.remaining).toBe(0);
+  });
+
+  it('rejects non-numeric item ID as usage_error', async () => {
+    const out = await drive(
+      ['item', 'set', 'not-a-number', 'status=Done', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects malformed --set expression (no =) as usage_error', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'no-equals-sign', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('live: people column resolves email via userByEmail and emits projected item', async () => {
+    const peopleBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'owner_p',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithPeople = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'owner_p',
+          type: 'people',
+          text: 'Alice',
+          value: '{"personsAndTeams":[{"id":555,"kind":"person"}]}',
+          column: { title: 'Owner' },
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'owner_p=alice@example.com',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [peopleBoard] } },
+          },
+          {
+            operation_name: 'UsersByEmail',
+            response: {
+              data: {
+                users: [
+                  { id: '555', name: 'Alice', email: 'alice@example.com' },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: itemWithPeople } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: user_not_found surfaces typed error when email is unknown', async () => {
+    const peopleBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'owner_p',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'owner_p=ghost@example.com',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [peopleBoard] } },
+          },
+          {
+            operation_name: 'UsersByEmail',
+            response: { data: { users: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('user_not_found');
+  });
+
+  it('--dry-run: relative date with MONDAY_TIMEZONE override surfaces details.resolved_from', async () => {
+    const dateBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'date4',
+          title: 'Due date',
+          type: 'date',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithDate = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'date4',
+          type: 'date',
+          text: '',
+          value: null,
+          column: { title: 'Due date' },
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'date4=tomorrow',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [dateBoard] } },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [itemWithDate] } },
+          },
+        ],
+      },
+      {
+        env: {
+          MONDAY_API_TOKEN: LEAK_CANARY,
+          MONDAY_API_URL: FIXTURE_API_URL,
+          XDG_CACHE_HOME: xdgRoot,
+          MONDAY_TIMEZONE: 'Europe/London',
+        },
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        diff: Readonly<Record<string, {
+          from: unknown;
+          to: unknown;
+          details?: { resolved_from?: { input: string; timezone: string } };
+        }>>;
+      }[];
+    };
+    const cell = env.planned_changes[0]?.diff.date4;
+    expect(cell?.details?.resolved_from?.input).toBe('tomorrow');
+    expect(cell?.details?.resolved_from?.timezone).toBe('Europe/London');
+  });
+
+  it('token never leaks in mutation error envelopes (M5b regression)', async () => {
+    const out = await drive(
+      ['item', 'set', '12345', 'NotAColumn=x', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    // The redaction-hardening discipline: the literal token must
+    // never appear in either stream.
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});

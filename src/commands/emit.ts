@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { RunContext } from '../cli/run.js';
 import {
+  buildDryRun,
   buildMeta,
   buildSuccess,
   type ColumnHead,
@@ -281,4 +282,59 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
   );
 
   renderForFormat(format, envelope, validated, ctx, globalFlags, kind, warnings);
+};
+
+/**
+ * Emit helper for `--dry-run` mutation paths (`cli-design.md` §6.4).
+ *
+ * The dry-run envelope shape carries `data: null`,
+ * `meta.dry_run: true`, and a top-level `planned_changes` array
+ * sibling to `data`. Mutation surfaces (`item set` / `item clear` /
+ * `item update`) call this when the action is invoked with
+ * `--dry-run`; the live path stays on `emitSuccess` (which builds
+ * the success envelope without `planned_changes`).
+ *
+ * Renderer dispatch: dry-run output is JSON-only — table / text /
+ * ndjson formats don't have a sensible rendering for the diff
+ * shape. Forces the JSON path regardless of TTY / `--output`.
+ */
+export interface EmitDryRunOptions {
+  readonly ctx: RunContext;
+  readonly programOpts: unknown;
+  readonly plannedChanges: readonly Readonly<Record<string, unknown>>[];
+  readonly source?: DataSource;
+  readonly cacheAgeSeconds?: number | null;
+  readonly warnings?: readonly Warning[];
+  readonly complexity?: Complexity | null;
+  readonly apiVersion?: string;
+}
+
+export const emitDryRun = (options: EmitDryRunOptions): void => {
+  const { ctx, programOpts, source = 'none' } = options;
+  const warnings = options.warnings ?? [];
+
+  // Dry-run envelopes are always JSON. Re-parsing globalFlags here is
+  // a no-op behaviour-wise but keeps the contract consistent — the
+  // `programOpts` shape is normalised once per emit call.
+  parseGlobalFlags(programOpts, ctx.env);
+
+  const meta = buildMeta({
+    api_version: options.apiVersion ?? ctx.env.MONDAY_API_VERSION ?? '2026-01',
+    cli_version: ctx.cliVersion,
+    request_id: ctx.requestId,
+    source,
+    retrieved_at: ctx.clock().toISOString(),
+    cache_age_seconds: options.cacheAgeSeconds ?? null,
+    complexity: options.complexity ?? null,
+    dry_run: true,
+  });
+
+  const envelope = buildDryRun(options.plannedChanges, meta, warnings);
+  const secrets = collectSecrets(ctx.env);
+  const redacted = redact(envelope, { secrets });
+  // Forced JSON regardless of `--output` / TTY — dry-run output is
+  // structured-only. cli-design §6.4 doesn't document a non-JSON
+  // rendering and inventing one (e.g. a table view of `diff`) would
+  // freeze the wrong contract.
+  renderJson(redacted, ctx.stdout);
 };
