@@ -36,6 +36,9 @@ describe('parsePeopleInput — single token', () => {
       payload: {
         personsAndTeams: [{ id: 42, kind: 'person' }],
       },
+      resolution: {
+        tokens: [{ input: 'alice@example.com', resolved_id: '42' }],
+      },
     });
   });
 
@@ -540,5 +543,95 @@ describe('parsePeopleInput — JSON scalar discipline', () => {
     expect(JSON.stringify(out.payload)).toBe(
       '{"personsAndTeams":[{"id":42,"kind":"person"}]}',
     );
+  });
+});
+
+describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () => {
+  // The dry-run engine renders this shape as `details.resolved_from`
+  // on people-column diff cells. cli-design §6.4 doesn't pin the
+  // people echo (only the date case is shown); the shape here is
+  // logged as a v0.1-plan §3 M5a spec gap for backfill. Pin the
+  // exact shape so a future "tidy up the echo" patch fails loudly.
+
+  it('emits one echo entry per non-empty input token, in input order', async () => {
+    const out = await parsePeopleInput(
+      'alice@example.com,bob@example.com,me',
+      'owner',
+      {
+        resolveMe: () => Promise.resolve('7'),
+        resolveEmail: (email: string) => {
+          if (email === 'alice@example.com') return Promise.resolve('1');
+          if (email === 'bob@example.com') return Promise.resolve('2');
+          return Promise.reject(new Error(`unexpected: ${email}`));
+        },
+      },
+    );
+    expect(out.resolution.tokens).toEqual([
+      { input: 'alice@example.com', resolved_id: '1' },
+      { input: 'bob@example.com', resolved_id: '2' },
+      { input: 'me', resolved_id: '7' },
+    ]);
+  });
+
+  it('input field is the post-trim verbatim token (preserves casing)', async () => {
+    const out = await parsePeopleInput('  ME  ,  alice@example.com  ', 'owner', {
+      resolveMe: () => Promise.resolve('7'),
+      resolveEmail: () => Promise.resolve('42'),
+    });
+    expect(out.resolution.tokens).toEqual([
+      { input: 'ME', resolved_id: '7' },
+      { input: 'alice@example.com', resolved_id: '42' },
+    ]);
+  });
+
+  it('empty-segment tokens are dropped from echo (matches payload semantics)', async () => {
+    // `alice@example.com,,bob@example.com` produces a 2-entry payload;
+    // the echo must mirror that — the dry-run engine pairs echo
+    // entries with payload entries by index for the diff cell
+    // assembly.
+    const out = await parsePeopleInput(
+      'alice@example.com,,bob@example.com',
+      'owner',
+      ctx({
+        resolveEmail: (email: string) =>
+          Promise.resolve(email === 'alice@example.com' ? '1' : '2'),
+      }),
+    );
+    expect(out.payload.personsAndTeams).toHaveLength(2);
+    expect(out.resolution.tokens).toHaveLength(2);
+    expect(out.resolution.tokens[0]?.input).toBe('alice@example.com');
+    expect(out.resolution.tokens[1]?.input).toBe('bob@example.com');
+  });
+
+  it('resolved_id is a string (matches the directory schema shape)', async () => {
+    // Pin string-typed echo IDs explicitly: the wire-side payload
+    // uses numbers (Monday's JSON scalar) but the echo uses strings
+    // so high-range IDs round-trip through JSON.stringify without
+    // precision loss. JSON.stringify({"id":9007199254740993}) loses
+    // precision; {"resolved_id":"9007199254740993"} doesn't.
+    const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
+      resolveEmail: () => Promise.resolve('42'),
+    }));
+    const echo = out.resolution.tokens[0];
+    if (echo === undefined) throw new Error('expected one echo entry');
+    expect(typeof echo.resolved_id).toBe('string');
+    expect(echo.resolved_id).toBe('42');
+  });
+
+  it('me caching: identical me tokens emit echo entries pointing at the same resolved_id', async () => {
+    let calls = 0;
+    const out = await parsePeopleInput('me,me,me', 'owner', {
+      resolveMe: () => {
+        calls += 1;
+        return Promise.resolve('7');
+      },
+      resolveEmail: () => Promise.reject(new Error('should not be called')),
+    });
+    expect(calls).toBe(1);
+    expect(out.resolution.tokens).toEqual([
+      { input: 'me', resolved_id: '7' },
+      { input: 'me', resolved_id: '7' },
+      { input: 'me', resolved_id: '7' },
+    ]);
   });
 });

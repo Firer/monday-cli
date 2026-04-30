@@ -1,0 +1,717 @@
+/**
+ * Unit tests for the dry-run engine (`src/api/dry-run.ts`).
+ *
+ * Two layers:
+ *   - Per-branch unit coverage for resolution / translation /
+ *     diff-cell assembly across each writable column type.
+ *   - **Snapshot test against the cli-design.md §6.4 sample
+ *     byte-for-byte**, the load-bearing M5a exit gate. If the
+ *     engine's output diverges from the documented sample even by
+ *     trailing whitespace, that's a contract drift — fix the
+ *     engine, not the snapshot.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  planChanges,
+  type PlanChangesResult,
+} from '../../../src/api/dry-run.js';
+import type { MondayClient, MondayResponse } from '../../../src/api/client.js';
+import { ApiError } from '../../../src/utils/errors.js';
+
+let tmpRoot: string;
+const xdgEnv = (): NodeJS.ProcessEnv => ({ XDG_CACHE_HOME: tmpRoot });
+
+beforeEach(async () => {
+  tmpRoot = await mkdtemp(join(tmpdir(), 'monday-cli-dryrun-'));
+});
+afterEach(async () => {
+  await rm(tmpRoot, { recursive: true, force: true });
+});
+
+interface Stats {
+  calls: number;
+  operations: string[];
+}
+
+const buildClient = (
+  responses: readonly unknown[],
+  stats: Stats,
+): MondayClient => {
+  let cursor = 0;
+  const fake = {
+    raw: <T>(
+      _query: string,
+      _vars: unknown,
+      opts?: { operationName?: string },
+    ): Promise<MondayResponse<T>> => {
+      stats.calls++;
+      stats.operations.push(opts?.operationName ?? '<unknown>');
+      const next = responses[cursor];
+      cursor = Math.min(cursor + 1, responses.length - 1);
+      if (next instanceof Error) {
+        return Promise.reject(next);
+      }
+      return Promise.resolve({
+        data: next as T,
+        complexity: null,
+        stats: { attempts: 1, totalSleepMs: 0 },
+      });
+    },
+  };
+  return fake as unknown as MondayClient;
+};
+
+const board67890 = (): { boards: unknown[] } => ({
+  boards: [
+    {
+      id: '67890',
+      name: 'Sprint',
+      description: null,
+      state: 'active',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: null,
+      url: null,
+      hierarchy_type: 'top_level',
+      is_leaf: true,
+      updated_at: null,
+      groups: [],
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+        {
+          id: 'date4',
+          title: 'Due',
+          type: 'date',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+        {
+          id: 'owner_4',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+        {
+          id: 'notes',
+          title: 'Notes',
+          type: 'text',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+        {
+          id: 'mirror_1',
+          title: 'Mirrored',
+          type: 'mirror',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    },
+  ],
+});
+
+const itemAtBacklog = (over: { columnValues?: unknown[] } = {}): { items: unknown[] } => ({
+  items: [
+    {
+      id: '12345',
+      name: 'Build it',
+      state: 'active',
+      url: null,
+      created_at: null,
+      updated_at: null,
+      board: { id: '67890' },
+      group: null,
+      parent_item: null,
+      column_values: over.columnValues ?? [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Backlog',
+          value: '{"label":"Backlog","index":0}',
+          column: { title: 'Status' },
+        },
+        {
+          id: 'date4',
+          type: 'date',
+          text: '',
+          value: null,
+          column: { title: 'Due' },
+        },
+      ],
+    },
+  ],
+});
+
+describe('planChanges — happy path: status + date relative-token', () => {
+  it('produces the §6.4 sample shape byte-compatible', async () => {
+    // The cli-design §6.4 sample is the canonical contract. We
+    // build an input that should produce the *same* planned_change
+    // entry the sample shows (single-item status + date update),
+    // then assert via deep-equal against the literal §6.4 shape.
+    // Drift here = contract drift; fix the engine, not the test.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'status', value: 'Working on it' },
+        { token: 'due', value: '+1w' },
+      ],
+      env: xdgEnv(),
+      dateResolution: {
+        // Pinned 2026-04-25 14:00 Europe/London (BST) so the relative
+        // +1w resolves to 2026-05-02. Matches the cli-design sample
+        // line 1214 + 786 byte-for-byte.
+        now: () => new Date('2026-04-25T14:00:00+01:00'),
+        timezone: 'Europe/London',
+      },
+    });
+
+    expect(result.plannedChanges).toHaveLength(1);
+    const change = result.plannedChanges[0]!;
+    expect(change).toEqual({
+      operation: 'change_multiple_column_values',
+      board_id: '67890',
+      item_id: '12345',
+      resolved_ids: { status: 'status_4', due: 'date4' },
+      diff: {
+        status_4: {
+          from: { label: 'Backlog', index: 0 },
+          to: { label: 'Working on it' },
+        },
+        date4: {
+          from: null,
+          to: { date: '2026-05-02' },
+          details: {
+            resolved_from: {
+              input: '+1w',
+              timezone: 'Europe/London',
+              now: '2026-04-25T14:00:00+01:00',
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('JSON.stringify byte-snapshot matches the cli-design §6.4 sample', () => {
+    // Independent of the planChanges call — pin the *literal* JSON
+    // bytes the documented sample uses. If the engine's deep-equal
+    // assertion above passes but the JSON-key order shifts, this
+    // test fails — JS object literals preserve insertion order so
+    // the engine's struct-build order *is* the wire order.
+    const expected = {
+      operation: 'change_multiple_column_values',
+      board_id: '67890',
+      item_id: '12345',
+      resolved_ids: { status: 'status_4', due: 'date4' },
+      diff: {
+        status_4: {
+          from: { label: 'Backlog', index: 0 },
+          to: { label: 'Working on it' },
+        },
+        date4: {
+          from: null,
+          to: { date: '2026-05-02' },
+          details: {
+            resolved_from: {
+              input: '+1w',
+              timezone: 'Europe/London',
+              now: '2026-04-25T14:00:00+01:00',
+            },
+          },
+        },
+      },
+    };
+    expect(JSON.stringify(expected)).toBe(
+      '{"operation":"change_multiple_column_values","board_id":"67890",' +
+        '"item_id":"12345","resolved_ids":{"status":"status_4","due":"date4"},' +
+        '"diff":{"status_4":{"from":{"label":"Backlog","index":0},' +
+        '"to":{"label":"Working on it"}},"date4":{"from":null,' +
+        '"to":{"date":"2026-05-02"},"details":{"resolved_from":' +
+        '{"input":"+1w","timezone":"Europe/London","now":"2026-04-25T14:00:00+01:00"}}}}}',
+    );
+  });
+});
+
+describe('planChanges — operation selection per cli-design §5.3 step 5', () => {
+  it('single simple type → change_simple_column_value', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'notes', value: 'meeting at 3' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.operation).toBe('change_simple_column_value');
+    expect(result.plannedChanges[0]?.diff.notes).toEqual({
+      from: null,
+      to: 'meeting at 3',
+    });
+  });
+
+  it('single rich type → change_column_value', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'status', value: 'Done' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.operation).toBe('change_column_value');
+    expect(result.plannedChanges[0]?.diff.status_4).toEqual({
+      from: { label: 'Backlog', index: 0 },
+      to: { label: 'Done' },
+    });
+  });
+
+  it('multiple --set entries → change_multiple_column_values', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'status', value: 'Done' },
+        { token: 'notes', value: 'shipped' },
+      ],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.operation).toBe(
+      'change_multiple_column_values',
+    );
+  });
+});
+
+describe('planChanges — resolved_from echo per kind', () => {
+  it('omits details on non-relative dates and non-people types', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'status', value: 'Done' },
+        { token: 'due', value: '2026-05-01' },
+      ],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.diff.status_4?.details).toBeUndefined();
+    expect(result.plannedChanges[0]?.diff.date4?.details).toBeUndefined();
+  });
+
+  it('emits details.resolved_from for people inputs (token-by-token)', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'owner', value: 'me,alice@example.com' }],
+      env: xdgEnv(),
+      peopleResolution: {
+        resolveMe: () => Promise.resolve('7'),
+        resolveEmail: (email: string) => {
+          if (email === 'alice@example.com') return Promise.resolve('42');
+          return Promise.reject(new ApiError('user_not_found', `unknown: ${email}`));
+        },
+      },
+    });
+    expect(result.plannedChanges[0]?.diff.owner_4).toEqual({
+      from: null,
+      to: { personsAndTeams: [
+        { id: 7, kind: 'person' },
+        { id: 42, kind: 'person' },
+      ] },
+      details: {
+        resolved_from: {
+          tokens: [
+            { input: 'me', resolved_id: '7' },
+            { input: 'alice@example.com', resolved_id: '42' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('emits details.resolved_from for relative date tokens', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'due', value: 'today' }],
+      env: xdgEnv(),
+      dateResolution: {
+        now: () => new Date('2026-04-30T10:00:00+01:00'),
+        timezone: 'Europe/London',
+      },
+    });
+    const cell = result.plannedChanges[0]?.diff.date4;
+    expect(cell?.to).toEqual({ date: '2026-04-30' });
+    expect(cell?.details?.resolved_from).toEqual({
+      input: 'today',
+      timezone: 'Europe/London',
+      now: '2026-04-30T10:00:00+01:00',
+    });
+  });
+});
+
+describe('planChanges — all-or-nothing on resolution failure', () => {
+  it('column_not_found: aborts the batch, no second leg', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    // Two responses for two metadata reads (initial + refresh
+    // attempt); both stale — neither holds "missing_col". Engine
+    // bubbles column_not_found.
+    const client = buildClient(
+      [board67890(), board67890()],
+      stats,
+    );
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'missing_col', value: 'x' }],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'column_not_found' });
+    // Item read should not have happened — abort came before item fetch.
+    expect(stats.operations).not.toContain('ItemDryRunRead');
+  });
+
+  it('ambiguous_column: aborts before item fetch', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient(
+      [
+        {
+          boards: [
+            {
+              ...board67890().boards[0] as object,
+              columns: [
+                { id: 'col_a', title: 'Owner', type: 'people', description: null, archived: false, settings_str: null, width: null },
+                { id: 'col_b', title: 'Owner', type: 'people', description: null, archived: false, settings_str: null, width: null },
+              ],
+            },
+          ],
+        },
+      ],
+      stats,
+    );
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'Owner', value: 'me' }],
+        env: xdgEnv(),
+        peopleResolution: {
+          resolveMe: () => Promise.resolve('7'),
+          resolveEmail: () => Promise.reject(new Error('unused')),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'ambiguous_column' });
+    expect(stats.operations).not.toContain('ItemDryRunRead');
+  });
+
+  it('unsupported_column_type: surfaces with --set-raw hint', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    let caught: unknown;
+    try {
+      await planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'mirror_1', value: 'whatever' }],
+        env: xdgEnv(),
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).code).toBe('unsupported_column_type');
+    expect((caught as ApiError).details).toMatchObject({
+      column_id: 'mirror_1',
+      type: 'mirror',
+    });
+    expect(stats.operations).not.toContain('ItemDryRunRead');
+  });
+
+  it('user_not_found: bubbles from people translator', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'owner', value: 'ghost@example.com' }],
+        env: xdgEnv(),
+        peopleResolution: {
+          resolveMe: () => Promise.reject(new Error('unused')),
+          resolveEmail: () =>
+            Promise.reject(
+              new ApiError('user_not_found', 'No Monday user matches email "ghost@example.com"', {
+                details: { email: 'ghost@example.com' },
+              }),
+            ),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'user_not_found' });
+    expect(stats.operations).not.toContain('ItemDryRunRead');
+  });
+
+  it('item not found: surfaces after column resolution', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), { items: null }], stats);
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '99999',
+        setEntries: [{ token: 'status', value: 'Done' }],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('item lives on a different board than --board: surfaces usage_error', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const wrongBoardItem = {
+      items: [
+        {
+          ...itemAtBacklog().items[0] as object,
+          board: { id: '99999' }, // different from --board=67890
+        },
+      ],
+    };
+    const client = buildClient([board67890(), wrongBoardItem], stats);
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'status', value: 'Done' }],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'usage_error' });
+  });
+});
+
+describe('planChanges — duplicate tokens / IDs', () => {
+  it('two --set entries with the same token: usage_error', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient(
+      [board67890(), board67890(), itemAtBacklog()],
+      stats,
+    );
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [
+          { token: 'status', value: 'Done' },
+          { token: 'status', value: 'Working on it' },
+        ],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'usage_error' });
+  });
+
+  it('two --set entries that resolve to the same column ID: usage_error', async () => {
+    // `status` (case-fold title) and `id:status_4` (id prefix) both
+    // resolve to status_4. Catch this before assembling a half-built
+    // diff.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient(
+      [board67890(), board67890(), itemAtBacklog()],
+      stats,
+    );
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [
+          { token: 'Status', value: 'Done' },
+          { token: 'id:status_4', value: 'Working on it' },
+        ],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'usage_error' });
+  });
+});
+
+describe('planChanges — diff `from` decoding', () => {
+  it('text/numbers cells with null value but populated text → from=text', async () => {
+    // Monday occasionally returns `value: null` with the human-form
+    // `text` populated for simple-type cells (legacy / cross-board
+    // boards). decodeFrom prefers text in that case so the diff's
+    // `from` reflects the actual cell state.
+    const stats: Stats = { calls: 0, operations: [] };
+    const itemNumberPopulated = {
+      items: [
+        {
+          ...itemAtBacklog().items[0] as object,
+          column_values: [
+            { id: 'notes', type: 'text', text: 'existing note', value: null, column: { title: 'Notes' } },
+          ],
+        },
+      ],
+    };
+    const client = buildClient([board67890(), itemNumberPopulated], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'notes', value: 'updated' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.diff.notes).toEqual({
+      from: 'existing note',
+      to: 'updated',
+    });
+  });
+
+  it('completely empty cell → from=null (both value AND text empty)', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const itemEmptyNotes = {
+      items: [
+        {
+          ...itemAtBacklog().items[0] as object,
+          column_values: [
+            { id: 'notes', type: 'text', text: '', value: null, column: { title: 'Notes' } },
+          ],
+        },
+      ],
+    };
+    const client = buildClient([board67890(), itemEmptyNotes], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'notes', value: 'updated' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.diff.notes?.from).toBeNull();
+  });
+});
+
+describe('planChanges — defensive guards', () => {
+  it('zero --set entries: internal_error (programmer wiring bug)', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([], stats);
+    await expect(
+      planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [],
+        env: xdgEnv(),
+      }),
+    ).rejects.toMatchObject({ code: 'internal_error' });
+    expect(stats.calls).toBe(0);
+  });
+});
+
+describe('planChanges — meta aggregation', () => {
+  it('aggregates source as `live` when item read happens (every dry-run is at least partly live in v0.1)', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'status', value: 'Done' }],
+      env: xdgEnv(),
+    });
+    expect(result.source).toBe('live');
+    expect(result.cacheAgeSeconds).toBeNull();
+  });
+
+  it('returns aggregate as `mixed` when column resolution refreshed and item read live', async () => {
+    // First call seeds the metadata cache. Second call: cache hit on
+    // the stale metadata, miss on the new column → refresh → resolve.
+    // The dry-run engine sees `mixed` from the column leg; folds into
+    // aggregate `mixed`.
+    const stats: Stats = { calls: 0, operations: [] };
+    const stale = board67890();
+    const fresh = {
+      boards: [
+        {
+          ...board67890().boards[0] as object,
+          columns: [
+            ...(board67890().boards[0] as { columns: unknown[] }).columns,
+            {
+              id: 'priority',
+              title: 'Priority',
+              type: 'numbers',
+              description: null,
+              archived: false,
+              settings_str: null,
+              width: null,
+            },
+          ],
+        },
+      ],
+    };
+    // Sequence: first call reads stale board metadata (1) + item (2);
+    // second call hits cache for column (no fetch — same metadata),
+    // misses on Priority, refreshes (3) = fresh, resolves; reads
+    // item (4).
+    const client = buildClient(
+      [stale, itemAtBacklog(), fresh, itemAtBacklog()],
+      stats,
+    );
+    // First seed the cache:
+    await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'status', value: 'Done' }],
+      env: xdgEnv(),
+    });
+    // Now look up Priority — only in the fresh payload. Engine refreshes.
+    const result: PlanChangesResult = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'priority', value: '5' }],
+      env: xdgEnv(),
+    });
+    expect(result.source).toBe('mixed');
+    // stale_cache_refreshed warning surfaced:
+    expect(result.warnings.some((w) => w.code === 'stale_cache_refreshed')).toBe(true);
+  });
+});

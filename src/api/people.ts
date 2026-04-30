@@ -115,8 +115,44 @@ export interface PeopleResolutionContext {
   readonly resolveEmail: (email: string) => Promise<string>;
 }
 
+/**
+ * Token-by-token resolution echo the dry-run engine renders as
+ * `details.resolved_from` per cli-design §6.4 (the people-column
+ * analogue of `DateResolution` from `dates.ts`). Each entry pairs
+ * the verbatim input token (post-trim) with its resolved Monday
+ * user ID — agents reading dry-run output see exactly which
+ * email/`me` resolved to which ID without having to re-derive the
+ * mapping from the `personsAndTeams` array.
+ *
+ * cli-design.md doesn't pin the shape (the §6.4 sample only shows
+ * the date case); logged as a v0.1-plan §3 M5a spec gap.
+ */
+export interface PeopleResolution {
+  readonly tokens: readonly PeopleResolutionToken[];
+}
+
+export interface PeopleResolutionToken {
+  /** The verbatim input token (post-trim, pre-resolution). */
+  readonly input: string;
+  /**
+   * The resolved Monday user ID (string form, decimal non-negative).
+   * Matches the directory schema's shape — string here so the echo
+   * round-trips through `JSON.stringify` without losing precision
+   * for IDs in the high range.
+   */
+  readonly resolved_id: string;
+}
+
 export interface ParsedPeopleInput {
   readonly payload: PeoplePayload;
+  /**
+   * Per-token resolution echo for the dry-run engine. Always
+   * populated (one entry per non-empty input token); empty input
+   * throws `usage_error` before reaching this slot. cli-design
+   * §5.3 step 3 lists the input grammar; the echo shape itself is
+   * a v0.1-plan §3 M5a spec gap for cli-design backfill.
+   */
+  readonly resolution: PeopleResolution;
 }
 
 /**
@@ -173,6 +209,7 @@ export const parsePeopleInput = async (
   };
 
   const entries: PeoplePayloadEntry[] = [];
+  const resolutionTokens: PeopleResolutionToken[] = [];
   for (const token of tokens) {
     if (NON_NEGATIVE_INTEGER.test(token)) {
       // Numeric tokens aren't in cli-design's people grammar. Reject
@@ -186,9 +223,13 @@ export const parsePeopleInput = async (
         ? await resolveMeOnce()
         : await ctx.resolveEmail(token);
     entries.push({ id: idStringToNumber(id, columnId, token), kind: 'person' });
+    resolutionTokens.push({ input: token, resolved_id: id });
   }
 
-  return { payload: { personsAndTeams: entries } };
+  return {
+    payload: { personsAndTeams: entries },
+    resolution: { tokens: resolutionTokens },
+  };
 };
 
 /**

@@ -32,6 +32,7 @@ describe('translateColumnValue — simple types', () => {
       rawInput: 'Refactor login',
       payload: { format: 'simple', value: 'Refactor login' },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -62,6 +63,7 @@ describe('translateColumnValue — simple types', () => {
         value: 'line one\nline two\nline three',
       },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -73,6 +75,7 @@ describe('translateColumnValue — simple types', () => {
       rawInput: '42',
       payload: { format: 'simple', value: '42' },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -124,6 +127,7 @@ describe('translateColumnValue — status (rich)', () => {
       rawInput: 'Done',
       payload: { format: 'rich', value: { label: 'Done' } },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -261,6 +265,7 @@ describe('translateColumnValue — dropdown (rich)', () => {
       rawInput: 'Backend',
       payload: { format: 'rich', value: { labels: ['Backend'] } },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -470,6 +475,7 @@ describe('translateColumnValue — date (rich)', () => {
       rawInput: '2026-05-01',
       payload: { format: 'rich', value: { date: '2026-05-01' } },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -947,6 +953,7 @@ describe('translateColumnValueAsync — surface contract', () => {
       rawInput: 'Refactor login',
       payload: { format: 'simple', value: 'Refactor login' },
       resolvedFrom: null,
+      peopleResolution: null,
     });
   });
 
@@ -980,6 +987,9 @@ describe('translateColumnValueAsync — surface contract', () => {
         value: { personsAndTeams: [{ id: 42, kind: 'person' }] },
       },
       resolvedFrom: null,
+      peopleResolution: {
+        tokens: [{ input: 'alice@example.com', resolved_id: '42' }],
+      },
     });
   });
 

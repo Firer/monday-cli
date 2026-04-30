@@ -100,6 +100,7 @@ import {
 } from './dates.js';
 import {
   parsePeopleInput,
+  type PeopleResolution,
   type PeopleResolutionContext,
 } from './people.js';
 
@@ -107,7 +108,9 @@ export type { DateResolution, DateResolutionContext } from './dates.js';
 export type {
   PeoplePayload,
   PeoplePayloadEntry,
+  PeopleResolution,
   PeopleResolutionContext,
+  PeopleResolutionToken,
 } from './people.js';
 
 /**
@@ -156,6 +159,25 @@ export interface TranslatedColumnValue {
    * the shape.
    */
   readonly resolvedFrom: DateResolution | null;
+  /**
+   * Echo of the per-token resolution for the `people` translator —
+   * one entry per input token, pairing the verbatim input with the
+   * resolved Monday user ID. Populated by the people translator;
+   * `null` for every other type. The dry-run engine renders this
+   * as `details.resolved_from` on people-column diff cells.
+   *
+   * **Why a parallel slot rather than widening `resolvedFrom`** —
+   * the date echo and people echo are structurally different
+   * (`{input, timezone, now}` vs `{tokens: [{input, resolved_id},
+   * ...]}`). One slot per kind keeps existing `resolvedFrom`
+   * consumers untouched and lets each translator's tests assert on
+   * its own shape without an `if kind === 'date'` discriminator
+   * dance. v0.2 may widen — extending the union is always
+   * available later. The shape itself is a v0.1-plan §3 M5a spec
+   * gap for cli-design backfill (the §6.4 sample only shows the
+   * date case).
+   */
+  readonly peopleResolution: PeopleResolution | null;
 }
 
 export interface TranslateColumnValueInputs {
@@ -254,6 +276,7 @@ export const translateColumnValue = (
         rawInput: value,
         payload: { format: 'rich', value: parsed.payload },
         resolvedFrom: parsed.resolvedFrom,
+        peopleResolution: null,
       };
     }
     case 'people':
@@ -347,6 +370,7 @@ export const translateColumnValueAsync = async (
       value: parsed.payload as unknown as JsonObject,
     },
     resolvedFrom: null,
+    peopleResolution: parsed.resolution,
   };
 };
 
@@ -359,9 +383,11 @@ const simple = (
   columnType,
   payload: { format: 'simple', value: rawInput },
   rawInput,
-  // Only the date translator populates resolvedFrom; every other
-  // type emits null so the dry-run engine has one shape to read.
+  // Only the date / people translators populate resolution echoes;
+  // every other type emits null so the dry-run engine has one shape
+  // to read per slot.
   resolvedFrom: null,
+  peopleResolution: null,
 });
 
 const rich = (
@@ -375,6 +401,7 @@ const rich = (
   payload: { format: 'rich', value },
   rawInput,
   resolvedFrom: null,
+  peopleResolution: null,
 });
 
 /**
