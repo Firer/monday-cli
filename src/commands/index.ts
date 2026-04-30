@@ -52,6 +52,9 @@ import { boardDescribeCommand } from './board/describe.js';
 import { boardSubscribersCommand } from './board/subscribers.js';
 import { boardColumnsCommand } from './board/columns.js';
 import { boardGroupsCommand } from './board/groups.js';
+import { userListCommand } from './user/list.js';
+import { userGetCommand } from './user/get.js';
+import { userMeCommand } from './user/me.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -77,6 +80,9 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardSubscribersCommand,
     boardColumnsCommand,
     boardGroupsCommand,
+    userListCommand,
+    userGetCommand,
+    userMeCommand,
   ];
   return cached;
 };
