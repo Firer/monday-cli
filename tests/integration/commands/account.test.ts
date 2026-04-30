@@ -420,6 +420,23 @@ describe('monday account complexity (integration)', () => {
     });
   });
 
+  it('surfaces internal_error when Monday returns no complexity block', async () => {
+    const out = await drive(
+      ['account', 'complexity', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ComplexityProbe',
+            response: { data: { complexity: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
   // Regression: --verbose against `account complexity` previously
   // tripped the data-stripper that removes the injected `complexity`
   // field — but `account complexity`'s own payload IS the
