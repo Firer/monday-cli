@@ -335,6 +335,54 @@ describe('createFetchTransport — failure shapes', () => {
     },
   ];
 
+  it('TLS error → "tls error"', async () => {
+    const e = new Error('certificate has expired');
+    Object.assign(e, { code: 'CERT_HAS_EXPIRED' });
+    const fakeFetch: typeof fetch = () => Promise.reject(e);
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+    let caught: { message?: string } = {};
+    try {
+      await transport.request({ query: '{ me { id } }' });
+    } catch (err) {
+      caught = err as { message?: string };
+    }
+    expect(caught.message).toBe('fetch failed: tls error');
+  });
+
+  it('non-Error throw → "fetch failed"', async () => {
+    // Drives the "err is not instanceof Error" branch of
+    // describeFetchError. Vitest's lint rule prefers Errors as
+    // promise rejections, so we wrap the literal-throw in a custom
+    // class that intentionally isn't an Error subclass.
+    class WeirdNotAnError {
+      readonly _kind = 'weird';
+    }
+    const fakeFetch: typeof fetch = () =>
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      Promise.reject(new WeirdNotAnError());
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+    let caught: { code?: string; message?: string } = {};
+    try {
+      await transport.request({ query: '{ me { id } }' });
+    } catch (err) {
+      caught = err as { code?: string; message?: string };
+    }
+    expect(caught.code).toBe('network_error');
+    expect(caught.message).toBe('fetch failed');
+  });
+
   for (const c of fetchErrorCases) {
     it(`describes ${c.name} without leaking the URL/token`, async () => {
       const fakeFetch: typeof fetch = () => Promise.reject(c.build());
