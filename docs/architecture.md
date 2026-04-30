@@ -173,22 +173,43 @@
   example_set) and `api/column-values.ts` (the writer). Adding
   a v0.2 type is one entry's worth of edit.
 - `api/column-values.ts` (M5a, in progress) — write half of
-  §5.3.3. `translateColumnValue({ column, value }) →
-  TranslatedColumnValue` returns `columnId`, `columnType`,
-  `rawInput`, and a discriminated `payload` —
+  §5.3. `translateColumnValue({ column, value, dateResolution? })
+  → TranslatedColumnValue` returns `columnId`, `columnType`,
+  `rawInput`, a discriminated `payload`, and a
+  `resolvedFrom: DateResolution | null` slot. Payload variants:
   `{ format: 'simple', value: string }` for the bare-string form
   (`change_simple_column_value`) or `{ format: 'rich', value:
   object }` for the JSON-object form (`change_column_value` /
   per-column entry of `change_multiple_column_values`).
-  **Skeleton ships `text` / `long_text` / `numbers`** (all
-  `format: 'simple'`); status / dropdown / date / people surface
-  `unsupported_column_type` (same code as truly non-allowlisted
-  types) until follow-up sessions land their translators.
+  **Six of seven v0.1 types translate today**: `text` /
+  `long_text` / `numbers` (simple) and `status` / `dropdown` /
+  `date` (rich); only `people` surfaces `unsupported_column_type`
+  until its follow-up session lands.
+  **`selectMutation`** dispatches per cli-design §5.3 step 5:
+  1 simple → `change_simple_column_value`; 1 rich →
+  `change_column_value`; N → `change_multiple_column_values`
+  (atomic, with `long_text` re-wrapped to `{text:<value>}` for
+  the multi mutation's per-column blob).
   **Monday `JSON` scalar discipline:** every payload is a plain
   JS value; the SDK / fetch layer stringifies at the wire
   boundary. The translator never `JSON.stringify`s — pinned by
-  a regression test so a future contributor doesn't introduce
-  double-encoding.
+  regression tests per (count × type) cell.
+
+- `api/dates.ts` (M5a) — pure date helpers powering the date
+  translator. `parseDateInput` accepts ISO date / ISO date+time
+  / relative tokens (`today` / `tomorrow` / `+Nd` / `-Nw` /
+  `+Nh`) and resolves relative inputs against an injected
+  clock + IANA timezone (defaults to system clock + system tz;
+  M5b's command layer plumbs `MONDAY_TIMEZONE`). `+Nd`/`+Nw`
+  use calendar-component arithmetic in the resolution tz so
+  DST is irrelevant; `+Nh` uses instant arithmetic so wall-
+  clock hour shifts ±1 across a DST boundary day, matching
+  industry-standard `Instant.add` semantics. Relative offsets
+  are bounded to ±100 years magnitude (`MAX_RELATIVE_DAYS` /
+  `MAX_RELATIVE_HOURS`) so unsafe inputs surface as typed
+  `usage_error`. `formatNowInTimezone` builds the local-time
+  ISO + longOffset string cli-design §5.3 line 786 pins
+  (`2026-04-25T14:00:00+01:00`).
 
 ### Hard rules
 

@@ -162,7 +162,7 @@ export const parseDateInput = (
   // all resolve identically. Case-fold here, not in the input
   // (the resolvedFrom echo carries `raw` verbatim so the
   // dry-run output shows what the agent typed).
-  const relative = parseRelative(trimmed.toLowerCase(), raw, ctx);
+  const relative = parseRelative(trimmed.toLowerCase(), raw, columnId, ctx);
   if (relative !== null) {
     return relative;
   }
@@ -268,10 +268,14 @@ const isCalendarDate = (y: number, m: number, d: number): boolean => {
  * @param verbatim - The original input — preserved in
  *   `resolvedFrom.input` so the dry-run output shows what the
  *   agent typed, not the lowercased form.
+ * @param columnId - Column ID, threaded through to
+ *   `outOfRangeRelativeOffsetError` so out-of-bound errors
+ *   carry `column_id` in details (Codex review pass-2 finding).
  */
 const parseRelative = (
   normalised: string,
   verbatim: string,
+  columnId: string,
   ctx: DateResolutionContext,
 ): ParsedDateInput | null => {
   const now = (ctx.now ?? defaultNow)();
@@ -299,7 +303,13 @@ const parseRelative = (
     if (!Number.isSafeInteger(amount)) return null;
     const days = amount * (unit === 'w' ? 7 : 1);
     if (days > MAX_RELATIVE_DAYS) {
-      throw outOfRangeRelativeOffsetError(verbatim, 'days', days, MAX_RELATIVE_DAYS);
+      throw outOfRangeRelativeOffsetError(
+        columnId,
+        verbatim,
+        'days',
+        days,
+        MAX_RELATIVE_DAYS,
+      );
     }
     const signed = signStr === '-' ? -days : days;
     return resolveDateOnly(now, signed, timezone, verbatim);
@@ -315,7 +325,13 @@ const parseRelative = (
     const amount = Number(amountStr);
     if (!Number.isSafeInteger(amount)) return null;
     if (amount > MAX_RELATIVE_HOURS) {
-      throw outOfRangeRelativeOffsetError(verbatim, 'hours', amount, MAX_RELATIVE_HOURS);
+      throw outOfRangeRelativeOffsetError(
+        columnId,
+        verbatim,
+        'hours',
+        amount,
+        MAX_RELATIVE_HOURS,
+      );
     }
     const signedHours = signStr === '-' ? -amount : amount;
     return resolveDateTime(now, signedHours, timezone, verbatim);
@@ -348,31 +364,38 @@ const MAX_RELATIVE_HOURS = 876_000;
 /**
  * Builds the `usage_error` for a relative offset that fits in
  * the safe-integer range but exceeds the translator's max
- * magnitude bound. Carries the literal input + the unit + the
- * actual / max magnitudes so an agent's debug log shows what
- * to clamp to without consulting Monday's docs.
+ * magnitude bound. Carries the column_id + the literal input +
+ * the unit + the actual / max magnitudes so an agent's debug
+ * log shows what to clamp to without consulting Monday's
+ * docs. The `column_id` field matches the shape of every
+ * other date `usage_error` so an agent that handles one
+ * details payload handles them all (Codex review pass-2
+ * finding).
  */
 const outOfRangeRelativeOffsetError = (
+  columnId: string,
   input: string,
   unit: 'days' | 'hours',
   amount: number,
   maxAmount: number,
 ): UsageError =>
   new UsageError(
-    `Relative date offset "${input}" resolves to ${amount.toString()} ` +
-      `${unit}, which exceeds the translator's maximum magnitude of ` +
-      `${maxAmount.toString()} ${unit} (~100 years). Use an explicit ISO ` +
-      `date instead, or pass --set-raw to bypass the friendly translator.`,
+    `Date column "${columnId}" relative offset "${input}" resolves to ` +
+      `${amount.toString()} ${unit}, which exceeds the translator's ` +
+      `maximum magnitude of ${maxAmount.toString()} ${unit} (~100 ` +
+      `years). Use an explicit ISO date instead, or pass --set-raw to ` +
+      `bypass the friendly translator.`,
     {
       details: {
+        column_id: columnId,
         column_type: 'date',
         raw_input: input,
         unit,
         amount,
         max_amount: maxAmount,
         hint:
-          'examples: --set due=2126-04-29 (explicit ISO), or ' +
-          "--set-raw due='{\"date\":\"2126-04-29\"}'",
+          `examples: --set ${columnId}=2126-04-29 (explicit ISO), or ` +
+          `--set-raw ${columnId}='{"date":"2126-04-29"}'`,
       },
     },
   );

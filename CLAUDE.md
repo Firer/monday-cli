@@ -50,7 +50,7 @@ Two binding documents:
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (text / long_text / numbers / status / dropdown translators + `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard). Date + people translators and `dry-run.ts` deferred to follow-up sessions. |
+| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (text / long_text / numbers / status / dropdown / date translators + `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`). People translator and `dry-run.ts` deferred to follow-up sessions. |
 | M5b | future | `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
@@ -222,18 +222,29 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `columnType`, `rawInput`, and a discriminated `payload` —
   `{ format: 'simple', value: <bare-string> }` for the simple-form
   mutation path or `{ format: 'rich', value: <plain-object> }` for
-  the JSON-object form. **Five of seven v0.1 types translate today**:
+  the JSON-object form. **Six of seven v0.1 types translate today**:
   `text` / `long_text` / `numbers` (all simple) and `status` /
-  `dropdown` (rich); `date` and `people` surface
+  `dropdown` / `date` (rich); only `people` still surfaces
   `unsupported_column_type` (same code as truly non-allowlisted
-  types) until follow-up sessions land their translators.
+  types) until its follow-up session lands.
   **Status payload**: label-first (`{label:<verbatim>}`) with
   non-negative integer fallback (`{index:N}`, JS number). **Dropdown
   payload**: comma-split, per-segment trimmed, empties dropped;
   all-numeric → `{ids:[N1,N2]}` (numbers), any non-numeric →
-  `{labels:[s1,s2]}` (strings). **Safe-integer guard**: numeric
-  input > 2^53 - 1 throws `usage_error` rather than silently
-  rounding via `Number(raw)` and corrupting the wire payload.
+  `{labels:[s1,s2]}` (strings). **Date payload**: ISO date
+  → `{date}`, ISO date+time → `{date,time:"HH:MM:SS"}`,
+  relative tokens (`today` / `tomorrow` / `+Nd` / `-Nw` / `+Nh`)
+  → resolved against `MONDAY_TIMEZONE` via the M0-injected
+  clock pattern; the resolution context plumbs through
+  `TranslateColumnValueInputs.dateResolution` (defaulting to
+  system clock + system tz). The full grammar lives in
+  `src/api/dates.ts` with DST-boundary tests pinned for
+  Europe/London + Pacific/Auckland 2026 transitions. Relative
+  offsets are bounded to ±100 years magnitude so unsafe inputs
+  surface as typed `usage_error` rather than malformed wire
+  payloads. **Safe-integer guard**: numeric input > 2^53 - 1
+  throws `usage_error` rather than silently rounding via
+  `Number(raw)` and corrupting the wire payload.
   **Mutation selection** (`selectMutation`, §5.3 step 5):
   1 simple → `change_simple_column_value`; 1 rich →
   `change_column_value`; N (any combo) →

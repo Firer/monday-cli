@@ -474,7 +474,7 @@ describe('parseDateInput — relative offset out-of-range bound (Codex F1)', () 
   // the wire shape stays valid and the failure mode is a typed
   // usage_error.
 
-  it('+50000d (>100 years) throws usage_error with the bound named in details', () => {
+  it('+50000d (>100 years) throws usage_error with the bound + column_id named in details', () => {
     const now = frozenClock('2026-04-29T12:00:00Z');
     expect(() =>
       parseDateInput('+50000d', 'due', { now, timezone: LONDON }),
@@ -487,7 +487,12 @@ describe('parseDateInput — relative offset out-of-range bound (Codex F1)', () 
     } catch (err) {
       if (!(err instanceof UsageError)) throw err;
       expect(err.code).toBe('usage_error');
+      // Codex review pass-2 finding: column_id must be in
+      // details so multi-`--set` agents can correlate which
+      // column triggered the bound. Pinned alongside the
+      // amount/max_amount fields.
       expect(err.details).toMatchObject({
+        column_id: 'due',
         column_type: 'date',
         unit: 'days',
         amount: 50000,
@@ -506,7 +511,7 @@ describe('parseDateInput — relative offset out-of-range bound (Codex F1)', () 
     ).toThrow(UsageError);
   });
 
-  it('+1000000h (~114 years) throws usage_error with hours unit in details', () => {
+  it('+1000000h (~114 years) throws usage_error with hours unit + column_id in details', () => {
     const now = frozenClock('2026-04-29T12:00:00Z');
     expect(() =>
       parseDateInput('+1000000h', 'due', { now, timezone: LONDON }),
@@ -516,6 +521,7 @@ describe('parseDateInput — relative offset out-of-range bound (Codex F1)', () 
     } catch (err) {
       if (!(err instanceof UsageError)) throw err;
       expect(err.details).toMatchObject({
+        column_id: 'due',
         unit: 'hours',
         amount: 1000000,
         max_amount: 876000,
