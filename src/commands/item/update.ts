@@ -69,6 +69,22 @@ import {
   maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
+import { buildQueryParams } from '../../api/filters.js';
+import {
+  loadBoardMetadata,
+  refreshBoardMetadata,
+  type BoardMetadata,
+} from '../../api/board-metadata.js';
+import {
+  paginate,
+  DEFAULT_PAGE_SIZE,
+  type PaginatedPage,
+} from '../../api/pagination.js';
+import {
+  ConfirmationRequiredError,
+} from '../../utils/errors.js';
+import type { RunContext } from '../../cli/run.js';
+import type { GlobalFlags } from '../../types/global-flags.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
@@ -176,16 +192,24 @@ export const itemUpdateOutputSchema = projectedItemSchema;
 export type ItemUpdateOutput = ProjectedItem;
 
 /**
- * Input shape — single-item path. The bulk path will gain
- * `where: z.array(z.string())` + drop the `itemId.required` invariant
- * in a follow-up commit.
+ * Input shape — supports both single-item and bulk shapes.
+ *
+ *   - Single-item: `itemId` positional required; `where` empty.
+ *   - Bulk:        `itemId` positional omitted; `where` non-empty
+ *                  AND `board` required.
+ *
+ * The split lives in `validateInputShape` (action body) so the zod
+ * schema captures the union without the per-shape conditional logic
+ * — the action layer reads the discriminator and dispatches.
  */
 const inputSchema = z
   .object({
-    itemId: ItemIdSchema,
+    itemId: ItemIdSchema.optional(),
     set: z.array(z.string()).default([]),
     name: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
+    where: z.array(z.string()).default([]),
+    filterJson: z.string().optional(),
     createLabelsIfMissing: z.boolean().optional(),
   })
   .strict()
@@ -199,6 +223,55 @@ const inputSchema = z
       path: ['set'],
     },
   );
+
+type ParsedInput = z.infer<typeof inputSchema>;
+
+/**
+ * Discriminates between the single-item and bulk argv shapes per
+ * cli-design §10.2. Single-item: positional `<iid>` present, no
+ * `--where` / `--filter-json`. Bulk: no positional, `--where` (or
+ * `--filter-json`) present, `--board` required. Either side: at
+ * least one of `--set` / `--name` (already enforced by the zod
+ * refinement above).
+ */
+type DispatchShape =
+  | { readonly kind: 'single'; readonly itemId: string }
+  | { readonly kind: 'bulk' };
+
+const validateInputShape = (parsed: ParsedInput): DispatchShape => {
+  const hasItemId = parsed.itemId !== undefined;
+  const hasFilter = parsed.where.length > 0 || parsed.filterJson !== undefined;
+  if (hasItemId && hasFilter) {
+    throw new UsageError(
+      'item update accepts either a positional <itemId> OR --where / ' +
+        '--filter-json (bulk shape), not both. Pick one.',
+      { details: { item_id: parsed.itemId, where_count: parsed.where.length } },
+    );
+  }
+  if (!hasItemId && !hasFilter) {
+    throw new UsageError(
+      'item update requires either a positional <itemId> or --where / ' +
+        '--filter-json for the bulk shape.',
+      { details: {} },
+    );
+  }
+  if (hasFilter && parsed.board === undefined) {
+    throw new UsageError(
+      'item update --where / --filter-json requires --board <bid>. The ' +
+        'bulk shape walks Monday\'s items_page on the named board.',
+      { details: { where_count: parsed.where.length } },
+    );
+  }
+  if (hasItemId) {
+    /* c8 ignore next 4 — defensive: hasItemId === true means
+       parsed.itemId is non-undefined; the type guard exists for TS. */
+    if (parsed.itemId === undefined) {
+      throw new UsageError('item update: itemId narrowing failed');
+    }
+    return { kind: 'single', itemId: parsed.itemId };
+  }
+  return { kind: 'bulk' };
+};
 
 const splitSetExpression = (raw: string): { readonly token: string; readonly value: string } => {
   const idx = raw.indexOf('=');
@@ -278,7 +351,7 @@ export const itemUpdateCommand: CommandModule<
   attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun
-      .command('update <itemId>')
+      .command('update [itemId]')
       .description(itemUpdateCommand.summary)
       .option(
         '--set <expr>',
@@ -287,7 +360,20 @@ export const itemUpdateCommand: CommandModule<
         [] as readonly string[],
       )
       .option('--name <n>', 'rename the item')
-      .option('--board <bid>', 'board ID (skip implicit lookup)')
+      .option('--board <bid>', 'board ID (required for bulk; skip lookup for single-item)')
+      .option(
+        '--where <expr>',
+        'repeatable bulk filter (cli-design §10.2): <col><op><val>',
+        (value: string, prev: readonly string[]) => [...prev, value],
+        [] as readonly string[],
+      )
+      .option('--filter-json <json>', 'literal Monday query_params for bulk')
+      // `--yes` is a GLOBAL flag (`src/cli/program.ts`); read it via
+      // `globalFlags.yes` rather than redeclaring on this subcommand
+      // so the flag stays single-source-of-truth across every M5b /
+      // M6 mutation surface (and so commander doesn't dispatch the
+      // value to a per-subcommand slot that diverges from the
+      // global one).
       .option(
         '--create-labels-if-missing',
         'auto-create unknown status / dropdown labels (Monday flag)',
@@ -298,7 +384,7 @@ export const itemUpdateCommand: CommandModule<
       )
       .action(async (itemId: unknown, opts: unknown) => {
         const parsed = parseArgv(itemUpdateCommand.inputSchema, {
-          itemId,
+          ...(itemId === undefined ? {} : { itemId }),
           ...(opts as Readonly<Record<string, unknown>>),
         });
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
@@ -306,9 +392,22 @@ export const itemUpdateCommand: CommandModule<
           program.opts(),
         );
 
+        const dispatch = validateInputShape(parsed);
+        if (dispatch.kind === 'bulk') {
+          await runBulk({
+            parsed,
+            client,
+            globalFlags,
+            apiVersion,
+            ctx,
+            programOpts: program.opts(),
+          });
+          return;
+        }
+
         const boardId = await resolveBoardId(
           client,
-          parsed.itemId,
+          dispatch.itemId,
           parsed.board,
         );
 
@@ -337,7 +436,7 @@ export const itemUpdateCommand: CommandModule<
           const result = await planChanges({
             client,
             boardId,
-            itemId: parsed.itemId,
+            itemId: dispatch.itemId,
             setEntries,
             ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
             dateResolution,
@@ -441,7 +540,7 @@ export const itemUpdateCommand: CommandModule<
           const mutation: SelectedMutation = selectMutation(allTranslated);
           mutationResult = await executeMutation(client, {
             mutation,
-            itemId: parsed.itemId,
+            itemId: dispatch.itemId,
             boardId,
             createLabelsIfMissing: parsed.createLabelsIfMissing,
           });
@@ -577,4 +676,454 @@ const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem => {
     );
   }
   return projectItem({ raw: parseRawItem(raw, { item_id: itemId }) });
+};
+
+// ============================================================
+// Bulk path (cli-design §10.2 — `--where` / `--filter-json`).
+// ============================================================
+
+const ITEMS_PAGE_QUERY = `
+  query ItemsPage(
+    $boardId: ID!
+    $limit: Int!
+    $queryParams: ItemsQuery
+  ) {
+    boards(ids: [$boardId]) {
+      items_page(limit: $limit, query_params: $queryParams) {
+        cursor
+        items {
+          id
+        }
+      }
+    }
+  }
+`;
+
+const NEXT_ITEMS_PAGE_QUERY = `
+  query NextItemsPage($cursor: String!, $limit: Int!) {
+    next_items_page(limit: $limit, cursor: $cursor) {
+      cursor
+      items {
+        id
+      }
+    }
+  }
+`;
+
+interface BulkItem {
+  readonly id: string;
+}
+
+interface InitialPageResponse {
+  readonly boards:
+    | readonly {
+        readonly items_page?: {
+          readonly cursor: string | null;
+          readonly items: readonly BulkItem[];
+        };
+      }[]
+    | null;
+}
+
+interface NextPageResponse {
+  readonly next_items_page: {
+    readonly cursor: string | null;
+    readonly items: readonly BulkItem[];
+  } | null;
+}
+
+/**
+ * Wrapped data shape for the bulk-live success envelope. cli-design
+ * §10.2 doesn't pin a specific shape for `data`, so we fold the
+ * matched / applied counts into a `summary` slot alongside the
+ * per-item projected list. Agents read `data.applied_count` for the
+ * "did it work?" probe and `data.items` for the post-mutation state.
+ */
+const bulkLiveDataSchema = z.object({
+  summary: z.object({
+    matched_count: z.number().int().nonnegative(),
+    applied_count: z.number().int().nonnegative(),
+    board_id: z.string(),
+  }),
+  items: z.array(projectedItemSchema),
+});
+
+type BulkLiveData = z.infer<typeof bulkLiveDataSchema>;
+
+interface RunBulkInputs {
+  readonly parsed: ParsedInput;
+  readonly client: MondayClient;
+  readonly globalFlags: GlobalFlags;
+  readonly apiVersion: string;
+  readonly ctx: RunContext;
+  readonly programOpts: unknown;
+}
+
+/**
+ * Bulk path orchestrator (cli-design §10.2). Walks `items_page` to
+ * collect every matched item, then dispatches:
+ *
+ *   1. Without `--yes` AND without `--dry-run` → throw
+ *      `confirmation_required` with the matched count. Per
+ *      cli-design §3.1 #7: "destructive ops without `--yes` fail
+ *      fast." Bulk multi-item mutations qualify.
+ *   2. With `--dry-run` → per-item `planChanges` → emit N-element
+ *      `planned_changes`. cli-design §10.2 line 1456-1457: "both
+ *      single-item and bulk forms use the same envelope".
+ *   3. With `--yes` (and not `--dry-run`) → per-item live mutation
+ *      via `executeMutation`. Fail-fast on first error; the error
+ *      envelope's `details.applied_to` lists IDs of items that
+ *      successfully mutated before the failure.
+ *
+ * **Why per-item planChanges / executeMutation rather than a
+ * single bulk mutation.** Monday has no true bulk-update mutation
+ * in 2026-01; the CLI walks items + fires N `change_*` calls. The
+ * column resolution + translation work is done once, then reused
+ * across every per-item mutation.
+ *
+ * **Sequential execution.** cli-design §9.3 mandates one-at-a-time
+ * requests in v0.1-v0.3; the per-item loop respects that. v0.4's
+ * `--concurrency` flag is the future extension point.
+ */
+const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
+  const { parsed, client, globalFlags, apiVersion, ctx, programOpts } = inputs;
+  /* c8 ignore next 6 — defensive: validateInputShape guarantees
+     parsed.board is non-undefined when shape is bulk; the type
+     guard exists for TS. */
+  if (parsed.board === undefined) {
+    throw new UsageError('item update bulk path: --board is required');
+  }
+  const boardId = parsed.board;
+
+  // 1) Load board metadata (cache-aware, refresh on column-not-found
+  //    during filter parsing per §5.3 step 5).
+  const meta = await loadBoardMetadata({
+    client,
+    boardId,
+    env: ctx.env,
+    noCache: globalFlags.noCache,
+  });
+  const onColumnNotFound =
+    meta.source === 'cache'
+      ? async (): Promise<BoardMetadata> => {
+          const refreshed = await refreshBoardMetadata({
+            client,
+            boardId,
+            env: ctx.env,
+          });
+          return refreshed.metadata;
+        }
+      : undefined;
+
+  const filterResult = await buildQueryParams({
+    metadata: meta.metadata,
+    resolveMe: resolveMeFactory(client),
+    whereClauses: parsed.where,
+    filterJson: parsed.filterJson,
+    ...(onColumnNotFound === undefined ? {} : { onColumnNotFound }),
+  });
+
+  // 2) Walk items_page collecting matched item IDs. Fail-fast on
+  //    stale-cursor per §5.6.
+  const matchedItemIds: string[] = [];
+  await paginate<BulkItem, InitialPageResponse | NextPageResponse>({
+    fetchInitial: async () => {
+      return client.raw<InitialPageResponse>(
+        ITEMS_PAGE_QUERY,
+        {
+          boardId,
+          limit: DEFAULT_PAGE_SIZE,
+          queryParams: filterResult.queryParams ?? null,
+        },
+        { operationName: 'ItemsPage' },
+      );
+    },
+    fetchNext: async (cursor) => {
+      return client.raw<NextPageResponse>(
+        NEXT_ITEMS_PAGE_QUERY,
+        { cursor, limit: DEFAULT_PAGE_SIZE },
+        { operationName: 'NextItemsPage' },
+      );
+    },
+    now: ctx.clock,
+    extractPage: (r): PaginatedPage<BulkItem> => {
+      if ('next_items_page' in r.data) {
+        const nr = (r as MondayResponse<NextPageResponse>).data;
+        return {
+          items: nr.next_items_page?.items ?? [],
+          cursor: nr.next_items_page?.cursor ?? null,
+        };
+      }
+      const ir = (r as MondayResponse<InitialPageResponse>).data;
+      const page = ir.boards?.[0]?.items_page;
+      return {
+        items: page?.items ?? [],
+        cursor: page?.cursor ?? null,
+      };
+    },
+    getId: (item) => item.id,
+    all: true,
+    onItem: (item) => {
+      matchedItemIds.push(item.id);
+    },
+  });
+
+  // 3) Confirmation gate. Bulk mutations without --yes (and without
+  //    --dry-run) surface `confirmation_required` per §3.1 #7 +
+  //    §6.5. Agents read the matched-item count and re-run with
+  //    --yes after reviewing. `--yes` is a global flag (program.ts).
+  if (!globalFlags.dryRun && !globalFlags.yes) {
+    throw new ConfirmationRequiredError(
+      `Bulk item update would mutate ${String(matchedItemIds.length)} ` +
+        `matched item(s). Re-run with --yes to confirm, or --dry-run to ` +
+        `preview.`,
+      {
+        details: {
+          board_id: boardId,
+          matched_count: matchedItemIds.length,
+          where_clauses: parsed.where,
+          ...(parsed.filterJson === undefined
+            ? {}
+            : { filter_json: parsed.filterJson }),
+          hint:
+            'Use --dry-run to inspect the planned_changes for every ' +
+            'matched item before applying.',
+        },
+      },
+    );
+  }
+
+  if (matchedItemIds.length === 0) {
+    // Empty match set — both dry-run and live are no-ops. Emit a
+    // success envelope with zero planned_changes / applied items
+    // rather than a misleading error.
+    if (globalFlags.dryRun) {
+      emitDryRun({
+        ctx,
+        programOpts,
+        plannedChanges: [],
+        source: 'live',
+        cacheAgeSeconds: null,
+        warnings: filterResult.warnings,
+        apiVersion,
+      });
+      return;
+    }
+    emitMutation({
+      ctx,
+      data: {
+        summary: { matched_count: 0, applied_count: 0, board_id: boardId },
+        items: [],
+      } satisfies BulkLiveData,
+      schema: bulkLiveDataSchema,
+      programOpts,
+      warnings: filterResult.warnings,
+      source: 'live',
+      cacheAgeSeconds: null,
+      apiVersion,
+    });
+    return;
+  }
+
+  const setEntries = parsed.set.map(splitSetExpression);
+
+  const dateResolution: DateResolutionContext = {
+    now: ctx.clock,
+    ...(ctx.env.MONDAY_TIMEZONE === undefined
+      ? {}
+      : { timezone: ctx.env.MONDAY_TIMEZONE }),
+  };
+  const peopleResolution: PeopleResolutionContext = {
+    resolveMe: resolveMeFactory(client),
+    resolveEmail: async (email) => {
+      const result = await userByEmail({
+        client,
+        email,
+        env: ctx.env,
+        noCache: globalFlags.noCache,
+      });
+      return result.user.id;
+    },
+  };
+
+  // 4) Dry-run path: per-item planChanges. Column resolution is
+  //    cached after the first call; per-item state read fires per
+  //    item (no item-state cache in v0.1).
+  if (globalFlags.dryRun) {
+    const allPlanned: Readonly<Record<string, unknown>>[] = [];
+    for (const itemId of matchedItemIds) {
+      const result = await planChanges({
+        client,
+        boardId,
+        itemId,
+        setEntries,
+        ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
+        dateResolution,
+        peopleResolution,
+        env: ctx.env,
+        noCache: globalFlags.noCache,
+      });
+      for (const plan of result.plannedChanges) {
+        allPlanned.push(plan as unknown as Readonly<Record<string, unknown>>);
+      }
+    }
+    emitDryRun({
+      ctx,
+      programOpts,
+      plannedChanges: allPlanned,
+      source: 'mixed',
+      cacheAgeSeconds: meta.cacheAgeSeconds,
+      warnings: filterResult.warnings,
+      apiVersion,
+    });
+    return;
+  }
+
+  // 5) Live path: per-item mutation. Resolve columns once, translate
+  //    once, then fire the same SelectedMutation against every
+  //    matched item.
+  //
+  // `collectedWarnings` is the union of filter warnings + resolver
+  // warnings, surfaced on the success envelope. `resolverWarnings`
+  // is the narrowed subset used by foldResolverWarningsIntoError —
+  // the helper's contract is to fold collision / stale_cache_refreshed
+  // signals, not generic Warning types.
+  const collectedWarnings: Warning[] = [...filterResult.warnings];
+  const resolverWarnings: ResolverWarning[] = [];
+  const translated: TranslatedColumnValue[] = [];
+  const resolvedIds: Record<string, string> = {};
+  for (const entry of setEntries) {
+    const resolution = await resolveColumnWithRefresh({
+      client,
+      boardId,
+      token: entry.token,
+      includeArchived: true,
+      env: ctx.env,
+      noCache: globalFlags.noCache,
+    });
+    collectedWarnings.push(...resolution.warnings);
+    resolverWarnings.push(...resolution.warnings);
+    if (resolution.match.column.archived === true) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${boardId} is archived.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: boardId,
+            },
+          },
+        ),
+        resolverWarnings,
+      );
+    }
+    try {
+      const t = await translateColumnValueAsync({
+        column: {
+          id: resolution.match.column.id,
+          type: resolution.match.column.type,
+        },
+        value: entry.value,
+        dateResolution,
+        peopleResolution,
+      });
+      translated.push(t);
+      resolvedIds[entry.token] = resolution.match.column.id;
+    } catch (err) {
+      if (err instanceof MondayCliError) {
+        throw foldResolverWarningsIntoError(err, resolverWarnings);
+      }
+      throw err;
+    }
+  }
+
+  const allTranslated: readonly TranslatedColumnValue[] =
+    parsed.name === undefined
+      ? translated
+      : [
+          {
+            columnId: 'name',
+            columnType: 'text',
+            rawInput: parsed.name,
+            payload: { format: 'simple', value: parsed.name },
+            resolvedFrom: null,
+            peopleResolution: null,
+          },
+          ...translated,
+        ];
+
+  const mutation: SelectedMutation = selectMutation(allTranslated);
+  const appliedItems: ProjectedItem[] = [];
+  for (const itemId of matchedItemIds) {
+    try {
+      const result = await executeMutation(client, {
+        mutation,
+        itemId,
+        boardId,
+        createLabelsIfMissing: parsed.createLabelsIfMissing,
+      });
+      appliedItems.push(result.projected);
+    } catch (err) {
+      if (err instanceof MondayCliError) {
+        const folded = foldResolverWarningsIntoError(err, resolverWarnings);
+        // Decorate with bulk-progress details so agents can see how
+        // many items mutated successfully before the failure.
+        const existing = folded.details ?? {};
+        const errorClass = folded.code === 'usage_error'
+          ? UsageError
+          : ApiError;
+        if (errorClass === UsageError) {
+          throw new UsageError(folded.message, {
+            ...(folded.cause === undefined ? {} : { cause: folded.cause }),
+            details: {
+              ...existing,
+              applied_count: appliedItems.length,
+              applied_to: appliedItems.map((i) => i.id),
+              failed_at_item: itemId,
+              matched_count: matchedItemIds.length,
+            },
+          });
+        }
+        throw new ApiError(folded.code, folded.message, {
+          ...(folded.cause === undefined ? {} : { cause: folded.cause }),
+          ...(folded.httpStatus === undefined ? {} : { httpStatus: folded.httpStatus }),
+          ...(folded.mondayCode === undefined ? {} : { mondayCode: folded.mondayCode }),
+          ...(folded.requestId === undefined ? {} : { requestId: folded.requestId }),
+          retryable: folded.retryable,
+          ...(folded.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: folded.retryAfterSeconds }),
+          details: {
+            ...existing,
+            applied_count: appliedItems.length,
+            applied_to: appliedItems.map((i) => i.id),
+            failed_at_item: itemId,
+            matched_count: matchedItemIds.length,
+          },
+        });
+      }
+      throw err;
+    }
+  }
+
+  emitMutation({
+    ctx,
+    data: {
+      summary: {
+        matched_count: matchedItemIds.length,
+        applied_count: appliedItems.length,
+        board_id: boardId,
+      },
+      items: appliedItems,
+    } satisfies BulkLiveData,
+    schema: bulkLiveDataSchema,
+    programOpts,
+    warnings: collectedWarnings,
+    source: collectedWarnings.length > 0 ? 'mixed' : 'live',
+    cacheAgeSeconds: null,
+    apiVersion,
+    resolvedIds,
+  });
 };

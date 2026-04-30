@@ -3129,3 +3129,321 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday item update (integration, M5b — bulk --where path)', () => {
+  // Helper to build matched-item responses.
+  const buildItem = (id: string, name = `Item ${id}`): typeof sampleItem => ({
+    ...sampleItem,
+    id,
+    name,
+  });
+
+  it('rejects bulk shape without --board as usage_error', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Working',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects mixing positional <iid> AND --where as usage_error', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Working',
+        '--board',
+        '111',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects bulk shape without --yes (and without --dry-run) as confirmation_required', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Working',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }, { id: '5003' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { matched_count?: number; board_id?: string };
+      };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.matched_count).toBe(3);
+    expect(env.error?.details?.board_id).toBe('111');
+  });
+
+  it('--dry-run: emits N planned_changes (one per matched item)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [buildItem('5001')] } },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [buildItem('5002')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        item_id: string;
+        diff: Readonly<Record<string, unknown>>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(2);
+    expect(env.planned_changes[0]?.item_id).toBe('5001');
+    expect(env.planned_changes[1]?.item_id).toBe('5002');
+  });
+
+  it('--yes: applies the mutation to every matched item, returns summary + items', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number; board_id: string };
+        items: readonly { id: string }[];
+      };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.data.summary).toEqual({
+      matched_count: 2,
+      applied_count: 2,
+      board_id: '111',
+    });
+    expect(env.data.items.length).toBe(2);
+    expect(env.resolved_ids).toEqual({ status: 'status_4' });
+  });
+
+  it('--yes: per-item failure surfaces with applied_to + matched_count details', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          applied_count?: number;
+          matched_count?: number;
+          failed_at_item?: string;
+          applied_to?: readonly string[];
+        };
+      };
+    };
+    expect(env.error?.code).toBe('validation_failed');
+    expect(env.error?.details?.applied_count).toBe(1);
+    expect(env.error?.details?.matched_count).toBe(2);
+    expect(env.error?.details?.failed_at_item).toBe('5002');
+    expect(env.error?.details?.applied_to).toEqual(['5001']);
+  });
+
+  it('empty match set is a clean no-op success envelope', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=NoSuchStatus',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { summary: { matched_count: number; applied_count: number } };
+    };
+    expect(env.data.summary).toEqual({
+      matched_count: 0,
+      applied_count: 0,
+      board_id: '111',
+    });
+  });
+});
