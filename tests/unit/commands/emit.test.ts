@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { run, type RunOptions } from '../../../src/cli/run.js';
-import { emitSuccess } from '../../../src/commands/emit.js';
+import { emitDryRun, emitMutation, emitSuccess } from '../../../src/commands/emit.js';
 import {
   ensureSubcommand,
   type CommandModule,
@@ -466,5 +466,133 @@ describe('emitSuccess — collection meta passthrough', () => {
     expect(result.exitCode).toBe(1);
     const env = JSON.parse(captured.stderr()) as { error: { code: string } };
     expect(env.error.code).toBe('usage_error');
+  });
+});
+
+describe('emitMutation (M5b)', () => {
+  const mutationModule: CommandModule<unknown, { id: string; name: string }> = {
+    name: 'demo.mutate',
+    summary: 'demo mutation',
+    examples: ['monday demo mutate'],
+    idempotent: true,
+    inputSchema: z.object({}).strict(),
+    outputSchema: z.object({ id: z.string(), name: z.string() }),
+    attach: (program, ctx) => {
+      const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+      noun
+        .command('mutate')
+        .description(mutationModule.summary)
+        .action(() => {
+          emitMutation({
+            ctx,
+            data: { id: '1', name: 'X' },
+            schema: mutationModule.outputSchema,
+            programOpts: program.opts(),
+            source: 'live',
+            resolvedIds: { status: 'col_a' },
+          });
+        });
+    },
+  };
+
+  it('emits a mutation envelope with resolved_ids slot', async () => {
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'mutate'],
+      extraCommands: [mutationModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+    const env = JSON.parse(captured.stdout()) as {
+      ok: boolean;
+      data: { id: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('1');
+    expect(env.resolved_ids).toEqual({ status: 'col_a' });
+  });
+
+  it('catches outputSchema drift via the R18 wrap (details.issues populated)', async () => {
+    const driftModule: CommandModule<unknown, { name: string }> = {
+      name: 'demo.drift-mutation',
+      summary: 'returns wrong shape',
+      examples: ['monday demo drift-mutation'],
+      idempotent: true,
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.object({ name: z.string() }),
+      attach: (program, ctx) => {
+        const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+        noun
+          .command('drift-mutation')
+          .description(driftModule.summary)
+          .action(() => {
+            emitMutation({
+              ctx,
+              // Wrong shape — `name` missing.
+              data: { wrongKey: 1 } as unknown as { name: string },
+              schema: driftModule.outputSchema,
+              programOpts: program.opts(),
+            });
+          });
+      },
+    };
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'drift-mutation'],
+      extraCommands: [driftModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(2);
+    const err = JSON.parse(captured.stderr()) as {
+      error: {
+        code: string;
+        details?: { issues?: readonly { path: string }[] };
+      };
+    };
+    expect(err.error.code).toBe('internal_error');
+    expect(err.error.details?.issues).toBeDefined();
+    expect((err.error.details?.issues ?? []).length).toBeGreaterThan(0);
+  });
+});
+
+describe('emitDryRun (M5b)', () => {
+  const dryRunModule: CommandModule<unknown, null> = {
+    name: 'demo.dryrun',
+    summary: 'demo dry-run',
+    examples: ['monday demo dryrun'],
+    idempotent: true,
+    inputSchema: z.object({}).strict(),
+    outputSchema: z.null(),
+    attach: (program, ctx) => {
+      const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+      noun
+        .command('dryrun')
+        .description(dryRunModule.summary)
+        .action(() => {
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [{ operation: 'change_simple_column_value', item_id: '1' }],
+          });
+        });
+    },
+  };
+
+  it('emits a §6.4 dry-run envelope with data:null + meta.dry_run + planned_changes', async () => {
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'dryrun'],
+      extraCommands: [dryRunModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+    const env = JSON.parse(captured.stdout()) as {
+      ok: boolean;
+      data: null;
+      meta: { dry_run?: boolean };
+      planned_changes: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data).toBeNull();
+    expect(env.meta.dry_run).toBe(true);
+    expect(env.planned_changes.length).toBe(1);
   });
 });

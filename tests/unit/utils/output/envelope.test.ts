@@ -114,30 +114,49 @@ describe('buildSuccess', () => {
 });
 
 describe('buildMutation', () => {
-  it('omits side_effects when there are none', () => {
-    const env = buildMutation({ id: '1' }, buildMeta(baseMetaInput));
+  it('omits side_effects + resolved_ids when there are none', () => {
+    const env = buildMutation({
+      data: { id: '1' },
+      meta: buildMeta(baseMetaInput),
+    });
     expect('side_effects' in env).toBe(false);
+    expect('resolved_ids' in env).toBe(false);
   });
 
   it('includes side_effects when present', () => {
-    const env = buildMutation({ id: '1' }, buildMeta(baseMetaInput), [
-      { kind: 'update_created', id: 'u_1' },
-    ]);
+    const env = buildMutation({
+      data: { id: '1' },
+      meta: buildMeta(baseMetaInput),
+      sideEffects: [{ kind: 'update_created', id: 'u_1' }],
+    });
     expect(env.side_effects).toEqual([
       { kind: 'update_created', id: 'u_1' },
     ]);
   });
 
-  it('emits keys in stable order with side_effects appended', () => {
-    const env = buildMutation({ id: '1' }, buildMeta(baseMetaInput), [
-      { kind: 'x' },
-    ]);
+  it('includes resolved_ids when supplied (cli-design §5.3 step 2)', () => {
+    const env = buildMutation({
+      data: { id: '1' },
+      meta: buildMeta(baseMetaInput),
+      resolvedIds: { status: 'status_4' },
+    });
+    expect(env.resolved_ids).toEqual({ status: 'status_4' });
+  });
+
+  it('emits keys in stable order with side_effects + resolved_ids appended', () => {
+    const env = buildMutation({
+      data: { id: '1' },
+      meta: buildMeta(baseMetaInput),
+      sideEffects: [{ kind: 'x' }],
+      resolvedIds: { status: 'status_4' },
+    });
     expect(Object.keys(env)).toEqual([
       'ok',
       'data',
       'meta',
       'warnings',
       'side_effects',
+      'resolved_ids',
     ]);
   });
 });

@@ -1482,6 +1482,14 @@ describe('monday item set (integration, M5b)', () => {
     // Resolution succeeded from a live BoardMetadata fetch — source
     // is 'live' (not 'mixed', since no cache leg was involved).
     expect(env.meta.source).toBe('live');
+    // Pass-1 finding F1: the resolved column ID is echoed on the
+    // live mutation envelope per cli-design §5.3 step 2 line
+    // 709-710 — agents capture stable IDs without re-reading
+    // metadata.
+    const withResolved = env as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(withResolved.resolved_ids).toEqual({ status: 'status_4' });
   });
 
   it('live: implicit --board lookup surfaces not_found when item is missing', async () => {
@@ -2038,6 +2046,259 @@ describe('monday item set (integration, M5b)', () => {
     const cell = env.planned_changes[0]?.diff.date4;
     expect(cell?.details?.resolved_from?.input).toBe('tomorrow');
     expect(cell?.details?.resolved_from?.timezone).toBe('Europe/London');
+  });
+
+  it('F4: validation_failed after LIVE resolution does NOT remap (only cache-sourced does)', async () => {
+    // Pass-1 finding F4 scopes the remap to cache-sourced
+    // resolution — a live resolution already saw the live archived
+    // flag, so a validation_failed there is genuine. Verify the
+    // helper bails out for live-source cases.
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          // Live BoardMetadata — column is active.
+          boardMetadataInteraction,
+          // Mutation returns validation_failed (e.g. unknown
+          // status label, NOT archived). With live-source
+          // resolution, the helper must NOT trigger the refresh +
+          // remap path.
+          {
+            operation_name: 'ItemSetRich',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'unknown status label',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          // No second BoardMetadata call — the remap helper
+          // bailed out for live-source. If the helper fired, the
+          // cassette would be exhausted and we'd get a different
+          // error.
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('validation_failed');
+  });
+
+  it('F2: UsageError translator failure preserves resolver_warnings (Codex pass-1)', async () => {
+    // Pre-fix, foldResolverWarningsIntoError only caught ApiError;
+    // a UsageError translator failure (e.g. dropdown empty input)
+    // bypassed and lost the stale_cache_refreshed signal. F2 widens
+    // the fold to MondayCliError so every typed translator failure
+    // carries the resolver context.
+    //
+    // Setup: cache → seeded board (no `tags` column). Refresh →
+    // board with `tags` (dropdown). User passes empty value → the
+    // dropdown translator throws UsageError. The cache refresh
+    // collected `stale_cache_refreshed` warning that must land in
+    // error.details.resolver_warnings.
+    const cachedBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const refreshedBoard = {
+      ...cachedBoard,
+      columns: [
+        ...cachedBoard.columns,
+        {
+          id: 'tags_d',
+          title: 'Tags',
+          type: 'dropdown',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    // Seed the cache.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedBoard] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      ['item', 'set', '12345', 'tags_d=', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          resolver_warnings?: readonly { code: string }[];
+        };
+      };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(
+      env.error?.details?.resolver_warnings?.some(
+        (w) => w.code === 'stale_cache_refreshed',
+      ),
+    ).toBe(true);
+  });
+
+  it('F3: malformed ItemBoardLookup response surfaces typed internal_error (Codex pass-1)', async () => {
+    // Pre-fix, client.raw<BoardLookupResponse> was a trusted
+    // boundary — a malformed response (e.g. `items` not an array)
+    // would surface downstream as a raw ZodError from
+    // BoardIdSchema.parse. F3 wraps the parse with unwrapOrThrow.
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: { data: { items: 'not-an-array' as unknown } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { issues?: readonly { path: string }[]; item_id?: string };
+      };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.issues).toBeDefined();
+    expect((env.error?.details?.issues ?? []).length).toBeGreaterThan(0);
+    expect(env.error?.details?.item_id).toBe('12345');
+  });
+
+  it('F4: validation_failed after cache-sourced resolution remaps to column_archived when refresh confirms (Codex pass-1)', async () => {
+    // Pre-fix, a cache-sourced resolution that missed the archived
+    // flag would surface validation_failed (Monday's mutation
+    // rejection), not column_archived. F4 forces a metadata
+    // refresh on validation_failed; if the refresh confirms the
+    // column is now archived, the error remaps to column_archived
+    // so agents key off the stable code.
+    //
+    // Setup:
+    //   1. Seed cache with active column.
+    //   2. item set against that column.
+    //   3. Live mutation returns validation_failed (HTTP 400 →
+    //      validation_failed per api/errors.ts).
+    //   4. Refresh fetches board with the column now archived.
+    //   5. Helper remaps to column_archived.
+    const cachedActive = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const refreshedArchived = {
+      ...cachedActive,
+      columns: [
+        {
+          ...cachedActive.columns[0],
+          archived: true,
+        },
+      ],
+    };
+    // Seed cache.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          // Cache hit — no BoardMetadata call here. Mutation fires
+          // because cache says active.
+          {
+            operation_name: 'ItemSetRich',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          // F4 forces a metadata refresh post-failure; the live
+          // board now reports the column archived.
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedArchived] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { remapped_from?: string };
+      };
+    };
+    expect(env.error?.code).toBe('column_archived');
+    expect(env.error?.details?.remapped_from).toBe('validation_failed');
   });
 
   it('token never leaks in mutation error envelopes (M5b regression)', async () => {

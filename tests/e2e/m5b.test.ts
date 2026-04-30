@@ -153,6 +153,13 @@ describe('M5b e2e — item set (live)', () => {
         type: 'status',
         label: 'Done',
       });
+      // Pass-1 finding F1: cli-design §5.3 step 2 promises the
+      // resolved column ID is echoed in mutation output. The live
+      // mutation envelope's `resolved_ids` slot ships this.
+      const withResolved = env as EnvelopeShape & {
+        resolved_ids?: Readonly<Record<string, string>>;
+      };
+      expect(withResolved.resolved_ids).toEqual({ status: 'status_4' });
       // Token never leaks into stdout / stderr.
       expect(result.stdout).not.toContain(LEAK_CANARY);
       expect(result.stderr).not.toContain(LEAK_CANARY);

@@ -3,6 +3,7 @@ import type { RunContext } from '../cli/run.js';
 import {
   buildDryRun,
   buildMeta,
+  buildMutation,
   buildSuccess,
   type ColumnHead,
   type Complexity,
@@ -282,6 +283,101 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
   );
 
   renderForFormat(format, envelope, validated, ctx, globalFlags, kind, warnings);
+};
+
+/**
+ * Emit helper for live mutation paths (`cli-design.md` §6.4).
+ *
+ * Same shape as `emitSuccess` but uses `buildMutation` so the
+ * envelope can carry `resolved_ids` (cli-design §5.3 step 2 echoes
+ * the resolved column ID per token) and a future `side_effects` slot
+ * (e.g. `monday dev task done` posts an update; that's a side
+ * effect). M5b's mutation surfaces (`item set`, eventually `clear`,
+ * `update`, plus `update create`) call this.
+ *
+ * Renderer dispatch is intentionally limited to JSON / table /
+ * text — `--ndjson` doesn't make sense for a single-resource
+ * mutation result. The single-resource layout uses the same
+ * renderer as a successful read.
+ */
+export interface EmitMutationOptions<T> {
+  readonly ctx: RunContext;
+  readonly data: T;
+  readonly schema: z.ZodType<T>;
+  readonly programOpts: unknown;
+  readonly source?: DataSource;
+  readonly cacheAgeSeconds?: number | null;
+  readonly warnings?: readonly Warning[];
+  readonly complexity?: Complexity | null;
+  readonly apiVersion?: string;
+  /**
+   * cli-design §5.3 step 2 token → column-ID echo. Keys are the
+   * agent-supplied tokens (`status`, `id:status_4`, etc.); values
+   * are the resolved column IDs.
+   */
+  readonly resolvedIds?: Readonly<Record<string, string>>;
+  /**
+   * Optional side-effect entries per cli-design §6.4 — secondary
+   * operations the CLI performed implicitly (e.g.
+   * `update_created` for `monday dev task done`). M5b's item set
+   * doesn't use this; reserved for v0.3 dev shortcuts.
+   */
+  readonly sideEffects?: readonly Readonly<Record<string, unknown>>[];
+}
+
+export const emitMutation = <T>(options: EmitMutationOptions<T>): void => {
+  const {
+    ctx,
+    schema,
+    programOpts,
+    source = 'live',
+  } = options;
+  const warnings = options.warnings ?? [];
+
+  // Drift catch — same shape emitSuccess uses.
+  const validated = unwrapOrThrow(schema.safeParse(options.data), {
+    context: 'mutation output diverged from declared outputSchema',
+    hint:
+      'this is an internal contract break — the action body produced ' +
+      'data the command\'s outputSchema rejected. Update either the ' +
+      'action body or the schema so they agree.',
+  });
+
+  const globalFlags = parseGlobalFlags(programOpts, ctx.env);
+  const format = selectOutput({
+    json: globalFlags.json,
+    table: globalFlags.table,
+    ...(globalFlags.output === undefined ? {} : { output: globalFlags.output }),
+    env: ctx.env,
+    isTTY: ctx.isTTY,
+  });
+  ensureFormatApplies(format, 'single');
+
+  const meta = buildMeta({
+    api_version: options.apiVersion ?? ctx.env.MONDAY_API_VERSION ?? '2026-01',
+    cli_version: ctx.cliVersion,
+    request_id: ctx.requestId,
+    source,
+    retrieved_at: ctx.clock().toISOString(),
+    cache_age_seconds: options.cacheAgeSeconds ?? null,
+    complexity: options.complexity ?? null,
+  });
+  const envelope = buildMutation({
+    data: validated,
+    meta,
+    warnings,
+    ...(options.sideEffects === undefined
+      ? {}
+      : { sideEffects: options.sideEffects }),
+    ...(options.resolvedIds === undefined
+      ? {}
+      : { resolvedIds: options.resolvedIds }),
+  });
+
+  // Render through the same format dispatch the read paths use.
+  // Mutations are single-resource by shape, so kind: 'single' (the
+  // ndjson rejection happens upstream in ensureFormatApplies).
+  renderForFormat(format, envelope, validated, ctx, globalFlags, 'single', warnings);
 };
 
 /**

@@ -98,6 +98,22 @@ export interface SuccessEnvelope<T> {
 
 export interface MutationEnvelope<T> extends SuccessEnvelope<T> {
   readonly side_effects?: readonly Readonly<Record<string, unknown>>[];
+  /**
+   * Token → resolved column ID map for the columns this mutation
+   * targeted. Per `cli-design.md` §5.3 step 2 line 709-710:
+   * "The resolved `column_id` is **echoed in mutation output**
+   * (§6.4 `resolved_ids`) so agents can capture stable IDs for
+   * future calls." The dry-run envelope's `planned_changes[].
+   * resolved_ids` carries the same shape; the live mutation
+   * envelope mirrors it so an agent's "set then re-read" loop
+   * can use the resolved ID without consulting metadata twice.
+   *
+   * Optional — present only on mutation envelopes that resolved
+   * tokens (read commands omit). The slot is canonical-position
+   * AFTER `side_effects` so the existing canonical key order
+   * stays stable.
+   */
+  readonly resolved_ids?: Readonly<Record<string, string>>;
 }
 
 export interface DryRunEnvelope {
@@ -181,11 +197,21 @@ export const buildSuccess = <T>(
   warnings,
 });
 
+export interface BuildMutationInputs<T> {
+  readonly data: T;
+  readonly meta: Meta;
+  readonly warnings?: readonly Warning[];
+  readonly sideEffects?: readonly Readonly<Record<string, unknown>>[];
+  /**
+   * Per cli-design §5.3 step 2: token → resolved column ID echo.
+   * Omit on mutations that don't resolve tokens (e.g. a future
+   * `item rename` that only writes `name`).
+   */
+  readonly resolvedIds?: Readonly<Record<string, string>>;
+}
+
 export const buildMutation = <T>(
-  data: T,
-  meta: Meta,
-  sideEffects: readonly Readonly<Record<string, unknown>>[] = [],
-  warnings: readonly Warning[] = [],
+  inputs: BuildMutationInputs<T>,
 ): MutationEnvelope<T> => {
   const env: {
     ok: true;
@@ -193,14 +219,18 @@ export const buildMutation = <T>(
     meta: Meta;
     warnings: readonly Warning[];
     side_effects?: readonly Readonly<Record<string, unknown>>[];
+    resolved_ids?: Readonly<Record<string, string>>;
   } = {
     ok: true,
-    data,
-    meta,
-    warnings,
+    data: inputs.data,
+    meta: inputs.meta,
+    warnings: inputs.warnings ?? [],
   };
-  if (sideEffects.length > 0) {
-    env.side_effects = sideEffects;
+  if (inputs.sideEffects !== undefined && inputs.sideEffects.length > 0) {
+    env.side_effects = inputs.sideEffects;
+  }
+  if (inputs.resolvedIds !== undefined) {
+    env.resolved_ids = inputs.resolvedIds;
   }
   return env;
 };
