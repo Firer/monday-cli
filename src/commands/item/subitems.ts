@@ -23,10 +23,12 @@ import {
   idFromRawItem,
   projectItem,
   projectedItemSchema,
-  rawItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
-import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  parseRawItem,
+} from '../../api/item-helpers.js';
 import { sortByIdAsc } from '../../api/sort.js';
 
 const ITEM_SUBITEMS_QUERY = `
@@ -94,8 +96,13 @@ export const itemSubitemsCommand: CommandModule<
         // Per-page sort by ID asc — §3.1 #8. Subitems is a single
         // page so this is the only sort the result sees.
         const sorted = sortByIdAsc(rawSubitems, idFromRawItem);
+        // R18 parse-boundary wrap: malformed subitem surfaces as
+        // typed `internal_error` with `details.issues` plus the
+        // parent-item id for triage.
         const data: ItemSubitemsOutput = sorted.map((raw) =>
-          projectItem({ raw: rawItemSchema.parse(raw) }),
+          projectItem({
+            raw: parseRawItem(raw, { parent_item_id: parsed.itemId }),
+          }),
         );
         emitSuccess({
           ctx,

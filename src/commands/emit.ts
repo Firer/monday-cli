@@ -21,6 +21,7 @@ import {
 } from '../types/global-flags.js';
 import { collectSecrets } from '../cli/envelope-out.js';
 import { UsageError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 
 /**
  * Emit helper for command actions (`v0.1-plan.md` §4 DoD #7–#8).
@@ -221,10 +222,18 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
   const kind = options.kind ?? 'single';
 
   // Drift catch (`v0.1-plan.md` §4 DoD #2). A failure means the
-  // command's runtime output diverged from its declared schema —
-  // the runner maps the thrown ZodError into `internal_error` /
-  // exit 2, which is what we want for an internal contract break.
-  const validated = schema.parse(options.data);
+  // command's runtime output diverged from its declared schema. R18
+  // parse-boundary wrap: surface as `internal_error` with
+  // `details.issues` (path + zod code per failing field) rather than
+  // a bare ZodError that the runner's catch-all maps to
+  // `internal_error` but loses the failing field path.
+  const validated = unwrapOrThrow(schema.safeParse(options.data), {
+    context: 'command output diverged from declared outputSchema',
+    hint:
+      'this is an internal contract break — the action body produced ' +
+      'data the command\'s outputSchema rejected. Update either the ' +
+      'action body or the schema so they agree.',
+  });
 
   const globalFlags = parseGlobalFlags(programOpts, ctx.env);
   const format = selectOutput({

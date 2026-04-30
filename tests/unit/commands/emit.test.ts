@@ -223,9 +223,19 @@ describe('emitSuccess — JSON envelope', () => {
     const result = await run(options);
     expect(result.exitCode).toBe(2);
     const err = JSON.parse(captured.stderr()) as {
-      error: { code: string };
+      error: {
+        code: string;
+        details?: { issues?: readonly { path: string }[] };
+      };
     };
     expect(err.error.code).toBe('internal_error');
+    // R18: the wrap surfaces the failing field path on
+    // `details.issues` — pre-fix, the bare ZodError lost the path
+    // when the runner's catch-all mapped to internal_error.
+    expect(err.error.details?.issues).toBeDefined();
+    const issues = err.error.details?.issues ?? [];
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((i) => i.path === 'name')).toBe(true);
   });
 
   it('renders text format for single-resource commands', async () => {

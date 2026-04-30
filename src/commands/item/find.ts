@@ -25,11 +25,13 @@ import {
   idFromRawItem,
   projectItem,
   projectedItemSchema,
-  rawItemSchema,
   type ProjectedItem,
   type RawItem,
 } from '../../api/item-projection.js';
-import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  parseRawItem,
+} from '../../api/item-helpers.js';
 import type { Warning } from '../../utils/output/envelope.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
@@ -216,8 +218,11 @@ export const itemFindCommand: CommandModule<
         // Project the haystack — findOne reads name + id only, so the
         // raw shape is enough; full projection happens once a winner
         // is selected.
+        // R18 parse-boundary wrap: malformed haystack item surfaces
+        // as typed `internal_error` carrying `details.issues` and
+        // the find-scope `query`/`board_id` for triage.
         const haystack: readonly RawItem[] = result.items.map((raw) =>
-          rawItemSchema.parse(raw),
+          parseRawItem(raw, { query: parsed.name, board_id: parsed.board }),
         );
         let found;
         try {

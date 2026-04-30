@@ -44,6 +44,7 @@ import {
 import type { MondayClient } from './client.js';
 import { BoardIdSchema, type BoardId } from '../types/ids.js';
 import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
 const BOARD_METADATA_QUERY = `
@@ -187,9 +188,28 @@ export interface BoardMetadataLoadResult {
   readonly complexity: Complexity | null;
 }
 
-const projectBoard = (raw: unknown): BoardMetadata =>
-  boardMetadataSchema.parse(raw);
+const projectBoard = (raw: unknown, boardId: string): BoardMetadata =>
+  // R18 parse-boundary wrap. Live-fetch projection: a malformed
+  // Monday response (schema drift, future field rename) surfaces as
+  // `internal_error` with `details.issues` rather than a bare
+  // ZodError that the runner's catch-all maps to `internal_error`
+  // but loses the failing field path. Per validation.md "Never
+  // bubble raw ZodError out of a parse boundary".
+  unwrapOrThrow(boardMetadataSchema.safeParse(raw), {
+    context: `Monday returned a malformed board metadata response for id ${boardId}`,
+    details: { board_id: boardId },
+    hint:
+      'this is a data-integrity error in Monday\'s response (or a ' +
+      'boardMetadataSchema drift); verify the response shape and ' +
+      'update the schema if Monday\'s contract has changed.',
+  });
 
+// Cache-read parse callback. ZodError here is intentionally
+// swallowed by the surrounding `loadBoardMetadata` try/catch (cache-
+// miss path) — a corrupt cache file is treated as a miss and a live
+// fetch follows. Wrapping with unwrapOrThrow would be a change in
+// behaviour. Kept as a thin parse so corrupt-cache → cache-miss
+// stays the established contract.
 const parseCacheEntry = (raw: unknown): BoardMetadata =>
   boardMetadataSchema.parse(raw);
 
@@ -209,8 +229,18 @@ const fetchLive = async (
   );
   // Pre-validate the loose response shape so a missing `boards` key
   // surfaces a clear error rather than tripping the projection
-  // parser on an undefined entry.
-  const validated = responseSchema.parse(response.data);
+  // parser on an undefined entry. R18 parse-boundary wrap: malformed
+  // top-level shape (e.g. response without a `boards` key, or
+  // `boards` not an array) surfaces with `details.issues` rather
+  // than a bare ZodError.
+  const validated = unwrapOrThrow(responseSchema.safeParse(response.data), {
+    context: `Monday returned a malformed BoardMetadata response for id ${boardId}`,
+    details: { board_id: boardId },
+    hint:
+      'this is a data-integrity error in Monday\'s response (or a ' +
+      'BoardMetadata response-shape drift); verify the response and ' +
+      'update responseSchema if Monday\'s contract has changed.',
+  });
   const first = validated.boards?.[0];
   if (first === undefined || first === null) {
     throw new ApiError(
@@ -219,7 +249,7 @@ const fetchLive = async (
       { details: { board_id: boardId } },
     );
   }
-  return { metadata: projectBoard(first), complexity: response.complexity };
+  return { metadata: projectBoard(first, boardId), complexity: response.complexity };
 };
 
 /**

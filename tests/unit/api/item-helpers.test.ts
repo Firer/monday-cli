@@ -12,11 +12,12 @@ import {
   COLUMN_VALUES_FRAGMENT,
   ITEM_FIELDS_FRAGMENT,
   collectColumnHeads,
+  parseRawItem,
   projectFromRaw,
   resolveMeFactory,
   titleMap,
 } from '../../../src/api/item-helpers.js';
-import { UsageError } from '../../../src/utils/errors.js';
+import { ApiError, UsageError } from '../../../src/utils/errors.js';
 import type { MondayClient } from '../../../src/api/client.js';
 
 describe('COLUMN_VALUES_FRAGMENT', () => {
@@ -105,6 +106,65 @@ describe('resolveMeFactory', () => {
     const resolveMe = resolveMeFactory(client);
     await expect(resolveMe()).resolves.toBe('999');
     expect(whoami).toHaveBeenCalledOnce();
+  });
+});
+
+describe('parseRawItem (R18 wrap)', () => {
+  it('returns the parsed RawItem on a well-shaped payload', () => {
+    const raw = {
+      id: '12345',
+      name: 'X',
+      state: null,
+      url: null,
+      created_at: null,
+      updated_at: null,
+      board: { id: '111' },
+      column_values: [],
+    };
+    const out = parseRawItem(raw);
+    expect(out.id).toBe('12345');
+    expect(out.name).toBe('X');
+  });
+
+  it('wraps a malformed payload into ApiError(internal_error) with issues + caller details', () => {
+    // Pre-R18, this would throw raw ZodError that the runner's
+    // catch-all maps to internal_error but loses the failing field
+    // path. The wrap surfaces details.issues so agents see which
+    // field tripped the schema.
+    const malformed = {
+      // Missing required `name` and `column_values`.
+      id: '12345',
+    };
+    let caught: unknown;
+    try {
+      parseRawItem(malformed, { item_id: '12345' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.code).toBe('internal_error');
+    expect(err.message).toMatch(/malformed item response/u);
+    const details = err.details as {
+      issues: readonly { path: string }[];
+      item_id: string;
+    };
+    expect(details.item_id).toBe('12345');
+    expect(details.issues.length).toBeGreaterThan(0);
+    expect(err.cause).toBeDefined();
+  });
+
+  it('omits caller details when none supplied', () => {
+    let caught: unknown;
+    try {
+      parseRawItem({ id: '1' });
+    } catch (e) {
+      caught = e;
+    }
+    const err = caught as ApiError;
+    const details = err.details as Readonly<Record<string, unknown>>;
+    expect(details.issues).toBeDefined();
+    expect(details.item_id).toBeUndefined();
   });
 });
 

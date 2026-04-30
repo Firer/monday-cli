@@ -57,12 +57,14 @@ import {
   type ResolverWarning,
 } from './columns.js';
 import {
-  rawItemSchema,
   parseColumnValue,
   type RawItem,
   type RawColumnValue,
 } from './item-projection.js';
-import { ITEM_FIELDS_FRAGMENT } from './item-helpers.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  parseRawItem,
+} from './item-helpers.js';
 import type { BoardColumn } from './board-metadata.js';
 import {
   selectMutation,
@@ -612,38 +614,15 @@ const fetchItem = async (
       { details: { item_id: itemId } },
     );
   }
-  // R17-style parse-then-wrap — validation.md "Never bubble raw
+  // R18 parse-boundary wrap — validation.md "Never bubble raw
   // ZodError out of a parse boundary". A malformed Monday response
   // (schema drift, future field rename) surfaces as a typed
-  // internal_error carrying details.issues rather than a bare
-  // ZodError that loses the field path. Same pattern as
-  // resolvers.ts userByEmail.
-  const parsed = rawItemSchema.safeParse(first);
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => ({
-      path: i.path.join('.'),
-      message: i.message,
-      code: i.code,
-    }));
-    throw new ApiError(
-      'internal_error',
-      `Monday returned a malformed item response for id ${itemId} — the ` +
-        `item schema rejected the payload at ${issues.length} ` +
-        `issue${issues.length === 1 ? '' : 's'}.`,
-      {
-        cause: parsed.error,
-        details: {
-          item_id: itemId,
-          issues,
-          hint:
-            'this is a data-integrity error in Monday\'s response (or a ' +
-            'rawItemSchema drift); verify the response shape and update ' +
-            'the schema if Monday\'s contract has changed.',
-        },
-      },
-    );
-  }
-  const item = parsed.data;
+  // internal_error carrying details.issues + item_id rather than a
+  // bare ZodError that loses the failing field path. Threads through
+  // the shared `parseRawItem` helper so the dry-run engine, every
+  // M4 read command, and any future M5b/M6 consumer pin the same
+  // contract via one source of truth.
+  const item = parseRawItem(first, { item_id: itemId });
   const byColumnId = new Map<string, RawColumnValue>();
   for (const cv of item.column_values) {
     byColumnId.set(cv.id, cv);

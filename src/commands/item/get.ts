@@ -17,10 +17,12 @@ import { parseArgv } from '../parse-argv.js';
 import {
   projectItem,
   projectedItemSchema,
-  rawItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
-import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  parseRawItem,
+} from '../../api/item-helpers.js';
 
 const ITEM_GET_QUERY = `
   query ItemGet($ids: [ID!]!) {
@@ -70,9 +72,12 @@ export const itemGetCommand: CommandModule<
           kind: 'item',
           schema: itemGetCommand.outputSchema,
           // Item-specific projection: parse the raw GraphQL element
-          // through the wider rawItemSchema first, then derive the
-          // §6.2 typed column shape via projectItem.
-          project: (raw) => projectItem({ raw: rawItemSchema.parse(raw) }),
+          // through `parseRawItem` (R18 wrap — malformed Monday
+          // payload surfaces as typed `internal_error` with
+          // `details.issues` and `item_id`), then derive the §6.2
+          // typed column shape via projectItem.
+          project: (raw) =>
+            projectItem({ raw: parseRawItem(raw, { item_id: parsed.itemId }) }),
         });
       });
   },

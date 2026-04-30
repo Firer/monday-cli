@@ -341,4 +341,70 @@ describe('loadBoardMetadata — error handling', () => {
       loadBoardMetadata({ client, boardId: '111', env: xdgEnv() }),
     ).rejects.toMatchObject({ code: 'rate_limited' });
   });
+
+  it('R18: malformed live response shape surfaces typed internal_error with details.issues', async () => {
+    // Pre-R18, the responseSchema.parse line threw raw ZodError that
+    // the runner's catch-all mapped to internal_error but lost the
+    // failing field path. R18 wraps with safeParse + ApiError so
+    // agents debugging schema drift see issues + board_id.
+    const stats: FakeClientStats = { calls: 0 };
+    const client = buildFakeClient(
+      [{ boards: 'not-an-array' as unknown }],
+      stats,
+    );
+    let caught: unknown;
+    try {
+      await loadBoardMetadata({ client, boardId: '111', env: xdgEnv() });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.code).toBe('internal_error');
+    const details = err.details as {
+      issues: readonly { path: string }[];
+      board_id: string;
+    };
+    expect(details.board_id).toBe('111');
+    expect(details.issues.length).toBeGreaterThan(0);
+    expect(err.cause).toBeDefined();
+  });
+
+  it('R18: malformed per-board projection surfaces typed internal_error with details.issues', async () => {
+    // The projectBoard parse boundary — Monday returns the top-level
+    // shape but the per-board entry is malformed (e.g. missing
+    // required `name` / `id` field). R18 wraps the projection so the
+    // failing field path lands on details.issues.
+    const stats: FakeClientStats = { calls: 0 };
+    const client = buildFakeClient(
+      [
+        {
+          boards: [
+            {
+              // Missing required `name` and other fields; columns
+              // wrong shape.
+              id: '111',
+              columns: 'not-an-array',
+            },
+          ],
+        },
+      ],
+      stats,
+    );
+    let caught: unknown;
+    try {
+      await loadBoardMetadata({ client, boardId: '111', env: xdgEnv() });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.code).toBe('internal_error');
+    const details = err.details as {
+      issues: readonly { path: string }[];
+      board_id: string;
+    };
+    expect(details.board_id).toBe('111');
+    expect(details.issues.length).toBeGreaterThan(0);
+  });
 });

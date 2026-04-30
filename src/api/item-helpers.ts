@@ -33,6 +33,7 @@
  */
 import type { ColumnHead } from '../utils/output/envelope.js';
 import { UsageError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import {
   projectItem,
   rawItemSchema,
@@ -151,30 +152,52 @@ export const resolveMeFactory = (
 };
 
 /**
+ * Parses a raw GraphQL item-shape into a `RawItem` with the R18
+ * parse-boundary wrap: malformed payloads surface as
+ * `ApiError(internal_error)` with `details.issues` rather than a
+ * bare ZodError that loses the failing field path.
+ *
+ * Per `validation.md` "Never bubble raw ZodError out of a parse
+ * boundary". Mirrors the dry-run engine's per-id wrap (`api/dry-
+ * run.ts fetchItem`) and `userByEmail` (`api/resolvers.ts`) — same
+ * pattern across every parse boundary.
+ *
+ * Optional `details` are merged into the error envelope (e.g.
+ * `{ item_id: '123' }`) so consumers in `item get` / `find` /
+ * `subitems` can scope the failure to the specific item being
+ * parsed.
+ */
+export const parseRawItem = (
+  raw: unknown,
+  details?: Readonly<Record<string, unknown>>,
+): RawItem =>
+  unwrapOrThrow(rawItemSchema.safeParse(raw), {
+    context: 'Monday returned a malformed item response',
+    ...(details === undefined ? {} : { details }),
+    hint:
+      'this is a data-integrity error in Monday\'s response (or a ' +
+      'rawItemSchema drift); verify the response shape and update ' +
+      'the schema if Monday\'s contract has changed.',
+  });
+
+/**
  * Parses one raw GraphQL item-shape and projects it into the §6.2 /
  * §6.3 `ProjectedItem`. A thin wrapper around
- * `rawItemSchema.parse + projectItem` so the collection commands
- * (`list`, `search`) spell the same call once.
+ * `parseRawItem + projectItem` so the collection commands (`list`,
+ * `search`) spell the same call once.
  *
  * `omitColumnTitles: true` is the §6.3 same-board-collection rule —
  * per-cell `title` drops out of each column entry (consolidated
  * into `meta.columns`). Single-resource paths (`item get`) skip
  * this helper because they keep titles inline (`item-projection.ts`
  * `projectItem` directly).
- *
- * Note: this helper still uses `rawItemSchema.parse`. R18 (next
- * commit) wraps every `rawItemSchema.parse` call site in the
- * `safeParse + ApiError(internal_error)` pattern per
- * `validation.md` "Never bubble raw ZodError out of a parse
- * boundary"; the wrap lands here in the R18 commit and propagates
- * through every consumer.
  */
 export const projectFromRaw = (
   raw: unknown,
   titles: ReadonlyMap<string, string>,
   options: { readonly omitColumnTitles: boolean },
 ): ProjectedItem => {
-  const parsed: RawItem = rawItemSchema.parse(raw);
+  const parsed: RawItem = parseRawItem(raw);
   return projectItem({
     raw: parsed,
     columnTitles: titles,
