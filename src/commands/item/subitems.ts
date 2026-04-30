@@ -20,6 +20,7 @@ import { ApiError } from '../../utils/errors.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import {
+  idFromRawItem,
   projectItem,
   projectedItemSchema,
   rawItemSchema,
@@ -64,6 +65,7 @@ interface RawResponse {
     | null;
 }
 
+
 export const itemSubitemsCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemSubitemsOutput
@@ -105,11 +107,7 @@ export const itemSubitemsCommand: CommandModule<
         const rawSubitems = first.subitems ?? [];
         // Per-page sort by ID asc — §3.1 #8. Subitems is a single
         // page so this is the only sort the result sees.
-        const sorted = sortByIdAsc(rawSubitems, (i) => {
-          if (typeof i !== 'object' || i === null) return '';
-          const v = (i as { id?: unknown }).id;
-          return typeof v === 'string' ? v : '';
-        });
+        const sorted = sortByIdAsc(rawSubitems, idFromRawItem);
         const data: ItemSubitemsOutput = sorted.map((raw) =>
           projectItem({ raw: rawItemSchema.parse(raw) }),
         );

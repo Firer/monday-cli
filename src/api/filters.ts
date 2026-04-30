@@ -373,11 +373,12 @@ const wrapForOperator = (
     case 'greater_than':
     case 'greater_than_or_equals':
       return Array.isArray(value) ? value[0] : value;
-    /* c8 ignore next 4 — unary kinds never reach this helper; the
+    /* c8 ignore start — unary kinds never reach this helper; the
        caller only invokes wrapForOperator for binary operators. */
     case 'is_empty':
     case 'is_not_empty':
       return undefined;
+    /* c8 ignore stop */
   }
 };
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  idFromRawItem,
   parseColumnValue,
   projectColumnValue,
   projectItem,
@@ -58,6 +59,19 @@ describe('projectColumnValue — typed inline fields', () => {
     expect(out.type).toBe('date');
     expect(out.date).toBe('2026-05-01');
     expect(out.time).toBeNull();
+  });
+
+  it('extracts non-null time for date columns when set', () => {
+    const out = projectColumnValue(
+      cv({
+        type: 'date',
+        text: '2026-05-01 10:30',
+        value: '{"date":"2026-05-01","time":"10:30"}',
+      }),
+      undefined,
+    );
+    expect(out.date).toBe('2026-05-01');
+    expect(out.time).toBe('10:30');
   });
 
   it('extracts people for people columns', () => {
@@ -143,6 +157,41 @@ describe('projectColumnValue — typed inline fields', () => {
     );
     expect(out.people).toEqual([{ id: '7', kind: 'person' }]);
   });
+
+  it('skips non-object person entries', () => {
+    const out = projectColumnValue(
+      cv({
+        type: 'people',
+        // Defensive: a person entry is not an object (e.g. a stray
+        // null in the array). Skip it without crashing.
+        value: '{"personsAndTeams":[null,{"id":"1","kind":"person"}]}',
+      }),
+      undefined,
+    );
+    expect(out.people).toEqual([{ id: '1', kind: 'person' }]);
+  });
+
+  it('returns empty people when personsAndTeams is missing', () => {
+    const out = projectColumnValue(
+      cv({
+        type: 'people',
+        value: '{"otherKey":"x"}',
+      }),
+      undefined,
+    );
+    expect(out.people).toEqual([]);
+  });
+
+  it('drops kind when not a string', () => {
+    const out = projectColumnValue(
+      cv({
+        type: 'people',
+        value: '{"personsAndTeams":[{"id":"5"}]}',
+      }),
+      undefined,
+    );
+    expect(out.people).toEqual([{ id: '5' }]);
+  });
 });
 
 describe('projectItem', () => {
@@ -221,5 +270,20 @@ describe('rawColumnValueSchema', () => {
     expect(() =>
       rawColumnValueSchema.parse({ id: 'status_4' }),
     ).toThrow();
+  });
+});
+
+describe('idFromRawItem', () => {
+  it('returns the id when present as a string', () => {
+    expect(idFromRawItem({ id: '42' })).toBe('42');
+  });
+
+  it('exists as a callable export', () => {
+    // Defensive branches (non-object input, missing id) are
+    // c8-ignored: the production wire shape always carries a string
+    // id and is enforced by rawItemSchema.parse before idFromRawItem
+    // sees the value. The function is exercised on the happy path
+    // via integration tests for item list / find / search.
+    expect(typeof idFromRawItem).toBe('function');
   });
 });

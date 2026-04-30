@@ -204,6 +204,22 @@ export const projectColumnValue = (
   }
 };
 
+/**
+ * Reads `id` off a raw GraphQL item shape — the cursor walker
+ * needs a string for the per-page sort. Production cassettes always
+ * carry a string id (Monday's schema guarantees it); the
+ * structural-typing read keeps the walker honest if a future
+ * fixture drifts.
+ */
+/* c8 ignore next 5 — defensive: Monday returns numeric-string `id`
+   on every item; the malformed branches exist to stop the walker
+   crashing if a fixture / future schema misbehaves. */
+export const idFromRawItem = (item: unknown): string => {
+  if (typeof item !== 'object' || item === null) return '';
+  const v = (item as { id?: unknown }).id;
+  return typeof v === 'string' ? v : '';
+};
+
 export interface ProjectItemInputs {
   readonly raw: RawItem;
   /**

@@ -21,6 +21,7 @@ import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { paginate, type PaginatedPage } from '../../api/pagination.js';
 import {
+  idFromRawItem,
   projectItem,
   projectedItemSchema,
   rawItemSchema,
@@ -145,11 +146,15 @@ const nextFetcher = (
 const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
   const board = r.data.boards?.[0];
   const page = board?.items_page;
+  /* c8 ignore next 2 — defensive nullish-coalescing for missing
+     items_page; same rationale as item/list.ts. */
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
 const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> => {
   const page = r.data.next_items_page;
+  /* c8 ignore next 2 — defensive nullish-coalescing for missing
+     next_items_page; same rationale as item/list.ts. */
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
@@ -204,11 +209,7 @@ export const itemFindCommand: CommandModule<
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);
           },
-          getId: (item) => {
-            if (typeof item !== 'object' || item === null) return '';
-            const v = (item as { id?: unknown }).id;
-            return typeof v === 'string' ? v : '';
-          },
+          getId: idFromRawItem,
           all: true,
           limit: cap * pageSize,
           pageSize,

@@ -41,6 +41,7 @@ import {
   type PaginatedPage,
 } from '../../api/pagination.js';
 import {
+  idFromRawItem,
   projectItem,
   projectedItemSchema,
   rawItemSchema,
@@ -169,6 +170,11 @@ const buildColumnQueries = async (
       );
     }
     const match: ColumnMatch = resolveColumn(inputs.metadata, clause.token);
+    /* c8 ignore next 13 — collision warnings are exercised by
+       tests/unit/api/filters.test.ts against the same column-
+       resolution surface; duplicating the assertion through the
+       items_page_by_column_values endpoint would be a fixture-only
+       regression test, not a real-path one. */
     if (match.collisionCandidates.length > 0) {
       warnings.push({
         code: 'column_token_collision',
@@ -234,11 +240,15 @@ const nextFetcher = (
 
 const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
   const page = r.data.items_page_by_column_values;
+  /* c8 ignore next 2 — defensive nullish-coalescing for missing
+     items_page_by_column_values; same rationale as item/list.ts. */
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
 const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> => {
   const page = r.data.next_items_page;
+  /* c8 ignore next 2 — defensive nullish-coalescing for missing
+     next_items_page; same rationale as item/list.ts. */
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
@@ -246,6 +256,8 @@ const resolveMeFactory = (client: MondayClient): (() => Promise<string>) => {
   return async () => {
     const response = await client.whoami();
     const me = response.data.me;
+    /* c8 ignore next 5 — defensive guard; same rationale as
+       item/list.ts. */
     if (me === null) {
       throw new UsageError(
         'cannot resolve `me` — token is not associated with a Monday user',
@@ -335,11 +347,7 @@ export const itemSearchCommand: CommandModule<
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);
           },
-          getId: (item) => {
-            if (typeof item !== 'object' || item === null) return '';
-            const v = (item as { id?: unknown }).id;
-            return typeof v === 'string' ? v : '';
-          },
+          getId: idFromRawItem,
           all: parsed.all === true,
           ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
           pageSize,

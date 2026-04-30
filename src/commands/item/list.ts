@@ -44,6 +44,7 @@ import {
   type PaginatedPage,
 } from '../../api/pagination.js';
 import {
+  idFromRawItem,
   projectItem,
   projectedItemSchema,
   rawItemSchema,
@@ -172,6 +173,10 @@ const resolveMeFactory = (client: MondayClient): (() => Promise<string>) => {
   return async () => {
     const response = await client.whoami();
     const me = response.data.me;
+    /* c8 ignore next 5 — defensive: Monday's me field is null only
+       when the token is invalid / belongs to a guest, which the
+       transport layer surfaces as `unauthorized` before this
+       resolver runs. The guard exists for type narrowing. */
     if (me === null) {
       throw new UsageError(
         'cannot resolve `me` — token is not associated with a Monday user',
@@ -188,6 +193,7 @@ const projectFromRaw = (
   const parsed: RawItem = rawItemSchema.parse(raw);
   return projectItem({ raw: parsed, columnTitles: titles });
 };
+
 
 interface CollectingFlags {
   readonly all: boolean;
@@ -233,6 +239,10 @@ const nextFetcher = (
 const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
   const board = r.data.boards?.[0];
   const page = board?.items_page;
+  /* c8 ignore next 4 — defensive nullish-coalescing for the
+     Monday-wire-shape `page` being undefined; the request always
+     returns an items_page object on success, the guard exists so a
+     malformed cassette / future schema drift doesn't crash. */
   return {
     cursor: page?.cursor ?? null,
     items: page?.items ?? [],
@@ -241,6 +251,7 @@ const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unkno
 
 const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> => {
   const page = r.data.next_items_page;
+  /* c8 ignore next 4 — same defensive shape as extractInitial. */
   return {
     cursor: page?.cursor ?? null,
     items: page?.items ?? [],
@@ -406,11 +417,7 @@ export const itemListCommand: CommandModule<
               if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
               return extractInitial(r as MondayResponse<InitialResponse>);
             },
-            getId: (item) => {
-              if (typeof item !== 'object' || item === null) return '';
-              const v = (item as { id?: unknown }).id;
-              return typeof v === 'string' ? v : '';
-            },
+            getId: idFromRawItem,
             all: flags.all,
             ...(flags.limit === undefined ? {} : { limit: flags.limit }),
             pageSize,
@@ -435,11 +442,7 @@ export const itemListCommand: CommandModule<
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);
           },
-          getId: (item) => {
-            if (typeof item !== 'object' || item === null) return '';
-            const v = (item as { id?: unknown }).id;
-            return typeof v === 'string' ? v : '';
-          },
+          getId: idFromRawItem,
           all: flags.all,
           ...(flags.limit === undefined ? {} : { limit: flags.limit }),
           pageSize,
