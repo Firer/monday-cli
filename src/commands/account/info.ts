@@ -68,7 +68,7 @@ export const accountInfoCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         accountInfoCommand.inputSchema.parse(opts);
-        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { client, toEmit } = resolveClient(ctx, program.opts());
         const result = await client.account();
         if (result.data.account === null) {
           throw new ApiError(
@@ -81,9 +81,7 @@ export const accountInfoCommand: CommandModule<
           data: result.data.account,
           schema: accountInfoCommand.outputSchema,
           programOpts: program.opts(),
-          source: 'live',
-          complexity: result.complexity,
-          apiVersion,
+          ...toEmit(result),
         });
       });
   },

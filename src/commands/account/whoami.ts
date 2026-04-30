@@ -68,7 +68,7 @@ export const accountWhoamiCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         accountWhoamiCommand.inputSchema.parse(opts);
-        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { client, toEmit } = resolveClient(ctx, program.opts());
         const result = await client.whoami();
         if (result.data.me === null) {
           // Monday returns `me: null` when the token is valid but
@@ -84,9 +84,7 @@ export const accountWhoamiCommand: CommandModule<
           data: result.data,
           schema: accountWhoamiCommand.outputSchema,
           programOpts: program.opts(),
-          source: 'live',
-          complexity: result.complexity,
-          apiVersion,
+          ...toEmit(result),
         });
       });
   },

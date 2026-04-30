@@ -26,24 +26,59 @@
  */
 
 import { createFetchTransport } from './transport.js';
-import { MondayClient, PINNED_API_VERSION } from './client.js';
+import {
+  MondayClient,
+  PINNED_API_VERSION,
+  type MondayResponse,
+} from './client.js';
 import { loadConfig } from '../config/load.js';
 import {
   parseGlobalFlags,
   type GlobalFlags,
 } from '../types/global-flags.js';
+import type {
+  Complexity,
+  DataSource,
+} from '../utils/output/envelope.js';
 import type { RunContext } from '../cli/run.js';
+
+/**
+ * The four meta-fields every successful network command threads into
+ * `emitSuccess`. Bundled (M2.5 R3) so call sites can splat
+ * `...toEmit(result)` instead of writing `apiVersion`, `complexity`,
+ * `source`, `cacheAgeSeconds` separately each time. Required-not-
+ * optional so the splat lands the keys verbatim under
+ * `exactOptionalPropertyTypes` — no `undefined` values to filter.
+ */
+export interface EmitFromNetworkResult {
+  readonly source: DataSource;
+  readonly apiVersion: string;
+  readonly complexity: Complexity | null;
+  readonly cacheAgeSeconds: number | null;
+}
 
 export interface ResolvedClient {
   readonly client: MondayClient;
   readonly globalFlags: GlobalFlags;
   /**
    * The actual `API-Version` value sent on the wire — `--api-version`
-   * flag > `MONDAY_API_VERSION` env > SDK pin. Surfaced so the
-   * envelope's `meta.api_version` carries the same value the request
-   * carried.
+   * flag > `MONDAY_API_VERSION` env > SDK pin. Surfaced so commands
+   * that *embed* the value in their output payload (e.g.
+   * `account version` writes it into `data.pinned.value`) can read
+   * it directly. The envelope-level `meta.api_version` is plumbed
+   * through `toEmit` below.
    */
   readonly apiVersion: string;
+  /**
+   * Builds the `EmitFromNetworkResult` shape for a given network
+   * response — closes over the resolved `apiVersion` so call sites
+   * can't pass a mismatched value. M2 commands all run live;
+   * `cacheAgeSeconds` stays `null` until M3 wires the cache. Source
+   * is `'live'` for now; a future cache-hit path will widen this
+   * (likely by adding a parameterised variant rather than
+   * mutating the closure).
+   */
+  readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
 }
 
 export const resolveClient = (
@@ -88,5 +123,12 @@ export const resolveClient = (
   ctx.meta.setApiVersion(apiVersion);
   ctx.meta.setSource('live');
 
-  return { client, globalFlags, apiVersion };
+  const toEmit = <T>(response: MondayResponse<T>): EmitFromNetworkResult => ({
+    source: 'live',
+    apiVersion,
+    complexity: response.complexity,
+    cacheAgeSeconds: null,
+  });
+
+  return { client, globalFlags, apiVersion, toEmit };
 };

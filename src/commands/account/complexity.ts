@@ -57,7 +57,7 @@ export const accountComplexityCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         accountComplexityCommand.inputSchema.parse(opts);
-        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { client, toEmit } = resolveClient(ctx, program.opts());
         const result = await client.complexityProbe();
         const c = result.data.complexity;
         if (c === null) {
@@ -76,9 +76,7 @@ export const accountComplexityCommand: CommandModule<
           },
           schema: accountComplexityCommand.outputSchema,
           programOpts: program.opts(),
-          source: 'live',
-          complexity: result.complexity,
-          apiVersion,
+          ...toEmit(result),
         });
       });
   },

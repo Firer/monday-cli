@@ -79,7 +79,7 @@ export const accountVersionCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         accountVersionCommand.inputSchema.parse(opts);
-        const { client, globalFlags, apiVersion } = resolveClient(
+        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
           program.opts(),
         );
@@ -108,9 +108,7 @@ export const accountVersionCommand: CommandModule<
           },
           schema: accountVersionCommand.outputSchema,
           programOpts: program.opts(),
-          source: 'live',
-          complexity: result.complexity,
-          apiVersion,
+          ...toEmit(result),
         });
       });
   },
