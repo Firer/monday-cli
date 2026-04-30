@@ -3,12 +3,12 @@ import { ApiError, UsageError } from '../../../src/utils/errors.js';
 import {
   selectMutation,
   translateColumnValue,
+  translateColumnValueAsync,
   unsupportedColumnTypeError,
   type ColumnValuePayload,
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../../src/api/column-values.js';
-import type { WritableColumnType } from '../../../src/api/column-types.js';
 
 const translate = (
   type: string,
@@ -529,24 +529,26 @@ describe('translateColumnValue — date (rich)', () => {
   });
 });
 
-describe('translateColumnValue — allowlisted but not yet implemented (M5a follow-ups)', () => {
-  // people remains in the v0.1 writable allowlist but its
-  // translation logic ships in a follow-up session. Until then
-  // it surfaces as `unsupported_column_type` — same code, same
-  // shape — so callers see one contract.
-  it.each<[WritableColumnType, string]>([
-    ['people', 'alice@example.test'],
-  ])('%s → unsupported_column_type until follow-up sessions land', (type, value) => {
-    expect(() => translate(type, value, 'col_x')).toThrow(ApiError);
+describe('translateColumnValue — sync entry on a people column', () => {
+  // People resolution is async (email→ID lookup hits the
+  // directory cache or `users(emails:)`). The sync entry point
+  // throws `internal_error` rather than `unsupported_column_type`
+  // because people IS in the v0.1 allowlist — the failure mode
+  // is "wrong entry point" not "type not supported". M5b's
+  // command layer always uses translateColumnValueAsync; this
+  // throw exists so a future contributor who wires sync sees
+  // the loud error instead of silent payload corruption.
+  it('routes people through internal_error with a hint to use the async entry', () => {
+    expect(() => translate('people', 'alice@example.test', 'col_x')).toThrow(ApiError);
     try {
-      translate(type, value, 'col_x');
+      translate('people', 'alice@example.test', 'col_x');
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
-      expect(err.code).toBe('unsupported_column_type');
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/translateColumnValueAsync/u);
       expect(err.details).toMatchObject({
         column_id: 'col_x',
-        type,
-        set_raw_example: `--set-raw col_x='<json>'`,
+        column_type: 'people',
       });
     }
   });
@@ -923,6 +925,151 @@ describe('selectMutation — JSON scalar discipline (no double-stringification)'
     const richEntry = out.columnValues.status_4;
     expect(typeof richEntry).toBe('object');
     expect(richEntry).toEqual({ label: 'Done' });
+  });
+});
+
+describe('translateColumnValueAsync — surface contract', () => {
+  // The async entry point is a thin wrapper: delegates to the sync
+  // translator for non-people types, dispatches to parsePeopleInput
+  // for people. The full people grammar lives in
+  // tests/unit/api/people.test.ts — here we just pin the
+  // column-values.ts surface contract: dispatch, peopleResolution
+  // wiring, and the TranslatedColumnValue shape for people output.
+
+  it('non-people column delegates to the sync translator (text → simple payload)', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'notes', type: 'text' },
+      value: 'Refactor login',
+    });
+    expect(out).toEqual<TranslatedColumnValue>({
+      columnId: 'notes',
+      columnType: 'text',
+      rawInput: 'Refactor login',
+      payload: { format: 'simple', value: 'Refactor login' },
+      resolvedFrom: null,
+    });
+  });
+
+  it('non-people column delegates to the sync translator (date → rich payload)', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'due', type: 'date' },
+      value: '2026-05-01',
+    });
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'rich',
+      value: { date: '2026-05-01' },
+    });
+    expect(out.resolvedFrom).toBeNull();
+  });
+
+  it('people column with peopleResolution → rich personsAndTeams payload', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'owner', type: 'people' },
+      value: 'alice@example.com',
+      peopleResolution: {
+        resolveMe: () => Promise.resolve('999'),
+        resolveEmail: (_email: string) => Promise.resolve('42'),
+      },
+    });
+    expect(out).toEqual<TranslatedColumnValue>({
+      columnId: 'owner',
+      columnType: 'people',
+      rawInput: 'alice@example.com',
+      payload: {
+        format: 'rich',
+        value: { personsAndTeams: [{ id: 42, kind: 'person' }] },
+      },
+      resolvedFrom: null,
+    });
+  });
+
+  it('people column without peopleResolution → internal_error with a wiring hint', async () => {
+    // Programmer wiring bug: M5b's command layer always passes the
+    // resolution context; missing it is a code-path regression we
+    // want loud. Pin the error code + message regex so a refactor
+    // that swaps to a silent fallback fires the test.
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'owner', type: 'people' },
+        value: 'alice@example.com',
+      }),
+    ).rejects.toThrow(ApiError);
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'owner', type: 'people' },
+        value: 'alice@example.com',
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/peopleResolution/u);
+      expect(err.details).toMatchObject({
+        column_id: 'owner',
+        column_type: 'people',
+      });
+    }
+  });
+
+  it('non-people column ignores peopleResolution silently (parity with dateResolution)', async () => {
+    // The peopleResolution slot is type-agnostic on the input
+    // surface; non-people columns should not even read it. Pin
+    // via test that passing a context to a `text` column has no
+    // effect on the payload.
+    const out = await translateColumnValueAsync({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+      peopleResolution: {
+        resolveMe: () => Promise.reject(new Error('should not be called')),
+        resolveEmail: () => Promise.reject(new Error('should not be called')),
+      },
+    });
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'simple',
+      value: 'hi',
+    });
+  });
+
+  it('selectMutation accepts a people-translated value and emits change_column_value', async () => {
+    // Pinning that the people TranslatedColumnValue threads through
+    // the existing selectMutation dispatch unchanged — it's a rich
+    // payload, so single → change_column_value with the object.
+    const t = await translateColumnValueAsync({
+      column: { id: 'owner', type: 'people' },
+      value: 'alice@example.com',
+      peopleResolution: {
+        resolveMe: () => Promise.resolve('999'),
+        resolveEmail: () => Promise.resolve('42'),
+      },
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_column_value',
+      columnId: 'owner',
+      value: { personsAndTeams: [{ id: 42, kind: 'person' }] },
+    });
+  });
+
+  it('selectMutation bundles people alongside other rich types (multi)', async () => {
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const people = await translateColumnValueAsync({
+      column: { id: 'owner', type: 'people' },
+      value: 'me',
+      peopleResolution: {
+        resolveMe: () => Promise.resolve('7'),
+        resolveEmail: () => Promise.reject(new Error('should not be called')),
+      },
+    });
+    const out = selectMutation([status, people]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_multiple_column_values',
+      columnValues: {
+        status_4: { label: 'Done' },
+        owner: { personsAndTeams: [{ id: 7, kind: 'person' }] },
+      },
+    });
   });
 });
 

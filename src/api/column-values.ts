@@ -7,14 +7,26 @@
  * `change_column_value` / `change_multiple_column_values` mutations
  * accept.
  *
- * **Scope so far.** Six of the seven v0.1-allowlisted types
- * translate: `text` / `long_text` / `numbers` (simple-string
- * payloads, M5a skeleton); `status` / `dropdown` (rich-object
- * payloads); and `date` (rich, with relative-token resolution
- * against the profile timezone). `people` carries its own
- * translation logic and arrives in a follow-up session; until
- * then it falls through to `unsupported_column_type` like any
- * non-allowlisted type.
+ * **Two entry points.** Six of the seven v0.1-allowlisted types
+ * translate purely locally — no network, no clock dependency
+ * beyond the date module's injectable clock — and live behind
+ * the sync `translateColumnValue`. `people` is the seventh, and
+ * it differs: email→ID resolution can hit the network. Rather
+ * than forcing a `Promise<TranslatedColumnValue>` on every call
+ * site for the six sync types, `translateColumnValueAsync` is
+ * the unified async entry point M5b's command layer always
+ * calls. It delegates to the sync version for non-people types
+ * and dispatches to `parsePeopleInput` for `people`. Existing
+ * call sites that handle non-people types stay sync; M5b's
+ * write surface goes through async exclusively (people may
+ * appear in any `--set` bundle).
+ *
+ * **Scope.** All seven v0.1-allowlisted types translate:
+ * `text` / `long_text` / `numbers` (simple-string payloads, M5a
+ * skeleton); `status` / `dropdown` (rich-object payloads); `date`
+ * (rich, with relative-token resolution against the profile
+ * timezone); and `people` (rich, with `me`-token + email
+ * resolution via the M3 `userByEmail` directory cache).
  *
  * **Date resolution context** (cli-design §5.3 step 3 + the
  * "Relative dates and timezone" subsection). Relative tokens
@@ -26,6 +38,17 @@
  * The actual resolution machinery lives in `dates.ts`; this
  * module just delegates and packages the result alongside the
  * other column types.
+ *
+ * **People resolution context** (cli-design §5.3 step 3 line
+ * 728-734 + the `me` token rule line 704-707). Email lookups +
+ * `me` resolution come through
+ * `TranslateColumnValueAsyncInputs.peopleResolution`, which
+ * carries `resolveMe` (mirroring `filters.ts`'s slot, so the
+ * same M5b wiring resolves `me` for both filter reads and
+ * `--set` writes) and `resolveEmail` (M5b wires this to
+ * `resolvers.userByEmail`). Required for people columns; ignored
+ * for everything else. The actual parsing machinery lives in
+ * `people.ts`.
  *
  * **Mutation selection** (`cli-design.md` §5.3 step 5) lives in
  * `selectMutation` below — single simple → `change_simple_column_value`;
@@ -74,8 +97,17 @@ import {
   type DateResolution,
   type DateResolutionContext,
 } from './dates.js';
+import {
+  parsePeopleInput,
+  type PeopleResolutionContext,
+} from './people.js';
 
 export type { DateResolution, DateResolutionContext } from './dates.js';
+export type {
+  PeoplePayload,
+  PeoplePayloadEntry,
+  PeopleResolutionContext,
+} from './people.js';
 
 /**
  * Discriminator on the wire payload's *shape*, not the GraphQL
@@ -143,18 +175,46 @@ export interface TranslateColumnValueInputs {
 }
 
 /**
+ * Async-entry inputs — superset of `TranslateColumnValueInputs`
+ * with the people-resolution slot. Required for people columns;
+ * ignored for everything else. The async entry point delegates
+ * to the sync version when `column.type !== 'people'`, so the
+ * `peopleResolution` slot can be omitted in callers that know
+ * they're never targeting a people column.
+ *
+ * In M5b's command layer, the slot is always passed (the layer
+ * doesn't know in advance which column types appear in a
+ * multi-`--set` bundle).
+ */
+export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInputs {
+  /**
+   * Resolution context for the `people` translator's `me` token
+   * + email lookups. Required for people columns; ignored for
+   * non-people types. cli-design §5.3 step 3 line 728-734 +
+   * line 704-707 pin the grammar.
+   */
+  readonly peopleResolution?: PeopleResolutionContext;
+}
+
+/**
  * Translates a single `<column>=<value>` pair into the Monday wire
- * payload. Throws `ApiError('unsupported_column_type')` for any
- * column type not in the v0.1 friendly-translator allowlist —
- * including allowlisted-but-not-yet-implemented types. The error
- * carries `column_id`, `type`, and a literal `--set-raw` example
- * so an agent that hits an unsupported type can paste a working
- * command without consulting Monday's docs.
+ * payload. **Sync entry point — handles the six v0.1 types whose
+ * translation is purely local computation** (`text` / `long_text` /
+ * `numbers` / `status` / `dropdown` / `date`). For `people` columns,
+ * use `translateColumnValueAsync`: people resolution can hit the
+ * network (email→ID lookup) and is therefore async-only.
  *
  * **Throws** `ApiError`:
- *   - `unsupported_column_type` — type not in the friendly
- *     allowlist, or in the allowlist but awaiting M5a follow-up
- *     (`people`, currently).
+ *   - `unsupported_column_type` — type not in the v0.1 friendly
+ *     allowlist. Carries `column_id`, `type`, and a literal
+ *     `--set-raw` example so an agent that hits an unsupported
+ *     type can paste a working command without consulting
+ *     Monday's docs.
+ *   - `internal_error` — sync entry was called on a `people`
+ *     column. Programmer error: M5b's write surface always uses
+ *     `translateColumnValueAsync`. The check exists so a future
+ *     contributor doesn't accidentally regress to a sync code
+ *     path that silently mis-translates people input.
  *
  * **Throws** `UsageError`:
  *   - `usage_error` — for status / dropdown numeric input that
@@ -194,12 +254,94 @@ export const translateColumnValue = (
       };
     }
     case 'people':
-      // Allowlisted but not yet implemented — surface the same
-      // unsupported error shape so agents have a single contract to
-      // key off until the rich-type writers land. The follow-up
-      // session lifts this out of this branch.
-      throw unsupportedColumnTypeError(column.id, column.type);
+      // People translation is async (email→ID lookup hits the
+      // directory cache or the `users(emails:)` GraphQL endpoint).
+      // Surface as `internal_error` so a future contributor who
+      // accidentally routes a people column through the sync entry
+      // point sees a loud programmer-error message rather than a
+      // silent payload corruption. M5b's command layer always uses
+      // `translateColumnValueAsync` for write paths.
+      throw new ApiError(
+        'internal_error',
+        `translateColumnValue (sync) called on people column "${column.id}". ` +
+          `People resolution is async — use translateColumnValueAsync.`,
+        {
+          details: {
+            column_id: column.id,
+            column_type: column.type,
+            hint: 'use translateColumnValueAsync from src/api/column-values.ts',
+          },
+        },
+      );
   }
+};
+
+/**
+ * Async entry point — handles all seven v0.1 types. Delegates to
+ * `translateColumnValue` (sync) for non-people columns; dispatches
+ * to `parsePeopleInput` for `people`.
+ *
+ * The `peopleResolution` slot is required when `column.type ===
+ * 'people'`. Omitting it for a people column raises `internal_error`
+ * (programmer wiring bug) — agents see this as a loud failure
+ * rather than a silent fallback to the unsupported-type path.
+ *
+ * **Throws** every error `translateColumnValue` throws (delegated
+ * unchanged for non-people types), plus:
+ *   - `ApiError(user_not_found)` — bubbled from `peopleResolution.
+ *     resolveEmail` for unknown emails. cli-design.md §5.3 step 3
+ *     line 733 pins the contract.
+ *   - `UsageError(usage_error)` — empty / numeric people input.
+ *     See `parsePeopleInput` for the per-branch messages.
+ *   - `ApiError(internal_error)` — `peopleResolution` was omitted
+ *     for a people column.
+ */
+export const translateColumnValueAsync = async (
+  inputs: TranslateColumnValueAsyncInputs,
+): Promise<TranslatedColumnValue> => {
+  if (inputs.column.type !== 'people') {
+    return translateColumnValue(inputs);
+  }
+  const { peopleResolution } = inputs;
+  if (peopleResolution === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `translateColumnValueAsync requires a peopleResolution context for ` +
+        `people column "${inputs.column.id}". M5b's command layer wires ` +
+        `resolveMe + resolveEmail through this slot.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: 'people',
+          hint:
+            'pass { peopleResolution: { resolveMe, resolveEmail } } when ' +
+            'calling translateColumnValueAsync.',
+        },
+      },
+    );
+  }
+  const parsed = await parsePeopleInput(
+    inputs.value,
+    inputs.column.id,
+    peopleResolution,
+  );
+  return {
+    columnId: inputs.column.id,
+    columnType: 'people',
+    rawInput: inputs.value,
+    // PeoplePayload is structurally a Record<string, unknown> — it
+    // has one declared key (`personsAndTeams`) whose value is a
+    // plain JS array of plain objects. TypeScript treats closed
+    // object types as not implicitly satisfying open index
+    // signatures, hence the cast. Runtime shape is unchanged;
+    // the wire-shape fixture in the unit suite is the load-bearing
+    // pin.
+    payload: {
+      format: 'rich',
+      value: parsed.payload as unknown as Readonly<Record<string, unknown>>,
+    },
+    resolvedFrom: null,
+  };
 };
 
 const simple = (
