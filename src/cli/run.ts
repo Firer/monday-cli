@@ -1,4 +1,4 @@
-import { Command, CommanderError } from 'commander';
+import { CommanderError, type Command } from 'commander';
 import {
   exitCodeForError,
   type AbortReason,
@@ -15,22 +15,23 @@ import {
   writeErrorEnvelope,
   type MetaBuilder,
 } from './envelope-out.js';
+import { buildProgram } from './program.js';
 import type { Transport } from '../api/transport.js';
-import { getCommandRegistry } from '../commands/index.js';
 import type { CommandModule } from '../commands/types.js';
 
 /**
  * Testable CLI runner (`v0.1-plan.md` §3 M0).
  *
- * Replaces the `process.argv` / `process.env` / `process.stdout`
- * direct reads in `cli/index.ts` with an injectable shape, so tests
- * exercise the same envelope-conversion / exit-code / SIGINT plumbing
- * the published binary uses. The thin shebang in `cli/index.ts`
- * forwards the live process state into here.
+ * Replaces `process.argv` / `process.env` / `process.stdout` direct
+ * reads in `cli/index.ts` with an injectable shape so tests exercise
+ * the same envelope-conversion / exit-code / SIGINT plumbing the
+ * published binary uses. The thin shebang in `cli/index.ts` forwards
+ * the live process state into here.
  *
- * Coverage applies to this module — `cli/index.ts` stays excluded
- * because spawning the binary is what the E2E suite is for, not a
- * coverage target.
+ * Owns the runtime core — argv → commander parse, signal combining,
+ * request-id generation, error → envelope conversion. Commander
+ * wiring lives in `program.ts`; envelope construction in
+ * `envelope-out.ts` (M2.5 R2).
  */
 export interface RunOptions {
   readonly argv: readonly string[];
@@ -115,70 +116,6 @@ const isSigintReason = (reason: unknown): boolean => {
   }
   const tagged = reason as { kind?: unknown };
   return tagged.kind === 'sigint';
-};
-
-const buildProgram = (options: RunOptions, ctx: RunContext): Command => {
-  const program = new Command();
-  program
-    .name('monday')
-    .description(options.cliDescription ?? 'CLI for Monday.com')
-    .version(options.cliVersion, '-V, --version')
-    .exitOverride()
-    .configureOutput({
-      writeOut: (str) => {
-        options.stdout.write(str);
-      },
-      writeErr: (str) => {
-        options.stderr.write(str);
-      },
-      // Swallow commander's plain-text error preamble — the catch-
-      // all below emits a §6 error envelope with the same content
-      // in a stable shape. Without this, stderr would carry both
-      // "error: unknown option" *and* the envelope, breaking the
-      // "stderr is the envelope, period" contract.
-      outputError: () => {
-        // intentionally empty
-      },
-    });
-
-  // Global flags — see `src/types/global-flags.ts` for the validated
-  // shape. We declare the option surface here so commander knows
-  // how to parse argv; refinement happens per-command via the zod
-  // schema at the action boundary.
-  program
-    .option('--output <fmt>', 'json | table | text | ndjson')
-    .option('--json', 'shorthand for --output json')
-    .option('--table', 'shorthand for --output table')
-    .option('--full', 'disable table value truncation')
-    .option('--width <n>', 'force table target width (TTY only)')
-    .option('--columns <list>', 'comma-separated visible columns')
-    .option('--minimal', 'omit non-essential fields from JSON')
-    .option('-q, --quiet', 'suppress stderr progress and hints')
-    .option('-v, --verbose', 'debug logs to stderr (tokens redacted)')
-    .option('--no-color', 'disable colour output')
-    .option('--no-cache', 'skip the local board-metadata cache')
-    .option('--profile <name>', 'config profile (v0.3+; "default" only in v0.1)')
-    .option('--api-version <v>', 'override the API-Version header')
-    .option('--timeout <ms>', 'per-request timeout in milliseconds')
-    .option('--retry <n>', 'max retries on transient errors')
-    .option('--dry-run', 'mutations: print planned change, do not execute')
-    .option('-y, --yes', 'skip confirmation gate on destructive ops')
-    .option('--body-file <path>', 'read --body content from a file (or - for stdin)')
-    .option('--query-file <path>', 'monday raw: read GraphQL query from a file (or -)')
-    .option('--vars-file <path>', 'monday raw: read GraphQL variables from a file (or -)');
-
-  // Wire the static registry first, then any test-supplied extras /
-  // raw hooks. Tests can swap out the registry entirely by passing
-  // an empty `extraCommands` and using `registerCommands` for ad-hoc
-  // commands; production callers leave both unset and pick up the
-  // shipped surface.
-  const modules = options.extraCommands ?? getCommandRegistry();
-  for (const mod of modules) {
-    mod.attach(program, ctx);
-  }
-  options.registerCommands?.(program, ctx);
-
-  return program;
 };
 
 export const run = async (options: RunOptions): Promise<RunResult> => {
