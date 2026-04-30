@@ -62,6 +62,7 @@ import {
   type RawItem,
   type RawColumnValue,
 } from './item-projection.js';
+import type { BoardColumn } from './board-metadata.js';
 import {
   selectMutation,
   translateColumnValueAsync,
@@ -209,16 +210,42 @@ export const planChanges = async (
   let aggregateCacheAge: number | null = null;
 
   for (const entry of inputs.setEntries) {
+    // Mutation paths must include archived columns in the resolver
+    // view so we can distinguish "doesn't exist" from "exists but
+    // archived" — cli-design §5.3 step 6: "Mutations against
+    // archived columns return `column_archived` regardless".
+    // resolveColumnWithRefresh would otherwise filter archived
+    // columns out and we'd surface `column_not_found`, which is
+    // the wrong code (the column DOES exist; it's just archived).
     const resolution = await resolveColumnWithRefresh({
       client: inputs.client,
       boardId: inputs.boardId,
       token: entry.token,
+      includeArchived: true,
       ...(inputs.env === undefined ? {} : { env: inputs.env }),
       ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
     });
     warnings.push(...resolution.warnings);
     aggregateSource = mergeSource(aggregateSource, resolution.source);
     aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
+
+    if (isArchivedColumn(resolution.match.column)) {
+      throw new ApiError(
+        'column_archived',
+        `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+          `${inputs.boardId} is archived. Monday rejects mutations against ` +
+          `archived columns; un-archive the column in Monday or pick a ` +
+          `different target.`,
+        {
+          details: {
+            column_id: resolution.match.column.id,
+            column_title: resolution.match.column.title,
+            column_type: resolution.match.column.type,
+            board_id: inputs.boardId,
+          },
+        },
+      );
+    }
 
     const translated = await translateColumnValueAsync({
       column: { id: resolution.match.column.id, type: resolution.match.column.type },
@@ -309,27 +336,39 @@ export const planChanges = async (
     );
   }
 
-  // 3) Build diff cells per resolved column. Order matches the
-  //    `--set` order — agents reading the diff see entries in the
-  //    same order they typed flags, even though the underlying
-  //    `change_multiple_column_values` payload is unordered.
-  const diff: Record<string, DiffCell> = {};
-  const orderedTranslated: TranslatedColumnValue[] = [];
-  for (const entry of inputs.setEntries) {
-    const translated = resolvedByToken.get(entry.token);
-    /* c8 ignore next 3 — defensive: every token landed in
-       resolvedByToken in the loop above. */
-    if (translated === undefined) {
-      throw new ApiError('internal_error', 'planChanges: lost translated entry');
-    }
-    orderedTranslated.push(translated);
-    diff[translated.columnId] = buildDiffCell(translated, itemRead.byColumnId.get(translated.columnId));
-  }
-
-  // 4) Pick the mutation kind via the shared selector — same source
-  //    of truth as the live M5b path.
+  // 3) Pick the mutation kind FIRST. `selectMutation` owns the
+  //    long_text re-wrap (`{text: <value>}` inside multi vs bare
+  //    string in single) per cli-design §5.3 step 5; the dry-run
+  //    diff `to` should reflect the *actual* wire shape that would
+  //    be sent. Building diff cells before selectMutation would
+  //    mis-render long_text in multi as a bare string.
+  const orderedTranslated: TranslatedColumnValue[] = inputs.setEntries.map(
+    (entry) => {
+      const translated = resolvedByToken.get(entry.token);
+      /* c8 ignore next 3 — defensive: every token landed in
+         resolvedByToken in the loop above. */
+      if (translated === undefined) {
+        throw new ApiError('internal_error', 'planChanges: lost translated entry');
+      }
+      return translated;
+    },
+  );
   const mutation: SelectedMutation = selectMutation(orderedTranslated);
   const operation: PlannedChange['operation'] = mutation.kind;
+
+  // 4) Build diff cells per resolved column, projecting `to` from
+  //    the selected mutation's wire shape. For single mutations
+  //    the projection is identity; for multi the long_text re-wrap
+  //    surfaces in the diff as it would on the wire.
+  const diff: Record<string, DiffCell> = {};
+  for (const translated of orderedTranslated) {
+    const wireTo = projectWireTo(translated, mutation);
+    diff[translated.columnId] = buildDiffCell(
+      translated,
+      wireTo,
+      itemRead.byColumnId.get(translated.columnId),
+    );
+  }
 
   const plannedChange: PlannedChange = {
     operation,
@@ -350,6 +389,15 @@ export const planChanges = async (
     warnings,
   };
 };
+
+/**
+ * `archived` is a nullable boolean on Monday's column shape — `null`
+ * means "no archive flag set", `false` means "explicitly active",
+ * `true` means archived. Treat any truthy value as archived; `null`
+ * / `false` / `undefined` all flow through.
+ */
+const isArchivedColumn = (column: BoardColumn): boolean =>
+  column.archived === true;
 
 /**
  * Merges per-leg `source` values into the aggregate envelope source
@@ -385,21 +433,51 @@ const mergeCacheAge = (
 };
 
 /**
+ * Projects the wire-side `to` value for a translated column,
+ * matching the actual mutation's payload exactly — including the
+ * `long_text` re-wrap that `selectMutation` applies for multi
+ * mutations. The single-mutation cases pass the translator's
+ * payload through unchanged.
+ *
+ * Why route through the selected mutation: `change_simple_column_value`
+ * accepts a bare string for `long_text`, but
+ * `change_multiple_column_values` requires `{text: <value>}` for
+ * the same type (cli-design §5.3 step 5 spec gap, pinned via
+ * fixture in column-values.test.ts). The dry-run diff `to` should
+ * reflect the wire shape the live mutation would actually send;
+ * routing through `selectMutation`'s output keeps both sides
+ * consistent without the dry-run engine duplicating the re-wrap.
+ */
+const projectWireTo = (
+  translated: TranslatedColumnValue,
+  mutation: SelectedMutation,
+): JsonValue => {
+  if (mutation.kind === 'change_multiple_column_values') {
+    const value = mutation.columnValues[translated.columnId];
+    /* c8 ignore next 3 — defensive: every translated column lands
+       in the multi map by construction in selectMutation. */
+    if (value === undefined) {
+      throw new ApiError('internal_error', 'projectWireTo: lost multi entry');
+    }
+    return value;
+  }
+  // Single-mutation path: payload's value is the wire value.
+  return translated.payload.value;
+};
+
+/**
  * Builds one diff cell. `from` decodes the current Monday value (or
- * `null` for empty cells); `to` projects the translator's wire
- * payload into a JsonValue (same JSON.stringify shape the live
- * mutation would send). `details.resolved_from` populates only when
- * the translator emitted an echo.
+ * `null` for empty cells); `to` is the wire-side projection
+ * (`projectWireTo` already applied the long_text re-wrap for
+ * multi). `details.resolved_from` populates only when the
+ * translator emitted an echo.
  */
 const buildDiffCell = (
   translated: TranslatedColumnValue,
+  to: JsonValue,
   current: RawColumnValue | undefined,
 ): DiffCell => {
   const from: JsonValue = current === undefined ? null : decodeFrom(current);
-  const to: JsonValue =
-    translated.payload.format === 'simple'
-      ? translated.payload.value
-      : translated.payload.value;
   if (translated.resolvedFrom !== null) {
     return {
       from,
@@ -512,7 +590,38 @@ const fetchItem = async (
       { details: { item_id: itemId } },
     );
   }
-  const item = rawItemSchema.parse(first);
+  // R17-style parse-then-wrap — validation.md "Never bubble raw
+  // ZodError out of a parse boundary". A malformed Monday response
+  // (schema drift, future field rename) surfaces as a typed
+  // internal_error carrying details.issues rather than a bare
+  // ZodError that loses the field path. Same pattern as
+  // resolvers.ts userByEmail.
+  const parsed = rawItemSchema.safeParse(first);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => ({
+      path: i.path.join('.'),
+      message: i.message,
+      code: i.code,
+    }));
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a malformed item response for id ${itemId} — the ` +
+        `item schema rejected the payload at ${issues.length} ` +
+        `issue${issues.length === 1 ? '' : 's'}.`,
+      {
+        cause: parsed.error,
+        details: {
+          item_id: itemId,
+          issues,
+          hint:
+            'this is a data-integrity error in Monday\'s response (or a ' +
+            'rawItemSchema drift); verify the response shape and update ' +
+            'the schema if Monday\'s contract has changed.',
+        },
+      },
+    );
+  }
+  const item = parsed.data;
   const byColumnId = new Map<string, RawColumnValue>();
   for (const cv of item.column_values) {
     byColumnId.set(cv.id, cv);

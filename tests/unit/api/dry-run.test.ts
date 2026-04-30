@@ -125,6 +125,15 @@ const board67890 = (): { boards: unknown[] } => ({
           settings_str: null,
           width: null,
         },
+        {
+          id: 'description',
+          title: 'Description',
+          type: 'long_text',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
       ],
     },
   ],
@@ -216,36 +225,31 @@ describe('planChanges — happy path: status + date relative-token', () => {
     });
   });
 
-  it('JSON.stringify byte-snapshot matches the cli-design §6.4 sample', () => {
-    // Independent of the planChanges call — pin the *literal* JSON
-    // bytes the documented sample uses. If the engine's deep-equal
-    // assertion above passes but the JSON-key order shifts, this
-    // test fails — JS object literals preserve insertion order so
-    // the engine's struct-build order *is* the wire order.
-    const expected = {
-      operation: 'change_multiple_column_values',
-      board_id: '67890',
-      item_id: '12345',
-      resolved_ids: { status: 'status_4', due: 'date4' },
-      diff: {
-        status_4: {
-          from: { label: 'Backlog', index: 0 },
-          to: { label: 'Working on it' },
-        },
-        date4: {
-          from: null,
-          to: { date: '2026-05-02' },
-          details: {
-            resolved_from: {
-              input: '+1w',
-              timezone: 'Europe/London',
-              now: '2026-04-25T14:00:00+01:00',
-            },
-          },
-        },
+  it('JSON.stringify byte-snapshot pins the engine output literally', async () => {
+    // Codex pass-1 finding: my prior version of this test
+    // stringified a hand-built `expected` object, not the engine's
+    // result — so reordering fields in dry-run.ts would still pass
+    // (the deep-equal `toEqual` is order-agnostic). The fix:
+    // stringify the actual engine output. If the build order in
+    // `PlannedChange` shifts (e.g. someone reorders the spread to
+    // emit `resolved_ids` before `item_id`), this assertion fails.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'status', value: 'Working on it' },
+        { token: 'due', value: '+1w' },
+      ],
+      env: xdgEnv(),
+      dateResolution: {
+        now: () => new Date('2026-04-25T14:00:00+01:00'),
+        timezone: 'Europe/London',
       },
-    };
-    expect(JSON.stringify(expected)).toBe(
+    });
+    expect(JSON.stringify(result.plannedChanges[0])).toBe(
       '{"operation":"change_multiple_column_values","board_id":"67890",' +
         '"item_id":"12345","resolved_ids":{"status":"status_4","due":"date4"},' +
         '"diff":{"status_4":{"from":{"label":"Backlog","index":0},' +
@@ -307,6 +311,50 @@ describe('planChanges — operation selection per cli-design §5.3 step 5', () =
     expect(result.plannedChanges[0]?.operation).toBe(
       'change_multiple_column_values',
     );
+  });
+
+  it('long_text in multi: diff `to` reflects the wire re-wrap (Codex pass-1)', async () => {
+    // cli-design §5.3 step 5 spec gap: long_text inside
+    // change_multiple_column_values uses {text: <value>} per-column
+    // blob, NOT the bare string change_simple_column_value
+    // accepts. Pre-fix, the dry-run engine emitted `to: <bare string>`
+    // for long_text in multi — the diff lied about the wire shape.
+    // Post-fix: routing through selectMutation's columnValues map
+    // means the diff `to` reflects the same re-wrap the live
+    // mutation would apply.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'notes', value: 'note text' },
+        { token: 'description', value: 'long body\nwith newlines' },
+      ],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.operation).toBe('change_multiple_column_values');
+    // text stays as bare string in multi:
+    expect(result.plannedChanges[0]?.diff.notes?.to).toBe('note text');
+    // long_text gets wrapped to {text: <value>} in multi:
+    expect(result.plannedChanges[0]?.diff.description?.to).toEqual({
+      text: 'long body\nwith newlines',
+    });
+  });
+
+  it('long_text in single: diff `to` is the bare string (no re-wrap)', async () => {
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([board67890(), itemAtBacklog()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'description', value: 'short body' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.operation).toBe('change_simple_column_value');
+    expect(result.plannedChanges[0]?.diff.description?.to).toBe('short body');
   });
 });
 
@@ -491,6 +539,55 @@ describe('planChanges — all-or-nothing on resolution failure', () => {
     expect(stats.operations).not.toContain('ItemDryRunRead');
   });
 
+  it('column_archived: surfaces typed error before item read (Codex pass-1)', async () => {
+    // cli-design §5.3 step 6: "Mutations against archived columns
+    // return `column_archived` regardless". Pre-fix, the dry-run
+    // engine reused the read-side resolver default that filters
+    // archived columns out — producing `column_not_found` for an
+    // archived target. Pin the typed code + that the item read
+    // doesn't fire.
+    const stats: Stats = { calls: 0, operations: [] };
+    const archivedBoard = {
+      boards: [
+        {
+          ...board67890().boards[0] as object,
+          columns: [
+            {
+              id: 'status_4',
+              title: 'Status',
+              type: 'status',
+              description: null,
+              archived: true,
+              settings_str: null,
+              width: null,
+            },
+          ],
+        },
+      ],
+    };
+    const client = buildClient([archivedBoard, itemAtBacklog()], stats);
+    let caught: unknown;
+    try {
+      await planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'status', value: 'Done' }],
+        env: xdgEnv(),
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).code).toBe('column_archived');
+    expect((caught as ApiError).details).toMatchObject({
+      column_id: 'status_4',
+      column_type: 'status',
+      board_id: '67890',
+    });
+    expect(stats.operations).not.toContain('ItemDryRunRead');
+  });
+
   it('item not found: surfaces after column resolution', async () => {
     const stats: Stats = { calls: 0, operations: [] };
     const client = buildClient([board67890(), { items: null }], stats);
@@ -625,6 +722,53 @@ describe('planChanges — diff `from` decoding', () => {
       env: xdgEnv(),
     });
     expect(result.plannedChanges[0]?.diff.notes?.from).toBeNull();
+  });
+});
+
+describe('planChanges — parse-boundary discipline (R17 pattern)', () => {
+  it('malformed item response: typed internal_error with details.issues (Codex pass-1)', async () => {
+    // validation.md "Never bubble raw ZodError out of a parse
+    // boundary" — the dry-run engine's own rawItemSchema.parse
+    // boundary needs the same safeParse + ApiError wrap that R17
+    // applied to userByEmail. Pre-fix, a malformed Monday response
+    // bubbled raw ZodError to the runner's catch-all (which mapped
+    // to internal_error but lost details.issues). Pin the typed
+    // wrap so an agent debugging a malformed Monday response sees
+    // the failing field path.
+    const stats: Stats = { calls: 0, operations: [] };
+    const malformedItem = {
+      items: [
+        {
+          // Missing required `name` field; rawItemSchema rejects.
+          id: '12345',
+          state: null,
+          url: null,
+          created_at: null,
+          updated_at: null,
+          board: { id: '67890' },
+          column_values: [],
+        },
+      ],
+    };
+    const client = buildClient([board67890(), malformedItem], stats);
+    let caught: unknown;
+    try {
+      await planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'status', value: 'Done' }],
+        env: xdgEnv(),
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const apiErr = caught as ApiError;
+    expect(apiErr.code).toBe('internal_error');
+    expect(apiErr.message).toMatch(/malformed item response/u);
+    const details = apiErr.details as { issues: readonly { path: string }[] };
+    expect(details.issues.length).toBeGreaterThan(0);
   });
 });
 
