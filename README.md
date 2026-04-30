@@ -8,11 +8,11 @@ terminal, with humans as a welcome second audience.
 > **Status:** v0.1 in progress — M0–M4 shipped (account / workspace /
 > board / user / update / item *reads* + filter DSL + cursor
 > pagination). M5a (column-value writers) is in progress: the shared
-> `column-types.ts` allowlist, the simple-type translators
-> (`text` / `long_text` / `numbers`), the rich-type translators
-> (`status` / `dropdown` / `date`) and the mutation-selection helper
-> have landed; the `people` translator and dry-run engine ship in
-> follow-up sessions.
+> `column-types.ts` allowlist, all seven v0.1 column-value
+> translators (`text` / `long_text` / `numbers` simple, plus
+> `status` / `dropdown` / `date` / `people` rich) and the
+> mutation-selection helper have landed; the dry-run engine ships
+> in the next M5a session.
 > The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
 > if you want to know what the CLI looks like end-to-end.
 > See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.

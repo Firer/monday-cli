@@ -173,25 +173,34 @@
   example_set) and `api/column-values.ts` (the writer). Adding
   a v0.2 type is one entry's worth of edit.
 - `api/column-values.ts` (M5a, in progress) — write half of
-  §5.3. `translateColumnValue({ column, value, dateResolution? })
-  → TranslatedColumnValue` returns `columnId`, `columnType`,
+  §5.3. **Two entry points**: the sync `translateColumnValue({
+  column, value, dateResolution? }) → TranslatedColumnValue`
+  covers the six locally-resolvable types; the async
+  `translateColumnValueAsync({ column, value, dateResolution?,
+  peopleResolution? }) → Promise<TranslatedColumnValue>` is the
+  unified wrapper M5b's command layer always calls (delegates
+  to sync for non-people; dispatches `parsePeopleInput` for
+  `people`, which needs network/cache lookup for email→ID
+  resolution). The result type returns `columnId`, `columnType`,
   `rawInput`, a discriminated `payload`, and a
   `resolvedFrom: DateResolution | null` slot. Payload variants:
   `{ format: 'simple', value: string }` for the bare-string form
   (`change_simple_column_value`) or `{ format: 'rich', value:
-  object }` for the JSON-object form (`change_column_value` /
-  per-column entry of `change_multiple_column_values`).
-  **Six of seven v0.1 types translate today**: `text` /
-  `long_text` / `numbers` (simple) and `status` / `dropdown` /
-  `date` (rich); only `people` surfaces `unsupported_column_type`
-  until its follow-up session lands.
+  JsonObject }` for the JSON-object form (`change_column_value`
+  / per-column entry of `change_multiple_column_values`).
+  **All seven v0.1 types translate**: `text` / `long_text` /
+  `numbers` (simple) and `status` / `dropdown` / `date` /
+  `people` (rich). The only remaining M5a deliverable is the
+  `dry-run.ts` engine.
   **`selectMutation`** dispatches per cli-design §5.3 step 5:
   1 simple → `change_simple_column_value`; 1 rich →
   `change_column_value`; N → `change_multiple_column_values`
   (atomic, with `long_text` re-wrapped to `{text:<value>}` for
   the multi mutation's per-column blob).
   **Monday `JSON` scalar discipline:** every payload is a plain
-  JS value; the SDK / fetch layer stringifies at the wire
+  JS value typed as `JsonObject` (R-JsonValue refactor —
+  catches non-JSON shapes like `undefined` / symbols at compile
+  time); the SDK / fetch layer stringifies at the wire
   boundary. The translator never `JSON.stringify`s — pinned by
   regression tests per (count × type) cell.
 
@@ -210,6 +219,38 @@
   `usage_error`. `formatNowInTimezone` builds the local-time
   ISO + longOffset string cli-design §5.3 line 786 pins
   (`2026-04-25T14:00:00+01:00`).
+
+- `api/people.ts` (M5a) — pure people-resolution helpers
+  powering the people translator. `parsePeopleInput` accepts
+  comma-split tokens (emails or case-insensitive `me`),
+  trim+filter empty segments, then resolves each through an
+  injected `PeopleResolutionContext` carrying `resolveMe`
+  (mirrors `filters.ts`'s slot — same `me` rule across
+  `--where Owner=me` and `--set Owner=me`) and `resolveEmail`
+  (M5b wires this to `resolvers.userByEmail`). Wire shape
+  `{personsAndTeams:[{id:N,kind:'person'},...]}` with `id` as
+  JS number; `kind` literal `'person'` only (teams deferred to
+  v0.2). `me` resolution cached within a single call (input
+  `me,me,me` resolves once). Defence-in-depth ID validation
+  via `DECIMAL_NON_NEGATIVE` regex matched against the same
+  shape `userByEmail`'s schema enforces — malformed IDs
+  surface as `internal_error` rather than silently corrupting
+  the wire payload via `Number()`. Numeric tokens (`--set
+  Owner=12345`) rejected with a literal `--set-raw` hint;
+  unknown emails bubble `user_not_found` from the resolveEmail
+  callback per cli-design §5.3 line 733.
+
+- `types/json.ts` (M5a R-JsonValue) — `JsonValue` /
+  `JsonObject` types narrowing the rich-payload slot to
+  JSON-shaped values. Replaces `Readonly<Record<string,
+  unknown>>` for column-values' rich-payload type, the
+  `selectMutation` discriminated union's rich variant, and
+  `MultiColumnValue`. Catches non-JSON values (`undefined`,
+  symbols, functions, class instances) at compile time;
+  documented limitations include NaN/Infinity (silently
+  become `null` via `JSON.stringify`), cycles, symbol keys,
+  and BigInt (none of which TypeScript can structurally
+  exclude).
 
 ### Hard rules
 

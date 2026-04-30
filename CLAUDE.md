@@ -18,8 +18,8 @@ on top of the official `@mondaydotcomorg/api` SDK.
 ## Status
 
 **v0.1 implementation in progress; M0–M4 shipped, M5a in progress
-(skeleton: `column-types.ts` + simple-type writers landed; rich
-types deferred).** The CLI has a
+(all seven v0.1 column-value translators landed; only `dry-run.ts`
+remains).** The CLI has a
 working network surface across 5 nouns (account / workspace / board /
 user / update / item reads), local-only commands (cache / config /
 schema), filter DSL (`--where` + `--filter-json`), cursor-based
@@ -50,7 +50,7 @@ Two binding documents:
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (text / long_text / numbers / status / dropdown / date translators + `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`). People translator and `dry-run.ts` deferred to follow-up sessions. |
+| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads). `dry-run.ts` is the last M5a deliverable. |
 | M5b | future | `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
@@ -222,11 +222,15 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `columnType`, `rawInput`, and a discriminated `payload` —
   `{ format: 'simple', value: <bare-string> }` for the simple-form
   mutation path or `{ format: 'rich', value: <plain-object> }` for
-  the JSON-object form. **Six of seven v0.1 types translate today**:
+  the JSON-object form. **All seven v0.1 types translate**:
   `text` / `long_text` / `numbers` (all simple) and `status` /
-  `dropdown` / `date` (rich); only `people` still surfaces
-  `unsupported_column_type` (same code as truly non-allowlisted
-  types) until its follow-up session lands.
+  `dropdown` / `date` / `people` (rich); the only remaining M5a
+  deliverable is the `dry-run.ts` engine. **Two entry points**:
+  the sync `translateColumnValue` covers the six locally-resolvable
+  types; `translateColumnValueAsync` is the unified async wrapper
+  M5b's command layer always calls — it delegates to sync for
+  non-people, dispatches `parsePeopleInput` for `people` (which
+  needs network/cache lookup for email→ID resolution).
   **Status payload**: label-first (`{label:<verbatim>}`) with
   non-negative integer fallback (`{index:N}`, JS number). **Dropdown
   payload**: comma-split, per-segment trimmed, empties dropped;
@@ -242,7 +246,23 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   Europe/London + Pacific/Auckland 2026 transitions. Relative
   offsets are bounded to ±100 years magnitude so unsafe inputs
   surface as typed `usage_error` rather than malformed wire
-  payloads. **Safe-integer guard**: numeric input > 2^53 - 1
+  payloads. **People payload**: comma-split tokens (emails or
+  case-insensitive `me`), each resolved through injected
+  `resolveMe` + `resolveEmail` callbacks (mirrors `filters.ts`'s
+  `me` plumbing — one rule across `--where Owner=me`, `item
+  search --where Owner=me`, and `--set Owner=me`). Wire shape
+  `{personsAndTeams:[{id:N,kind:'person'},...]}` with `id` as JS
+  number; `kind` literal `'person'` only (teams deferred to
+  v0.2). Numeric tokens (`--set Owner=12345`) rejected with
+  `--set-raw` hint; unknown emails surface as
+  `user_not_found` (bubbled from `resolveEmail`). The full
+  grammar lives in `src/api/people.ts`. Defence-in-depth ID
+  validation: `userByEmail`'s schema enforces decimal
+  non-negative integer strings, AND the translator's
+  `idStringToNumber` re-checks before `Number()` conversion —
+  malformed shapes (`"0x2a"`, `"1e3"`) surface as
+  `internal_error` rather than silently corrupting the wire
+  payload. **Safe-integer guard**: numeric input > 2^53 - 1
   throws `usage_error` rather than silently rounding via
   `Number(raw)` and corrupting the wire payload.
   **Mutation selection** (`selectMutation`, §5.3 step 5):
