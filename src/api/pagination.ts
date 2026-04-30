@@ -246,19 +246,34 @@ export const paginate = async <T, R>(
     lastResponse = first.response;
     pagesFetched = 1;
     const sorted = sortByIdAsc(first.page.items, inputs.getId);
-    await emitItems(sorted, collected, limit, inputs.onItem);
+    const firstOutcome = await emitItems(sorted, collected, limit, inputs.onItem);
     cursor = first.page.cursor;
 
     // Caller asked for one page only. Surface the cursor verbatim;
-    // hasMore reflects whether Monday says there's more to read.
+    // hasMore reflects whether Monday says there's more to read OR
+    // whether `--limit` truncated the page.
     if (!inputs.all) {
-      return finish(collected, lastResponse, cursor, cursor !== null, pagesFetched);
+      return finish(
+        collected,
+        lastResponse,
+        cursor,
+        cursor !== null || firstOutcome.truncated,
+        pagesFetched,
+      );
     }
 
     // `--limit` short-circuited mid-page (or exactly at boundary).
-    // Surface the in-flight cursor so the caller can resume.
+    // Surface the in-flight cursor so the caller can resume; emit
+    // `hasMore: true` even when `next_cursor` is null because the
+    // truncation itself means more rows exist on this page.
     if (limit !== undefined && collected.length >= limit) {
-      return finish(collected, lastResponse, cursor, cursor !== null, pagesFetched);
+      return finish(
+        collected,
+        lastResponse,
+        cursor,
+        cursor !== null || firstOutcome.truncated,
+        pagesFetched,
+      );
     }
 
     // Walk until cursor exhaustion or limit hit.
@@ -272,10 +287,16 @@ export const paginate = async <T, R>(
         lastResponse = next.response;
         pagesFetched++;
         const sortedNext = sortByIdAsc(next.page.items, inputs.getId);
-        await emitItems(sortedNext, collected, limit, inputs.onItem);
+        const outcome = await emitItems(sortedNext, collected, limit, inputs.onItem);
         cursor = next.page.cursor;
         if (limit !== undefined && collected.length >= limit) {
-          return finish(collected, lastResponse, cursor, cursor !== null, pagesFetched);
+          return finish(
+            collected,
+            lastResponse,
+            cursor,
+            cursor !== null || outcome.truncated,
+            pagesFetched,
+          );
         }
       } catch (err) {
         if (err instanceof ApiError && err.code === 'stale_cursor') {
@@ -312,21 +333,36 @@ const fetchPage = async <T, R>(
   return { response, page: extract(response) };
 };
 
+interface EmitOutcome {
+  /**
+   * True when `emitItems` left items on the page unconsumed because
+   * `--limit` was hit. The caller surfaces `hasMore: true` even when
+   * the page itself terminated the cursor walk — §6.3 / Codex M4 §3:
+   * a `--limit`-truncated result is still "more to read", not
+   * "exhausted", regardless of `next_cursor`.
+   */
+  readonly truncated: boolean;
+}
+
 const emitItems = async <T>(
   pageItems: readonly T[],
   collected: T[],
   limit: number | undefined,
   onItem: ((item: T) => void | Promise<void>) | undefined,
-): Promise<void> => {
-  for (const item of pageItems) {
+): Promise<EmitOutcome> => {
+  for (let i = 0; i < pageItems.length; i++) {
     if (limit !== undefined && collected.length >= limit) {
-      return;
+      // Items past index i are unconsumed — page had more than the
+      // remaining budget allowed.
+      return { truncated: i < pageItems.length };
     }
+    const item = pageItems[i] as T;
     collected.push(item);
     if (onItem !== undefined) {
       await onItem(item);
     }
   }
+  return { truncated: false };
 };
 
 const finish = <T, R>(

@@ -78,7 +78,12 @@ export const projectedColumnSchema = z
   .object({
     id: z.string().min(1),
     type: z.string().min(1),
-    title: z.string(),
+    // §6.3: per-cell title is dropped in same-board collections and
+    // consolidated into `meta.columns`. Single-resource calls keep
+    // it inline per §6.2. The schema therefore makes it optional —
+    // emit-time the projector either includes it or leaves it
+    // undefined.
+    title: z.string().optional(),
     text: z.string().nullable(),
     value: z.unknown(),
     // Typed fields (optional — only set per type)
@@ -230,14 +235,29 @@ export interface ProjectItemInputs {
    * theory) leave this undefined and fall back to the wire title.
    */
   readonly columnTitles?: ReadonlyMap<string, string>;
+  /**
+   * §6.3 title de-duplication for same-board collections. When
+   * `true`, per-cell `title` is dropped from each column-value
+   * payload — the caller carries the canonical titles in
+   * `meta.columns` instead. Default `false` so single-resource calls
+   * (`item get`) keep titles inline (§6.2).
+   */
+  readonly omitColumnTitles?: boolean;
 }
 
 export const projectItem = (inputs: ProjectItemInputs): ProjectedItem => {
   const titles = inputs.columnTitles;
+  const omitTitles = inputs.omitColumnTitles === true;
   const columns: Record<string, ProjectedColumn> = {};
   for (const cv of inputs.raw.column_values) {
     const fallback = titles?.get(cv.id);
-    columns[cv.id] = projectColumnValue(cv, fallback);
+    const projected = projectColumnValue(cv, fallback);
+    if (omitTitles) {
+      const { title: _title, ...rest } = projected;
+      columns[cv.id] = rest;
+    } else {
+      columns[cv.id] = projected;
+    }
   }
   return {
     id: inputs.raw.id,

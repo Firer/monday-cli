@@ -19,6 +19,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { findOne } from '../../api/resolvers.js';
 import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import { ApiError } from '../../utils/errors.js';
 import { paginate, type PaginatedPage } from '../../api/pagination.js';
 import {
   idFromRawItem,
@@ -35,7 +36,6 @@ const ITEM_FIND_QUERY = `
   query ItemFind(
     $boardId: ID!
     $limit: Int!
-    $groupIds: [String!]
   ) {
     boards(ids: [$boardId]) {
       items_page(limit: $limit) {
@@ -59,7 +59,40 @@ const ITEM_FIND_QUERY = `
           }
         }
       }
-      groups(ids: $groupIds) { id }
+    }
+  }
+`;
+
+const ITEM_FIND_BY_GROUP_QUERY = `
+  query ItemFindByGroup(
+    $boardId: ID!
+    $groupId: String!
+    $limit: Int!
+  ) {
+    boards(ids: [$boardId]) {
+      groups(ids: [$groupId]) {
+        items_page(limit: $limit) {
+          cursor
+          items {
+            id
+            name
+            state
+            url
+            created_at
+            updated_at
+            board { id }
+            group { id title }
+            parent_item { id }
+            column_values {
+              id
+              type
+              text
+              value
+              column { title }
+            }
+          }
+        }
+      }
     }
   }
 `;
@@ -91,7 +124,14 @@ const ITEM_FIND_NEXT_QUERY = `
 `;
 
 interface InitialResponse {
-  readonly boards: readonly { readonly items_page: { readonly cursor: string | null; readonly items: readonly unknown[] } }[] | null;
+  readonly boards:
+    | readonly {
+        readonly items_page?: { readonly cursor: string | null; readonly items: readonly unknown[] };
+        readonly groups?: readonly {
+          readonly items_page: { readonly cursor: string | null; readonly items: readonly unknown[] };
+        }[];
+      }[]
+    | null;
 }
 interface NextResponse {
   readonly next_items_page: { readonly cursor: string | null; readonly items: readonly unknown[] } | null;
@@ -123,7 +163,10 @@ const initialFetcher = (
   return () => {
     const variables: Record<string, unknown> = { boardId, limit: pageSize };
     if (group !== undefined) {
-      variables.groupIds = [group];
+      variables.groupId = group;
+      return client.raw<InitialResponse>(ITEM_FIND_BY_GROUP_QUERY, variables, {
+        operationName: 'ItemFindByGroup',
+      });
     }
     return client.raw<InitialResponse>(ITEM_FIND_QUERY, variables, {
       operationName: 'ItemFind',
@@ -145,7 +188,7 @@ const nextFetcher = (
 
 const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
   const board = r.data.boards?.[0];
-  const page = board?.items_page;
+  const page = board?.groups?.[0]?.items_page ?? board?.items_page;
   /* c8 ignore next 2 — defensive nullish-coalescing for missing
      items_page; same rationale as item/list.ts. */
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
@@ -205,6 +248,7 @@ export const itemFindCommand: CommandModule<
         const result = await paginate<unknown, InitialResponse | NextResponse>({
           fetchInitial: initialFetcher(client, parsed.board, parsed.group, pageSize),
           fetchNext: nextFetcher(client, pageSize),
+          now: ctx.clock,
           extractPage: (r): PaginatedPage<unknown> => {
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);
@@ -221,18 +265,59 @@ export const itemFindCommand: CommandModule<
         const haystack: readonly RawItem[] = result.items.map((raw) =>
           rawItemSchema.parse(raw),
         );
-        const found = findOne(
-          haystack,
-          parsed.name,
-          (i) => ({ id: i.id, name: i.name }),
-          {
-            kind: 'item',
-            ...(parsed.first === undefined ? {} : { first: parsed.first }),
-          },
-        );
+        let found;
+        try {
+          found = findOne(
+            haystack,
+            parsed.name,
+            (i) => ({ id: i.id, name: i.name }),
+            {
+              kind: 'item',
+              ...(parsed.first === undefined ? {} : { first: parsed.first }),
+            },
+          );
+        } catch (err) {
+          // Cap-hit before findOne resolved → re-throw with the cap
+          // information so agents can widen --limit-pages or narrow
+          // the query (Codex M4 §6: a partial scan can produce a
+          // false not_found / false uniqueness, must surface).
+          if (err instanceof ApiError && err.code === 'not_found' && result.hasMore) {
+            throw new ApiError(
+              'not_found',
+              `No item matched ${JSON.stringify(parsed.name)} in the scanned ${String(result.totalReturned)} item(s); scan was capped at ${String(cap)} pages — widen --limit-pages or narrow with --group / --where.`,
+              {
+                details: {
+                  query: parsed.name,
+                  kind: 'item',
+                  scan_truncated: true,
+                  pages_scanned: result.pagesFetched,
+                  cap_pages: cap,
+                  items_scanned: result.totalReturned,
+                },
+              },
+            );
+          }
+          throw err;
+        }
 
         const data = projectItem({ raw: found.resource });
         const warnings: Warning[] = [];
+        if (result.hasMore) {
+          // Match resolved within the cap, but the scan was
+          // truncated — uniqueness isn't guaranteed. Surface a
+          // warning so agents can widen the cap if they need
+          // certainty.
+          warnings.push({
+            code: 'pagination_cap_reached',
+            message: `find scan capped at ${String(cap)} pages; uniqueness not verified — widen --limit-pages to confirm.`,
+            details: {
+              pages_scanned: result.pagesFetched,
+              items_scanned: result.totalReturned,
+              cap_pages: cap,
+              hint: 'pass --limit-pages <larger> or narrow the query with --group / --where',
+            },
+          });
+        }
         if (found.firstOfMany) {
           warnings.push({
             code: 'first_of_many',

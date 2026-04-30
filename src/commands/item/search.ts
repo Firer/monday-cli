@@ -32,9 +32,14 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError } from '../../utils/errors.js';
-import { loadBoardMetadata } from '../../api/board-metadata.js';
+import {
+  loadBoardMetadata,
+  refreshBoardMetadata,
+  type BoardMetadata,
+} from '../../api/board-metadata.js';
 import { parseWhereSyntax, type WhereClause } from '../../api/filters.js';
 import { resolveColumn, type ColumnMatch } from '../../api/columns.js';
+import { ApiError } from '../../utils/errors.js';
 import {
   DEFAULT_PAGE_SIZE,
   paginate,
@@ -49,7 +54,6 @@ import {
 } from '../../api/item-projection.js';
 import type { Warning, ColumnHead } from '../../utils/output/envelope.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
-import type { BoardMetadata } from '../../api/board-metadata.js';
 
 const ITEMS_PAGE_BY_COLUMN_VALUES_QUERY = `
   query ItemsByColumnValues(
@@ -140,11 +144,14 @@ interface BuildSearchInputs {
   readonly metadata: BoardMetadata;
   readonly clauses: readonly WhereClause[];
   readonly resolveMe: () => Promise<string>;
+  readonly onColumnNotFound?: () => Promise<BoardMetadata>;
 }
 
 interface BuildSearchResult {
   readonly columns: readonly ColumnQuery[];
   readonly warnings: readonly Warning[];
+  readonly refreshed: boolean;
+  readonly metadata: BoardMetadata;
 }
 
 const buildColumnQueries = async (
@@ -161,6 +168,9 @@ const buildColumnQueries = async (
     return cachedMe;
   };
 
+  let metadata = inputs.metadata;
+  let refreshed = false;
+
   for (const clause of inputs.clauses) {
     if (clause.operator.kind !== 'equals') {
       throw new UsageError(
@@ -169,7 +179,31 @@ const buildColumnQueries = async (
         { details: { clause: clause.raw, operator: clause.operator.literal } },
       );
     }
-    const match: ColumnMatch = resolveColumn(inputs.metadata, clause.token);
+    let match: ColumnMatch;
+    try {
+      match = resolveColumn(metadata, clause.token);
+    } catch (err) {
+      // Same cache-miss-refresh shape as filters.ts buildFilterRules
+      // (Codex M4 §1).
+      const isMissing =
+        err instanceof ApiError && err.code === 'column_not_found';
+      if (
+        !isMissing ||
+        inputs.onColumnNotFound === undefined ||
+        refreshed
+      ) {
+        throw err;
+      }
+      metadata = await inputs.onColumnNotFound();
+      refreshed = true;
+      warnings.push({
+        code: 'stale_cache_refreshed',
+        message:
+          'Cache miss for filter token; refreshed board metadata to resolve.',
+        details: { token: clause.token, board_id: metadata.id },
+      });
+      match = resolveColumn(metadata, clause.token);
+    }
     /* c8 ignore next 13 — collision warnings are exercised by
        tests/unit/api/filters.test.ts against the same column-
        resolution surface; duplicating the assertion through the
@@ -209,7 +243,7 @@ const buildColumnQueries = async (
   for (const [columnId, values] of byColumn) {
     columns.push({ column_id: columnId, column_values: values });
   }
-  return { columns, warnings };
+  return { columns, warnings, refreshed, metadata };
 };
 
 const initialFetcher = (
@@ -330,19 +364,36 @@ export const itemSearchCommand: CommandModule<
         });
 
         const clauses = parsed.where.map(parseWhereSyntax);
-        const { columns, warnings: filterWarnings } = await buildColumnQueries({
+        const onColumnNotFound =
+          meta.source === 'cache'
+            ? async (): Promise<BoardMetadata> => {
+                const refreshed = await refreshBoardMetadata({
+                  client,
+                  boardId: parsed.board,
+                  env: ctx.env,
+                });
+                return refreshed.metadata;
+              }
+            : undefined;
+        const queryResult = await buildColumnQueries({
           metadata: meta.metadata,
           clauses,
           resolveMe: resolveMeFactory(client),
+          ...(onColumnNotFound === undefined ? {} : { onColumnNotFound }),
         });
+        const { columns, warnings: filterWarnings } = queryResult;
 
-        const titles = titleMap(meta.metadata);
-        const columnHeads = collectColumnHeads(meta.metadata);
+        const titles = titleMap(queryResult.metadata);
+        const columnHeads = collectColumnHeads(queryResult.metadata);
         const pageSize = parsed.pageSize ?? DEFAULT_PAGE_SIZE;
+        const effectiveSource: 'live' | 'cache' | 'mixed' =
+          meta.source === 'live' && !queryResult.refreshed ? 'live' : 'mixed';
+        const effectiveCacheAge = meta.cacheAgeSeconds;
 
         const result = await paginate<unknown, InitialResponse | NextResponse>({
           fetchInitial: initialFetcher(client, parsed.board, pageSize, columns),
           fetchNext: nextFetcher(client, pageSize),
+          now: ctx.clock,
           extractPage: (r): PaginatedPage<unknown> => {
             if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
             return extractInitial(r as MondayResponse<InitialResponse>);
@@ -354,7 +405,13 @@ export const itemSearchCommand: CommandModule<
         });
 
         const data: ItemSearchOutput = result.items.map((raw) =>
-          projectItem({ raw: rawItemSchema.parse(raw), columnTitles: titles }),
+          projectItem({
+            raw: rawItemSchema.parse(raw),
+            columnTitles: titles,
+            // §6.3 same-board title de-dup: titles live in
+            // meta.columns, not on each row.
+            omitColumnTitles: true,
+          }),
         );
         const warnings: Warning[] = [...filterWarnings, ...result.warnings];
 
@@ -370,6 +427,8 @@ export const itemSearchCommand: CommandModule<
           columns: columnHeads,
           warnings,
           ...toEmit(result.lastResponse),
+          source: effectiveSource,
+          cacheAgeSeconds: effectiveCacheAge,
         });
       });
   },

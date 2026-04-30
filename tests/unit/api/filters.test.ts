@@ -320,6 +320,72 @@ describe('buildFilterRules', () => {
   it('returns queryParams: undefined for empty clauses', async () => {
     const out = await buildFilterRules({ metadata: meta, resolveMe, clauses: [] });
     expect(out.queryParams).toBeUndefined();
+    expect(out.refreshed).toBe(false);
+  });
+
+  it('fires onColumnNotFound once on cache-miss and emits stale_cache_refreshed warning (Codex M4 §1)', async () => {
+    const cachedMeta = metadata([
+      { id: 'status_4', title: 'Status', type: 'status' },
+    ]);
+    const refreshedMeta = metadata([
+      { id: 'status_4', title: 'Status', type: 'status' },
+      { id: 'newcol_1', title: 'NewCol', type: 'status' },
+    ]);
+    let refreshCalls = 0;
+    const out = await buildFilterRules({
+      metadata: cachedMeta,
+      resolveMe,
+      clauses: [parseWhereSyntax('NewCol=Done')],
+      onColumnNotFound: () => {
+        refreshCalls++;
+        return Promise.resolve(refreshedMeta);
+      },
+    });
+    expect(refreshCalls).toBe(1);
+    expect(out.refreshed).toBe(true);
+    expect(out.queryParams?.rules[0]?.column_id).toBe('newcol_1');
+    expect(out.warnings.some((w) => w.code === 'stale_cache_refreshed')).toBe(true);
+  });
+
+  it('does not refresh when first clause resolves cleanly even if onColumnNotFound is provided', async () => {
+    let refreshCalls = 0;
+    const out = await buildFilterRules({
+      metadata: meta,
+      resolveMe,
+      clauses: [parseWhereSyntax('Status=Done')],
+      onColumnNotFound: () => {
+        refreshCalls++;
+        return Promise.resolve(meta);
+      },
+    });
+    expect(refreshCalls).toBe(0);
+    expect(out.refreshed).toBe(false);
+  });
+
+  it('only refreshes ONCE — second cache-miss bubbles column_not_found', async () => {
+    const cachedMeta = metadata([
+      { id: 'a', title: 'A', type: 'status' },
+    ]);
+    let refreshCalls = 0;
+    await expect(
+      buildFilterRules({
+        metadata: cachedMeta,
+        resolveMe,
+        clauses: [
+          parseWhereSyntax('B=x'),
+          parseWhereSyntax('C=y'),
+        ],
+        onColumnNotFound: () => {
+          refreshCalls++;
+          // Refresh returns metadata that resolves B but not C.
+          return Promise.resolve(metadata([
+            { id: 'a', title: 'A', type: 'status' },
+            { id: 'b_1', title: 'B', type: 'status' },
+          ]));
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'column_not_found' });
+    expect(refreshCalls).toBe(1);
   });
 });
 

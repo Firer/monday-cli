@@ -232,11 +232,26 @@ export interface BuildFilterRulesInputs {
    */
   readonly resolveMe: () => Promise<string>;
   readonly clauses: readonly WhereClause[];
+  /**
+   * Optional cache-miss refresh callback — when provided, the parser
+   * fires it once on the first `column_not_found` to retry the
+   * resolution against fresh metadata (Codex M4 §1: filters must
+   * honour §5.3 step 5). Caller should plumb `refreshBoardMetadata`
+   * here when the metadata came from cache; pass `undefined` when
+   * the metadata was already live (no refresh would help).
+   */
+  readonly onColumnNotFound?: () => Promise<BoardMetadata>;
 }
 
 export interface BuildFilterRulesResult {
   readonly queryParams: QueryParams | undefined;
   readonly warnings: readonly Warning[];
+  /**
+   * `true` when `onColumnNotFound` fired — caller flips
+   * `meta.source` to `'mixed'` and emits a `stale_cache_refreshed`
+   * warning per §5.3 step 5.
+   */
+  readonly refreshed: boolean;
 }
 
 /**
@@ -255,7 +270,7 @@ export const buildFilterRules = async (
   inputs: BuildFilterRulesInputs,
 ): Promise<BuildFilterRulesResult> => {
   if (inputs.clauses.length === 0) {
-    return { queryParams: undefined, warnings: [] };
+    return { queryParams: undefined, warnings: [], refreshed: false };
   }
 
   const warnings: Warning[] = [];
@@ -266,8 +281,38 @@ export const buildFilterRules = async (
     return cachedMe;
   };
 
+  let metadata = inputs.metadata;
+  let refreshed = false;
+
   for (const clause of inputs.clauses) {
-    const match = resolveColumn(inputs.metadata, clause.token);
+    let match: ColumnMatch;
+    try {
+      match = resolveColumn(metadata, clause.token);
+    } catch (err) {
+      // Cache-miss-refresh per §5.3 step 5: if the resolution fails
+      // with column_not_found AND the caller supplied a refresh
+      // callback AND we haven't already refreshed, fire the refresh
+      // once and retry. Other resolution errors (ambiguous_column)
+      // bubble — refreshing wouldn't change them.
+      const isMissing =
+        err instanceof ApiError && err.code === 'column_not_found';
+      if (
+        !isMissing ||
+        inputs.onColumnNotFound === undefined ||
+        refreshed
+      ) {
+        throw err;
+      }
+      metadata = await inputs.onColumnNotFound();
+      refreshed = true;
+      warnings.push({
+        code: 'stale_cache_refreshed',
+        message:
+          'Cache miss for filter token; refreshed board metadata to resolve.',
+        details: { token: clause.token, board_id: metadata.id },
+      });
+      match = resolveColumn(metadata, clause.token);
+    }
     foldCollisionWarning(match, warnings);
 
     const rule = await buildRuleForClause(clause, match.column, me);
@@ -277,6 +322,7 @@ export const buildFilterRules = async (
   return {
     queryParams: { rules },
     warnings,
+    refreshed,
   };
 };
 
@@ -426,11 +472,15 @@ export interface BuildQueryParamsInputs {
   readonly resolveMe: () => Promise<string>;
   readonly whereClauses: readonly string[];
   readonly filterJson: string | undefined;
+  /** Forwarded to `buildFilterRules` — see that interface. */
+  readonly onColumnNotFound?: () => Promise<BoardMetadata>;
 }
 
 export interface BuildQueryParamsResult {
   readonly queryParams: Readonly<Record<string, unknown>> | undefined;
   readonly warnings: readonly Warning[];
+  /** Forwarded from `buildFilterRules`. */
+  readonly refreshed: boolean;
 }
 
 export const buildQueryParams = async (
@@ -448,10 +498,11 @@ export const buildQueryParams = async (
     return {
       queryParams: parseFilterJson(filterJson),
       warnings: [],
+      refreshed: false,
     };
   }
   if (!hasWhere) {
-    return { queryParams: undefined, warnings: [] };
+    return { queryParams: undefined, warnings: [], refreshed: false };
   }
 
   const clauses = inputs.whereClauses.map(parseWhereSyntax);
@@ -459,9 +510,13 @@ export const buildQueryParams = async (
     metadata: inputs.metadata,
     resolveMe: inputs.resolveMe,
     clauses,
+    ...(inputs.onColumnNotFound === undefined
+      ? {}
+      : { onColumnNotFound: inputs.onColumnNotFound }),
   });
   return {
     queryParams: result.queryParams as Readonly<Record<string, unknown>> | undefined,
     warnings: result.warnings,
+    refreshed: result.refreshed,
   };
 };

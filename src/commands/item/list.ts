@@ -36,7 +36,11 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError } from '../../utils/errors.js';
-import { loadBoardMetadata } from '../../api/board-metadata.js';
+import {
+  loadBoardMetadata,
+  refreshBoardMetadata,
+  type BoardMetadata,
+} from '../../api/board-metadata.js';
 import { buildQueryParams } from '../../api/filters.js';
 import {
   DEFAULT_PAGE_SIZE,
@@ -69,12 +73,8 @@ const ITEMS_PAGE_QUERY = `
     $boardId: ID!
     $limit: Int!
     $queryParams: ItemsQuery
-    $groupIds: [String!]
   ) {
     boards(ids: [$boardId]) {
-      groups(ids: $groupIds) {
-        id
-      }
       items_page(limit: $limit, query_params: $queryParams) {
         cursor
         items {
@@ -93,6 +93,48 @@ const ITEMS_PAGE_QUERY = `
             text
             value
             column { title }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Group-scoped variant — Monday's items_page exposes a per-group
+ * page when the query is rooted at `boards.groups.items_page`. The
+ * top-level `items_page` doesn't accept a group filter, so the
+ * group-aware path uses a separate query shape rather than a flag
+ * inside `query_params`.
+ */
+const ITEMS_PAGE_BY_GROUP_QUERY = `
+  query ItemsPageByGroup(
+    $boardId: ID!
+    $groupId: String!
+    $limit: Int!
+    $queryParams: ItemsQuery
+  ) {
+    boards(ids: [$boardId]) {
+      groups(ids: [$groupId]) {
+        items_page(limit: $limit, query_params: $queryParams) {
+          cursor
+          items {
+            id
+            name
+            state
+            url
+            created_at
+            updated_at
+            board { id }
+            group { id title }
+            parent_item { id }
+            column_values {
+              id
+              type
+              text
+              value
+              column { title }
+            }
           }
         }
       }
@@ -127,7 +169,14 @@ const NEXT_ITEMS_PAGE_QUERY = `
 `;
 
 interface InitialResponse {
-  readonly boards: readonly { readonly items_page: { readonly cursor: string | null; readonly items: readonly unknown[] } }[] | null;
+  readonly boards:
+    | readonly {
+        readonly items_page?: { readonly cursor: string | null; readonly items: readonly unknown[] };
+        readonly groups?: readonly {
+          readonly items_page: { readonly cursor: string | null; readonly items: readonly unknown[] };
+        }[];
+      }[]
+    | null;
 }
 interface NextResponse {
   readonly next_items_page: { readonly cursor: string | null; readonly items: readonly unknown[] } | null;
@@ -142,7 +191,6 @@ const inputSchema = z
     group: GroupIdSchema.optional(),
     where: z.array(z.string()).optional(),
     filterJson: z.string().optional(),
-    state: z.enum(['active', 'archived', 'all']).optional(),
     all: z.boolean().optional(),
     limit: z.coerce.number().int().positive().max(10_000).optional(),
     pageSize: z.coerce.number().int().positive().max(500).optional(),
@@ -191,7 +239,13 @@ const projectFromRaw = (
   titles: ReadonlyMap<string, string>,
 ): ProjectedItem => {
   const parsed: RawItem = rawItemSchema.parse(raw);
-  return projectItem({ raw: parsed, columnTitles: titles });
+  // Same-board collection — drop per-cell titles per §6.3, the
+  // canonical view lives on `meta.columns`.
+  return projectItem({
+    raw: parsed,
+    columnTitles: titles,
+    omitColumnTitles: true,
+  });
 };
 
 
@@ -212,11 +266,14 @@ const initialFetcher = (
       boardId,
       limit: pageSize,
     };
-    if (group !== undefined) {
-      variables.groupIds = [group];
-    }
     if (queryParams !== undefined) {
       variables.queryParams = queryParams;
+    }
+    if (group !== undefined) {
+      variables.groupId = group;
+      return client.raw<InitialResponse>(ITEMS_PAGE_BY_GROUP_QUERY, variables, {
+        operationName: 'ItemsPageByGroup',
+      });
     }
     return client.raw<InitialResponse>(ITEMS_PAGE_QUERY, variables, {
       operationName: 'ItemsPage',
@@ -238,7 +295,9 @@ const nextFetcher = (
 
 const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
   const board = r.data.boards?.[0];
-  const page = board?.items_page;
+  // Group-scoped query: `boards[0].groups[0].items_page`.
+  // Top-level query: `boards[0].items_page`.
+  const page = board?.groups?.[0]?.items_page ?? board?.items_page;
   /* c8 ignore next 4 — defensive nullish-coalescing for the
      Monday-wire-shape `page` being undefined; the request always
      returns an items_page object on success, the guard exists so a
@@ -272,6 +331,9 @@ interface StreamNdjsonInputs {
   readonly cliVersion: string;
   readonly requestId: string;
   readonly retrievedAt: string;
+  /** §6.1 — derived from metadata + items legs by the caller. */
+  readonly source: 'live' | 'cache' | 'mixed';
+  readonly cacheAgeSeconds: number | null;
 }
 
 interface StreamHandle {
@@ -298,9 +360,9 @@ const startNdjsonStream = (inputs: StreamNdjsonInputs): StreamHandle => {
         api_version: inputs.apiVersion,
         cli_version: inputs.cliVersion,
         request_id: inputs.requestId,
-        source: 'live',
+        source: inputs.source,
         retrieved_at: inputs.retrievedAt,
-        cache_age_seconds: null,
+        cache_age_seconds: inputs.cacheAgeSeconds,
         complexity: params.complexity,
         next_cursor: params.nextCursor,
         has_more: params.hasMore,
@@ -349,7 +411,6 @@ export const itemListCommand: CommandModule<
         [] as readonly string[],
       )
       .option('--filter-json <json>', 'literal Monday query_params (escape hatch)')
-      .option('--state <s>', 'active|archived|all (default Monday default)')
       .option('--all', 'auto-paginate every page')
       .option('--limit <n>', 'cap total items returned across pages')
       .option('--page-size <n>', `page size (1-500, default ${String(DEFAULT_PAGE_SIZE)})`)
@@ -371,15 +432,50 @@ export const itemListCommand: CommandModule<
           noCache: globalFlags.noCache,
         });
 
-        const { queryParams, warnings: filterWarnings } = await buildQueryParams({
+        // Build the cache-aware refresh callback only when metadata
+        // came from cache — refreshing live data wouldn't help and
+        // would burn an extra request. When refresh fires, the
+        // returned BoardMetadata becomes the new view for titles +
+        // columnHeads.
+        let activeMetadata = meta.metadata;
+        const onColumnNotFound =
+          meta.source === 'cache'
+            ? async (): Promise<BoardMetadata> => {
+                const refreshed = await refreshBoardMetadata({
+                  client,
+                  boardId: parsed.board,
+                  env: ctx.env,
+                });
+                activeMetadata = refreshed.metadata;
+                return refreshed.metadata;
+              }
+            : undefined;
+
+        const filterResult = await buildQueryParams({
           metadata: meta.metadata,
           resolveMe: resolveMeFactory(client),
           whereClauses: parsed.where ?? [],
           filterJson: parsed.filterJson,
+          ...(onColumnNotFound === undefined ? {} : { onColumnNotFound }),
         });
+        const queryParams = filterResult.queryParams;
+        const filterWarnings = filterResult.warnings;
 
-        const titles = titleMap(meta.metadata);
-        const columnHeads = collectColumnHeads(meta.metadata);
+        // Effective meta source per §6.1:
+        //  - metadata live + items live   → live
+        //  - metadata cache + items live  → mixed (filterResult.refreshed
+        //    doesn't matter here — the data is still partly cache-derived)
+        //  - metadata cache + refresh fired during filter resolution
+        //    → mixed (the original cache was stale, refresh was forced).
+        // The original cacheAgeSeconds is preserved so agents can read
+        // "how stale was the cache when this ran" — same pattern as
+        // resolveColumnWithRefresh per Codex M3 pass-2 §1.
+        const effectiveSource: 'live' | 'cache' | 'mixed' =
+          meta.source === 'live' && !filterResult.refreshed ? 'live' : 'mixed';
+        const effectiveCacheAge = meta.cacheAgeSeconds;
+
+        const titles = titleMap(activeMetadata);
+        const columnHeads = collectColumnHeads(activeMetadata);
         const pageSize = parsed.pageSize ?? DEFAULT_PAGE_SIZE;
         const flags: CollectingFlags = {
           all: parsed.all === true,
@@ -409,10 +505,13 @@ export const itemListCommand: CommandModule<
             cliVersion: ctx.cliVersion,
             requestId: ctx.requestId,
             retrievedAt: ctx.clock().toISOString(),
+            source: effectiveSource,
+            cacheAgeSeconds: effectiveCacheAge,
           });
           const result = await paginate<unknown, InitialResponse | NextResponse>({
             fetchInitial: initialFetcher(client, parsed.board, parsed.group, pageSize, queryParams),
             fetchNext: nextFetcher(client, pageSize),
+            now: ctx.clock,
             extractPage: (r): PaginatedPage<unknown> => {
               if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
               return extractInitial(r as MondayResponse<InitialResponse>);
@@ -457,6 +556,7 @@ export const itemListCommand: CommandModule<
         // emit's contract — programOpts is the raw shape — explicit.)
         parseGlobalFlags(program.opts(), ctx.env);
 
+        const baseEmit = toEmit(result.lastResponse);
         emitSuccess({
           ctx,
           data,
@@ -468,11 +568,13 @@ export const itemListCommand: CommandModule<
           totalReturned: result.totalReturned,
           columns: columnHeads,
           warnings,
-          ...toEmit(result.lastResponse),
-          // toEmit's complexity comes from result.lastResponse — but
-          // when paginate's verbose collected complexity also covers
-          // intermediate pages, lastResponse is the freshest snapshot
-          // (matching M3 commands' "last response wins" rule).
+          ...baseEmit,
+          // Override toEmit's `live` / `null` defaults when the
+          // metadata leg came from cache. Items still came from the
+          // live items_page query, so source: 'mixed' + the original
+          // cacheAgeSeconds is the §6.1-correct view (Codex M4 §2).
+          source: effectiveSource,
+          cacheAgeSeconds: effectiveCacheAge,
         });
       });
   },

@@ -131,6 +131,23 @@ describe('paginate — --all walking', () => {
     expect(result.pagesFetched).toBe(2);
   });
 
+  it('reports has_more=true when --limit truncates a terminal (cursor=null) page (REGRESSION: Codex M4 §3)', async () => {
+    // Page returns 3 items + cursor=null (terminal). --limit=2
+    // means the third item is unconsumed; even though Monday says
+    // "no more cursor pages", the caller hasn't seen everything.
+    const result = await paginate({
+      fetchInitial: () => Promise.resolve(respond(null, ['1', '2', '3'])),
+      fetchNext: () => Promise.reject(new Error('unused')),
+      extractPage: project,
+      getId,
+      all: true,
+      limit: 2,
+    });
+    expect(result.items).toHaveLength(2);
+    expect(result.nextCursor).toBeNull();
+    expect(result.hasMore).toBe(true);
+  });
+
   it('handles --limit equal to first-page size — preserves cursor', async () => {
     const result = await paginate({
       fetchInitial: () => Promise.resolve(respond('C2', ['1', '2', '3'])),

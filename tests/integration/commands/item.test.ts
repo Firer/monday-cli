@@ -435,6 +435,58 @@ describe('monday item list (integration)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('cursor_age_seconds is computed from the injected ctx.clock (REGRESSION: Codex M4 §7)', async () => {
+    // Verifies the ctx.clock plumbing — the unit suite drives the
+    // `> 0` boundary against a mock clock that advances; this
+    // integration test confirms the command-level wiring runs
+    // through the injected clock at all (cursor_age_seconds is a
+    // present, finite, non-negative number on the error envelope).
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--all', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: 'C2', items: [item('1')] } },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'NextItemsPage',
+            response: {
+              errors: [
+                {
+                  message: 'Cursor expired',
+                  extensions: { code: 'INVALID_CURSOR_EXCEPTION' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error: {
+        code: string;
+        details: { cursor_age_seconds: number; items_returned_so_far: number };
+      };
+    };
+    expect(env.error.code).toBe('stale_cursor');
+    // Plumbing assertion: the field is present and finite. Frozen
+    // clock means the value is 0 — that's correct for a same-tick
+    // walk. The unit suite (tests/unit/api/pagination.test.ts) drives
+    // the advancing-clock case where the value is positive.
+    expect(typeof env.error.details.cursor_age_seconds).toBe('number');
+    expect(env.error.details.cursor_age_seconds).toBeGreaterThanOrEqual(0);
+    expect(env.error.details.items_returned_so_far).toBe(1);
+  });
+
   it('mid-walk stale_cursor fails fast with details (no silent re-issue)', async () => {
     const out = await drive(
       ['item', 'list', '--board', '111', '--all', '--json'],
@@ -494,6 +546,158 @@ describe('monday item list (integration)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('filter parser refreshes board metadata on cache-miss column lookup (REGRESSION: Codex M4 §1)', async () => {
+    // First call: warm the cache with the original metadata (no
+    // NewCol).
+    await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    // Second call: --where references a NewCol that exists on
+    // refreshed metadata but not on the cached view. Without §5.3
+    // step 5 / Codex M4 §1, this would surface as column_not_found.
+    // With the refresh-once contract, the parser refreshes once,
+    // resolves NewCol, and queries items_page with the rule.
+    const refreshedMetadata = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'newcol_1',
+          title: 'NewCol',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'list',
+        '--board',
+        '111',
+        '--where',
+        'NewCol=Done',
+        '--json',
+      ],
+      {
+        interactions: [
+          // Refresh-on-not-found fires the BoardMetadata operation
+          // again, this time with NewCol in the response.
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedMetadata] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            match_variables: {
+              queryParams: {
+                rules: [
+                  {
+                    column_id: 'newcol_1',
+                    operator: 'any_of',
+                    compare_value: ['Done'],
+                  },
+                ],
+              },
+            },
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [item('1')] } }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.warnings?.some((w) => w.code === 'stale_cache_refreshed')).toBe(true);
+    expect(env.meta.source).toBe('mixed');
+  });
+
+  it('drops per-cell column titles in collection output, consolidates into meta.columns (§6.3 / REGRESSION: Codex M4 §8)', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: { cursor: null, items: [item('1')] },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { columns: Record<string, { title?: string; type: string }> }[];
+      meta: EnvelopeShape['meta'] & {
+        columns?: Record<string, { id: string; type: string; title: string }>;
+      };
+    };
+    // Per-cell title is dropped.
+    expect(env.data[0]?.columns.status_4?.title).toBeUndefined();
+    // Canonical title lives in meta.columns.
+    expect(env.meta.columns?.status_4?.title).toBe('Status');
+  });
+
+  it('reports source: mixed when board metadata is cached and items are live (REGRESSION: Codex M4 §2)', async () => {
+    // First call: warm the cache by running list once.
+    await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    // Second call: cache hit on metadata, live on items. Expect
+    // source: 'mixed' with cache_age_seconds set.
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [item('1')] } }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.source).toBe('mixed');
+    expect(env.meta.cache_age_seconds).not.toBeNull();
+  });
+
   it('--limit caps total items returned mid-page and preserves the cursor', async () => {
     const out = await drive(
       ['item', 'list', '--board', '111', '--all', '--limit', '2', '--json'],
@@ -527,19 +731,23 @@ describe('monday item list (integration)', () => {
     expect(env.meta.next_cursor).toBe('C2');
   });
 
-  it('--group narrows the items_page request via groupIds', async () => {
+  it('--group routes through the boards.groups.items_page query shape', async () => {
     const out = await drive(
       ['item', 'list', '--board', '111', '--group', 'topics', '--json'],
       {
         interactions: [
           boardMetadataInteraction,
           {
-            operation_name: 'ItemsPage',
-            match_variables: { groupIds: ['topics'] },
+            operation_name: 'ItemsPageByGroup',
+            match_variables: { groupId: 'topics' },
             response: {
               data: {
                 boards: [
-                  { items_page: { cursor: null, items: [item('1')] } },
+                  {
+                    groups: [
+                      { items_page: { cursor: null, items: [item('1')] } },
+                    ],
+                  },
                 ],
               },
             },
@@ -737,6 +945,55 @@ describe('monday item find (integration)', () => {
     expect(env.error?.code).toBe('not_found');
   });
 
+  it('emits pagination_cap_reached warning when find scan was capped before resolving uniqueness (REGRESSION: Codex M4 §6)', async () => {
+    // Resolved match exists on page 1 but the cap is small enough
+    // that there are still more pages — uniqueness can't be
+    // verified.
+    const out = await drive(
+      [
+        'item',
+        'find',
+        'Refactor',
+        '--board',
+        '111',
+        '--limit-pages',
+        '1',
+        '--page-size',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: 'C2',
+                      items: [
+                        item('1', 'Refactor'),
+                        item('2', 'Other'),
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+      warnings: { code: string }[];
+    };
+    expect(env.data.id).toBe('1');
+    expect(env.warnings.some((w) => w.code === 'pagination_cap_reached')).toBe(true);
+  });
+
   it('walks multiple pages until the match is found, with --group narrowing', async () => {
     const out = await drive(
       [
@@ -752,16 +1009,20 @@ describe('monday item find (integration)', () => {
       {
         interactions: [
           {
-            operation_name: 'ItemFind',
-            match_variables: { groupIds: ['topics'] },
+            operation_name: 'ItemFindByGroup',
+            match_variables: { groupId: 'topics' },
             response: {
               data: {
                 boards: [
                   {
-                    items_page: {
-                      cursor: 'C2',
-                      items: [item('1', 'Other')],
-                    },
+                    groups: [
+                      {
+                        items_page: {
+                          cursor: 'C2',
+                          items: [item('1', 'Other')],
+                        },
+                      },
+                    ],
                   },
                 ],
               },
@@ -830,6 +1091,70 @@ describe('monday item search (integration)', () => {
       data: { id: string }[];
     };
     expect(env.data).toHaveLength(2);
+  });
+
+  it('refreshes board metadata on cache-miss column lookup (REGRESSION: Codex M4 §1)', async () => {
+    // Warm the cache with metadata that lacks NewCol.
+    await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const refreshedMetadata = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'newcol_1',
+          title: 'NewCol',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'search', '--board', '111', '--where', 'NewCol=Done', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedMetadata] } },
+          },
+          {
+            operation_name: 'ItemsByColumnValues',
+            match_variables: {
+              columns: [
+                { column_id: 'newcol_1', column_values: ['Done'] },
+              ],
+            },
+            response: {
+              data: {
+                items_page_by_column_values: {
+                  cursor: null,
+                  items: [item('1')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.warnings?.some((w) => w.code === 'stale_cache_refreshed')).toBe(true);
+    expect(env.meta.source).toBe('mixed');
   });
 
   it('rejects non-equality operators with usage_error', async () => {
