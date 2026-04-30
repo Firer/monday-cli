@@ -509,3 +509,287 @@ describe('monday item list (integration)', () => {
     expect(env.meta.api_version).toBe('2026-04');
   });
 });
+
+describe('monday item find (integration)', () => {
+  it('returns the unique match', async () => {
+    const out = await drive(
+      ['item', 'find', 'Refactor login', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [item('1', 'Refactor login'), item('2', 'Other')],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string };
+    };
+    expect(env.data.id).toBe('1');
+    expect(env.data.name).toBe('Refactor login');
+  });
+
+  it('raises ambiguous_name on multi-match without --first', async () => {
+    const out = await drive(
+      ['item', 'find', 'Refactor', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [item('1', 'Refactor'), item('2', 'Refactor')],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('ambiguous_name');
+  });
+
+  it('surfaces first_of_many warning under --first', async () => {
+    const out = await drive(
+      ['item', 'find', 'Refactor', '--board', '111', '--first', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [item('5', 'Refactor'), item('1', 'Refactor')],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('1'); // lowest ID wins
+    expect(env.warnings?.[0]?.code).toBe('first_of_many');
+  });
+
+  it('not_found when the board has no matching item', async () => {
+    const out = await drive(
+      ['item', 'find', 'No such', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [item('1', 'Other')] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+});
+
+describe('monday item search (integration)', () => {
+  it('runs items_page_by_column_values with merged column queries', async () => {
+    const out = await drive(
+      [
+        'item',
+        'search',
+        '--board',
+        '111',
+        '--where',
+        'status=Done',
+        '--where',
+        'status=Backlog',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsByColumnValues',
+            match_variables: {
+              columns: [
+                { column_id: 'status_4', column_values: ['Done', 'Backlog'] },
+              ],
+            },
+            response: {
+              data: {
+                items_page_by_column_values: {
+                  cursor: null,
+                  items: [item('1'), item('2')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    expect(env.data).toHaveLength(2);
+  });
+
+  it('rejects non-equality operators with usage_error', async () => {
+    const out = await drive(
+      [
+        'item',
+        'search',
+        '--board',
+        '111',
+        '--where',
+        'status~=Done',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--all walks via next_items_page', async () => {
+    const out = await drive(
+      [
+        'item',
+        'search',
+        '--board',
+        '111',
+        '--where',
+        'status=Done',
+        '--all',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsByColumnValues',
+            response: {
+              data: {
+                items_page_by_column_values: {
+                  cursor: 'C2',
+                  items: [item('1')],
+                },
+              },
+            },
+          },
+          {
+            operation_name: 'ItemsByColumnValuesNext',
+            response: {
+              data: {
+                next_items_page: { cursor: null, items: [item('2')] },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    expect(env.data).toHaveLength(2);
+  });
+});
+
+describe('monday item subitems (integration)', () => {
+  it('lists direct subitems sorted by ID asc', async () => {
+    const out = await drive(
+      ['item', 'subitems', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemSubitems',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    subitems: [item('30'), item('5'), item('99')],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    expect(env.data.map((i) => i.id)).toEqual(['5', '30', '99']);
+    expect(env.meta.has_more).toBe(false);
+    expect(env.meta.next_cursor).toBeNull();
+  });
+
+  it('returns empty array when item has no subitems', async () => {
+    const out = await drive(
+      ['item', 'subitems', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemSubitems',
+            response: { data: { items: [{ id: '12345', subitems: [] }] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: unknown[];
+    };
+    expect(env.data).toEqual([]);
+  });
+
+  it('surfaces not_found when the parent item is missing', async () => {
+    const out = await drive(
+      ['item', 'subitems', '99999', '--json'],
+      {
+        interactions: [
+          { operation_name: 'ItemSubitems', response: { data: { items: [] } } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+});
