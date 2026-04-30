@@ -7,13 +7,25 @@
  * `change_column_value` / `change_multiple_column_values` mutations
  * accept.
  *
- * **Scope so far.** Five of the seven v0.1-allowlisted types
+ * **Scope so far.** Six of the seven v0.1-allowlisted types
  * translate: `text` / `long_text` / `numbers` (simple-string
- * payloads, M5a skeleton) and `status` / `dropdown` (rich-object
- * payloads, this commit). `date` and `people` each carry their
- * own translation logic and arrive in follow-up sessions; until
- * then they fall through to `unsupported_column_type` like any
+ * payloads, M5a skeleton); `status` / `dropdown` (rich-object
+ * payloads); and `date` (rich, with relative-token resolution
+ * against the profile timezone). `people` carries its own
+ * translation logic and arrives in a follow-up session; until
+ * then it falls through to `unsupported_column_type` like any
  * non-allowlisted type.
+ *
+ * **Date resolution context** (cli-design §5.3 step 3 + the
+ * "Relative dates and timezone" subsection). Relative tokens
+ * (`today`, `+3d`, `+2h`) need a clock + a timezone; both come
+ * from `TranslateColumnValueInputs.dateResolution`. Defaults to
+ * the system clock + system tz when omitted — M5b's command
+ * layer plumbs `MONDAY_TIMEZONE` env override through this slot.
+ * Tests inject a deterministic clock for DST-boundary coverage.
+ * The actual resolution machinery lives in `dates.ts`; this
+ * module just delegates and packages the result alongside the
+ * other column types.
  *
  * **Mutation selection** (`cli-design.md` §5.3 step 5) lives in
  * `selectMutation` below — single simple → `change_simple_column_value`;
@@ -57,6 +69,13 @@ import {
   isWritableColumnType,
   type WritableColumnType,
 } from './column-types.js';
+import {
+  parseDateInput,
+  type DateResolution,
+  type DateResolutionContext,
+} from './dates.js';
+
+export type { DateResolution, DateResolutionContext } from './dates.js';
 
 /**
  * Discriminator on the wire payload's *shape*, not the GraphQL
@@ -91,6 +110,17 @@ export interface TranslatedColumnValue {
   readonly payload: ColumnValuePayload;
   /** The raw input the caller passed, preserved for the dry-run diff. */
   readonly rawInput: string;
+  /**
+   * Echo of the resolution context for relative-token date
+   * inputs — populated by the `date` translator when the input
+   * was a relative token (`today`, `+3d`, `+2h`) so the
+   * dry-run engine can render `details.resolved_from` per
+   * cli-design §6.4. `null` for explicit ISO inputs (where
+   * the raw input *is* the resolved value) and for
+   * non-`date` columns. cli-design §5.3 line 783-786 pins
+   * the shape.
+   */
+  readonly resolvedFrom: DateResolution | null;
 }
 
 export interface TranslateColumnValueInputs {
@@ -102,6 +132,14 @@ export interface TranslateColumnValueInputs {
   readonly column: { readonly id: string; readonly type: string };
   /** The raw user-supplied value (post-`--set` parsing). */
   readonly value: string;
+  /**
+   * Resolution context for the `date` translator's relative
+   * tokens (`today`, `+3d`, `+2h`). Ignored for non-`date`
+   * columns. Defaults to system clock + system tz when omitted;
+   * M5b's command layer plumbs `MONDAY_TIMEZONE` env override
+   * through this slot per cli-design §5.3 line 765.
+   */
+  readonly dateResolution?: DateResolutionContext;
 }
 
 /**
@@ -128,7 +166,7 @@ export interface TranslateColumnValueInputs {
 export const translateColumnValue = (
   inputs: TranslateColumnValueInputs,
 ): TranslatedColumnValue => {
-  const { column, value } = inputs;
+  const { column, value, dateResolution } = inputs;
   if (!isWritableColumnType(column.type)) {
     throw unsupportedColumnTypeError(column.id, column.type);
   }
@@ -143,12 +181,21 @@ export const translateColumnValue = (
       return rich(column.id, 'status', value, translateStatus(value, column.id));
     case 'dropdown':
       return rich(column.id, 'dropdown', value, translateDropdown(column.id, value));
-    case 'date':
+    case 'date': {
+      const parsed = parseDateInput(value, column.id, dateResolution);
+      return {
+        columnId: column.id,
+        columnType: 'date',
+        rawInput: value,
+        payload: { format: 'rich', value: parsed.payload },
+        resolvedFrom: parsed.resolvedFrom,
+      };
+    }
     case 'people':
       // Allowlisted but not yet implemented — surface the same
       // unsupported error shape so agents have a single contract to
-      // key off until the rich-type writers land. Each follow-up
-      // session lifts one of these out of this branch.
+      // key off until the rich-type writers land. The follow-up
+      // session lifts this out of this branch.
       throw unsupportedColumnTypeError(column.id, column.type);
   }
 };
@@ -162,6 +209,9 @@ const simple = (
   columnType,
   payload: { format: 'simple', value: rawInput },
   rawInput,
+  // Only the date translator populates resolvedFrom; every other
+  // type emits null so the dry-run engine has one shape to read.
+  resolvedFrom: null,
 });
 
 const rich = (
@@ -174,6 +224,7 @@ const rich = (
   columnType,
   payload: { format: 'rich', value },
   rawInput,
+  resolvedFrom: null,
 });
 
 /**

@@ -31,6 +31,7 @@ describe('translateColumnValue — simple types', () => {
       columnType: 'text',
       rawInput: 'Refactor login',
       payload: { format: 'simple', value: 'Refactor login' },
+      resolvedFrom: null,
     });
   });
 
@@ -60,6 +61,7 @@ describe('translateColumnValue — simple types', () => {
         format: 'simple',
         value: 'line one\nline two\nline three',
       },
+      resolvedFrom: null,
     });
   });
 
@@ -70,6 +72,7 @@ describe('translateColumnValue — simple types', () => {
       columnType: 'numbers',
       rawInput: '42',
       payload: { format: 'simple', value: '42' },
+      resolvedFrom: null,
     });
   });
 
@@ -120,6 +123,7 @@ describe('translateColumnValue — status (rich)', () => {
       columnType: 'status',
       rawInput: 'Done',
       payload: { format: 'rich', value: { label: 'Done' } },
+      resolvedFrom: null,
     });
   });
 
@@ -256,6 +260,7 @@ describe('translateColumnValue — dropdown (rich)', () => {
       columnType: 'dropdown',
       rawInput: 'Backend',
       payload: { format: 'rich', value: { labels: ['Backend'] } },
+      resolvedFrom: null,
     });
   });
 
@@ -446,13 +451,90 @@ describe('translateColumnValue — dropdown (rich)', () => {
   });
 });
 
+describe('translateColumnValue — date (rich)', () => {
+  // The full grammar lives in tests/unit/api/dates.test.ts —
+  // here we just pin the column-values.ts surface contract:
+  // the translator delegates to dates.parseDateInput, populates
+  // the resolvedFrom slot for relative tokens, and leaves it
+  // null for explicit ISO inputs. The DST + tz coverage is in
+  // dates.test.ts to keep concerns separated.
+
+  it('ISO date → rich payload, null resolvedFrom', () => {
+    const out = translateColumnValue({
+      column: { id: 'due', type: 'date' },
+      value: '2026-05-01',
+    });
+    expect(out).toEqual<TranslatedColumnValue>({
+      columnId: 'due',
+      columnType: 'date',
+      rawInput: '2026-05-01',
+      payload: { format: 'rich', value: { date: '2026-05-01' } },
+      resolvedFrom: null,
+    });
+  });
+
+  it('ISO date+time → rich payload with {date, time}', () => {
+    const out = translateColumnValue({
+      column: { id: 'due', type: 'date' },
+      value: '2026-05-01T14:30',
+    });
+    if (out.payload.format !== 'rich') throw new Error('expected rich');
+    expect(out.payload.value).toEqual({ date: '2026-05-01', time: '14:30:00' });
+    expect(out.resolvedFrom).toBeNull();
+  });
+
+  it('relative token with injected clock + tz populates resolvedFrom', () => {
+    const now = (): Date => new Date('2026-04-29T13:00:00Z');
+    const out = translateColumnValue({
+      column: { id: 'due', type: 'date' },
+      value: '+3d',
+      dateResolution: { now, timezone: 'Europe/London' },
+    });
+    if (out.payload.format !== 'rich') throw new Error('expected rich');
+    expect(out.payload.value).toEqual({ date: '2026-05-02' });
+    expect(out.resolvedFrom).toEqual({
+      input: '+3d',
+      timezone: 'Europe/London',
+      now: '2026-04-29T14:00:00+01:00',
+    });
+  });
+
+  it('garbled input throws usage_error from the date parser', () => {
+    expect(() =>
+      translateColumnValue({
+        column: { id: 'due', type: 'date' },
+        value: 'next thursday',
+      }),
+    ).toThrow(UsageError);
+  });
+
+  it('non-date column ignores dateResolution silently', () => {
+    // The dateResolution slot is type-agnostic on the input
+    // surface; non-date columns should not even read it. Pin
+    // via test that passing a context to a `text` column has
+    // no effect on the payload.
+    const out = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+      dateResolution: {
+        now: () => new Date('2026-04-29T13:00:00Z'),
+        timezone: 'Pacific/Auckland',
+      },
+    });
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'simple',
+      value: 'hi',
+    });
+    expect(out.resolvedFrom).toBeNull();
+  });
+});
+
 describe('translateColumnValue — allowlisted but not yet implemented (M5a follow-ups)', () => {
-  // date / people remain in the v0.1 writable allowlist but their
-  // translation logic ships in follow-up sessions. Until then they
-  // surface as `unsupported_column_type` — same code, same shape —
-  // so callers see one contract.
+  // people remains in the v0.1 writable allowlist but its
+  // translation logic ships in a follow-up session. Until then
+  // it surfaces as `unsupported_column_type` — same code, same
+  // shape — so callers see one contract.
   it.each<[WritableColumnType, string]>([
-    ['date', '2026-05-01'],
     ['people', 'alice@example.test'],
   ])('%s → unsupported_column_type until follow-up sessions land', (type, value) => {
     expect(() => translate(type, value, 'col_x')).toThrow(ApiError);
