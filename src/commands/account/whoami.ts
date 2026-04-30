@@ -16,7 +16,7 @@
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitSuccess } from '../emit.js';
-import { resolveClient } from './client-helper.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { ApiError } from '../../utils/errors.js';
 
 const accountSchema = z

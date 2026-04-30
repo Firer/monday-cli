@@ -1,5 +1,5 @@
 /**
- * Shared `MondayClient` construction for the `account/*` commands.
+ * Shared `MondayClient` construction for every network command.
  *
  * Each network command needs the same plumbing — load config (for
  * the API token + URL + version), pick up global flags (`--retry`,
@@ -14,20 +14,25 @@
  *   - means a future profile switch / OAuth path swaps in here once,
  *     not per-command.
  *
+ * Lives next to `Transport` and `MondayClient` (M2.5 R1) — every
+ * network noun calls into here, so a cross-noun import from
+ * `commands/<x>/` into `commands/<y>/` would be wrong. Putting it
+ * under `src/api/` removes that temptation entirely.
+ *
  * The injected `ctx.transport` always wins — that's the fixture seam
  * for integration tests. Production callers leave it undefined and
  * a fresh `FetchTransport` is built per command invocation, so each
  * call sees the live config (same as the SDK's per-call client).
  */
 
-import { createFetchTransport } from '../../api/transport.js';
-import { MondayClient, PINNED_API_VERSION } from '../../api/client.js';
-import { loadConfig } from '../../config/load.js';
+import { createFetchTransport } from './transport.js';
+import { MondayClient, PINNED_API_VERSION } from './client.js';
+import { loadConfig } from '../config/load.js';
 import {
   parseGlobalFlags,
   type GlobalFlags,
-} from '../../types/global-flags.js';
-import type { RunContext } from '../../cli/run.js';
+} from '../types/global-flags.js';
+import type { RunContext } from '../cli/run.js';
 
 export interface ResolvedClient {
   readonly client: MondayClient;
