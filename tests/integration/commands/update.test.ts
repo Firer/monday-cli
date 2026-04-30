@@ -218,3 +218,91 @@ describe('monday update get', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 });
+
+describe('monday update create (integration, M5b)', () => {
+  const createdUpdate = {
+    id: '88',
+    body: '<p>Done — moved to QA.</p>',
+    text_body: 'Done — moved to QA.',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T11:00:00Z',
+    updated_at: '2026-04-30T11:00:00Z',
+  };
+
+  it('live: --body posts the comment and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', 'Done — moved to QA.', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateCreate',
+            response: { data: { create_update: createdUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; item_id: string; body: string };
+    };
+    expect(env.data.id).toBe('88');
+    expect(env.data.item_id).toBe('12345');
+    expect(env.data.body).toContain('Done');
+  });
+
+  it('rejects empty --body as usage_error', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', '', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects no --body and no --body-file as usage_error', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric item id as usage_error', async () => {
+    const out = await drive(
+      ['update', 'create', 'abc', '--body', 'x', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_update; no mutation fires', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', 'preview only', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        item_id: string;
+        body: string;
+        body_length: number;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_update');
+    expect(plan?.item_id).toBe('12345');
+    expect(plan?.body).toBe('preview only');
+    expect(plan?.body_length).toBe(12);
+  });
+});

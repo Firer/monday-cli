@@ -307,6 +307,64 @@ describe('M5b e2e — item update (multi --set + --name, atomic)', () => {
   });
 });
 
+describe('M5b e2e — update create (post a comment)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips --body via create_update; envelope carries the projected update', async () => {
+    const createdUpdate = {
+      id: '88',
+      body: '<p>Done</p>',
+      text_body: 'Done',
+      creator_id: '1',
+      creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+      item_id: '12345',
+      created_at: '2026-04-30T11:00:00Z',
+      updated_at: '2026-04-30T11:00:00Z',
+    };
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'UpdateCreate',
+          response: { data: { create_update: createdUpdate } },
+        },
+      ],
+    };
+    const xdg = await mkdtemp(join(tmpdir(), 'monday-cli-e2e-update-create-'));
+    try {
+      server = await startFixtureServer({ cassette });
+      const result = await spawnCli({
+        args: [
+          'update',
+          'create',
+          '12345',
+          '--body',
+          'Done',
+          '--json',
+          '--no-cache',
+        ],
+        env: fixtureEnv(server, { XDG_CACHE_HOME: xdg }),
+      });
+      expect(result.exitCode).toBe(0);
+      const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+        data: { id: string; item_id: string };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.id).toBe('88');
+      expect(env.data.item_id).toBe('12345');
+      expect(result.stdout).not.toContain(LEAK_CANARY);
+      expect(result.stderr).not.toContain(LEAK_CANARY);
+    } finally {
+      await rm(xdg, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('M5b e2e — item set --dry-run', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {

@@ -67,6 +67,7 @@ import { itemSubitemsCommand } from './item/subitems.js';
 import { itemSetCommand } from './item/set.js';
 import { itemClearCommand } from './item/clear.js';
 import { itemUpdateCommand } from './item/update.js';
+import { updateCreateCommand } from './update/create.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -105,6 +106,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemSetCommand,
     itemClearCommand,
     itemUpdateCommand,
+    updateCreateCommand,
   ];
   return cached;
 };

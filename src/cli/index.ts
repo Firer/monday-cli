@@ -25,4 +25,12 @@ const result = await runWithSignals({
   cliDescription: pkg.description,
 });
 
-process.exit(result.exitCode);
+// Set the exit code rather than calling `process.exit(...)` directly.
+// `process.exit` terminates the process before stdout / stderr have
+// finished flushing to a pipe, which truncates large outputs (e.g.
+// `monday schema --json` once it crosses the kernel pipe buffer at
+// ~64KB). Using `process.exitCode` lets Node exit naturally once the
+// event loop drains the pending writes — the published exit code
+// stays the same, but every byte the CLI wrote actually reaches the
+// reader. cli.md "exit codes are part of the contract" is preserved.
+process.exitCode = result.exitCode;
