@@ -41,6 +41,10 @@ import { accountWhoamiCommand } from './account/whoami.js';
 import { accountInfoCommand } from './account/info.js';
 import { accountVersionCommand } from './account/version.js';
 import { accountComplexityCommand } from './account/complexity.js';
+// M3 commands — workspace + board (incl. describe core) + user + update reads.
+import { workspaceListCommand } from './workspace/list.js';
+import { workspaceGetCommand } from './workspace/get.js';
+import { workspaceFoldersCommand } from './workspace/folders.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -56,6 +60,9 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     accountInfoCommand,
     accountVersionCommand,
     accountComplexityCommand,
+    workspaceListCommand,
+    workspaceGetCommand,
+    workspaceFoldersCommand,
   ];
   return cached;
 };

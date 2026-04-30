@@ -3,6 +3,7 @@ import type { RunContext } from '../cli/run.js';
 import {
   buildMeta,
   buildSuccess,
+  type ColumnHead,
   type Complexity,
   type DataSource,
   type Meta,
@@ -86,6 +87,26 @@ export interface EmitSuccessOptions<T> {
    * the env-or-SDK-pin default the runner already uses.
    */
   readonly apiVersion?: string;
+  /**
+   * Collection-only meta fields (`cli-design.md` §6.3). All optional
+   * — list commands fill what they know.
+   *
+   * `nextCursor` is for `items_page` style pagination (M4); page-
+   * based collections (workspace list, board list) leave it
+   * undefined. `hasMore` is set whenever the command can tell.
+   * `totalReturned` defaults to `data.length` when omitted but is
+   * accepted explicitly so a future paginator that filters
+   * client-side can report a smaller surface.
+   *
+   * `columns` is the per-board column de-duplication slot §6.3
+   * documents — `item list` against a single board fills this so
+   * the per-row `columns` payload doesn't repeat titles. Unused
+   * by M3 commands.
+   */
+  readonly nextCursor?: string | null;
+  readonly hasMore?: boolean;
+  readonly totalReturned?: number;
+  readonly columns?: Readonly<Record<string, ColumnHead>>;
 }
 
 /**
@@ -223,6 +244,15 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
   });
   ensureFormatApplies(format, kind);
 
+  // Default `total_returned` to `data.length` for collections so
+  // commands don't have to repeat the count. Single-resource commands
+  // skip this because §6.3 ties `total_returned` to the collection
+  // shape.
+  const inferredTotal =
+    kind === 'collection' && Array.isArray(validated)
+      ? (validated as readonly unknown[]).length
+      : undefined;
+
   const envelope = buildSuccess(
     validated,
     buildMeta({
@@ -237,6 +267,14 @@ export const emitSuccess = <T>(options: EmitSuccessOptions<T>): void => {
       // selects the GraphQL field. Carry the resolved value when the
       // action provides one.
       complexity: options.complexity ?? null,
+      ...(options.nextCursor === undefined ? {} : { next_cursor: options.nextCursor }),
+      ...(options.hasMore === undefined ? {} : { has_more: options.hasMore }),
+      ...(options.totalReturned !== undefined
+        ? { total_returned: options.totalReturned }
+        : inferredTotal !== undefined
+          ? { total_returned: inferredTotal }
+          : {}),
+      ...(options.columns === undefined ? {} : { columns: options.columns }),
     }),
     warnings,
   );
