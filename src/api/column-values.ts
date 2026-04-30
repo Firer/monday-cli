@@ -88,6 +88,7 @@
  */
 
 import { ApiError, UsageError } from '../utils/errors.js';
+import type { JsonObject } from '../types/json.js';
 import {
   isWritableColumnType,
   type WritableColumnType,
@@ -130,7 +131,7 @@ export type ColumnValuePayload =
   | { readonly format: 'simple'; readonly value: string }
   | {
       readonly format: 'rich';
-      readonly value: Readonly<Record<string, unknown>>;
+      readonly value: JsonObject;
     };
 
 export interface TranslatedColumnValue {
@@ -329,16 +330,19 @@ export const translateColumnValueAsync = async (
     columnId: inputs.column.id,
     columnType: 'people',
     rawInput: inputs.value,
-    // PeoplePayload is structurally a Record<string, unknown> — it
-    // has one declared key (`personsAndTeams`) whose value is a
-    // plain JS array of plain objects. TypeScript treats closed
+    // PeoplePayload is structurally a JsonObject — it has one
+    // declared key (`personsAndTeams`) whose value is a readonly
+    // array of plain objects with `id: number` and `kind:
+    // 'person'` (both JsonValues). TypeScript treats closed
     // object types as not implicitly satisfying open index
-    // signatures, hence the cast. Runtime shape is unchanged;
-    // the wire-shape fixture in the unit suite is the load-bearing
-    // pin.
+    // signatures even when their values all line up, so the cast
+    // is structural-typing-only. Runtime shape is unchanged; the
+    // wire-shape fixture in the unit suite is the load-bearing
+    // pin. See `src/types/json.ts` for the JsonObject definition
+    // and the closed-type-literal note that documents this trade.
     payload: {
       format: 'rich',
-      value: parsed.payload as unknown as Readonly<Record<string, unknown>>,
+      value: parsed.payload as unknown as JsonObject,
     },
     resolvedFrom: null,
   };
@@ -362,7 +366,7 @@ const rich = (
   columnId: string,
   columnType: 'status' | 'dropdown',
   rawInput: string,
-  value: Readonly<Record<string, unknown>>,
+  value: JsonObject,
 ): TranslatedColumnValue => ({
   columnId,
   columnType,
@@ -403,7 +407,7 @@ const rich = (
 const translateStatus = (
   raw: string,
   columnId: string,
-): Readonly<Record<string, unknown>> => {
+): JsonObject => {
   if (NON_NEGATIVE_INTEGER.test(raw)) {
     const parsed = Number(raw);
     if (!Number.isSafeInteger(parsed)) {
@@ -442,7 +446,7 @@ const translateStatus = (
 const translateDropdown = (
   columnId: string,
   raw: string,
-): Readonly<Record<string, unknown>> => {
+): JsonObject => {
   const parts = raw
     .split(',')
     .map((segment) => segment.trim())
@@ -546,7 +550,7 @@ const NON_NEGATIVE_INTEGER = /^\d+$/u;
  */
 export type MultiColumnValue =
   | string
-  | Readonly<Record<string, unknown>>;
+  | JsonObject;
 
 /**
  * Discriminated union over the three v0.1 mutation paths that
@@ -584,7 +588,7 @@ export type SelectedMutation =
   | {
       readonly kind: 'change_column_value';
       readonly columnId: string;
-      readonly value: Readonly<Record<string, unknown>>;
+      readonly value: JsonObject;
     }
   | {
       readonly kind: 'change_multiple_column_values';
