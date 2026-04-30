@@ -26,12 +26,10 @@ import type { CommandModule } from '../commands/types.js';
  * reads in `cli/index.ts` with an injectable shape so tests exercise
  * the same envelope-conversion / exit-code / SIGINT plumbing the
  * published binary uses. The thin shebang in `cli/index.ts` forwards
- * the live process state into here.
- *
- * Owns the runtime core — argv → commander parse, signal combining,
- * request-id generation, error → envelope conversion. Commander
- * wiring lives in `program.ts`; envelope construction in
- * `envelope-out.ts` (M2.5 R2).
+ * the live process state into here. Owns the runtime core — argv →
+ * commander parse, signal combining, request-id generation, error →
+ * envelope conversion. Commander wiring lives in `program.ts`;
+ * envelope construction in `envelope-out.ts` (M2.5 R2).
  */
 export interface RunOptions {
   readonly argv: readonly string[];
@@ -100,12 +98,13 @@ export interface RunContext {
    */
   readonly signal: AbortSignal;
   /**
-   * Action-resolved meta for both the success and error paths.
-   * Network commands call `ctx.meta.setApiVersion(v)` /
-   * `ctx.meta.setSource('live')` once they've resolved the values
-   * the request will carry; an error envelope on the sad path then
-   * reports the same `api_version` / `source` a success envelope
-   * would. See `envelope-out.ts` for the rationale (M2.5 R2).
+   * Action-resolved meta for the **error** path only. Commands that
+   * commit values via `ctx.meta.setApiVersion(v)` / `setSource('live')`
+   * get them reported on the error envelope if the action throws.
+   * Success envelopes get the same values via `emitSuccess`'s options
+   * (the `...toEmit(result)` splat from `resolveClient`); both channels
+   * agree because `resolveClient` writes to both. Full rationale:
+   * `envelope-out.ts` (M2.5 R2).
    */
   readonly meta: MetaBuilder;
 }

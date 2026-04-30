@@ -2,10 +2,29 @@
  * Envelope emission helpers (M2.5 R2).
  *
  * Pulled out of `cli/run.ts` so the runner stays focused on argv
- * parsing, signal handling, and command registration. Both the error
- * path (`writeErrorEnvelope`, called by the runner's catch-all) and
- * the success path (emit.ts) read action-resolved meta from the same
- * `MetaBuilder` snapshot.
+ * parsing, signal handling, and command registration.
+ *
+ * **Two paths, two channels, one source of truth.** The success and
+ * error envelopes report the same `api_version` and `source`, but
+ * they get there through different channels:
+ *
+ *   - **Success path.** `emit.ts` builds the success envelope from
+ *     options the action passed through `emitSuccess({apiVersion,
+ *     source, complexity, cacheAgeSeconds, ...})` — usually via the
+ *     `...toEmit(result)` splat returned by `resolveClient` (M2.5 R3).
+ *   - **Error path.** `writeErrorEnvelope` (this file) builds the
+ *     error envelope from `MetaBuilder.snapshot()` after the action
+ *     has thrown. The action commits values via
+ *     `ctx.meta.setApiVersion(v)` / `ctx.meta.setSource('live')`
+ *     before the network call goes out, so a thrown `ApiError` on
+ *     HTTP 401 still produces an envelope with the right meta.
+ *
+ * The two paths agree because `resolveClient` writes the *same*
+ * `apiVersion` / `source` into both: the `MetaBuilder` (for error
+ * fallback) and the `toEmit` closure (for success). An M3 command
+ * that calls `resolveClient` gets both for free; an M3 command that
+ * builds its own client must commit to both channels manually if it
+ * wants the same guarantee.
  *
  * **Why a builder, not a setter callback.** The M2-era `setMetaHint`
  * pattern (commit `5e211bc`) worked but coupled the action body to a
@@ -17,14 +36,14 @@
  *     what the error path can carry — adding a new field means adding
  *     a new typed method + extending `MetaSnapshot`, not stuffing
  *     another optional key into a shared record;
- *   - both paths read from `builder.snapshot()`, so success-vs-error
- *     drift is impossible (M2 Codex review §2 — `--api-version 2026-04
- *     account whoami` claiming `api_version: "2026-01"` on HTTP 401 —
- *     was structurally caused by the two paths reading different
- *     state);
  *   - the public surface is closed (no `set(key, value)` escape
  *     hatch), so the only way to widen what the error envelope can
- *     report is to extend this module deliberately.
+ *     report is to extend this module deliberately;
+ *   - the M2 Codex review §2 incident — `--api-version 2026-04
+ *     account whoami` claiming `api_version: "2026-01"` on HTTP 401 —
+ *     was structurally caused by the two paths reading different
+ *     state. The builder is the error-side half of the fix; the
+ *     `toEmit` closure (R3) is the success-side half.
  *
  * Action sites stay terse: `ctx.meta.setApiVersion(v)` /
  * `ctx.meta.setSource('live')` is the same shape the M2 callback
