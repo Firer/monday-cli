@@ -60,7 +60,13 @@ const tryParse = (raw: string | null): unknown => {
   }
 };
 
-const exampleSetForColumn = (column: BoardColumn): string[] | null => {
+/**
+ * Exported for unit testing. Produces a per-column suggestion list
+ * the agent can copy-paste as `--set` flags. Returns `null` for
+ * non-writable column types so the M3 exit's "writable + non-writable
+ * round-trip" can be asserted.
+ */
+export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
   if (!WRITABLE_TYPES.has(column.type)) return null;
   switch (column.type) {
     case 'text':

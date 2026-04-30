@@ -175,6 +175,22 @@ describe('monday workspace list (integration)', () => {
     expect(out.requests).toBe(2);
   });
 
+  it('--kind and --state are threaded into variables', async () => {
+    const out = await drive(
+      ['workspace', 'list', '--kind', 'open', '--state', 'archived', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceList',
+            match_variables: { kind: 'open', state: 'archived' },
+            response: { data: { workspaces: [sampleWorkspace] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
   it('rejects --all and --page together as usage_error', async () => {
     const out = await drive(
       ['workspace', 'list', '--all', '--page', '2', '--json'],
@@ -288,5 +304,32 @@ describe('monday workspace folders (integration)', () => {
     expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--all walks until a short page', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleFolder,
+      id: String(1000 + i),
+    }));
+    const shortPage = [{ ...sampleFolder, id: '2000' }];
+    const out = await drive(
+      ['workspace', 'folders', '5', '--all', '--limit', '25', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceFolders',
+            match_variables: { page: 1 },
+            response: { data: { folders: fullPage } },
+          },
+          {
+            operation_name: 'WorkspaceFolders',
+            match_variables: { page: 2 },
+            response: { data: { folders: shortPage } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(2);
   });
 });

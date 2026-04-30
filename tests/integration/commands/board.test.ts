@@ -316,6 +316,48 @@ describe('monday board find', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('not_found');
   });
+
+  it('walks pages until it sees a short page (default cap = 5)', async () => {
+    // Page 1 returns exactly 100 boards (full page) → walker continues.
+    // Page 2 returns < 100 → walker stops.
+    const fullPage = Array.from({ length: 100 }, (_, i) =>
+      findFixture({ id: String(1000 + i), name: `Other ${String(i)}` }),
+    );
+    const shortPage = [findFixture({ id: '777', name: 'Tasks' })];
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--json'],
+      {
+        interactions: [
+          findInteraction(fullPage, 1),
+          findInteraction(shortPage, 2),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & { data: { id: string } };
+    expect(env.data.id).toBe('777');
+    expect(out.requests).toBe(2);
+  });
+
+  it('--limit-pages caps the walk', async () => {
+    // The walker stops after `--limit-pages` even if every page is full.
+    const fullPage = Array.from({ length: 100 }, (_, i) =>
+      findFixture({ id: String(2000 + i), name: `Z ${String(i)}` }),
+    );
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          findInteraction(fullPage, 1),
+          findInteraction(fullPage, 2),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+    expect(out.requests).toBe(2);
+  });
 });
 
 const metadataResponse = (

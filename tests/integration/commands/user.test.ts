@@ -126,6 +126,65 @@ describe('monday user list', () => {
     expect(env.data).toEqual([sampleUser]);
   });
 
+  it('--name / --email / --kind are threaded into variables', async () => {
+    const out = await drive(
+      ['user', 'list', '--name', 'Alice', '--email', 'alice@example.test', '--kind', 'guests', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UserList',
+            match_variables: {
+              name: 'Alice',
+              emails: ['alice@example.test'],
+              kind: 'guests',
+            },
+            response: { data: { users: [sampleUser] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('--all walks until short page', async () => {
+    const full = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleUser,
+      id: String(100 + i),
+      email: `u${String(i)}@x.test`,
+    }));
+    const short = [{ ...sampleUser, id: '200', email: 'last@x.test' }];
+    const out = await drive(
+      ['user', 'list', '--all', '--limit', '25', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UserList',
+            match_variables: { page: 1 },
+            response: { data: { users: full } },
+          },
+          {
+            operation_name: 'UserList',
+            match_variables: { page: 2 },
+            response: { data: { users: short } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.total_returned).toBe(26);
+  });
+
+  it('rejects --all + --page', async () => {
+    const out = await drive(
+      ['user', 'list', '--all', '--page', '2', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
   it('--api-version reaches error envelope on HTTP 401', async () => {
     const out = await drive(
       ['--api-version', '2026-04', 'user', 'list', '--json'],
