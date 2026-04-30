@@ -19,6 +19,7 @@ import {
   parseGlobalFlags,
   type GlobalFlags,
 } from '../types/global-flags.js';
+import { collectSecrets } from '../cli/envelope-out.js';
 import { UsageError } from '../utils/errors.js';
 
 /**
@@ -124,15 +125,6 @@ const ensureFormatApplies = (
       '--ndjson / --output ndjson is only supported for collection commands',
     );
   }
-};
-
-const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
-  const out: string[] = [];
-  const token = env.MONDAY_API_TOKEN;
-  if (token !== undefined && token.length > 0) {
-    out.push(token);
-  }
-  return out;
 };
 
 const renderForFormat = <T>(

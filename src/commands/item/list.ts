@@ -69,6 +69,7 @@ import { redact } from '../../utils/redact.js';
 import {
   parseGlobalFlags,
 } from '../../types/global-flags.js';
+import { collectSecrets } from '../../cli/envelope-out.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
 const ITEMS_PAGE_QUERY = `
@@ -277,13 +278,6 @@ const startNdjsonStream = (inputs: StreamNdjsonInputs): StreamHandle => {
       stream.write(`${JSON.stringify(trailer)}\n`);
     },
   };
-};
-
-const collectSecrets = (env: NodeJS.ProcessEnv): readonly string[] => {
-  const out: string[] = [];
-  const token = env.MONDAY_API_TOKEN;
-  if (token !== undefined && token.length > 0) out.push(token);
-  return out;
 };
 
 export const itemListCommand: CommandModule<
