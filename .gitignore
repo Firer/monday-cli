@@ -34,3 +34,7 @@ npm-debug.log*
 
 # Working files from collaborator reviews (codex/gemini/claude review outputs)
 .review-*.md
+
+# Per-session handover artifacts — preserved for the next agent run,
+# not committed.
+.session-handover/
