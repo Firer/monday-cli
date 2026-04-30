@@ -19,9 +19,15 @@
  *      negatives after a column was added.
  *
  * **`title:` / `id:` prefix syntax** (§5.3 step 3) — explicit override
- * for the rare ID-vs-title collision case. The CLI returns the
- * matched column with no warning; the caller is asserting which
- * disambiguation they want.
+ * for the rare ID-vs-title collision case. The prefix forces the
+ * resolution channel deterministically (`title:` always picks the
+ * title path; `id:` always picks the ID path). The `id:` form still
+ * surfaces a `column_token_collision` warning when the value happens
+ * to match another column's title — informational, not blocking, so
+ * agents auditing data shape on a long-lived board can see the
+ * overlap without rerunning the lookup. Suppressing the warning
+ * here would silently mask a real collision the agent might want
+ * to know about.
  *
  * **`--include-archived`** (§5.3 step 6) — archived columns are not
  * resolvable by default. The resolver filters them out unless the
@@ -410,7 +416,13 @@ export const resolveColumnWithRefresh = async (
       match,
       metadata: refreshed.metadata,
       source: 'mixed',
-      cacheAgeSeconds: null,
+      // Carry the *original* cache age forward — agents reading
+      // `meta.cache_age_seconds` on a `mixed` result want to know how
+      // stale the cache was when the resolver had to refresh, not a
+      // null. Codex M3 pass-2 §1 caught this; without it, a `mixed`
+      // envelope claimed `cache_age_seconds: null` even though the
+      // first leg WAS a cache hit.
+      cacheAgeSeconds: first.cacheAgeSeconds,
       warnings,
     };
   }

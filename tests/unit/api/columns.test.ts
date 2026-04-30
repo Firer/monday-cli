@@ -373,6 +373,11 @@ describe('resolveColumnWithRefresh — auto-refresh once on column_not_found', (
     expect(result.warnings.map((w) => w.code)).toContain(
       'stale_cache_refreshed',
     );
+    // Codex M3 pass-2 §1: the mixed result preserves the *original*
+    // cache age — that's the age the misleading payload had at the
+    // moment the cache returned it. Null would erase the audit trail.
+    expect(result.cacheAgeSeconds).not.toBeNull();
+    expect(result.cacheAgeSeconds).toBeGreaterThanOrEqual(0);
   });
 
   it('cache-hit path reports source=cache and surfaces collisions', async () => {
