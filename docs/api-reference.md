@@ -61,14 +61,64 @@ Each column type has its own JSON shape. Common ones:
 | `text` | `"some text"` |
 | `long_text` | `{"text": "..."}` |
 | `status` | `{"label": "Done"}` or `{"index": 1}` |
-| `person` | `{"personsAndTeams": [{"id": 12345, "kind": "person"}]}` |
+| `people` | `{"personsAndTeams": [{"id": 12345, "kind": "person"}]}` |
 | `date` | `{"date": "2026-04-29", "time": "14:30:00"}` |
 | `dropdown` | `{"labels": ["Backend", "Frontend"]}` |
 | `link` | `{"url": "...", "text": "..."}` |
 | `numbers` | `"42"` |
 
+> The `person` column type is deprecated in Monday's schema — use
+> `people` (plural) for both single-assignee and multi-assignee
+> values. SDK 14.0.0 still types both, but new boards always
+> create the `people` form.
+
 Use `change_simple_column_value` for the simple text/number case to skip
 the JSON-string layer.
+
+## Column resolution (the CLI's `<col>` token)
+
+The CLI accepts a column ID *or* a column title in `--set`,
+`--where`, and `--columns` flags. Resolution rules are normative —
+agents key off them. The full implementation is in
+`src/api/columns.ts`; the canonical contract is `cli-design.md` §5.3.
+
+Order of resolution:
+
+1. **Exact ID match** — Monday IDs are stable lowercase snake_case
+   strings (`status_4`, `date_1`). Case-sensitive.
+2. **NFC-normalised exact title match** — titles are NFC-normalised,
+   trimmed, internal whitespace collapsed to single spaces. So
+   `Café` (composed) and `Café` (decomposed) resolve identically;
+   `Plan A` and `Plan   A` (multiple spaces) match the same target.
+3. **NFC + case-fold fallback** — locale-independent
+   (`toLocaleLowerCase('und')`). Picks up `STATUS` matching `Status`
+   when no NFC-exact match exists.
+4. **Multi-match** at any level → `ambiguous_column` with
+   `details.candidates`.
+5. **No match** → `column_not_found`. Read-paths that hit a missing
+   column on a cache hit auto-refresh the metadata once before
+   surfacing.
+
+**Explicit prefix syntax:** `id:status_4` forces the ID path,
+`title:Status` forces the title path. Useful when an ID and a title
+collide. The `id:` form still emits a `column_token_collision`
+warning when the value also matches a different column's title —
+informational so agents auditing data shape see the overlap.
+
+**Archived columns** are filtered out by default; they surface as
+`column_not_found` for read paths. Pass `--include-archived` on read
+commands to see them. Mutations against an archived column return
+`column_archived` regardless.
+
+## Board describe (the introspection seam)
+
+`monday board describe <bid>` is the single richest read in v0.1 —
+columns + groups + `hierarchy_type` + `is_leaf` + per-column
+`example_set` of suggested `--set` invocations for every writable
+column type. Agents that have run `board describe` once can
+construct a mutation against any M5b-writable column without
+consulting Monday's docs. Ships live for v0.1 reads; M5b mutations
+read it through the cached `loadBoardMetadata` helper.
 
 ## Monday Dev specifics
 

@@ -17,18 +17,38 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**Design complete; v0.1 implementation in progress.** Repo has
-toolchain, lint/typecheck/test wiring, a directory skeleton, and one
-working module (`src/config/load.ts`). Two binding documents:
+**v0.1 implementation in progress; M0–M3 shipped.** The CLI has a
+working network surface across 4 nouns (account / workspace / board /
+user / update reads), local-only commands (cache / config / schema),
+and the foundations every later milestone depends on (typed errors,
+universal envelope, redaction, retry/abort, fixture transport).
+Two binding documents:
 
 - **[`docs/cli-design.md`](./docs/cli-design.md)** (~1,700 lines) —
   the canonical CLI contract: command surface, output envelope,
   error codes (26 stable), deferral list, every single design
   decision. Two AI-collaborator review passes; internally consistent.
-- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,000 lines) —
-  the implementation plan for v0.1: nine sequenced milestones
-  (M0–M7 with M5 split), per-milestone deliverables, testing-pyramid
-  commitments, risk register, exit checklist. One Codex review pass.
+- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,450 lines) —
+  the implementation plan for v0.1: ten sequenced milestones
+  (M0–M7 with M5 split + M2.5 refactor pass inserted post-M2),
+  per-milestone deliverables, testing-pyramid commitments, risk
+  register, exit checklist, and per-milestone post-mortems
+  (§11 M0, §12 M2, §13 M2.5, §14 M3 — what Codex review caught
+  after each cluster shipped).
+
+**Milestones:**
+
+| ID | Status | Surface |
+|----|--------|---------|
+| M0 | shipped | runner + `errors.ts` + `redact.ts` + signal handling + envelope builders |
+| M1 | shipped | `config show/path`, `cache list/clear/stats`, `schema`; CommandModule registry |
+| M2 | shipped | `Transport` + `MondayClient` + retry; `account whoami/info/version/complexity` |
+| M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
+| M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
+| M4 | next | `item` reads + `--where` filter DSL + cursor-based pagination |
+| M5a / M5b | future | column-value writers + dry-run; `item set/clear/update`, `update create` |
+| M6 | future | `board doctor`, `raw`, agent-flow E2E |
+| M7 | future | release prep |
 
 > **If you're implementing anything in this repo, read
 > `docs/cli-design.md` for the contract and `docs/v0.1-plan.md` for
@@ -171,8 +191,15 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   v0.1 allowlist: `status`, `text`, `long_text`, `numbers`, `dropdown`,
   `date`, `people`. Other types return `unsupported_column_type` with a
   `--set-raw` example. The CLI resolves `<col>` as ID > NFC-normalised
-  exact title > `ambiguous_column`. `me` is a recognised token for
-  people columns.
+  exact title > NFC + case-fold > `ambiguous_column`. `me` is a
+  recognised token for people columns. **Read-side resolver lives at
+  `src/api/columns.ts`** (M3) and is the seam M5a's value translator
+  reuses; archived columns surface as `column_not_found` for read
+  paths. Cache-aware lookups via `resolveColumnWithRefresh` auto-
+  refresh once on `column_not_found` after a cache hit per §5.3
+  step 5; the refresh-then-resolve case sets `meta.source: "mixed"`
+  with a `stale_cache_refreshed` warning. ID/title collisions on the
+  ID-match path emit a `column_token_collision` warning (§5.3 step 3).
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
   misleading "restore" command — see §5.4 for what a future explicit
@@ -184,7 +211,15 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `stale_cursor` rather than silently re-issuing — silent re-issue can
   duplicate or skip rows. There's no safe deterministic resume in v0.1;
   callers restart with idempotent operations or a known-stable filter.
-  (§5.6)
+  (§5.6) M3 commands are page-based (Monday's `workspaces` / `boards`
+  / `users` / `updates` use `limit` + `page`, not cursors). Cursor
+  pagination lands in M4 (`item list` via `items_page` →
+  `next_items_page`). Page-based `--all` walks cap at
+  `--limit-pages` (default 50, max 500); a cap-hit on a still-full
+  page emits a `pagination_cap_reached` warning so agents can widen
+  the cap or narrow the query. **Spec gap (logged in v0.1-plan §3
+  M3 for backfill):** `--limit-pages` and `pagination_cap_reached`
+  aren't in cli-design.md yet; both are additive / non-breaking.
 - **v0.1 is read-heavy:** account info, board list/get/find/describe/
   doctor, item list/get/find/search/set/clear/update (single mutation —
   no create/delete/move/archive yet), update list/get/create, schema,
@@ -192,6 +227,21 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   arrive in v0.3. Watch and concurrency are v0.4. **See §13 of
   cli-design.md for the full phase markers — every command in §4.3
   also carries its phase.**
+- **`board describe` ships `example_set` per writable column** (M3
+  exit criteria). Agents reading one `board describe` payload can
+  construct `--set <token>=<value>` calls for every M5b-writable
+  column on the board without consulting external Monday docs. Lives
+  at `src/commands/board/describe.ts`.
+- **Cross-noun resolver patterns (M3 share-out).** `findOne(scope,
+  query)` in `src/api/resolvers.ts` powers every `find` verb (M3:
+  boards; M4 will add items) with identical NFC + case-fold + `--first`
+  semantics. `userByEmail` in the same module owns the directory-cache
+  + `users(emails:)` fallback that M5a's `--set Owner=<email>` value
+  translator will reuse.
+- **Page-walking helper.** Every page-based list command goes through
+  `walkPages` in `src/api/walk-pages.ts` — single source of truth for
+  `--all` semantics, the `--limit-pages` cap, and the
+  `pagination_cap_reached` warning.
 
 ## Workflow Rules
 
