@@ -46,7 +46,7 @@
  * design doesn't say either way; logged as a spec gap.
  */
 
-import { UsageError } from '../utils/errors.js';
+import { ApiError, UsageError } from '../utils/errors.js';
 
 /**
  * Wire payload shape for a `people` column. Matches Monday's
@@ -200,17 +200,55 @@ const NON_NEGATIVE_INTEGER = /^\d+$/u;
 
 /**
  * Converts a string user ID (Monday's directory shape) to a
- * number for the `personsAndTeams[].id` wire field. Throws
- * `usage_error` if the ID exceeds `Number.MAX_SAFE_INTEGER`
- * (2^53 - 1) — defensive guard against a future Monday user-ID
- * range expansion that would silently round through `Number()`
- * and corrupt the wire payload. Same template the status /
- * dropdown safe-integer guards use.
+ * number for the `personsAndTeams[].id` wire field. Two layers
+ * of validation, both required:
+ *
+ *   1. **Decimal-shape regex** (`DECIMAL_NON_NEGATIVE`). `Number()`
+ *      alone accepts hex (`"0x2a"` → 42), scientific notation
+ *      (`"1e3"` → 1000), empty strings (`""` → 0), and signed
+ *      forms (`"-1"` → -1) — none of which are valid Monday user
+ *      IDs but all of which would silently land at Monday as the
+ *      wrong number. Codex review pass-1 finding: caller's
+ *      `userByEmail` validates only `z.string().min(1)`, so the
+ *      translator must defend its own boundary. Throws
+ *      `internal_error` (data corruption from the resolver, not
+ *      user-input fault).
+ *   2. **Safe-integer guard.** Defensive against a future Monday
+ *      user-ID range expansion that would silently round through
+ *      `Number()` and corrupt the wire payload. Throws
+ *      `usage_error` (consistent with the status / dropdown
+ *      safe-integer guards — agent-actionable).
  *
  * `token` is included in error details so the agent's debug log
  * shows which email/me-token resolved to the unsafe ID.
  */
 const idStringToNumber = (id: string, columnId: string, token: string): number => {
+  if (!DECIMAL_NON_NEGATIVE.test(id)) {
+    // Resolver returned something that isn't a decimal non-negative
+    // integer string. This is a data-integrity problem with the
+    // directory, not a user-input fault — surface as internal_error
+    // with enough context for an agent to file a bug, but don't
+    // pretend the user can fix it by editing their --set value.
+    throw new ApiError(
+      'internal_error',
+      `People column "${columnId}" resolved token "${token}" to a ` +
+        `non-decimal user ID ${JSON.stringify(id)}. Monday's user IDs ` +
+        `are decimal non-negative integers; the resolver returned an ` +
+        `unexpected shape.`,
+      {
+        details: {
+          column_id: columnId,
+          column_type: 'people',
+          token,
+          resolved_id: id,
+          hint:
+            'this is a data-integrity error in the user directory or ' +
+            'the resolver wiring; verify the directory cache and the ' +
+            'shape of the response from `users(emails:)`.',
+        },
+      },
+    );
+  }
   const parsed = Number(id);
   if (!Number.isSafeInteger(parsed)) {
     throw new UsageError(
@@ -232,6 +270,22 @@ const idStringToNumber = (id: string, columnId: string, token: string): number =
   }
   return parsed;
 };
+
+/**
+ * Decimal non-negative integer string: matches `0`, `42`,
+ * `1234567`. Rejects `"-1"` (signed), `"0x2a"` (hex), `"1e3"`
+ * (scientific), `""` (empty), `"01"` (leading zeros — defensible
+ * to allow but Monday's IDs don't have them, so the strict shape
+ * catches data corruption sooner). Used by `idStringToNumber` as
+ * the resolver-output validator.
+ *
+ * Note this is intentionally stricter than `NON_NEGATIVE_INTEGER`
+ * (which accepts `"00042"`) — the input-side regex is forgiving
+ * because users type sloppy numbers; the resolver-side regex is
+ * strict because the directory should never return `"00042"` for
+ * a real user.
+ */
+const DECIMAL_NON_NEGATIVE = /^(0|[1-9]\d*)$/u;
 
 /**
  * Builds the `usage_error` for empty input — no emails, no `me`,

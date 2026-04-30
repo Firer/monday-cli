@@ -124,8 +124,10 @@ export type {
  *   - `rich`   — plain-object payload accepted by
  *     `change_column_value` and the per-column entry in
  *     `change_multiple_column_values`. Used by `status`,
- *     `dropdown`, and `date` today; `people` ships in a
- *     follow-up session but the typed slot already exists.
+ *     `dropdown`, `date`, and `people`. The slot type is
+ *     `JsonObject` (R-JsonValue refactor) so non-JSON values
+ *     (`undefined`, symbols, functions) can't sneak past the
+ *     type system into the wire payload.
  */
 export type ColumnValuePayload =
   | { readonly format: 'simple'; readonly value: string }
@@ -566,8 +568,7 @@ export type MultiColumnValue =
  *     is the plain-object payload Monday's
  *     `change_column_value(value: JSON!)` mutation accepts —
  *     the SDK / fetch layer JSON-stringifies at the wire boundary.
- *     `status` / `dropdown` (today); `date` / `people` will join
- *     in follow-up sessions.
+ *     Used by `status` / `dropdown` / `date` / `people`.
  *   - `change_multiple_column_values` — N (any combo). The
  *     `columnValues` map carries one entry per column; per-column
  *     value is `string | object` per `MultiColumnValue` above.

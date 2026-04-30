@@ -63,7 +63,7 @@ describe('parsePeopleInput — single token', () => {
     });
   });
 
-  it.each(['ME', 'Me', 'mE', 'mE'])(
+  it.each(['ME', 'Me', 'mE'])(
     'me token is case-insensitive (%s)',
     async (token) => {
       const out = await parsePeopleInput(token, 'owner', {
@@ -440,6 +440,77 @@ describe('parsePeopleInput — safe-integer guard on resolved IDs', () => {
         resolveEmail: () => Promise.reject(new Error('should not be called')),
       }),
     ).rejects.toThrow(/exceeds JavaScript's safe-integer range/u);
+  });
+});
+
+describe('parsePeopleInput — defensive resolver-side ID validation', () => {
+  // Codex review pass-1 finding F2. `Number()` alone accepts hex
+  // ("0x2a" → 42), scientific notation ("1e3" → 1000), empty
+  // strings ("" → 0), and signed forms ("-1" → -1) — none of
+  // which are valid Monday user IDs but all of which would
+  // silently land at Monday as the wrong number. The translator
+  // defends its own boundary because `userByEmail`'s schema is
+  // loose (z.string().min(1)). Pin per malformed shape so a
+  // future refactor that drops the regex check fires.
+
+  it.each([
+    ['hex-prefixed', '0x2a'],
+    ['scientific notation', '1e3'],
+    ['signed negative', '-1'],
+    ['signed positive', '+1'],
+    ['decimal', '1.5'],
+    ['leading zeros', '00042'],
+    ['empty string', ''],
+    ['whitespace only', '  '],
+    ['trailing whitespace', '42 '],
+    ['internal whitespace', '4 2'],
+    ['letter-mixed', '42abc'],
+  ])('rejects malformed resolved ID (%s: %j) → internal_error', async (_label, malformedId) => {
+    await expect(
+      parsePeopleInput('alice@example.com', 'owner', ctx({
+        resolveEmail: () => Promise.resolve(malformedId),
+      })),
+    ).rejects.toThrow(ApiError);
+    try {
+      await parsePeopleInput('alice@example.com', 'owner', ctx({
+        resolveEmail: () => Promise.resolve(malformedId),
+      }));
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/non-decimal user ID/u);
+      expect(err.details).toMatchObject({
+        column_id: 'owner',
+        column_type: 'people',
+        token: 'alice@example.com',
+        resolved_id: malformedId,
+      });
+    }
+  });
+
+  it('rejects malformed me-resolved ID with the same shape', async () => {
+    // Same template; the me path goes through the same idStringToNumber
+    // helper. Pin so a future refactor that splits the validation
+    // between paths surfaces.
+    await expect(
+      parsePeopleInput('me', 'owner', {
+        resolveMe: () => Promise.resolve('1e3'),
+        resolveEmail: () => Promise.reject(new Error('should not be called')),
+      }),
+    ).rejects.toThrow(/non-decimal user ID/u);
+  });
+
+  it('accepts valid decimal IDs (0, 1, 42, MAX_SAFE_INTEGER)', async () => {
+    // Pin both sides of the boundary: the strict regex still
+    // accepts the legitimate cases. "0" is a valid Monday user
+    // ID for the system-user slot (rare but real); pin so a
+    // future "non-zero only" refactor surfaces.
+    for (const id of ['0', '1', '42', String(Number.MAX_SAFE_INTEGER)]) {
+      const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
+        resolveEmail: () => Promise.resolve(id),
+      }));
+      expect(out.payload.personsAndTeams[0]?.id).toBe(Number(id));
+    }
   });
 });
 

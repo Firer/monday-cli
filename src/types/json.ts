@@ -28,10 +28,20 @@
  */
 
 /**
- * The full `JSON` scalar value type. Mirrors RFC 8259 except for
- * the no-`undefined` rule (`JSON.stringify({x: undefined})` drops
- * the key, which is silent payload corruption — the type system
- * catches it instead).
+ * The full `JSON` scalar value type. Models the JSON grammar
+ * RFC 8259 prescribes — string / number / boolean / null /
+ * arrays / objects — minus `undefined` (`JSON.stringify({x:
+ * undefined})` drops the key, which is silent payload
+ * corruption — the type system catches it instead).
+ *
+ * **What this does NOT prevent.** TypeScript's `number` type
+ * includes `NaN` and `±Infinity`, both of which `JSON.stringify`
+ * silently maps to `null`. JsonValue can't exclude them
+ * structurally; callers that build payloads from arithmetic
+ * results should validate at the boundary. Codex pass-1 nit on
+ * the R-JsonValue refactor; documented here so a future
+ * contributor doesn't assume "JsonValue = JSON.stringify-safe"
+ * unconditionally.
  */
 export type JsonValue =
   | string

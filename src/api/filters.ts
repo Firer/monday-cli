@@ -399,8 +399,14 @@ const resolveCompareValue = async (
   // pass through verbatim so a stray `me` against a text column
   // surfaces as Monday's validation_failed rather than a silent
   // identity swap.
+  //
+  // Case-insensitive matching mirrors the people *write* surface
+  // (`api/people.ts`'s `parsePeopleInput`) so an agent's
+  // `--where Owner=ME` resolves the same as `--set Owner=ME` —
+  // one `me` rule across read filters and `--set` writes per
+  // cli-design §5.3 step 3 line 704-707. Codex pass-1 finding.
   const meTokens = ['me'];
-  if (column.type === 'people' && meTokens.includes(rawValue.trim())) {
+  if (column.type === 'people' && meTokens.includes(rawValue.trim().toLowerCase())) {
     const id = await resolveMe();
     return wrapForOperator([id], operator);
   }

@@ -231,6 +231,24 @@ describe('buildFilterRules', () => {
     expect(out.queryParams?.rules).toHaveLength(2);
   });
 
+  it.each(['ME', 'Me', 'mE'])(
+    'resolves case-insensitive `me` (%s) against a people column',
+    async (token) => {
+      // Codex review pass-1 finding: filter / write surfaces had
+      // diverged me-casing (`api/people.ts` was case-insensitive
+      // but `api/filters.ts` was case-sensitive). Pin parity here
+      // so an agent's `--where Owner=ME` resolves the same way
+      // as `--set Owner=ME`. Same one-rule contract per
+      // cli-design §5.3 step 3 line 704-707.
+      const out = await buildFilterRules({
+        metadata: meta,
+        resolveMe: () => Promise.resolve('user-99'),
+        clauses: [parseWhereSyntax(`Owner=${token}`)],
+      });
+      expect(out.queryParams?.rules[0]?.compare_value).toEqual(['user-99']);
+    },
+  );
+
   it('does NOT apply `me` sugar to non-people columns', async () => {
     const out = await buildFilterRules({
       metadata: meta,
