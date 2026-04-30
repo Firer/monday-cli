@@ -3,6 +3,7 @@ import {
   parseColumnTokenPrefix,
   resolveColumn,
   resolveColumnWithRefresh,
+  resolveColumnsAcrossClauses,
 } from '../../../src/api/columns.js';
 import type { BoardColumn, BoardMetadata } from '../../../src/api/board-metadata.js';
 import { ApiError } from '../../../src/utils/errors.js';
@@ -448,5 +449,110 @@ describe('resolveColumnWithRefresh — auto-refresh once on column_not_found', (
       }),
     ).rejects.toMatchObject({ code: 'ambiguous_column' });
     expect(stats.calls).toBe(1);
+  });
+});
+
+describe('resolveColumnsAcrossClauses (R12 lift)', () => {
+  it('resolves all tokens in input order; refreshed=false; no warnings on clean hits', async () => {
+    const meta = board([
+      col({ id: 'status_4', title: 'Status' }),
+      col({ id: 'date4', title: 'Due date', type: 'date' }),
+    ]);
+    const result = await resolveColumnsAcrossClauses({
+      metadata: meta,
+      tokens: ['status_4', 'Due date'],
+    });
+    expect(result.matches).toHaveLength(2);
+    expect(result.matches[0]?.column.id).toBe('status_4');
+    expect(result.matches[1]?.column.id).toBe('date4');
+    expect(result.refreshed).toBe(false);
+    expect(result.warnings).toHaveLength(0);
+    expect(result.metadata).toBe(meta); // identity-equal — no refresh
+  });
+
+  it('fires onColumnNotFound exactly once on the first miss; subsequent misses bubble', async () => {
+    const before = board([col({ id: 'status_4', title: 'Status' })]);
+    const after = board([
+      col({ id: 'status_4', title: 'Status' }),
+      col({ id: 'newcol', title: 'NewCol' }),
+    ]);
+    let refreshCalls = 0;
+    const onColumnNotFound = async (): Promise<typeof after> => {
+      refreshCalls++;
+      return after;
+    };
+    const result = await resolveColumnsAcrossClauses({
+      metadata: before,
+      tokens: ['status_4', 'NewCol'],
+      onColumnNotFound,
+    });
+    expect(refreshCalls).toBe(1);
+    expect(result.matches[1]?.column.id).toBe('newcol');
+    expect(result.refreshed).toBe(true);
+    expect(result.warnings.some((w) => w.code === 'stale_cache_refreshed')).toBe(
+      true,
+    );
+    expect(result.metadata).toBe(after); // identity-equal post-refresh
+  });
+
+  it('second column_not_found after refresh bubbles unwrapped', async () => {
+    const before = board([col({ id: 'status_4', title: 'Status' })]);
+    const after = board([col({ id: 'status_4', title: 'Status' })]);
+    let refreshCalls = 0;
+    const onColumnNotFound = async (): Promise<typeof after> => {
+      refreshCalls++;
+      return after;
+    };
+    await expect(
+      resolveColumnsAcrossClauses({
+        metadata: before,
+        tokens: ['NewCol', 'AlsoNew'],
+        onColumnNotFound,
+      }),
+    ).rejects.toMatchObject({ code: 'column_not_found' });
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('ambiguous_column bubbles immediately — refresh would not help', async () => {
+    const meta = board([
+      col({ id: 'col_a', title: 'Owner' }),
+      col({ id: 'col_b', title: 'Owner' }),
+    ]);
+    let refreshCalls = 0;
+    await expect(
+      resolveColumnsAcrossClauses({
+        metadata: meta,
+        tokens: ['Owner'],
+        onColumnNotFound: async () => {
+          refreshCalls++;
+          return meta;
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'ambiguous_column' });
+    expect(refreshCalls).toBe(0);
+  });
+
+  it('column_not_found bubbles when no refresh callback was passed', async () => {
+    const meta = board([col({ id: 'status_4', title: 'Status' })]);
+    await expect(
+      resolveColumnsAcrossClauses({
+        metadata: meta,
+        tokens: ['NotPresent'],
+      }),
+    ).rejects.toMatchObject({ code: 'column_not_found' });
+  });
+
+  it('folds collision warnings per match (id-vs-title overlap)', async () => {
+    const meta = board([
+      col({ id: 'status', title: 'Original', type: 'text' }),
+      col({ id: 'col_b', title: 'Status', type: 'status' }),
+    ]);
+    const result = await resolveColumnsAcrossClauses({
+      metadata: meta,
+      tokens: ['status'],
+    });
+    expect(result.matches[0]?.column.id).toBe('status');
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.code).toBe('column_token_collision');
   });
 });

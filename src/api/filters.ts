@@ -56,7 +56,7 @@
 
 import { z } from 'zod';
 import { ApiError, UsageError } from '../utils/errors.js';
-import { resolveColumn, type ColumnMatch } from './columns.js';
+import { resolveColumnsAcrossClauses } from './columns.js';
 import { isMeToken } from './me-token.js';
 import type { BoardColumn, BoardMetadata } from './board-metadata.js';
 import type { Warning } from '../utils/output/envelope.js';
@@ -282,75 +282,50 @@ export const buildFilterRules = async (
     return { queryParams: undefined, warnings: [], refreshed: false };
   }
 
-  const warnings: Warning[] = [];
-  const rules: FilterRule[] = [];
   let cachedMe: string | undefined;
   const me = async (): Promise<string> => {
     cachedMe ??= await inputs.resolveMe();
     return cachedMe;
   };
 
-  let metadata = inputs.metadata;
-  let refreshed = false;
+  // R12 lift: cache-miss-refresh + collision-warning collection are
+  // shared with `commands/item/search.ts buildColumnQueries`. The
+  // helper resolves every clause's column token; per-clause value
+  // resolution (`me` for people, etc.) stays here.
+  const resolved = await resolveColumnsAcrossClauses({
+    metadata: inputs.metadata,
+    tokens: inputs.clauses.map((c) => c.token),
+    ...(inputs.onColumnNotFound === undefined
+      ? {}
+      : { onColumnNotFound: inputs.onColumnNotFound }),
+  });
 
-  for (const clause of inputs.clauses) {
-    let match: ColumnMatch;
-    try {
-      match = resolveColumn(metadata, clause.token);
-    } catch (err) {
-      // Cache-miss-refresh per §5.3 step 5: if the resolution fails
-      // with column_not_found AND the caller supplied a refresh
-      // callback AND we haven't already refreshed, fire the refresh
-      // once and retry. Other resolution errors (ambiguous_column)
-      // bubble — refreshing wouldn't change them.
-      const isMissing =
-        err instanceof ApiError && err.code === 'column_not_found';
-      if (
-        !isMissing ||
-        inputs.onColumnNotFound === undefined ||
-        refreshed
-      ) {
-        throw err;
-      }
-      metadata = await inputs.onColumnNotFound();
-      refreshed = true;
-      warnings.push({
-        code: 'stale_cache_refreshed',
-        message:
-          'Cache miss for filter token; refreshed board metadata to resolve.',
-        details: { token: clause.token, board_id: metadata.id },
-      });
-      match = resolveColumn(metadata, clause.token);
+  const rules: FilterRule[] = [];
+  for (let i = 0; i < inputs.clauses.length; i++) {
+    const clause = inputs.clauses[i];
+    const match = resolved.matches[i];
+    /* c8 ignore next 6 — defensive: matches.length === clauses.length
+       by helper contract; the index guard exists for
+       noUncheckedIndexedAccess narrowing only. */
+    if (clause === undefined || match === undefined) {
+      throw new ApiError(
+        'internal_error',
+        `buildFilterRules: lost clause/match alignment at index ${String(i)}`,
+      );
     }
-    foldCollisionWarning(match, warnings);
-
     const rule = await buildRuleForClause(clause, match.column, me);
     rules.push(rule);
   }
 
+  // ResolverWarning is structurally compatible with envelope.Warning
+  // (narrower `code` literal, required `details`), so the assignment
+  // widens cleanly without a cast. Same shape `commands/item/search.ts`
+  // uses post-R12 for the same reason.
   return {
     queryParams: { rules },
-    warnings,
-    refreshed,
+    warnings: resolved.warnings,
+    refreshed: resolved.refreshed,
   };
-};
-
-const foldCollisionWarning = (
-  match: ColumnMatch,
-  warnings: Warning[],
-): void => {
-  if (match.collisionCandidates.length === 0) return;
-  warnings.push({
-    code: 'column_token_collision',
-    message:
-      `Filter token matched column id "${match.column.id}" and ` +
-      `${String(match.collisionCandidates.length)} title(s); the ID match wins.`,
-    details: {
-      via: match.via,
-      resolved_id: match.column.id,
-      candidates: match.collisionCandidates,
-    },
-  });
 };
 
 const buildRuleForClause = async (

@@ -431,3 +431,103 @@ export const resolveColumnWithRefresh = async (
     };
   }
 };
+
+export interface ResolveColumnsAcrossClausesInputs {
+  /** Pre-loaded board metadata — caller already fetched it. */
+  readonly metadata: BoardMetadata;
+  /** Tokens to resolve, one per output `match`. Order is preserved. */
+  readonly tokens: readonly string[];
+  /**
+   * Cache-miss refresh callback. When provided, the FIRST
+   * `column_not_found` triggers exactly one refresh; subsequent
+   * misses bubble. Passed `undefined` when `inputs.metadata` was
+   * already a live fetch (refresh wouldn't help).
+   */
+  readonly onColumnNotFound?: () => Promise<BoardMetadata>;
+  /** Per-clause resolution scope. Defaults to false. */
+  readonly includeArchived?: boolean;
+}
+
+export interface ResolveColumnsAcrossClausesResult {
+  /** One match per input token, same index. */
+  readonly matches: readonly ColumnMatch[];
+  /** Possibly refreshed metadata; identity-equal to inputs.metadata when no refresh fired. */
+  readonly metadata: BoardMetadata;
+  /** True when the refresh callback fired during resolution. */
+  readonly refreshed: boolean;
+  /** Resolver-emitted warnings (`column_token_collision`, `stale_cache_refreshed`). */
+  readonly warnings: readonly ResolverWarning[];
+}
+
+/**
+ * Resolves a batch of column tokens against pre-loaded board
+ * metadata, with the same cache-miss-refresh-once semantics
+ * `resolveColumnWithRefresh` applies per token (R12 lift).
+ *
+ * **Why a batched helper.** Two M4 callers (`api/filters.ts
+ * buildFilterRules` and `commands/item/search.ts buildColumnQueries`)
+ * spelled the same try/catch loop verbatim — `try resolveColumn /
+ * catch column_not_found / call onColumnNotFound once / re-resolve /
+ * push stale_cache_refreshed warning`. They differed only in what
+ * each clause projected to (FilterRule vs ColumnQuery). M5b's bulk
+ * `item update --where` will need the same shape a third time;
+ * lifting now keeps the cache-miss-refresh contract a single source
+ * of truth and lets each caller stay focused on its per-clause
+ * projection.
+ *
+ * **Scope.** Resolution-only — no per-clause projection or value
+ * resolution (e.g. `me` token resolution belongs to the caller).
+ * The helper threads collision warnings + the single
+ * `stale_cache_refreshed` warning that fires when the refresh path
+ * triggers.
+ *
+ * **Why not the dry-run engine.** The dry-run engine's per-token
+ * loop calls the singular `resolveColumnWithRefresh`, which loads
+ * metadata internally (one cache hit per token rather than one
+ * shared metadata view). Different shape, different concern; lifting
+ * it onto the batched helper would change semantics. Tracked as a
+ * conscious design split — see the v0.1-plan §17 R12 entry.
+ */
+export const resolveColumnsAcrossClauses = async (
+  inputs: ResolveColumnsAcrossClausesInputs,
+): Promise<ResolveColumnsAcrossClausesResult> => {
+  const includeArchived = inputs.includeArchived ?? false;
+  const matches: ColumnMatch[] = [];
+  const warnings: ResolverWarning[] = [];
+  let metadata = inputs.metadata;
+  let refreshed = false;
+
+  for (const token of inputs.tokens) {
+    let match: ColumnMatch;
+    try {
+      match = resolveColumn(metadata, token, { includeArchived });
+    } catch (err) {
+      // Cache-miss-refresh per §5.3 step 5: only the first
+      // `column_not_found` triggers a refresh; subsequent misses
+      // bubble. Other resolution errors (`ambiguous_column`) bubble
+      // immediately — refreshing wouldn't change them.
+      const isMissing =
+        err instanceof ApiError && err.code === 'column_not_found';
+      if (
+        !isMissing ||
+        inputs.onColumnNotFound === undefined ||
+        refreshed
+      ) {
+        throw err;
+      }
+      metadata = await inputs.onColumnNotFound();
+      refreshed = true;
+      warnings.push({
+        code: 'stale_cache_refreshed',
+        message:
+          'Cache miss for filter token; refreshed board metadata to resolve.',
+        details: { token, board_id: metadata.id },
+      });
+      match = resolveColumn(metadata, token, { includeArchived });
+    }
+    const collision = collisionWarning(match);
+    if (collision !== undefined) warnings.push(collision);
+    matches.push(match);
+  }
+  return { matches, metadata, refreshed, warnings };
+};

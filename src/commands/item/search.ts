@@ -38,9 +38,8 @@ import {
   type BoardMetadata,
 } from '../../api/board-metadata.js';
 import { parseWhereSyntax, type WhereClause } from '../../api/filters.js';
-import { resolveColumn, type ColumnMatch } from '../../api/columns.js';
+import { resolveColumnsAcrossClauses } from '../../api/columns.js';
 import { isMeToken } from '../../api/me-token.js';
-import { ApiError } from '../../utils/errors.js';
 import {
   DEFAULT_PAGE_SIZE,
   paginate,
@@ -133,20 +132,9 @@ interface BuildSearchResult {
 const buildColumnQueries = async (
   inputs: BuildSearchInputs,
 ): Promise<BuildSearchResult> => {
-  // Group clauses by resolved column ID, preserving insertion order
-  // for stable result diffs. Each clause must be `=` (any_of) — the
-  // endpoint doesn't support other operators.
-  const byColumn = new Map<string, string[]>();
-  const warnings: Warning[] = [];
-  let cachedMe: string | undefined;
-  const me = async (): Promise<string> => {
-    cachedMe ??= await inputs.resolveMe();
-    return cachedMe;
-  };
-
-  let metadata = inputs.metadata;
-  let refreshed = false;
-
+  // Reject non-equality operators upfront — the endpoint doesn't
+  // support them and validating before resolution avoids burning a
+  // metadata refresh on a doomed call.
   for (const clause of inputs.clauses) {
     if (clause.operator.kind !== 'equals') {
       throw new UsageError(
@@ -155,48 +143,39 @@ const buildColumnQueries = async (
         { details: { clause: clause.raw, operator: clause.operator.literal } },
       );
     }
-    let match: ColumnMatch;
-    try {
-      match = resolveColumn(metadata, clause.token);
-    } catch (err) {
-      // Same cache-miss-refresh shape as filters.ts buildFilterRules
-      // (Codex M4 §1).
-      const isMissing =
-        err instanceof ApiError && err.code === 'column_not_found';
-      if (
-        !isMissing ||
-        inputs.onColumnNotFound === undefined ||
-        refreshed
-      ) {
-        throw err;
-      }
-      metadata = await inputs.onColumnNotFound();
-      refreshed = true;
-      warnings.push({
-        code: 'stale_cache_refreshed',
-        message:
-          'Cache miss for filter token; refreshed board metadata to resolve.',
-        details: { token: clause.token, board_id: metadata.id },
-      });
-      match = resolveColumn(metadata, clause.token);
-    }
-    /* c8 ignore next 13 — collision warnings are exercised by
-       tests/unit/api/filters.test.ts against the same column-
-       resolution surface; duplicating the assertion through the
-       items_page_by_column_values endpoint would be a fixture-only
-       regression test, not a real-path one. */
-    if (match.collisionCandidates.length > 0) {
-      warnings.push({
-        code: 'column_token_collision',
-        message:
-          `Search token matched column id "${match.column.id}" and ` +
-          `${String(match.collisionCandidates.length)} title(s); the ID match wins.`,
-        details: {
-          via: match.via,
-          resolved_id: match.column.id,
-          candidates: match.collisionCandidates,
-        },
-      });
+  }
+
+  // R12 lift: cache-miss-refresh + collision-warning collection are
+  // shared with `api/filters.ts buildFilterRules`. The helper
+  // resolves every clause's column token; per-clause value resolution
+  // (`me` for people) stays here.
+  const resolved = await resolveColumnsAcrossClauses({
+    metadata: inputs.metadata,
+    tokens: inputs.clauses.map((c) => c.token),
+    ...(inputs.onColumnNotFound === undefined
+      ? {}
+      : { onColumnNotFound: inputs.onColumnNotFound }),
+  });
+
+  let cachedMe: string | undefined;
+  const me = async (): Promise<string> => {
+    cachedMe ??= await inputs.resolveMe();
+    return cachedMe;
+  };
+
+  // Group clauses by resolved column ID, preserving insertion order
+  // for stable result diffs.
+  const byColumn = new Map<string, string[]>();
+  for (let i = 0; i < inputs.clauses.length; i++) {
+    const clause = inputs.clauses[i];
+    const match = resolved.matches[i];
+    /* c8 ignore next 6 — defensive: matches.length === clauses.length
+       by helper contract; the index guard exists for
+       noUncheckedIndexedAccess narrowing only. */
+    if (clause === undefined || match === undefined) {
+      throw new UsageError(
+        `buildColumnQueries: lost clause/match alignment at index ${String(i)}`,
+      );
     }
     /* c8 ignore next 4 — defensive: parser guarantees binary
        operators carry a value. */
@@ -224,7 +203,15 @@ const buildColumnQueries = async (
   for (const [columnId, values] of byColumn) {
     columns.push({ column_id: columnId, column_values: values });
   }
-  return { columns, warnings, refreshed, metadata };
+  return {
+    columns,
+    // ResolverWarning widens cleanly to envelope.Warning (narrower
+    // code literal, required details). Same straight assignment
+    // filters.ts uses post-R12.
+    warnings: resolved.warnings,
+    refreshed: resolved.refreshed,
+    metadata: resolved.metadata,
+  };
 };
 
 const initialFetcher = (
