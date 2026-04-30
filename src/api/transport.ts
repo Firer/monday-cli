@@ -171,9 +171,56 @@ const isAbortError = (err: unknown): boolean => {
   return false;
 };
 
+/**
+ * Builds a generic, URL-free message for a thrown `fetch` exception.
+ *
+ * Why not `err.message`. Node's undici embeds the request URL into
+ * the messages of common transport errors — `ECONNREFUSED https://
+ * api.example/v2?token=...`, `getaddrinfo ENOTFOUND
+ * api.example`, etc. If `MONDAY_API_URL` is misconfigured to carry
+ * the token (or any other secret), the literal token lands in
+ * `ApiError.message`. The runner's redactor would catch it on emit,
+ * but `security.md` forbids the token entering `Error.message` in
+ * the first place — the rule is defence-in-depth, not "we'll fix it
+ * downstream". The original error is still attached via `cause`,
+ * which a future debug log surfaces through `redact()` (key + value
+ * scan) rather than verbatim.
+ *
+ * Maps the common shapes to short, stable codes:
+ *  - DNS / hostname unresolvable  → `dns lookup failed`
+ *  - ECONNREFUSED / ECONNRESET    → `connection refused`
+ *  - SSL/TLS issue                → `tls error`
+ *  - generic Error                → `fetch failed`
+ *  - non-Error throw              → `fetch failed`
+ */
 const describeFetchError = (err: unknown): string => {
   if (err instanceof Error) {
-    return err.message;
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === 'string') {
+      if (code.startsWith('ENOTFOUND') || code.startsWith('EAI_')) {
+        return 'fetch failed: dns lookup failed';
+      }
+      if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
+        return 'fetch failed: connection refused';
+      }
+      if (code === 'CERT_HAS_EXPIRED' || code.startsWith('UNABLE_TO_')) {
+        return 'fetch failed: tls error';
+      }
+    }
+    // Sniff the message for the same common shapes when err.code
+    // isn't surfaced (older fetch impls, wrapped TypeErrors).
+    const lower = err.message.toLowerCase();
+    if (lower.includes('econnrefused') || lower.includes('connection refused')) {
+      return 'fetch failed: connection refused';
+    }
+    if (
+      lower.includes('enotfound') ||
+      lower.includes('eai_again') ||
+      lower.includes('getaddrinfo')
+    ) {
+      return 'fetch failed: dns lookup failed';
+    }
+    return 'fetch failed';
   }
   return 'fetch failed';
 };

@@ -294,6 +294,69 @@ describe('createFetchTransport — failure shapes', () => {
     }
   });
 
+  // Codex M2 second-pass review: Node's undici embeds the request
+  // URL into the messages of common transport errors —
+  // `connect ECONNREFUSED https://api.example/v2?token=...`,
+  // `getaddrinfo ENOTFOUND api.example`, etc. If the URL contains
+  // the token, `describeFetchError(err)` returning err.message
+  // verbatim would have leaked it into ApiError.message. The fix
+  // maps known err.code values + sniffs the message string and
+  // returns a stable, URL-free description.
+  const fetchErrorCases = [
+    {
+      name: 'ECONNREFUSED with URL embedded in message',
+      build: (): Error => {
+        const e = new TypeError(
+          'fetch failed: connect ECONNREFUSED https://api.example/v2?token=tok-leakcheck-deadbeef-canary',
+        );
+        Object.assign(e, { code: 'ECONNREFUSED' });
+        return e;
+      },
+      expectedFragment: 'connection refused',
+    },
+    {
+      name: 'ENOTFOUND with hostname-bearing message',
+      build: (): Error => {
+        const e = new TypeError(
+          'fetch failed: getaddrinfo ENOTFOUND api.example?token=tok-leakcheck-deadbeef-canary',
+        );
+        Object.assign(e, { code: 'ENOTFOUND' });
+        return e;
+      },
+      expectedFragment: 'dns lookup failed',
+    },
+    {
+      name: 'ECONNREFUSED via message-only signal (no err.code)',
+      build: (): Error =>
+        new TypeError(
+          'fetch failed: ECONNREFUSED https://api.example/v2?token=tok-leakcheck-deadbeef-canary',
+        ),
+      expectedFragment: 'connection refused',
+    },
+  ];
+
+  for (const c of fetchErrorCases) {
+    it(`describes ${c.name} without leaking the URL/token`, async () => {
+      const fakeFetch: typeof fetch = () => Promise.reject(c.build());
+      const transport = createFetchTransport({
+        endpoint: 'https://api.example/v2?token=tok-leakcheck-deadbeef-canary',
+        apiToken: 'tok-leakcheck-deadbeef-canary',
+        apiVersion: '2026-01',
+        timeoutMs: 5_000,
+        fetchImpl: fakeFetch,
+      });
+      let caught: { code?: string; message?: string } = {};
+      try {
+        await transport.request({ query: '{ me { id } }' });
+      } catch (err) {
+        caught = err as { code?: string; message?: string };
+      }
+      expect(caught.code).toBe('network_error');
+      expect(caught.message).not.toContain('tok-leakcheck-deadbeef-canary');
+      expect(caught.message).toContain(c.expectedFragment);
+    });
+  }
+
   it('does not interpolate the token into the error message or cause-chain', async () => {
     const literalToken = 'tok-leakcheck-xxxx';
     const fakeFetch: typeof fetch = () =>
