@@ -142,10 +142,17 @@ describe('readEntry / writeEntry round-trip', () => {
   });
 
   it('honours an explicit ttlSeconds override', async () => {
-    await writeEntry(root, key, { ok: true });
+    const { path } = await writeEntry(root, key, { ok: true });
+    // Pin mtime so `now - mtime` is deterministic. Without this the
+    // assertion races: on slow CI the fs-recorded mtime can land
+    // milliseconds *after* the in-process Date.now() the test reads,
+    // making the floor land on 0 and `0 > 0` (the staleness check)
+    // return the entry instead of undefined.
+    const fixedMtime = new Date('2026-01-01T00:00:00.000Z');
+    await utimes(path, fixedMtime, fixedMtime);
     const result = await readEntry(root, key, (raw) => raw, {
       ttlSeconds: 0,
-      now: () => new Date(Date.now() + 1_000),
+      now: () => new Date(fixedMtime.getTime() + 1_000),
     });
     expect(result).toBeUndefined();
   });
@@ -269,10 +276,16 @@ describe('listEntries', () => {
   });
 
   it('uses the injected clock for ageSeconds', async () => {
-    await writeEntry(root, { kind: 'users' }, {});
-    const future = new Date(Date.now() + 60_000);
+    const { path } = await writeEntry(root, { kind: 'users' }, {});
+    // Pin mtime: the floor((future - mtime) / 1000) calculation flakes
+    // on CI when fs mtime trails Date.now() by a few ms (race between
+    // writeFile completion and the Date.now() the test captures).
+    // Setting mtime explicitly removes that source of jitter.
+    const fixedMtime = new Date('2026-01-01T00:00:00.000Z');
+    await utimes(path, fixedMtime, fixedMtime);
+    const future = new Date(fixedMtime.getTime() + 60_000);
     const found = await listEntries(root, { now: () => future });
-    expect(found[0]?.ageSeconds).toBeGreaterThanOrEqual(60);
+    expect(found[0]?.ageSeconds).toBe(60);
   });
 
   it('wraps readdir EACCES failures into CacheError', async () => {
@@ -422,15 +435,21 @@ describe('stats', () => {
   });
 
   it('aggregates totals and ages across entries', async () => {
-    await writeEntry(root, { kind: 'board', boardId: '1' }, { v: 1 });
-    await writeEntry(root, { kind: 'users' }, { v: 2 });
+    const e1 = await writeEntry(root, { kind: 'board', boardId: '1' }, { v: 1 });
+    const e2 = await writeEntry(root, { kind: 'users' }, { v: 2 });
+    // Pin both files' mtime so the age arithmetic is deterministic;
+    // see the listEntries injected-clock test for why this matters on
+    // CI runners with fs mtime / Date.now() drift.
+    const fixedMtime = new Date('2026-01-01T00:00:00.000Z');
+    await utimes(e1.path, fixedMtime, fixedMtime);
+    await utimes(e2.path, fixedMtime, fixedMtime);
     const result = await stats(root, {
-      now: () => new Date(Date.now() + 30_000),
+      now: () => new Date(fixedMtime.getTime() + 30_000),
     });
     expect(result.entries).toBe(2);
     expect(result.bytes).toBeGreaterThan(0);
-    expect(result.oldestAgeSeconds).toBeGreaterThanOrEqual(30);
-    expect(result.newestAgeSeconds).toBeGreaterThanOrEqual(30);
+    expect(result.oldestAgeSeconds).toBe(30);
+    expect(result.newestAgeSeconds).toBe(30);
   });
 
 });

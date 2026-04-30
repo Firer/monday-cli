@@ -42,7 +42,19 @@ export const spawnCli = async (
     );
   }
   const spawnOptions: SpawnOptionsWithoutStdio = {
-    env: options.env ?? { PATH: process.env.PATH ?? '' },
+    env: {
+      ...(options.env ?? { PATH: process.env.PATH ?? '' }),
+      // Node 22+ prints a `DEP0040` warning to stderr when any
+      // dependency reaches into the deprecated `punycode` module
+      // (transitive: graphql-request → undici / whatwg-url). The
+      // warning is environmental and lands as `(node:1234) ...` on
+      // stderr — which makes `expect(stderr).toBe('')` fail and, on
+      // some CI nodes, bleeds into stdout and breaks JSON.parse.
+      // Suppressing here keeps the spawned CLI's output clean for
+      // contract assertions; the CLI itself never relies on these
+      // warnings.
+      NODE_NO_WARNINGS: '1',
+    },
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   };
   const child = spawn('node', [binaryPath, ...options.args], spawnOptions);
