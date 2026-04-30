@@ -230,6 +230,18 @@ export const planChanges = async (
     aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
 
     if (isArchivedColumn(resolution.match.column)) {
+      // Surface any resolver warnings (column_token_collision /
+      // stale_cache_refreshed) under details.resolver_warnings so
+      // they aren't lost when the failure envelope replaces the
+      // success envelope's `warnings` slot. Codex pass-2 finding:
+      // a stale-cache-then-archived flow would otherwise drop the
+      // refresh signal — the agent would never know the cache was
+      // wrong AND the column was archived.
+      const resolverDetailWarnings = resolution.warnings.map((w) => ({
+        code: w.code,
+        message: w.message,
+        details: w.details,
+      }));
       throw new ApiError(
         'column_archived',
         `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
@@ -242,6 +254,9 @@ export const planChanges = async (
             column_title: resolution.match.column.title,
             column_type: resolution.match.column.type,
             board_id: inputs.boardId,
+            ...(resolverDetailWarnings.length > 0
+              ? { resolver_warnings: resolverDetailWarnings }
+              : {}),
           },
         },
       );
@@ -478,6 +493,27 @@ const buildDiffCell = (
   current: RawColumnValue | undefined,
 ): DiffCell => {
   const from: JsonValue = current === undefined ? null : decodeFrom(current);
+  // Echo-slot exclusivity invariant. Today's translators populate
+  // at most one of resolvedFrom (date) / peopleResolution (people).
+  // A future translator that mistakenly sets both would silently
+  // collapse to the date echo (the first branch wins below); fire
+  // an internal_error so the regression is loud, not silent.
+  // Codex pass-2 finding F3.
+  if (translated.resolvedFrom !== null && translated.peopleResolution !== null) {
+    throw new ApiError(
+      'internal_error',
+      `Translator emitted both resolvedFrom and peopleResolution for ` +
+        `column "${translated.columnId}" (type "${translated.columnType}"). ` +
+        `These slots are mutually exclusive in v0.1; a translator setting ` +
+        `both is a wiring bug.`,
+      {
+        details: {
+          column_id: translated.columnId,
+          column_type: translated.columnType,
+        },
+      },
+    );
+  }
   if (translated.resolvedFrom !== null) {
     return {
       from,

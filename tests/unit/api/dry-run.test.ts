@@ -701,6 +701,34 @@ describe('planChanges — diff `from` decoding', () => {
     });
   });
 
+  it('text cells with empty-string value but populated text → from=text (Codex pass-2)', async () => {
+    // Same branch as the `value: null` case but exercises the
+    // `value: ""` (empty-string) arm specifically — Monday returns
+    // empty-string `value` for some legacy text columns. Without
+    // this branch, the diff would emit `from: null` for a
+    // populated cell.
+    const stats: Stats = { calls: 0, operations: [] };
+    const itemEmptyValueOnly = {
+      items: [
+        {
+          ...itemAtBacklog().items[0] as object,
+          column_values: [
+            { id: 'notes', type: 'text', text: 'still here', value: '', column: { title: 'Notes' } },
+          ],
+        },
+      ],
+    };
+    const client = buildClient([board67890(), itemEmptyValueOnly], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'notes', value: 'updated' }],
+      env: xdgEnv(),
+    });
+    expect(result.plannedChanges[0]?.diff.notes?.from).toBe('still here');
+  });
+
   it('completely empty cell → from=null (both value AND text empty)', async () => {
     const stats: Stats = { calls: 0, operations: [] };
     const itemEmptyNotes = {
@@ -769,6 +797,12 @@ describe('planChanges — parse-boundary discipline (R17 pattern)', () => {
     expect(apiErr.message).toMatch(/malformed item response/u);
     const details = apiErr.details as { issues: readonly { path: string }[] };
     expect(details.issues.length).toBeGreaterThan(0);
+    // Codex pass-2 tightening: assert the failing field path so an
+    // agent debugging a malformed Monday response sees which field
+    // tripped the schema, AND assert the cause is preserved for
+    // stack-trace debugging.
+    expect(details.issues.some((i) => i.path === 'name')).toBe(true);
+    expect(apiErr.cause).toBeDefined();
   });
 });
 
@@ -857,5 +891,47 @@ describe('planChanges — meta aggregation', () => {
     expect(result.source).toBe('mixed');
     // stale_cache_refreshed warning surfaced:
     expect(result.warnings.some((w) => w.code === 'stale_cache_refreshed')).toBe(true);
+  });
+
+  it('mergeCacheAge takes the max across multiple cached column legs (Codex pass-2)', async () => {
+    // Two columns resolved from cache → mergeCacheAge picks the
+    // older age (worst-case staleness per §6.1). Without this test
+    // the Math.max branch was uncovered by the existing suite. We
+    // seed the cache with one call, then run a two-column dry-run
+    // that hits cache for both columns.
+    const stats: Stats = { calls: 0, operations: [] };
+    // Sequence: seed (call 1) + item (call 2), then two-column
+    // dry-run hits cache (no fetch) + item (call 3).
+    const client = buildClient(
+      [board67890(), itemAtBacklog(), itemAtBacklog()],
+      stats,
+    );
+    // Seed: one column lookup → cache write.
+    await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'status', value: 'Done' }],
+      env: xdgEnv(),
+    });
+    // Now dry-run with two columns; both legs hit the same cached
+    // metadata (same on-disk file → same age). mergeCacheAge runs
+    // Math.max over (age, age) → returns the same age. Branch
+    // covered without needing a per-column distinct age.
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [
+        { token: 'status', value: 'Done' },
+        { token: 'notes', value: 'shipped' },
+      ],
+      env: xdgEnv(),
+    });
+    // Both column legs hit cache; aggregate source is mixed
+    // (cache + live item) and cacheAgeSeconds is non-null.
+    expect(result.source).toBe('mixed');
+    expect(result.cacheAgeSeconds).not.toBeNull();
+    expect(typeof result.cacheAgeSeconds).toBe('number');
   });
 });
