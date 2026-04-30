@@ -59,6 +59,7 @@ import { updateListCommand } from './update/list.js';
 import { updateGetCommand } from './update/get.js';
 // M4 commands — item reads + filter DSL + cursor pagination.
 import { itemGetCommand } from './item/get.js';
+import { itemListCommand } from './item/list.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -90,6 +91,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateListCommand,
     updateGetCommand,
     itemGetCommand,
+    itemListCommand,
   ];
   return cached;
 };

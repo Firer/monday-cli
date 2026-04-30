@@ -12,13 +12,47 @@
  *   - item subitems — children listing.
  *   - --api-version reaches error envelope on a per-noun basis.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Cassette } from '../../fixtures/load.js';
 import {
   assertEnvelopeContract,
-  drive,
+  drive as driveBase,
   parseEnvelope,
+  FIXTURE_API_URL,
+  LEAK_CANARY,
+  type DriveResult,
   type EnvelopeShape,
 } from '../helpers.js';
+import type { RunOptions } from '../../../src/cli/run.js';
+
+// item list / search exercise the cache-aware loadBoardMetadata —
+// each test wants an isolated XDG_CACHE_HOME so cache writes don't
+// bleed across tests.
+let xdgRoot: string;
+
+beforeEach(async () => {
+  xdgRoot = await mkdtemp(join(tmpdir(), 'monday-cli-item-int-'));
+});
+
+afterEach(async () => {
+  await rm(xdgRoot, { recursive: true, force: true });
+});
+
+const drive = async (
+  argv: readonly string[],
+  cassette: Cassette,
+  overrides: Partial<RunOptions> = {},
+): Promise<DriveResult> => {
+  const env = {
+    MONDAY_API_TOKEN: LEAK_CANARY,
+    MONDAY_API_URL: FIXTURE_API_URL,
+    XDG_CACHE_HOME: xdgRoot,
+  };
+  return driveBase(argv, cassette, { env, ...overrides });
+};
 
 const sampleColumnValues = [
   {
@@ -126,5 +160,352 @@ describe('monday item get (integration)', () => {
     expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
+  });
+});
+
+const sampleBoardMetadata = {
+  id: '111',
+  name: 'Tasks',
+  description: null,
+  state: 'active',
+  board_kind: 'public',
+  board_folder_id: null,
+  workspace_id: '5',
+  url: null,
+  hierarchy_type: null,
+  is_leaf: true,
+  updated_at: null,
+  groups: [],
+  columns: [
+    {
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+      description: null,
+      archived: null,
+      settings_str: '{}',
+      width: null,
+    },
+    {
+      id: 'date4',
+      title: 'Due date',
+      type: 'date',
+      description: null,
+      archived: null,
+      settings_str: null,
+      width: null,
+    },
+  ],
+};
+
+const boardMetadataInteraction = {
+  operation_name: 'BoardMetadata',
+  response: { data: { boards: [sampleBoardMetadata] } },
+};
+
+const item = (id: string, name = `Item ${id}`): typeof sampleItem => ({
+  ...sampleItem,
+  id,
+  name,
+  // Item.board.id must match the board the test is querying so the
+  // projector emits the right board_id.
+  board: { id: '111' },
+});
+
+describe('monday item list (integration)', () => {
+  it('emits the projected list with the §6.3 collection envelope', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [item('1'), item('2')],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    assertEnvelopeContract(env);
+    expect(env.data).toHaveLength(2);
+    expect(env.meta.total_returned).toBe(2);
+    expect(env.meta.has_more).toBe(false);
+    expect(env.meta.next_cursor).toBeNull();
+  });
+
+  it('per-page sorts items by ID ascending', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [item('30'), item('5'), item('200'), item('99')],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    expect(env.data.map((i) => i.id)).toEqual(['5', '30', '99', '200']);
+  });
+
+  it('--all walks every page until cursor exhausts', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--all', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: 'C2', items: [item('1'), item('2')] } },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'NextItemsPage',
+            response: {
+              data: {
+                next_items_page: { cursor: null, items: [item('3')] },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string }[];
+    };
+    expect(env.data.map((i) => i.id)).toEqual(['1', '2', '3']);
+    expect(env.meta.next_cursor).toBeNull();
+    expect(env.meta.has_more).toBe(false);
+  });
+
+  it('default (no --all) exposes next_cursor without walking', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: 'CURSOR-AHEAD', items: [item('1')] } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.next_cursor).toBe('CURSOR-AHEAD');
+    expect(env.meta.has_more).toBe(true);
+  });
+
+  it('streams NDJSON: one item per line, trailer last, no envelope on stdout', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--all', '--output', 'ndjson'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: 'C2', items: [item('1')] } },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'NextItemsPage',
+            response: {
+              data: {
+                next_items_page: { cursor: null, items: [item('2')] },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    expect(lines).toHaveLength(3); // 2 items + trailer
+    const item1 = JSON.parse(lines[0] ?? '') as { id: string; name: string };
+    expect(item1.id).toBe('1');
+    expect(item1.name).toBeDefined();
+    const item2 = JSON.parse(lines[1] ?? '') as { id: string };
+    expect(item2.id).toBe('2');
+    const trailer = JSON.parse(lines[2] ?? '') as {
+      _meta: { next_cursor: string | null; has_more: boolean; total_returned: number };
+    };
+    expect(trailer._meta.next_cursor).toBeNull();
+    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer._meta.total_returned).toBe(2);
+  });
+
+  it('parses --where through filters.ts and includes query_params in the request', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--where', 'status=Done', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            match_variables: {
+              queryParams: {
+                rules: [
+                  {
+                    column_id: 'status_4',
+                    operator: 'any_of',
+                    compare_value: ['Done'],
+                  },
+                ],
+              },
+            },
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: null, items: [item('1')] } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('--where + --filter-json mutually exclusive — usage_error', async () => {
+    const out = await drive(
+      [
+        'item',
+        'list',
+        '--board',
+        '111',
+        '--where',
+        'status=Done',
+        '--filter-json',
+        '{"rules":[]}',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('mid-walk stale_cursor fails fast with details (no silent re-issue)', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', '111', '--all', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: 'C2', items: [item('1'), item('2')] } },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'NextItemsPage',
+            response: {
+              errors: [
+                {
+                  message: 'Cursor expired',
+                  extensions: { code: 'INVALID_CURSOR_EXCEPTION' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error: {
+        code: string;
+        details: {
+          items_returned_so_far: number;
+          last_item_id: string;
+          cursor_age_seconds: number;
+        };
+      };
+    };
+    expect(env.error.code).toBe('stale_cursor');
+    expect(env.error.details.items_returned_so_far).toBe(2);
+    expect(env.error.details.last_item_id).toBe('2');
+    // Walker did NOT silently re-issue the initial query — exactly
+    // one initial + one next_items_page request.
+    expect(out.requests).toBe(3); // metadata + initial + next
+  });
+
+  it('rejects non-numeric --board as usage_error', async () => {
+    const out = await drive(
+      ['item', 'list', '--board', 'abc', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--api-version reaches the error envelope on board metadata 401', async () => {
+    const out = await drive(
+      ['--api-version', '2026-04', 'item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardMetadata', http_status: 401, response: {} },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('unauthorized');
+    expect(env.meta.api_version).toBe('2026-04');
   });
 });
