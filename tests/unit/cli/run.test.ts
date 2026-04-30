@@ -472,6 +472,34 @@ describe('run — abort handling (SIGINT path)', () => {
     expect(captured.stderr()).toContain('"code": "internal_error"');
   });
 
+  it('SIGINT delivered after a graceful action returns 130 (parseAsync resolved, signal aborted)', async () => {
+    // Edge case: the action handles the abort gracefully (returns
+    // instead of throwing). parseAsync then resolves, but the
+    // signal is aborted with a sigint reason — the runner still
+    // returns 130 per §3.1 #5 (exit code is the signal).
+    const ctrl = new AbortController();
+    const { options } = baseOptions({
+      argv: ['node', 'monday', 'graceful'],
+      signal: ctrl.signal,
+      registerCommands: (program, ctx) => {
+        program
+          .command('graceful')
+          .action(async () => {
+            // Action races with the SIGINT but resolves cleanly
+            // either way — exercises the post-parseAsync abort
+            // check rather than the catch-block path.
+            ctrl.abort({ kind: 'sigint' });
+            await Promise.resolve();
+            // Note: the abort fires during this microtask. The
+            // action then resolves rather than throwing.
+            void ctx.signal.aborted;
+          });
+      },
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(130);
+  });
+
   it('without an abort, a normal action returns its own exit code', async () => {
     const { options } = baseOptions({
       argv: ['node', 'monday', 'echo'],

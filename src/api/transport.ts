@@ -254,6 +254,10 @@ const combineSignals = (
   if (typeof AbortSignal.any === 'function') {
     return AbortSignal.any(real);
   }
+  /* c8 ignore start — legacy fallback for runtimes without
+     `AbortSignal.any` (Node < 19). Repo's engines pin to Node 22+,
+     so this path is never hit in CI or dev. Kept for safety in case
+     a downstream embedder runs an older Node. */
   const ctrl = new AbortController();
   for (const s of real) {
     if (s.aborted) {
@@ -269,4 +273,5 @@ const combineSignals = (
     );
   }
   return ctrl.signal;
+  /* c8 ignore stop */
 };

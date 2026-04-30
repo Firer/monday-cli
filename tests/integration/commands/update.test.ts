@@ -63,7 +63,9 @@ interface EnvelopeShape {
     readonly retrieved_at: string;
     readonly complexity: unknown;
     readonly total_returned?: number;
+    readonly has_more?: boolean;
   };
+  readonly warnings?: readonly { readonly code: string }[];
 }
 
 const parseEnvelope = (s: string): EnvelopeShape =>
@@ -97,6 +99,25 @@ const sampleUpdate = {
   edited_at: '2026-04-30T09:01:00Z',
   replies: [],
 };
+
+describe('monday update list — null-data resilience', () => {
+  it('emits an empty list when items[0].updates is missing', async () => {
+    const out = await drive(
+      ['update', 'list', '5001', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: { data: { items: [{ id: '5001' }] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+  });
+});
 
 describe('monday update list', () => {
   it('returns the projected updates for an item', async () => {
@@ -160,6 +181,64 @@ describe('monday update list', () => {
     expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--all walks pages until short page', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleUpdate,
+      id: String(100 + i),
+    }));
+    const shortPage = [{ ...sampleUpdate, id: '200' }];
+    const out = await drive(
+      ['update', 'list', '5001', '--all', '--limit', '25', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            match_variables: { page: 1 },
+            response: { data: { items: [{ id: '5001', updates: fullPage }] } },
+          },
+          {
+            operation_name: 'UpdateList',
+            match_variables: { page: 2 },
+            response: { data: { items: [{ id: '5001', updates: shortPage }] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.total_returned).toBe(26);
+  });
+
+  it('--all + --limit-pages emits pagination_cap_reached', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleUpdate,
+      id: String(100 + i),
+    }));
+    const out = await drive(
+      ['update', 'list', '5001', '--all', '--limit', '25', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            match_variables: { page: 1 },
+            response: { data: { items: [{ id: '5001', updates: fullPage }] } },
+          },
+          {
+            operation_name: 'UpdateList',
+            match_variables: { page: 2 },
+            response: { data: { items: [{ id: '5001', updates: fullPage }] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly { readonly code: string }[];
+    };
+    expect(env.meta.has_more).toBe(true);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
   });
 
   it('--api-version reaches error envelope on HTTP 401', async () => {

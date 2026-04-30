@@ -50,6 +50,35 @@ describe('findOne — exact unique match', () => {
   });
 });
 
+describe('findOne — case-fold ambiguity', () => {
+  it('raises ambiguous_name when multiple case-fold variants exist with no NFC-exact match', () => {
+    const haystack = [
+      board('1', 'Status'),
+      board('2', 'STATUS'),
+    ];
+    let caught: unknown = undefined;
+    try {
+      findOne(haystack, 'sTaTuS', (t) => t, { kind: 'board' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ code: 'ambiguous_name' });
+  });
+
+  it('--first picks the lowest-ID case-fold variant', () => {
+    const haystack = [
+      board('99', 'Status'),
+      board('15', 'STATUS'),
+    ];
+    const result = findOne(haystack, 'sTaTuS', (t) => t, {
+      first: true,
+      kind: 'board',
+    });
+    expect(result.resource.id).toBe('15');
+    expect(result.firstOfMany).toBe(true);
+  });
+});
+
 describe('findOne — multiple matches', () => {
   it('raises ambiguous_name with the candidate list when multi-match', () => {
     const haystack = [
@@ -231,6 +260,23 @@ describe('userByEmail — directory cache + live fallback', () => {
     });
     expect(cachedAgain.source).toBe('cache');
     expect(stats.calls).toBe(2);
+  });
+
+  it('falls through to live fetch when the cache read raises (corrupt entry)', async () => {
+    const stats = { calls: 0 };
+    // Pre-fill the cache with a malformed payload so the parser
+    // rejects it on read.
+    const { writeEntry } = await import('../../../src/api/cache.js');
+    const root = `${tmpRoot}/monday-cli`;
+    await writeEntry(root, { kind: 'users' }, [{ wrong: 'shape' }]);
+    const client = buildClient([{ users: [alice] }], stats);
+    const result = await userByEmail({
+      client,
+      email: alice.email,
+      env: xdgEnv(),
+    });
+    expect(stats.calls).toBe(1);
+    expect(result.source).toBe('live');
   });
 
   it('--noCache bypasses both cache layers', async () => {

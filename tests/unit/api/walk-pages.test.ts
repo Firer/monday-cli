@@ -112,6 +112,39 @@ describe('walkPages — all=true walking', () => {
     expect(cursor).toBe(4);
   });
 
+  it('all=true with empty first page reports hasMore=false and stops immediately', async () => {
+    let cursor = 0;
+    const result = await walkPages<{ id: number }, PageShape>({
+      fetchPage: () => {
+        cursor++;
+        return Promise.resolve(respond([]));
+      },
+      extractItems: (r) => r.data.items,
+      pageSize: 5,
+      all: true,
+      maxPages: 10,
+    });
+    expect(cursor).toBe(1);
+    expect(result.hasMore).toBe(false);
+    expect(result.items).toEqual([]);
+  });
+
+  it('all=true with a short first page reports hasMore=false', async () => {
+    let cursor = 0;
+    const result = await walkPages<{ id: number }, PageShape>({
+      fetchPage: () => {
+        cursor++;
+        return Promise.resolve(respond([{ id: 1 }, { id: 2 }]));
+      },
+      extractItems: (r) => r.data.items,
+      pageSize: 5,
+      all: true,
+      maxPages: 10,
+    });
+    expect(cursor).toBe(1);
+    expect(result.hasMore).toBe(false);
+  });
+
   it('honours startPage as the first page number', async () => {
     const seen: number[] = [];
     await walkPages<{ id: number }, PageShape>({

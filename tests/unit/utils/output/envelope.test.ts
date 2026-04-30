@@ -178,6 +178,24 @@ describe('buildDryRun', () => {
       planned,
     );
   });
+
+  it('preserves collection extras (next_cursor / has_more / total_returned / columns) when rebuilding meta with dry_run', () => {
+    const meta = buildMeta({
+      ...baseMetaInput,
+      next_cursor: 'cur-abc',
+      has_more: true,
+      total_returned: 42,
+      columns: { status_4: { id: 'status_4', type: 'status', title: 'Status' } },
+    });
+    const env = buildDryRun([], meta);
+    expect(env.meta.next_cursor).toBe('cur-abc');
+    expect(env.meta.has_more).toBe(true);
+    expect(env.meta.total_returned).toBe(42);
+    expect(env.meta.columns).toEqual({
+      status_4: { id: 'status_4', type: 'status', title: 'Status' },
+    });
+    expect(env.meta.dry_run).toBe(true);
+  });
 });
 
 describe('buildError', () => {

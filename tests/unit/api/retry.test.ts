@@ -328,6 +328,32 @@ describe('withRetry', () => {
     expect(caught).toMatchObject({ code: 'internal_error' });
   });
 
+  it('a custom sleep that throws MondayCliError surfaces unchanged (no double-wrap)', async () => {
+    const ctrl = new AbortController();
+    let caught: unknown;
+    const failingSleep = (): Promise<void> =>
+      Promise.reject(new ApiError('timeout', 'sleep timed out'));
+    try {
+      await withRetry(
+        async () => {
+          await Promise.resolve();
+          throw new ApiError('rate_limited', 'transient', { retryAfterSeconds: 0 });
+        },
+        {
+          retries: 3,
+          signal: ctrl.signal,
+          baseBackoffMs: 100,
+          sleep: failingSleep,
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    // The MondayCliError from the custom sleep flows through without
+    // being re-wrapped as wrapAbortAsApiError — line 248 of retry.ts.
+    expect(caught).toMatchObject({ code: 'timeout' });
+  });
+
   it('aborts mid-backoff and re-throws an abort error', async () => {
     const ctrl = new AbortController();
     let n = 0;

@@ -86,6 +86,9 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         ];
       }
       const first = labelEntries[0];
+      /* c8 ignore next 6 — defensive: labelEntries was already
+         length-checked above, so `first` cannot be undefined. The
+         guard exists for `noUncheckedIndexedAccess` narrowing. */
       if (first === undefined) {
         return [
           `--set ${column.id}=Done`,
@@ -121,6 +124,8 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         `--set ${column.id}=alice@example.com`,
         `--set ${column.id}=me`,
       ];
+    /* c8 ignore next 2 — unreachable: WRITABLE_TYPES gates the entry,
+       so any column.type that lands here is one of the cases above. */
     default:
       return null;
   }

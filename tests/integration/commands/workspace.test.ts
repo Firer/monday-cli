@@ -71,7 +71,7 @@ interface EnvelopeShape {
     readonly total_returned?: number;
     readonly next_cursor?: string | null;
   };
-  readonly warnings?: readonly unknown[];
+  readonly warnings?: readonly { readonly code: string }[];
 }
 
 const parseEnvelope = (s: string): EnvelopeShape =>
@@ -140,6 +140,26 @@ const listInteraction = (
 });
 
 describe('monday workspace list (integration)', () => {
+  it('handles a missing `workspaces` field gracefully (treats as empty page)', async () => {
+    // Defensive ?? [] branch: Monday returning {data: {}} without
+    // the workspaces selection — shouldn't crash the walker.
+    const out = await drive(
+      ['workspace', 'list', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceList',
+            response_body: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+    expect(env.meta.total_returned).toBe(0);
+  });
+
   it('returns the projected list with collection-shaped meta', async () => {
     const out = await drive(
       ['workspace', 'list', '--json'],
@@ -304,6 +324,20 @@ describe('monday workspace folders (integration)', () => {
     children: [{ id: '500', name: 'Q2 plan' }],
   };
 
+  it('handles a missing `folders` field gracefully (treats as empty page)', async () => {
+    const out = await drive(
+      ['workspace', 'folders', '5', '--json'],
+      {
+        interactions: [
+          { operation_name: 'WorkspaceFolders', response_body: { data: {} } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+  });
+
   it('returns the projected folder list', async () => {
     const out = await drive(
       ['workspace', 'folders', '5', '--json'],
@@ -358,5 +392,35 @@ describe('monday workspace folders (integration)', () => {
     );
     expect(out.exitCode).toBe(0);
     expect(out.requests).toBe(2);
+  });
+
+  it('--all + --limit-pages emits pagination_cap_reached', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleFolder,
+      id: String(1000 + i),
+    }));
+    const out = await drive(
+      ['workspace', 'folders', '5', '--all', '--limit', '25', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceFolders',
+            match_variables: { page: 1 },
+            response: { data: { folders: fullPage } },
+          },
+          {
+            operation_name: 'WorkspaceFolders',
+            match_variables: { page: 2 },
+            response: { data: { folders: fullPage } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly { readonly code: string }[];
+    };
+    expect(env.meta.has_more).toBe(true);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
   });
 });

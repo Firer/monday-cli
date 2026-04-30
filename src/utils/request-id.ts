@@ -25,7 +25,10 @@ export const fixedRequestIdGenerator = (
     if (i < ids.length) {
       const id = ids[i];
       i++;
-      // narrow: index check above guarantees defined
+      /* c8 ignore next 4 — narrow: the `i < ids.length` guard above
+         already proves `ids[i]` is defined; the explicit check
+         exists only because `noUncheckedIndexedAccess` widens the
+         indexed type. */
       if (id !== undefined) {
         return id;
       }

@@ -87,6 +87,11 @@ export const boardSubscribersCommand: CommandModule<
           );
         }
         const subs = boardSubscribersCommand.outputSchema.parse(
+          /* c8 ignore next — the GraphQL `subscribers` selection is
+             non-nullable per Monday's schema, but the SDK's typed
+             shape models it as optional. The fallback exists for
+             that type-vs-runtime gap; in practice every successful
+             response carries a (possibly empty) array. */
           first.subscribers ?? [],
         );
         emitSuccess({

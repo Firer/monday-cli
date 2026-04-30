@@ -355,6 +355,46 @@ describe('createFetchTransport — failure shapes', () => {
     expect(caught.message).toBe('fetch failed: tls error');
   });
 
+  it('DNS error via message-only signal (no err.code, just "getaddrinfo" in message)', async () => {
+    const e = new TypeError(
+      'fetch failed: getaddrinfo ENOTFOUND api.example',
+    );
+    const fakeFetch: typeof fetch = () => Promise.reject(e);
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+    let caught: { message?: string } = {};
+    try {
+      await transport.request({ query: '{ me { id } }' });
+    } catch (err) {
+      caught = err as { message?: string };
+    }
+    expect(caught.message).toBe('fetch failed: dns lookup failed');
+  });
+
+  it('eai_again message-only triggers DNS branch', async () => {
+    const e = new TypeError('fetch failed: EAI_AGAIN');
+    const fakeFetch: typeof fetch = () => Promise.reject(e);
+    const transport = createFetchTransport({
+      endpoint: 'https://api.example/v2',
+      apiToken: 'tok',
+      apiVersion: '2026-01',
+      timeoutMs: 5_000,
+      fetchImpl: fakeFetch,
+    });
+    let caught: { message?: string } = {};
+    try {
+      await transport.request({ query: '{ me { id } }' });
+    } catch (err) {
+      caught = err as { message?: string };
+    }
+    expect(caught.message).toBe('fetch failed: dns lookup failed');
+  });
+
   it('non-Error throw → "fetch failed"', async () => {
     // Drives the "err is not instanceof Error" branch of
     // describeFetchError. Vitest's lint rule prefers Errors as

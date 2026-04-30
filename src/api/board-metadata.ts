@@ -232,6 +232,7 @@ const fetchLive = async (
 export const loadBoardMetadata = async (
   inputs: LoadBoardMetadataInputs,
 ): Promise<BoardMetadataLoadResult> => {
+  /* c8 ignore next — defensive fallback; tests always pass `env`. */
   const env = inputs.env ?? process.env;
   const boardId = BoardIdSchema.parse(inputs.boardId);
   const root = resolveCacheRoot({ env });
@@ -303,6 +304,7 @@ export const refreshBoardMetadata = async (
  */
 export const evictBoardMetadata = async (
   boardId: BoardId | string,
+  /* c8 ignore next — defensive default; callers pass an explicit env. */
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> => {
   const id = BoardIdSchema.parse(boardId);

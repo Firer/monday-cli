@@ -110,6 +110,9 @@ export interface RunContext {
 }
 
 const isSigintReason = (reason: unknown): boolean => {
+  /* c8 ignore next 3 — defensive non-object guard. Production
+     callers always pass `{kind: 'sigint'}` via `runWithSignals`;
+     a primitive reason is only possible via direct `run()` misuse. */
   if (typeof reason !== 'object' || reason === null) {
     return false;
   }

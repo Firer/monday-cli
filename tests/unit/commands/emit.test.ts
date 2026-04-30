@@ -382,3 +382,79 @@ const makeCollectionModule = (): CommandModule<unknown, readonly { id: string; n
   };
   return mod;
 };
+
+describe('emitSuccess — collection meta passthrough', () => {
+  it('threads next_cursor / has_more / total_returned / columns into meta', async () => {
+    const mod: CommandModule<unknown, readonly { id: string; name: string }[]> = {
+      name: 'demo.cursor',
+      summary: 'cursor walker',
+      examples: ['monday demo cursor'],
+      idempotent: true,
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.array(z.object({ id: z.string(), name: z.string() })),
+      attach: (program, ctx) => {
+        const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+        noun
+          .command('cursor')
+          .description('cursor walker')
+          .action(() => {
+            emitSuccess({
+              ctx,
+              data: [{ id: '1', name: 'one' }],
+              schema: mod.outputSchema,
+              programOpts: program.opts(),
+              kind: 'collection',
+              nextCursor: 'cur-abc',
+              hasMore: true,
+              totalReturned: 99,
+              columns: {
+                status_4: { id: 'status_4', type: 'status', title: 'Status' },
+              },
+            });
+          });
+      },
+    };
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'cursor', '--json'],
+      extraCommands: [mod],
+    });
+    await run(options);
+    const env = JSON.parse(captured.stdout()) as {
+      meta: {
+        next_cursor: string | null;
+        has_more: boolean;
+        total_returned: number;
+        columns: Readonly<Record<string, unknown>>;
+      };
+    };
+    expect(env.meta.next_cursor).toBe('cur-abc');
+    expect(env.meta.has_more).toBe(true);
+    expect(env.meta.total_returned).toBe(99);
+    expect(env.meta.columns).toEqual({
+      status_4: { id: 'status_4', type: 'status', title: 'Status' },
+    });
+  });
+
+  it('--ndjson is rejected for single-resource commands', async () => {
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'echo', '--name', 'a', '--output', 'ndjson'],
+      extraCommands: [echoModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(1);
+    const env = JSON.parse(captured.stderr()) as { error: { code: string } };
+    expect(env.error.code).toBe('usage_error');
+  });
+
+  it('--output text is rejected for collection commands', async () => {
+    const list = makeCollectionModule();
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'list', '--output', 'text'],
+      extraCommands: [list],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(1);
+    const env = JSON.parse(captured.stderr()) as { error: { code: string } };
+    expect(env.error.code).toBe('usage_error');
+  });
+});

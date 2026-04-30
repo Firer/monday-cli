@@ -206,6 +206,23 @@ describe('resolveColumn — explicit prefix syntax', () => {
     const meta = board([col({ id: 'col_1', title: 'Status' })]);
     expect(resolveColumn(meta, 'title:status').via).toBe('prefix_title');
   });
+
+  it('title: prefix raises ambiguous_column when the case-fold fallback is itself ambiguous', () => {
+    const meta = board([
+      col({ id: 'col_a', title: 'Status' }),
+      col({ id: 'col_b', title: 'STATUS' }),
+    ]);
+    expect(() => resolveColumn(meta, 'title:sTaTuS')).toThrow(
+      expect.objectContaining({ code: 'ambiguous_column' }) as Error,
+    );
+  });
+
+  it('title: prefix raises column_not_found when nothing matches at all', () => {
+    const meta = board([col({ id: 'col_1', title: 'Status' })]);
+    expect(() => resolveColumn(meta, 'title:does-not-exist')).toThrow(
+      expect.objectContaining({ code: 'column_not_found' }) as Error,
+    );
+  });
 });
 
 let tmpRoot: string;

@@ -362,6 +362,10 @@ const collisionWarning = (
 export const resolveColumnWithRefresh = async (
   inputs: ResolveColumnWithRefreshInputs,
 ): Promise<ResolveColumnWithRefreshResult> => {
+  /* c8 ignore next — `inputs.env` is always supplied in tests and
+     in the production action body (via `ctx.env`); the
+     `?? process.env` fallback is defensive against a future
+     embedder that constructs the resolver bare. */
   const env = inputs.env ?? process.env;
   const includeArchived = inputs.includeArchived ?? false;
 

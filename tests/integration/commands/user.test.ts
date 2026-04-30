@@ -62,7 +62,9 @@ interface EnvelopeShape {
     readonly retrieved_at: string;
     readonly complexity: unknown;
     readonly total_returned?: number;
+    readonly has_more?: boolean;
   };
+  readonly warnings?: readonly { readonly code: string }[];
 }
 
 const parseEnvelope = (s: string): EnvelopeShape =>
@@ -106,6 +108,22 @@ const sampleUser = {
   join_date: '2026-01-01',
   last_activity: '2026-04-30T09:00:00Z',
 };
+
+describe('monday user list — null-data resilience', () => {
+  it('handles a missing `users` field gracefully', async () => {
+    const out = await drive(
+      ['user', 'list', '--json'],
+      {
+        interactions: [
+          { operation_name: 'UserList', response_body: { data: {} } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+  });
+});
 
 describe('monday user list', () => {
   it('returns the projected list with collection meta', async () => {
@@ -173,6 +191,38 @@ describe('monday user list', () => {
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout);
     expect(env.meta.total_returned).toBe(26);
+  });
+
+  it('--all + --limit-pages emits pagination_cap_reached', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleUser,
+      id: String(100 + i),
+      email: `u${String(i)}@x.test`,
+    }));
+    const out = await drive(
+      ['user', 'list', '--all', '--limit', '25', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UserList',
+            match_variables: { page: 1 },
+            response: { data: { users: fullPage } },
+          },
+          {
+            operation_name: 'UserList',
+            match_variables: { page: 2 },
+            response: { data: { users: fullPage } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      meta: { has_more?: boolean };
+      warnings: readonly { readonly code: string }[];
+    };
+    expect(env.meta.has_more).toBe(true);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
   });
 
   it('rejects --all + --page', async () => {

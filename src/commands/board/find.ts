@@ -25,6 +25,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { findOne } from '../../api/resolvers.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import { walkPages } from '../../api/walk-pages.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 const BOARD_FIND_QUERY = `
@@ -121,28 +122,8 @@ export const boardFindCommand: CommandModule<
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
         const cap = parsed.limitPages ?? DEFAULT_PAGES;
-        const collected: unknown[] = [];
-        // Walk at least once so the caller always sees a network
-        // attempt; the find verb has no notion of "skipped fetch".
-        const firstVariables: Record<string, unknown> = {
-          limit: PAGE_SIZE,
-          page: 1,
-        };
-        if (parsed.workspace !== undefined) {
-          firstVariables.workspaceIds = [parsed.workspace];
-        }
-        if (parsed.state !== undefined) {
-          firstVariables.state = parsed.state;
-        }
-        let lastResponse = await client.raw<RawBoards>(
-          BOARD_FIND_QUERY,
-          firstVariables,
-          { operationName: 'BoardFind' },
-        );
-        const firstPage = lastResponse.data.boards ?? [];
-        collected.push(...firstPage);
-        if (firstPage.length === PAGE_SIZE) {
-          for (let page = 2; page <= cap; page++) {
+        const walked = await walkPages<unknown, RawBoards>({
+          fetchPage: (page) => {
             const variables: Record<string, unknown> = {
               limit: PAGE_SIZE,
               page,
@@ -150,25 +131,22 @@ export const boardFindCommand: CommandModule<
             if (parsed.workspace !== undefined) {
               variables.workspaceIds = [parsed.workspace];
             }
-            if (parsed.state !== undefined) {
-              variables.state = parsed.state;
-            }
-            lastResponse = await client.raw<RawBoards>(
-              BOARD_FIND_QUERY,
-              variables,
-              { operationName: 'BoardFind' },
-            );
-            const data = lastResponse.data.boards ?? [];
-            if (data.length === 0) break;
-            collected.push(...data);
-            if (data.length < PAGE_SIZE) break;
-          }
-        }
+            if (parsed.state !== undefined) variables.state = parsed.state;
+            return client.raw<RawBoards>(BOARD_FIND_QUERY, variables, {
+              operationName: 'BoardFind',
+            });
+          },
+          extractItems: (r) => r.data.boards ?? [],
+          pageSize: PAGE_SIZE,
+          all: true,
+          maxPages: cap,
+        });
+        const lastResponse = walked.lastResponse;
 
         // Strict-parse the haystack so a malformed response surfaces
         // as `internal_error` from the runner — mirrors how every
         // other M3 list-shaped command behaves.
-        const haystack = z.array(boardSchema).parse(collected);
+        const haystack = z.array(boardSchema).parse(walked.items);
 
         const result = findOne(
           haystack,

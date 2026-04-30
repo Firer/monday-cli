@@ -158,8 +158,10 @@ const resolveMulti = <T>(
         : a.id.length - b.id.length,
     );
     const [winner] = sorted;
+    /* c8 ignore next 8 — defensive: caller passes non-empty `matches`,
+       so `sorted[0]` is always defined. Guard exists for
+       `noUncheckedIndexedAccess` narrowing. */
     if (winner === undefined) {
-      // Unreachable — `matches` was non-empty when we entered.
       throw new ApiError(
         'not_found',
         `No ${kind} matches name ${JSON.stringify(query)}`,
@@ -294,6 +296,7 @@ const matchInCache = (
 export const userByEmail = async (
   inputs: UserByEmailInputs,
 ): Promise<UserByEmailResult> => {
+  /* c8 ignore next — defensive fallback; tests always pass `env`. */
   const env = inputs.env ?? process.env;
   const noCache = inputs.noCache ?? false;
 

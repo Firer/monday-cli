@@ -225,11 +225,16 @@ export type AbortReason =
  * to the union without updating the switch fails type-checking
  * locally rather than only at the call site.
  */
+/* c8 ignore start — defensive guard; type system makes the `never`
+   parameter unreachable. Exists so adding a new variant to a
+   discriminated union without updating the consuming switch fails
+   type-checking, not silently. */
 const assertNever = (value: never, context: string): never => {
   throw new InternalError(
     `unreachable: ${context} reached with ${JSON.stringify(value)}`,
   );
 };
+/* c8 ignore stop */
 
 /**
  * Maps an error code to the exit code documented in `cli-design.md`
@@ -269,6 +274,7 @@ export const exitCodeForError = (code: ErrorCode): ExitCode => {
     case 'dev_board_misconfigured':
     case 'internal_error':
       return 2;
+    /* c8 ignore next 2 — assertNever is an exhaustiveness guard. */
     default:
       return assertNever(code, 'exitCodeForError');
   }
@@ -301,6 +307,7 @@ export const errorForAbortReason = (reason: AbortReason): MondayCliError => {
         reason.reason ?? 'cancelled',
         { details: { abort_reason: 'cancel' } },
       );
+    /* c8 ignore next 2 — assertNever is an exhaustiveness guard. */
     default:
       return assertNever(reason, 'errorForAbortReason');
   }

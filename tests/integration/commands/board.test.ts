@@ -147,6 +147,22 @@ const sampleBoard = {
   updated_at: '2026-04-30T10:00:00Z',
 };
 
+describe('monday board list — null-data resilience', () => {
+  it('handles a missing `boards` field gracefully', async () => {
+    const out = await drive(
+      ['board', 'list', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardList', response_body: { data: {} } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+  });
+});
+
 describe('monday board list', () => {
   it('returns the projected list', async () => {
     const out = await drive(
@@ -339,6 +355,53 @@ describe('monday board find', () => {
     expect(out.requests).toBe(2);
   });
 
+  it('walks multiple pages with --workspace + --state filters threaded through', async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) =>
+      findFixture({ id: String(2000 + i), name: `Other ${String(i)}` }),
+    );
+    const shortPage = [findFixture({ id: '888', name: 'Tasks' })];
+    const out = await drive(
+      [
+        'board',
+        'find',
+        'Tasks',
+        '--workspace',
+        '5',
+        '--state',
+        'archived',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardFind',
+            match_variables: {
+              page: 1,
+              workspaceIds: ['5'],
+              state: 'archived',
+            },
+            response: { data: { boards: fullPage } },
+          },
+          {
+            operation_name: 'BoardFind',
+            match_variables: {
+              page: 2,
+              workspaceIds: ['5'],
+              state: 'archived',
+            },
+            response: { data: { boards: shortPage } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('888');
+    expect(out.requests).toBe(2);
+  });
+
   it('--limit-pages caps the walk', async () => {
     // The walker stops after `--limit-pages` even if every page is full.
     const fullPage = Array.from({ length: 100 }, (_, i) =>
@@ -477,6 +540,30 @@ describe('monday board describe', () => {
     expect(out2.requests).toBe(0);
   });
 
+  it('--include-archived shows archived columns and deleted groups', async () => {
+    const cols = [
+      { ...baseColumn, id: 'live', title: 'Live' },
+      { ...baseColumn, id: 'gone', title: 'Gone', archived: true },
+    ];
+    const groups = [
+      { id: 'g1', title: 'G1', color: null, position: '1', archived: false, deleted: false },
+      { id: 'g2', title: 'G2', color: null, position: '2', archived: true, deleted: false },
+    ];
+    const out = await drive(
+      ['board', 'describe', '111', '--include-archived', '--json'],
+      { interactions: [metadataResponse(cols, groups)] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        columns: readonly { id: string }[];
+        groups: readonly { id: string }[];
+      };
+    };
+    expect(env.data.columns.map((c) => c.id)).toEqual(['live', 'gone']);
+    expect(env.data.groups.map((g) => g.id)).toEqual(['g1', 'g2']);
+  });
+
   it('--no-cache always fetches live', async () => {
     // First call seeds the cache.
     const live1 = await drive(
@@ -493,6 +580,168 @@ describe('monday board describe', () => {
     const env = parseEnvelope(live2.stdout);
     expect(env.meta.source).toBe('live');
     expect(live2.requests).toBe(1);
+  });
+});
+
+describe('monday board list — variable threading', () => {
+  it('--workspace + --state become workspaceIds + state on the wire', async () => {
+    const out = await drive(
+      ['board', 'list', '--workspace', '5', '--state', 'archived', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardList',
+            match_variables: { workspaceIds: ['5'], state: 'archived' },
+            response: { data: { boards: [sampleBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('--all + --page is a usage_error', async () => {
+    const out = await drive(
+      ['board', 'list', '--all', '--page', '2', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--all + --limit-pages caps with pagination_cap_reached warning', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...sampleBoard,
+      id: String(1000 + i),
+    }));
+    const out = await drive(
+      ['board', 'list', '--all', '--limit', '25', '--limit-pages', '2', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardList',
+            match_variables: { page: 1 },
+            response: { data: { boards: fullPage } },
+          },
+          {
+            operation_name: 'BoardList',
+            match_variables: { page: 2 },
+            response: { data: { boards: fullPage } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly { readonly code: string }[];
+    };
+    expect(env.meta.has_more).toBe(true);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
+  });
+});
+
+describe('monday board subscribers — extended', () => {
+  it('not_found when the board does not exist', async () => {
+    const out = await drive(
+      ['board', 'subscribers', '999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardSubscribers',
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('rejects a non-numeric board id at the parse boundary', async () => {
+    const out = await drive(
+      ['board', 'subscribers', 'abc', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('emits has_more=false on the single-fetch payload', async () => {
+    const out = await drive(
+      ['board', 'subscribers', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardSubscribers',
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    subscribers: [],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.has_more).toBe(false);
+    expect(env.meta.total_returned).toBe(0);
+  });
+});
+
+describe('monday board groups — extended', () => {
+  it('--include-archived reveals archived/deleted groups', async () => {
+    const groups = [
+      {
+        id: 'g1',
+        title: 'Live',
+        color: 'red',
+        position: '1.000',
+        archived: false,
+        deleted: false,
+      },
+      {
+        id: 'g2',
+        title: 'Old',
+        color: null,
+        position: '2.000',
+        archived: true,
+        deleted: false,
+      },
+      {
+        id: 'g3',
+        title: 'Gone',
+        color: null,
+        position: '3.000',
+        archived: false,
+        deleted: true,
+      },
+    ];
+    const out1 = await drive(
+      ['board', 'groups', '111', '--json'],
+      { interactions: [metadataResponse([], groups)] },
+    );
+    const env1 = parseEnvelope(out1.stdout) as EnvelopeShape & {
+      data: readonly { id: string }[];
+    };
+    expect(env1.data.map((g) => g.id)).toEqual(['g1']);
+
+    const out2 = await drive(
+      ['--no-cache', 'board', 'groups', '111', '--include-archived', '--json'],
+      { interactions: [metadataResponse([], groups)] },
+    );
+    const env2 = parseEnvelope(out2.stdout) as EnvelopeShape & {
+      data: readonly { id: string }[];
+    };
+    expect(env2.data.map((g) => g.id)).toEqual(['g1', 'g2', 'g3']);
   });
 });
 
