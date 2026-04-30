@@ -90,9 +90,9 @@ export type { DateResolution, DateResolutionContext } from './dates.js';
  *     the per-mutation projection.
  *   - `rich`   — plain-object payload accepted by
  *     `change_column_value` and the per-column entry in
- *     `change_multiple_column_values`. Used by `status` and
- *     `dropdown` today; `date` and `people` ship in follow-up
- *     sessions but the typed slot already exists.
+ *     `change_multiple_column_values`. Used by `status`,
+ *     `dropdown`, and `date` today; `people` ships in a
+ *     follow-up session but the typed slot already exists.
  */
 export type ColumnValuePayload =
   | { readonly format: 'simple'; readonly value: string }
@@ -154,14 +154,16 @@ export interface TranslateColumnValueInputs {
  * **Throws** `ApiError`:
  *   - `unsupported_column_type` — type not in the friendly
  *     allowlist, or in the allowlist but awaiting M5a follow-up
- *     (`date` / `people`, currently).
+ *     (`people`, currently).
  *
  * **Throws** `UsageError`:
  *   - `usage_error` — for status / dropdown numeric input that
- *     exceeds `Number.MAX_SAFE_INTEGER`, or for dropdown input
- *     that contains no labels and no IDs after trim + filter.
- *     See `unsafeIntegerError` and the dropdown empty-input
- *     branch for the documented messages.
+ *     exceeds `Number.MAX_SAFE_INTEGER`, dropdown input that
+ *     contains no labels and no IDs after trim + filter, or
+ *     `date` input that does not match any supported form
+ *     (ISO date, ISO date+time, or relative token). See
+ *     `unsafeIntegerError`, the dropdown empty-input branch,
+ *     and `dates.parseDateInput` for the documented messages.
  */
 export const translateColumnValue = (
   inputs: TranslateColumnValueInputs,

@@ -236,18 +236,25 @@ const parseIsoDateTime = (raw: string): DatePayload | null => {
 /**
  * Validates that a year/month/day triple represents a real
  * calendar date. Catches `2026-02-30`, `2026-13-01`,
- * `2026-04-31`. Uses Date.UTC + round-trip — the simplest
- * stdlib-only way to validate without listing leap-year
- * rules.
+ * `2026-04-31`. Round-trips through `setUTCFullYear` — `Date.UTC`
+ * alone maps two-digit years 0-99 onto 1900-1999, so a literal
+ * `0001-01-01` would land at `1901-01-01` and round-trip past
+ * the equality check incorrectly. `setUTCFullYear` accepts the
+ * literal year so pre-1900 inputs validate honestly. The
+ * translator's contract is "produce the documented wire shape,
+ * let Monday reject" — Monday rejects ancient dates as
+ * `validation_failed` and the CLI shouldn't pre-empt that
+ * decision with a silent local conversion. Codex review pass-1
+ * finding F2.
  */
 const isCalendarDate = (y: number, m: number, d: number): boolean => {
   if (m < 1 || m > 12 || d < 1 || d > 31) return false;
-  const utc = Date.UTC(y, m - 1, d);
-  const round = new Date(utc);
+  const dt = new Date(0);
+  dt.setUTCFullYear(y, m - 1, d);
   return (
-    round.getUTCFullYear() === y &&
-    round.getUTCMonth() === m - 1 &&
-    round.getUTCDate() === d
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
   );
 };
 
@@ -291,6 +298,9 @@ const parseRelative = (
     const amount = Number(amountStr);
     if (!Number.isSafeInteger(amount)) return null;
     const days = amount * (unit === 'w' ? 7 : 1);
+    if (days > MAX_RELATIVE_DAYS) {
+      throw outOfRangeRelativeOffsetError(verbatim, 'days', days, MAX_RELATIVE_DAYS);
+    }
     const signed = signStr === '-' ? -days : days;
     return resolveDateOnly(now, signed, timezone, verbatim);
   }
@@ -304,11 +314,68 @@ const parseRelative = (
     if (signStr === undefined || amountStr === undefined) return null;
     const amount = Number(amountStr);
     if (!Number.isSafeInteger(amount)) return null;
+    if (amount > MAX_RELATIVE_HOURS) {
+      throw outOfRangeRelativeOffsetError(verbatim, 'hours', amount, MAX_RELATIVE_HOURS);
+    }
     const signedHours = signStr === '-' ? -amount : amount;
     return resolveDateTime(now, signedHours, timezone, verbatim);
   }
   return null;
 };
+
+/**
+ * Maximum magnitude for a `+Nd` / `-Nd` / `+Nw` / `-Nw`
+ * relative offset, expressed in days. ~100 years covers every
+ * reasonable agent use case (project deadlines, retention
+ * windows, compliance dates) and stays well inside JavaScript's
+ * Date range (±100M days from epoch). Beyond this bound the
+ * date math would silently wrap into nonsense (`+99999999d`
+ * produced `{date:"0NaN-NaN-NaN"}` pre-fix). Codex review
+ * pass-1 finding F1.
+ */
+const MAX_RELATIVE_DAYS = 36_500;
+
+/**
+ * Maximum magnitude for a `+Nh` / `-Nh` relative offset, in
+ * hours. ~100 years matches MAX_RELATIVE_DAYS so the two
+ * grammars have a consistent bound; beyond this the
+ * `now.getTime() + offset` math could land outside Date range
+ * and throw RangeError instead of the typed UsageError the
+ * translator's contract promises.
+ */
+const MAX_RELATIVE_HOURS = 876_000;
+
+/**
+ * Builds the `usage_error` for a relative offset that fits in
+ * the safe-integer range but exceeds the translator's max
+ * magnitude bound. Carries the literal input + the unit + the
+ * actual / max magnitudes so an agent's debug log shows what
+ * to clamp to without consulting Monday's docs.
+ */
+const outOfRangeRelativeOffsetError = (
+  input: string,
+  unit: 'days' | 'hours',
+  amount: number,
+  maxAmount: number,
+): UsageError =>
+  new UsageError(
+    `Relative date offset "${input}" resolves to ${amount.toString()} ` +
+      `${unit}, which exceeds the translator's maximum magnitude of ` +
+      `${maxAmount.toString()} ${unit} (~100 years). Use an explicit ISO ` +
+      `date instead, or pass --set-raw to bypass the friendly translator.`,
+    {
+      details: {
+        column_type: 'date',
+        raw_input: input,
+        unit,
+        amount,
+        max_amount: maxAmount,
+        hint:
+          'examples: --set due=2126-04-29 (explicit ISO), or ' +
+          "--set-raw due='{\"date\":\"2126-04-29\"}'",
+      },
+    },
+  );
 
 /**
  * Resolves a date-only relative offset (today, tomorrow, +Nd,

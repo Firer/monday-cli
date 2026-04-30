@@ -325,13 +325,19 @@ describe('parseDateInput — DST boundaries (Pacific/Auckland)', () => {
   });
 
   it('+24h across fall-back shifts wall-clock hour by -1 in NZ', () => {
-    // 2026-04-04 14:00 UTC = 2026-04-05 03:00 NZDT (last hour
-    // of NZDT before the fall-back at 03:00 → 02:00 NZST).
-    // +24h = 2026-04-05 14:00 UTC = 2026-04-06 02:00 NZST.
-    // Wall-clock hour shifted from 03:00 to 02:00.
-    const now = frozenClock('2026-04-04T14:00:00Z');
+    // The fall-back happens at 03:00 NZDT on Apr 5 = 14:00 UTC
+    // Apr 4. Codex review pass-1 finding F3: a start instant
+    // OF EXACTLY 14:00 UTC sits at the transition itself, where
+    // Intl reports 02:00 NZST (post-transition). To pin the
+    // intended -1h wall-clock shift the start has to be
+    // pre-transition. 13:30Z gives:
+    //   start  = 2026-04-04T13:30 UTC = 2026-04-05T02:30 NZDT (still NZDT)
+    //   +24h   = 2026-04-05T13:30 UTC = 2026-04-06T01:30 NZST (now NZST)
+    // Wall-clock shifted from 02:30 to 01:30 — the -1h fall-back
+    // hour.
+    const now = frozenClock('2026-04-04T13:30:00Z');
     const out = parseDateInput('+24h', 'due', { now, timezone: AUCKLAND });
-    expect(out.payload).toEqual({ date: '2026-04-06', time: '02:00:00' });
+    expect(out.payload).toEqual({ date: '2026-04-06', time: '01:30:00' });
   });
 
   it('resolvedFrom.now reflects the +13/+12 NZ offset correctly', () => {
@@ -457,6 +463,121 @@ describe('parseDateInput — error paths', () => {
       if (!(err instanceof UsageError)) throw err;
       expect(err.message).toContain('"project_due"');
     }
+  });
+});
+
+describe('parseDateInput — relative offset out-of-range bound (Codex F1)', () => {
+  // Pre-fix, +99999999d produced {date:"0NaN-NaN-NaN"} — the
+  // safe-integer check passed but the resulting Date was beyond
+  // JS's representable range, and getUTCFullYear() returned NaN.
+  // The bound caps relative offsets to ~100 years magnitude so
+  // the wire shape stays valid and the failure mode is a typed
+  // usage_error.
+
+  it('+50000d (>100 years) throws usage_error with the bound named in details', () => {
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    expect(() =>
+      parseDateInput('+50000d', 'due', { now, timezone: LONDON }),
+    ).toThrow(UsageError);
+    expect(() =>
+      parseDateInput('+50000d', 'due', { now, timezone: LONDON }),
+    ).toThrow(/exceeds the translator's maximum magnitude/u);
+    try {
+      parseDateInput('+50000d', 'due', { now, timezone: LONDON });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_type: 'date',
+        unit: 'days',
+        amount: 50000,
+        max_amount: 36500,
+      });
+    }
+  });
+
+  it('+10000w (= 70000 days, > 100 years) throws because weeks multiply', () => {
+    // The bound is on days, so a large weeks value still has
+    // to be checked post-multiply. Pinned so a future "bound
+    // weeks separately" refactor doesn't quietly miss this.
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    expect(() =>
+      parseDateInput('+10000w', 'due', { now, timezone: LONDON }),
+    ).toThrow(UsageError);
+  });
+
+  it('+1000000h (~114 years) throws usage_error with hours unit in details', () => {
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    expect(() =>
+      parseDateInput('+1000000h', 'due', { now, timezone: LONDON }),
+    ).toThrow(UsageError);
+    try {
+      parseDateInput('+1000000h', 'due', { now, timezone: LONDON });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.details).toMatchObject({
+        unit: 'hours',
+        amount: 1000000,
+        max_amount: 876000,
+      });
+    }
+  });
+
+  it('+36500d (= max) succeeds — bound is inclusive', () => {
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    const out = parseDateInput('+36500d', 'due', { now, timezone: LONDON });
+    // 36500 days from 2026-04-29 ≈ 2126-04-04 (allow either
+    // side of the leap-year correction; just assert the
+    // shape, not the exact day, so the test stays robust to
+    // the leap-day count between 2026 and 2126).
+    expect(out.payload).toMatchObject({
+      date: expect.stringMatching(/^21\d{2}-\d{2}-\d{2}$/u) as unknown,
+    });
+  });
+
+  it('+36501d (max + 1) throws — bound is enforced strictly', () => {
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    expect(() =>
+      parseDateInput('+36501d', 'due', { now, timezone: LONDON }),
+    ).toThrow(UsageError);
+  });
+
+  it('-50000d (large negative magnitude) throws — bound applies in both directions via |sign|', () => {
+    // The implementation checks `days > MAX` before applying
+    // the sign, so -50000 still trips the same bound.
+    const now = frozenClock('2026-04-29T12:00:00Z');
+    expect(() =>
+      parseDateInput('-50000d', 'due', { now, timezone: LONDON }),
+    ).toThrow(UsageError);
+  });
+});
+
+describe('parseDateInput — pre-1900 ISO date (Codex F2)', () => {
+  // Pre-fix, isCalendarDate used Date.UTC(y, m-1, d) which maps
+  // years 0-99 onto 1900-1999 (a JS legacy quirk for two-digit
+  // years). 0001-01-01 round-tripped to 1901-01-01 and got
+  // rejected. setUTCFullYear-based round-trip accepts the
+  // literal year. Translator's contract is "let Monday be
+  // the validator" — pre-1900 dates are Monday's call to
+  // accept or reject as validation_failed, not the CLI's.
+
+  it('accepts 1899-12-31 (one day before the JS two-digit-year boundary)', () => {
+    const out = parseDateInput('1899-12-31', 'due');
+    expect(out.payload).toEqual({ date: '1899-12-31' });
+  });
+
+  it('accepts 0099-12-31 (inside the JS two-digit-year range)', () => {
+    const out = parseDateInput('0099-12-31', 'due');
+    expect(out.payload).toEqual({ date: '0099-12-31' });
+  });
+
+  it('accepts 0001-01-01 (year 1)', () => {
+    const out = parseDateInput('0001-01-01', 'due');
+    expect(out.payload).toEqual({ date: '0001-01-01' });
+  });
+
+  it('still rejects an impossible pre-1900 date (0099-02-30)', () => {
+    expect(() => parseDateInput('0099-02-30', 'due')).toThrow(UsageError);
   });
 });
 
