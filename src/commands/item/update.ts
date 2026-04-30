@@ -1276,6 +1276,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // would surface as `live` even though the resolver served from
   // cache. M4 pinned this exact regression for read commands; the
   // bulk write path replicated the bug.
+  //
+  // The items_page walk and per-item mutations always fire live —
+  // merge that into `aggregateSource` so a fully-cached metadata +
+  // column-resolution path still surfaces as `mixed` (cache-served
+  // metadata + live wire calls). Mirrors the empty-match no-op
+  // path's `emptyEnvelopeSource` derivation.
+  const finalSource = mergeSourceForRemap(aggregateSource, 'live');
   emitMutation({
     ctx,
     data: {
@@ -1289,7 +1296,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     schema: bulkLiveDataSchema,
     programOpts,
     warnings: collectedWarnings,
-    source: aggregateSource,
+    source: finalSource,
     cacheAgeSeconds: meta.cacheAgeSeconds,
     apiVersion,
     resolvedIds,

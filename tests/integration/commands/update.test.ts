@@ -429,6 +429,24 @@ describe('monday update create (integration, M5b)', () => {
       const env = parseEnvelope(out.stderr);
       expect(env.error?.code).toBe('usage_error');
     });
+
+    it('rejects empty --body-file content as usage_error (after trim)', async () => {
+      // Covers create.ts:172 — empty file (or whitespace-only that
+      // trims to nothing) surfaces usage_error rather than posting
+      // an empty comment Monday would reject anyway.
+      const path = join(tmpRoot, 'empty.md');
+      await writeFile(path, '   \n\n', 'utf8');
+      const out = await drive(
+        ['update', 'create', '12345', '--body-file', path, '--json'],
+        { interactions: [] },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { body_file?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.body_file).toBe(path);
+    });
   });
 
   it('surfaces typed internal_error for malformed Monday response', async () => {
