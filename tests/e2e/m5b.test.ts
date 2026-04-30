@@ -235,6 +235,78 @@ describe('M5b e2e — item clear (live)', () => {
   });
 });
 
+describe('M5b e2e — item update (multi --set + --name, atomic)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips --name + multi --set via change_multiple_column_values', async () => {
+    const renamedAndUpdated = {
+      ...sampleItem,
+      name: 'New title',
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'BoardMetadata',
+          response: { data: { boards: [sampleBoardMetadata] } },
+        },
+        {
+          operation_name: 'ItemUpdateMulti',
+          response: {
+            data: { change_multiple_column_values: renamedAndUpdated },
+          },
+        },
+      ],
+    };
+    const xdg = await mkdtemp(join(tmpdir(), 'monday-cli-e2e-update-'));
+    try {
+      server = await startFixtureServer({ cassette });
+      const result = await spawnCli({
+        args: [
+          'item',
+          'update',
+          '12345',
+          '--name',
+          'New title',
+          '--set',
+          'status=Done',
+          '--board',
+          '111',
+          '--json',
+          '--no-cache',
+        ],
+        env: fixtureEnv(server, { XDG_CACHE_HOME: xdg }),
+      });
+      expect(result.exitCode).toBe(0);
+      const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+        data: { id: string; name: string };
+        resolved_ids?: Readonly<Record<string, string>>;
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.name).toBe('New title');
+      expect(env.resolved_ids).toEqual({ status: 'status_4' });
+      expect(result.stdout).not.toContain(LEAK_CANARY);
+      expect(result.stderr).not.toContain(LEAK_CANARY);
+    } finally {
+      await rm(xdg, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('M5b e2e — item set --dry-run', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {

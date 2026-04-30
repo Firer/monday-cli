@@ -2716,3 +2716,416 @@ describe('monday item clear (integration, M5b)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday item update (integration, M5b — single-item path)', () => {
+  // Sample item post-update with two columns set + name renamed.
+  const updatedMultiItem = {
+    ...sampleItem,
+    name: 'New title',
+    column_values: [
+      {
+        id: 'status_4',
+        type: 'status',
+        text: 'Done',
+        value: '{"label":"Done","index":1}',
+        column: { title: 'Status' },
+      },
+      {
+        id: 'date4',
+        type: 'date',
+        text: '2026-05-15',
+        value: '{"date":"2026-05-15","time":null}',
+        column: { title: 'Due date' },
+      },
+    ],
+  };
+
+  it('live: multi --set bundles into change_multiple_column_values (atomic)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          // First column resolution → live BoardMetadata fetch
+          // (cache miss). Second column resolution hits the cache
+          // populated by the first call, so only one BoardMetadata
+          // interaction is needed.
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateMulti',
+            response: {
+              data: { change_multiple_column_values: updatedMultiItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    // Both tokens echo their resolved column IDs per cli-design
+    // §5.3 step 2.
+    expect(env.resolved_ids).toEqual({ status: 'status_4', date4: 'date4' });
+  });
+
+  it('live: single --set (one column) → change_simple_column_value or change_column_value', async () => {
+    const updatedSingle = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'update', '12345', '--set', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: updatedSingle } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: --name only → change_simple_column_value(column_id: "name", ...)', async () => {
+    const renamedItem = { ...sampleItem, name: 'New title' };
+    const out = await drive(
+      ['item', 'update', '12345', '--name', 'New title', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemUpdateSimple',
+            response: { data: { change_simple_column_value: renamedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { name: string };
+    };
+    expect(env.data.name).toBe('New title');
+  });
+
+  it('live: --name + --set bundles into change_multiple_column_values', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--name',
+        'New title',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateMulti',
+            response: {
+              data: { change_multiple_column_values: updatedMultiItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { name: string };
+    };
+    expect(env.data.name).toBe('New title');
+  });
+
+  it('rejects empty call (no --set, no --name) as usage_error', async () => {
+    const out = await drive(
+      ['item', 'update', '12345', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects malformed --set expression (no =) as usage_error', async () => {
+    const out = await drive(
+      ['item', 'update', '12345', '--set', 'no-equals', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('live: column_not_found surfaces typed error envelope', async () => {
+    const out = await drive(
+      ['item', 'update', '12345', '--set', 'NotAColumn=x', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('column_not_found');
+  });
+
+  it('live: --create-labels-if-missing flag threads through to mutation params', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--create-labels-if-missing',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateRich',
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'status_4',
+                      type: 'status',
+                      text: 'Done',
+                      value: '{"label":"Done","index":1}',
+                      column: { title: 'Status' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('--dry-run: single --set emits a §6.4 PlannedChange', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, unknown>>;
+        resolved_ids: Readonly<Record<string, string>>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_column_value');
+    expect(plan?.resolved_ids).toEqual({ status: 'status_4' });
+  });
+
+  it('--dry-run: multi --set emits change_multiple_column_values with both columns in diff', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, unknown>>;
+      }[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_multiple_column_values');
+    expect(plan?.diff).toHaveProperty('status_4');
+    expect(plan?.diff).toHaveProperty('date4');
+  });
+
+  it('--dry-run: --name + --set emits multi with name key alongside columns', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--name',
+        'New title',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, { from: unknown; to: unknown }>>;
+      }[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_multiple_column_values');
+    expect(plan?.diff.name).toEqual({
+      from: 'Refactor login',
+      to: 'New title',
+    });
+    expect(plan?.diff).toHaveProperty('status_4');
+  });
+
+  it('--dry-run: --name only emits change_simple_column_value with name diff', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--name',
+        'New title',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, { from: unknown; to: unknown }>>;
+      }[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_simple_column_value');
+    expect(plan?.diff.name).toEqual({
+      from: 'Refactor login',
+      to: 'New title',
+    });
+  });
+
+  it('selectMutation rejects duplicate column tokens in multi-set as usage_error', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'status=Doing',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('token never leaks in error envelopes (M5b regression)', async () => {
+    const out = await drive(
+      ['item', 'update', '12345', '--set', 'NotAColumn=x', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});

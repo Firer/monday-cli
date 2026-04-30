@@ -97,6 +97,19 @@ export interface PlanChangesInputs {
   /** The full list of `--set` pairs the command layer parsed. */
   readonly setEntries: readonly SetEntry[];
   /**
+   * Optional rename — the new value for the item's `name` field.
+   * Plumbed through `monday item update --name <n>`. The engine
+   * treats `name` as a synthetic field (it isn't a column on Monday's
+   * board.columns surface) — column resolution is skipped for the
+   * `name` slot, and the dry-run diff carries an extra `name` key
+   * alongside any column diff entries. When passed alongside one or
+   * more `setEntries`, the operation rolls into
+   * `change_multiple_column_values` with `name` included in the
+   * `column_values` map per Monday's API. Alone, the operation is
+   * `change_simple_column_value(column_id: "name", value: <n>)`.
+   */
+  readonly nameChange?: string;
+  /**
    * Date-resolution context — clock + tz for relative tokens. M5b's
    * command layer plumbs `MONDAY_TIMEZONE` env override here. When
    * omitted, the date translator falls back to system clock + tz.
@@ -187,16 +200,16 @@ export interface PlanChangesResult {
 export const planChanges = async (
   inputs: PlanChangesInputs,
 ): Promise<PlanChangesResult> => {
-  if (inputs.setEntries.length === 0) {
+  if (inputs.setEntries.length === 0 && inputs.nameChange === undefined) {
     // Defensive — the command layer is supposed to reject the
-    // no-`--set` case before reaching the engine. Surfacing as
-    // internal_error rather than usage_error because reaching this
-    // path is a wiring bug, not a user fault.
+    // no-`--set`-and-no-`--name` case before reaching the engine.
+    // Surfacing as internal_error rather than usage_error because
+    // reaching this path is a wiring bug, not a user fault.
     throw new ApiError(
       'internal_error',
-      'planChanges called with zero --set entries; the command ' +
-        'layer should reject the no-`--set` case before invoking the ' +
-        'dry-run engine.',
+      'planChanges called with zero --set entries and no --name change; ' +
+        'the command layer should reject the empty case before invoking ' +
+        'the dry-run engine.',
       { details: { board_id: inputs.boardId, item_id: inputs.itemId } },
     );
   }
@@ -372,13 +385,24 @@ export const planChanges = async (
       return translated;
     },
   );
-  const mutation: SelectedMutation = selectMutation(orderedTranslated);
+  // When `--name <n>` is present, prepend a synthetic translated
+  // value so `selectMutation` handles bundling uniformly: name-only
+  // → `change_simple_column_value(column_id: "name", ...)`; name +
+  // columns → `change_multiple_column_values` with name as a key.
+  const allTranslated: readonly TranslatedColumnValue[] =
+    inputs.nameChange === undefined
+      ? orderedTranslated
+      : [buildNameTranslatedValue(inputs.nameChange), ...orderedTranslated];
+  const mutation: SelectedMutation = selectMutation(allTranslated);
   const operation: PlannedChange['operation'] = mutation.kind;
 
   // 4) Build diff cells per resolved column, projecting `to` from
   //    the selected mutation's wire shape. For single mutations
   //    the projection is identity; for multi the long_text re-wrap
-  //    surfaces in the diff as it would on the wire.
+  //    surfaces in the diff as it would on the wire. Real columns
+  //    only — the synthetic `name` entry, when present, lands in
+  //    `diff.name` separately so the `from` side reads the item's
+  //    `name` field (not a column_values entry).
   const diff: Record<string, DiffCell> = {};
   for (const translated of orderedTranslated) {
     const wireTo = projectWireTo(translated, mutation);
@@ -387,6 +411,16 @@ export const planChanges = async (
       wireTo,
       itemRead.byColumnId.get(translated.columnId),
     );
+  }
+  if (inputs.nameChange !== undefined) {
+    // Synthetic `name` diff cell. The `from` side reads the item's
+    // current `name` field (always populated in Monday). No
+    // resolver echo since `name` doesn't go through the column
+    // translator's date / people paths.
+    diff.name = {
+      from: itemRead.item.name,
+      to: inputs.nameChange,
+    };
   }
 
   const plannedChange: PlannedChange = {
@@ -417,6 +451,33 @@ export const planChanges = async (
  */
 const isArchivedColumn = (column: BoardColumn): boolean =>
   column.archived === true;
+
+/**
+ * Builds a synthetic `TranslatedColumnValue` for a `--name <n>`
+ * rename. `selectMutation` then handles bundling uniformly: if it's
+ * the only entry → `change_simple_column_value(column_id: "name",
+ * value: <n>)`; if there are columns alongside → roll into
+ * `change_multiple_column_values` with `name` as a key.
+ *
+ * **The `name` white lie.** "name" isn't a column on Monday's
+ * `board.columns` surface — it's the item's top-level field. We
+ * tag the synthetic value with `columnType: 'text'` (closest
+ * analog) so `projectForMulti`'s `long_text`-rewrap branch isn't
+ * accidentally triggered. The resulting wire shape is correct
+ * because Monday's `change_*_column_value` mutations accept
+ * `column_id: "name"` with a bare string regardless of which
+ * mutation kind is used.
+ */
+const buildNameTranslatedValue = (
+  nameChange: string,
+): TranslatedColumnValue => ({
+  columnId: 'name',
+  columnType: 'text',
+  rawInput: nameChange,
+  payload: { format: 'simple', value: nameChange },
+  resolvedFrom: null,
+  peopleResolution: null,
+});
 
 export interface PlanClearInputs {
   readonly client: MondayClient;
