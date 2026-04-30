@@ -8,6 +8,7 @@ import {
   userIdFromString,
 } from '../../../src/api/resolvers.js';
 import type { MondayClient, MondayResponse } from '../../../src/api/client.js';
+import { ApiError } from '../../../src/utils/errors.js';
 
 interface NamedThing {
   readonly id: string;
@@ -305,13 +306,28 @@ describe('userByEmail — directory cache + live fallback', () => {
         [{ users: [{ ...alice, id: malformedId }] }],
         stats,
       );
-      // Schema parse failure bubbles as ZodError → runner maps to
-      // internal_error. Here we just assert the call rejects (the
-      // exact error wrapping is the runner's job, not the
-      // resolver's).
-      await expect(
-        userByEmail({ client, email: alice.email, env: xdgEnv() }),
-      ).rejects.toThrow();
+      // R17 (post-people Codex backlog): the parse boundary now
+      // wraps ZodError as ApiError(internal_error) carrying
+      // `details.issues`. Pre-R17, a raw ZodError bubbled to the
+      // runner's catch-all (which DID map to internal_error but lost
+      // the issues array). Assert the typed wrap so an agent
+      // debugging a malformed Monday response sees the path that
+      // failed.
+      let thrown: unknown;
+      try {
+        await userByEmail({ client, email: alice.email, env: xdgEnv() });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      const apiErr = thrown as ApiError;
+      expect(apiErr.code).toBe('internal_error');
+      expect(apiErr.message).toMatch(/malformed users response/u);
+      const details = apiErr.details as { issues: readonly { path: string }[] };
+      expect(details.issues.length).toBeGreaterThan(0);
+      // Issue path includes `id` so an agent debugging this can
+      // identify the failing field at a glance.
+      expect(details.issues.some((i) => i.path.endsWith('id'))).toBe(true);
     },
   );
 

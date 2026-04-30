@@ -333,7 +333,44 @@ export const userByEmail = async (
     { operationName: 'UsersByEmail' },
   );
   const users = response.data.users ?? [];
-  const fresh = userDirectorySchema.parse(users);
+  // R17: parse-then-wrap. Per `validation.md`'s "Never bubble raw
+  // ZodError out of a parse boundary" rule, malformed Monday
+  // responses (e.g. a future tenant where `id` is a hex string)
+  // surface as a typed `internal_error` carrying `details.issues`
+  // rather than a bare ZodError. Pre-R17, the raw ZodError reached
+  // the runner's catch-all which DID map to `internal_error` (the
+  // right semantic code) but lost the issues array — agents
+  // debugging a malformed Monday response saw only the bare
+  // message. The newly-tightened `id` regex (R-people pass-2 F4)
+  // makes this surface more reachable: every malformed ID from
+  // Monday now hits this boundary instead of silently caching.
+  const parsed = userDirectorySchema.safeParse(users);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => ({
+      path: i.path.join('.'),
+      message: i.message,
+      code: i.code,
+    }));
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a malformed users response for email ` +
+        `${JSON.stringify(inputs.email)} — the directory schema rejected ` +
+        `the payload at ${issues.length} ` +
+        `issue${issues.length === 1 ? '' : 's'}.`,
+      {
+        cause: parsed.error,
+        details: {
+          email: inputs.email,
+          issues,
+          hint:
+            'this is a data-integrity error in Monday\'s response (or a ' +
+            'directory-schema drift); verify the response shape and update ' +
+            'userDirectoryEntrySchema if Monday\'s contract has changed.',
+        },
+      },
+    );
+  }
+  const fresh = parsed.data;
   if (!noCache && fresh.length > 0) {
     await upsertCache(env, fresh);
   }
