@@ -172,7 +172,7 @@
   consumers: `commands/board/describe.ts` (writable +
   example_set) and `api/column-values.ts` (the writer). Adding
   a v0.2 type is one entry's worth of edit.
-- `api/column-values.ts` (M5a, in progress) — write half of
+- `api/column-values.ts` (M5a) — write half of
   §5.3. **Two entry points**: the sync `translateColumnValue({
   column, value, dateResolution? }) → TranslatedColumnValue`
   covers the six locally-resolvable types; the async
@@ -182,16 +182,16 @@
   to sync for non-people; dispatches `parsePeopleInput` for
   `people`, which needs network/cache lookup for email→ID
   resolution). The result type returns `columnId`, `columnType`,
-  `rawInput`, a discriminated `payload`, and a
-  `resolvedFrom: DateResolution | null` slot. Payload variants:
-  `{ format: 'simple', value: string }` for the bare-string form
-  (`change_simple_column_value`) or `{ format: 'rich', value:
-  JsonObject }` for the JSON-object form (`change_column_value`
-  / per-column entry of `change_multiple_column_values`).
-  **All seven v0.1 types translate**: `text` / `long_text` /
-  `numbers` (simple) and `status` / `dropdown` / `date` /
-  `people` (rich). The only remaining M5a deliverable is the
-  `dry-run.ts` engine.
+  `rawInput`, a discriminated `payload`, and parallel echo slots
+  (`resolvedFrom: DateResolution | null` for relative dates;
+  `peopleResolution: PeopleResolution | null` for people inputs).
+  Payload variants: `{ format: 'simple', value: string }` for the
+  bare-string form (`change_simple_column_value`) or `{ format:
+  'rich', value: JsonObject }` for the JSON-object form
+  (`change_column_value` / per-column entry of
+  `change_multiple_column_values`). **All seven v0.1 types
+  translate**: `text` / `long_text` / `numbers` (simple) and
+  `status` / `dropdown` / `date` / `people` (rich).
   **`selectMutation`** dispatches per cli-design §5.3 step 5:
   1 simple → `change_simple_column_value`; 1 rich →
   `change_column_value`; N → `change_multiple_column_values`
@@ -232,13 +232,56 @@
   JS number; `kind` literal `'person'` only (teams deferred to
   v0.2). `me` resolution cached within a single call (input
   `me,me,me` resolves once). Defence-in-depth ID validation
-  via `DECIMAL_NON_NEGATIVE` regex matched against the same
-  shape `userByEmail`'s schema enforces — malformed IDs
-  surface as `internal_error` rather than silently corrupting
-  the wire payload via `Number()`. Numeric tokens (`--set
+  via the shared `DECIMAL_USER_ID_PATTERN` (R16, exported from
+  `src/types/ids.ts`) matched against the same shape
+  `userByEmail`'s schema enforces — malformed IDs surface as
+  `internal_error` rather than silently corrupting the wire
+  payload via `Number()`. Numeric tokens (`--set
   Owner=12345`) rejected with a literal `--set-raw` hint;
   unknown emails bubble `user_not_found` from the resolveEmail
-  callback per cli-design §5.3 line 733.
+  callback per cli-design §5.3 line 733. `parsePeopleInput`
+  also returns a `resolution: PeopleResolution` echo (one
+  `{input, resolved_id}` entry per non-empty input token) the
+  dry-run engine renders as `details.resolved_from` on the diff
+  cell.
+
+- `api/me-token.ts` (M5a R15) — shared `isMeToken(token)`
+  recogniser plus the frozen `ME_TOKENS` array. Three
+  consumers: `filters.ts` (`--where Owner=me`),
+  `commands/item/search.ts` (search filter), and `api/people.ts`
+  (`--set Owner=me`). One rule across all three surfaces per
+  cli-design §5.3 step 3 line 704-707; lifted out of three
+  verbatim copies that had drifted across the people-session
+  Codex passes. v0.2 grammar extensions (`i` / `@me`) land by
+  adding to the array.
+
+- `api/dry-run.ts` (M5a) — orchestrator the M5b mutation
+  surfaces (`item set` / `item clear` / `item update`) call
+  when `--dry-run` is set. Single export `planChanges({client,
+  boardId, itemId, setEntries, dateResolution?,
+  peopleResolution?, env?, noCache?})` ties together the M3
+  cache-aware column resolver (with `includeArchived: true` so
+  archived targets surface as `column_archived`, not
+  `column_not_found`), `translateColumnValueAsync` +
+  `selectMutation` for the wire shape, and a fresh item-state
+  read for the diff `from` side. **Output matches cli-design
+  §6.4's `planned_changes[]` shape byte-for-byte**, pinned via
+  a `JSON.stringify(result.plannedChanges[0])` literal-byte
+  snapshot test (the load-bearing M5a exit gate). **All-or-
+  nothing**: any resolution failure (`column_not_found`,
+  `ambiguous_column`, `column_archived`,
+  `unsupported_column_type`, `user_not_found`, item `not_found`,
+  item-on-wrong-board, duplicate token, duplicate resolved id)
+  aborts the batch BEFORE the item read fires. The diff `to`
+  side projects through `selectMutation`'s `columnValues` map
+  for multi paths so the `long_text` re-wrap (`{text: <value>}`
+  inside multi) surfaces verbatim. Resolver warnings on a
+  `column_archived` throw fold into
+  `error.details.resolver_warnings` so a stale-cache-then-
+  archived flow keeps both signals. The engine's own
+  `rawItemSchema.parse` boundary uses safeParse +
+  `ApiError(internal_error)` per validation.md (mirrors R17 +
+  the userByEmail wrap).
 
 - `types/json.ts` (M5a R-JsonValue) — `JsonValue` /
   `JsonObject` types narrowing the rich-payload slot to

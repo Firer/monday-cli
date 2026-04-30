@@ -17,9 +17,7 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M4 shipped, M5a in progress
-(all seven v0.1 column-value translators landed; only `dry-run.ts`
-remains).** The CLI has a
+**v0.1 implementation in progress; M0–M5a shipped; M5b next.** The CLI has a
 working network surface across 5 nouns (account / workspace / board /
 user / update / item reads), local-only commands (cache / config /
 schema), filter DSL (`--where` + `--filter-json`), cursor-based
@@ -37,8 +35,8 @@ Two binding documents:
   (M0–M7 with M5 split + M2.5 refactor pass inserted post-M2),
   per-milestone deliverables, testing-pyramid commitments, risk
   register, exit checklist, and per-milestone post-mortems
-  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4 — what Codex review
-  caught after each cluster shipped).
+  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a — what Codex
+  review caught after each cluster shipped).
 
 **Milestones:**
 
@@ -50,7 +48,7 @@ Two binding documents:
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a | in progress | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads). `dry-run.ts` is the last M5a deliverable. |
+| M5a | shipped | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads) + `dry-run.ts` (M3 column resolution + R12 cache-miss-refresh + M5a translation + item-state read; all-or-nothing semantics + cli-design §6.4 byte-snapshot exit gate; resolver-warning preservation across `column_archived` throws) + `me-token.ts` (R15 shared `isMeToken` helper) + `DECIMAL_USER_ID_PATTERN` lift (R16) + R17 ZodError wrap at `userByEmail`. |
 | M5b | future | `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
@@ -216,7 +214,7 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   throwing). Two consumers: `commands/board/describe.ts`
   (writable + example_set) and `api/column-values.ts` (the
   writer). Adding a v0.2 type is one entry's worth of edit.
-- **Column-value writer (M5a, in progress).** `src/api/column-values.ts`
+- **Column-value writer (M5a).** `src/api/column-values.ts`
   is the write half of §5.3. `translateColumnValue({ column,
   value })` returns a `TranslatedColumnValue` carrying `columnId`,
   `columnType`, `rawInput`, and a discriminated `payload` —
@@ -281,6 +279,36 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   contributor doesn't introduce double-encoding.
   Fixture-pinned wire shape per (count × type) cell so M5b's
   bulk surface and v0.2 inherit unchanged.
+- **Dry-run engine (M5a).** `src/api/dry-run.ts` exports
+  `planChanges(...)`. Single orchestrator the M5b mutation
+  surfaces (`item set` / `item clear` / `item update`) call when
+  `--dry-run` is set. Ties together: M3 column resolution (with
+  `includeArchived: true` so archived targets surface as
+  `column_archived`, not `column_not_found`), M5a's
+  `translateColumnValueAsync` + `selectMutation`, and a fresh
+  item-state read for the diff `from` side. Output matches
+  cli-design §6.4's `planned_changes[]` shape byte-for-byte —
+  pinned via a `JSON.stringify(result.plannedChanges[0])` literal-
+  byte snapshot test. **All-or-nothing semantics**: any
+  resolution failure (`column_not_found` / `ambiguous_column` /
+  `column_archived` / `unsupported_column_type` / `user_not_found`
+  / item `not_found` / item-on-wrong-board / duplicate token /
+  duplicate resolved id) aborts the batch BEFORE the item read
+  fires. **Diff projection through `selectMutation`**: the diff
+  `to` side uses `selectMutation`'s `columnValues` map for multi
+  paths so the `long_text` re-wrap (`{text: <value>}` inside multi)
+  surfaces in the diff verbatim. Resolver warnings on a
+  `column_archived` throw fold into `error.details.resolver_warnings`
+  so a stale-cache-then-archived flow doesn't lose the
+  `stale_cache_refreshed` signal. **Echo design — Option B**:
+  `TranslatedColumnValue` carries parallel `resolvedFrom:
+  DateResolution | null` and `peopleResolution: PeopleResolution
+  | null` slots; `buildDiffCell` enforces exclusivity via
+  `internal_error` if a translator wires both. The people echo
+  shape (`{tokens: [{input, resolved_id}, ...]}`) is logged as
+  cli-design §6.4 backfill. **Parse-boundary discipline**: the
+  engine's own `rawItemSchema.parse` boundary uses safeParse +
+  `ApiError(internal_error)` per validation.md, mirroring R17.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
   misleading "restore" command — see §5.4 for what a future explicit
