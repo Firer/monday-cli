@@ -17,10 +17,12 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M3 shipped.** The CLI has a
-working network surface across 4 nouns (account / workspace / board /
-user / update reads), local-only commands (cache / config / schema),
-and the foundations every later milestone depends on (typed errors,
+**v0.1 implementation in progress; M0–M4 shipped.** The CLI has a
+working network surface across 5 nouns (account / workspace / board /
+user / update / item reads), local-only commands (cache / config /
+schema), filter DSL (`--where` + `--filter-json`), cursor-based
+pagination with stale-cursor fail-fast + NDJSON streaming, and the
+foundations every later milestone depends on (typed errors,
 universal envelope, redaction, retry/abort, fixture transport).
 Two binding documents:
 
@@ -28,13 +30,13 @@ Two binding documents:
   the canonical CLI contract: command surface, output envelope,
   error codes (26 stable), deferral list, every single design
   decision. Two AI-collaborator review passes; internally consistent.
-- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,450 lines) —
+- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,500 lines) —
   the implementation plan for v0.1: ten sequenced milestones
   (M0–M7 with M5 split + M2.5 refactor pass inserted post-M2),
   per-milestone deliverables, testing-pyramid commitments, risk
   register, exit checklist, and per-milestone post-mortems
-  (§11 M0, §12 M2, §13 M2.5, §14 M3 — what Codex review caught
-  after each cluster shipped).
+  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4 — what Codex review
+  caught after each cluster shipped).
 
 **Milestones:**
 
@@ -45,8 +47,8 @@ Two binding documents:
 | M2 | shipped | `Transport` + `MondayClient` + retry; `account whoami/info/version/complexity` |
 | M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
-| M4 | next | `item` reads + `--where` filter DSL + cursor-based pagination |
-| M5a / M5b | future | column-value writers + dry-run; `item set/clear/update`, `update create` |
+| M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
+| M5a / M5b | next / future | column-value writers + dry-run; `item set/clear/update`, `update create` |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
 
