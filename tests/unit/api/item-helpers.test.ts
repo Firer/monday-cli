@@ -17,7 +17,7 @@ import {
   resolveMeFactory,
   titleMap,
 } from '../../../src/api/item-helpers.js';
-import { ApiError, UsageError } from '../../../src/utils/errors.js';
+import { ApiError } from '../../../src/utils/errors.js';
 import type { MondayClient } from '../../../src/api/client.js';
 
 describe('COLUMN_VALUES_FRAGMENT', () => {
@@ -162,7 +162,7 @@ describe('parseRawItem (R18 wrap)', () => {
       caught = e;
     }
     const err = caught as ApiError;
-    const details = err.details as Readonly<Record<string, unknown>>;
+    const details = err.details!;
     expect(details.issues).toBeDefined();
     expect(details.item_id).toBeUndefined();
   });
@@ -193,7 +193,7 @@ describe('projectFromRaw', () => {
 
   it('drops per-cell titles when omitColumnTitles is true', () => {
     const projected = projectFromRaw(raw, titles, { omitColumnTitles: true });
-    const cell = projected.columns['status_4'];
+    const cell = projected.columns.status_4;
     expect(cell?.title).toBeUndefined();
     expect(cell?.label).toBe('Done');
     expect(cell?.index).toBe(1);
@@ -201,7 +201,7 @@ describe('projectFromRaw', () => {
 
   it('keeps per-cell titles when omitColumnTitles is false', () => {
     const projected = projectFromRaw(raw, titles, { omitColumnTitles: false });
-    const cell = projected.columns['status_4'];
+    const cell = projected.columns.status_4;
     expect(cell?.title).toBe('Status');
   });
 });

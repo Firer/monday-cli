@@ -25,7 +25,7 @@ describe('unwrapOrThrow', () => {
     let caught: unknown;
     try {
       unwrapOrThrow(
-        schema.safeParse({ id: 1, n: 'not-a-number' } as unknown),
+        schema.safeParse({ id: 1, n: 'not-a-number' }),
         { context: 'parsing user payload' },
       );
     } catch (e) {
@@ -45,7 +45,7 @@ describe('unwrapOrThrow', () => {
   it('merges caller-supplied details alongside issues + hint', () => {
     let caught: unknown;
     try {
-      unwrapOrThrow(schema.safeParse({} as unknown), {
+      unwrapOrThrow(schema.safeParse({}), {
         context: 'fetching board',
         details: { board_id: '111' },
       });
@@ -54,7 +54,7 @@ describe('unwrapOrThrow', () => {
     }
     expect(caught).toBeInstanceOf(ApiError);
     const err = caught as ApiError;
-    const details = err.details as Readonly<Record<string, unknown>>;
+    const details = err.details!;
     expect(details.board_id).toBe('111');
     expect(details.issues).toBeDefined();
     expect(details.hint).toBeDefined();
@@ -63,7 +63,7 @@ describe('unwrapOrThrow', () => {
   it('falls back to default hint when caller omits one', () => {
     let caught: unknown;
     try {
-      unwrapOrThrow(schema.safeParse({} as unknown), { context: 'x' });
+      unwrapOrThrow(schema.safeParse({}), { context: 'x' });
     } catch (e) {
       caught = e;
     }
@@ -75,7 +75,7 @@ describe('unwrapOrThrow', () => {
   it('uses the override hint when caller supplies one', () => {
     let caught: unknown;
     try {
-      unwrapOrThrow(schema.safeParse({} as unknown), {
+      unwrapOrThrow(schema.safeParse({}), {
         context: 'x',
         hint: 'verify the cassette shape',
       });
@@ -91,7 +91,7 @@ describe('unwrapOrThrow', () => {
     let caught: unknown;
     try {
       unwrapOrThrow(
-        schema.safeParse({ id: 'x' /* missing n only */ } as unknown),
+        schema.safeParse({ id: 'x' /* missing n only */ }),
         { context: 'one-issue case' },
       );
     } catch (e) {

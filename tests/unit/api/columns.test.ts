@@ -477,9 +477,9 @@ describe('resolveColumnsAcrossClauses (R12 lift)', () => {
       col({ id: 'newcol', title: 'NewCol' }),
     ]);
     let refreshCalls = 0;
-    const onColumnNotFound = async (): Promise<typeof after> => {
+    const onColumnNotFound = (): Promise<typeof after> => {
       refreshCalls++;
-      return after;
+      return Promise.resolve(after);
     };
     const result = await resolveColumnsAcrossClauses({
       metadata: before,
@@ -499,9 +499,9 @@ describe('resolveColumnsAcrossClauses (R12 lift)', () => {
     const before = board([col({ id: 'status_4', title: 'Status' })]);
     const after = board([col({ id: 'status_4', title: 'Status' })]);
     let refreshCalls = 0;
-    const onColumnNotFound = async (): Promise<typeof after> => {
+    const onColumnNotFound = (): Promise<typeof after> => {
       refreshCalls++;
-      return after;
+      return Promise.resolve(after);
     };
     await expect(
       resolveColumnsAcrossClauses({
@@ -523,9 +523,9 @@ describe('resolveColumnsAcrossClauses (R12 lift)', () => {
       resolveColumnsAcrossClauses({
         metadata: meta,
         tokens: ['Owner'],
-        onColumnNotFound: async () => {
+        onColumnNotFound: () => {
           refreshCalls++;
-          return meta;
+          return Promise.resolve(meta);
         },
       }),
     ).rejects.toMatchObject({ code: 'ambiguous_column' });
