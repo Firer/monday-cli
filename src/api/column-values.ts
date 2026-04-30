@@ -261,6 +261,174 @@ const translateDropdown = (
 const NON_NEGATIVE_INTEGER = /^\d+$/u;
 
 /**
+ * The wire shape `change_multiple_column_values` accepts for one
+ * column inside its `column_values` map: either a bare string (for
+ * the simple types Monday accepts as a string) or a plain JSON
+ * object (for rich types — and for `long_text`, see below).
+ */
+export type MultiColumnValue =
+  | string
+  | Readonly<Record<string, unknown>>;
+
+/**
+ * Discriminated union over the three v0.1 mutation paths that
+ * `cli-design.md` §5.3 step 5 enumerates. The variant carries
+ * exactly the fields M5b's command layer threads into the GraphQL
+ * SDK — no extra projection at the call site.
+ *
+ *   - `change_simple_column_value` — single simple type. The
+ *     `value` field is the bare string Monday's
+ *     `change_simple_column_value(value: String!)` mutation
+ *     accepts. `text` / `long_text` / `numbers` only.
+ *   - `change_column_value` — single rich type. The `value` field
+ *     is the plain-object payload Monday's
+ *     `change_column_value(value: JSON!)` mutation accepts —
+ *     the SDK / fetch layer JSON-stringifies at the wire boundary.
+ *     `status` / `dropdown` (today); `date` / `people` will join
+ *     in follow-up sessions.
+ *   - `change_multiple_column_values` — N (any combo). The
+ *     `columnValues` map carries one entry per column; per-column
+ *     value is `string | object` per `MultiColumnValue` above.
+ *     **`long_text` re-wrap**: simple-form `long_text`'s bare
+ *     string is wrapped to `{ text: <value> }` for this mutation
+ *     because Monday's per-column blob inside the multi mutation
+ *     requires the object form for `long_text` (a wire-shape
+ *     divergence from `change_simple_column_value`'s bare-string
+ *     acceptance — see selectMutation source comment for the spec
+ *     gap).
+ */
+export type SelectedMutation =
+  | {
+      readonly kind: 'change_simple_column_value';
+      readonly columnId: string;
+      readonly value: string;
+    }
+  | {
+      readonly kind: 'change_column_value';
+      readonly columnId: string;
+      readonly value: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly kind: 'change_multiple_column_values';
+      readonly columnValues: Readonly<Record<string, MultiColumnValue>>;
+    };
+
+/**
+ * Picks the right Monday mutation for a list of translated column
+ * values per `cli-design.md` §5.3 step 5.
+ *
+ * Dispatch:
+ *   - 1 translated value, simple → `change_simple_column_value`
+ *     (bare-string `value`).
+ *   - 1 translated value, rich → `change_column_value` (object
+ *     `value`).
+ *   - N translated values (any combo of simple / rich) →
+ *     `change_multiple_column_values`. Atomic on Monday's side —
+ *     either every column update lands or none do.
+ *
+ * **Duplicate column IDs throw `usage_error`.** Bundling two
+ * `--set status=Done --set status=Doing` would have last-write-wins
+ * semantics inside `change_multiple_column_values`'s map and the
+ * agent has no way to know which one won. Surfacing as a typed
+ * error at the bundling boundary keeps mutations deterministic;
+ * the command layer (M5b) can catch + reframe with the literal
+ * `--set` flags it received.
+ *
+ * **Empty input throws `usage_error`.** Defensive — the command
+ * layer is supposed to validate `--set` was supplied, but the
+ * helper shouldn't return a malformed `change_multiple_column_values`
+ * with an empty map.
+ *
+ * **`long_text` re-wrap, spec gap.** Monday's
+ * `change_multiple_column_values(column_values: JSON!)` accepts a
+ * map where each value is either a string or a per-type object.
+ * For `long_text` specifically, the per-type object is `{text:
+ * <value>}` — so the bare string that `change_simple_column_value`
+ * accepts is *not* the right shape inside the multi mutation.
+ * `text` / `numbers` stay as bare strings. This wire-shape
+ * divergence isn't called out in cli-design.md §5.3 step 5; logged
+ * as a spec gap in v0.1-plan.md §3 M5a for backfill. Pinned via
+ * fixture in the unit suite.
+ */
+export const selectMutation = (
+  translated: readonly TranslatedColumnValue[],
+): SelectedMutation => {
+  if (translated.length === 0) {
+    throw new UsageError(
+      'selectMutation requires at least one translated column value. ' +
+        'The command layer should reject the no-`--set` case before ' +
+        'reaching this helper.',
+      { details: { translated_count: 0 } },
+    );
+  }
+  if (translated.length === 1) {
+    const only = translated[0];
+    /* c8 ignore next 4 — defensive: length === 1 was just checked,
+       so `only` cannot be undefined. The guard exists for
+       `noUncheckedIndexedAccess` narrowing. */
+    if (only === undefined) {
+      throw new UsageError('selectMutation: unreachable indexing guard');
+    }
+    if (only.payload.format === 'simple') {
+      return {
+        kind: 'change_simple_column_value',
+        columnId: only.columnId,
+        value: only.payload.value,
+      };
+    }
+    return {
+      kind: 'change_column_value',
+      columnId: only.columnId,
+      value: only.payload.value,
+    };
+  }
+  // Multi: project each translated value to its multi-form blob,
+  // detecting duplicate column IDs along the way.
+  const columnValues: Record<string, MultiColumnValue> = {};
+  const seenIds = new Set<string>();
+  for (const t of translated) {
+    if (seenIds.has(t.columnId)) {
+      throw new UsageError(
+        `Multiple --set values target column "${t.columnId}". ` +
+          `change_multiple_column_values is a map keyed by column ID; ` +
+          `bundling two values for the same column would silently keep ` +
+          `only one. Pass at most one --set per column.`,
+        {
+          details: {
+            column_id: t.columnId,
+            duplicate_count:
+              translated.filter((other) => other.columnId === t.columnId).length,
+          },
+        },
+      );
+    }
+    seenIds.add(t.columnId);
+    columnValues[t.columnId] = projectForMulti(t);
+  }
+  return { kind: 'change_multiple_column_values', columnValues };
+};
+
+/**
+ * Projects one translated column value into the per-column blob
+ * `change_multiple_column_values` accepts. Three cases:
+ *
+ *   - rich payload → pass the object through unchanged.
+ *   - simple payload, type `long_text` → wrap as `{ text: <value> }`.
+ *     Monday's multi-mutation blob for `long_text` requires the
+ *     object form (spec gap; see `selectMutation` JSDoc).
+ *   - simple payload, any other type → bare string.
+ */
+const projectForMulti = (t: TranslatedColumnValue): MultiColumnValue => {
+  if (t.payload.format === 'rich') {
+    return t.payload.value;
+  }
+  if (t.columnType === 'long_text') {
+    return { text: t.payload.value };
+  }
+  return t.payload.value;
+};
+
+/**
  * Builds the canonical `unsupported_column_type` error (`cli-design.md`
  * §5.3 step 4 + §6.5). The `--set-raw` example uses the literal
  * column ID so an agent can paste-and-edit. Exported for unit

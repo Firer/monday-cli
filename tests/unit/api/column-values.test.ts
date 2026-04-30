@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, UsageError } from '../../../src/utils/errors.js';
 import {
+  selectMutation,
   translateColumnValue,
   unsupportedColumnTypeError,
   type ColumnValuePayload,
+  type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../../src/api/column-values.js';
 import type { WritableColumnType } from '../../../src/api/column-types.js';
@@ -384,6 +386,332 @@ describe('translateColumnValue — non-allowlisted types', () => {
     // archived columns), we still surface a stable code rather
     // than letting the switch fall through to a TypeError.
     expect(() => translate('', 'value', 'col_a')).toThrow(ApiError);
+  });
+});
+
+// =============================================================================
+// selectMutation — cli-design.md §5.3 step 5 dispatch
+// =============================================================================
+
+describe('selectMutation — single value', () => {
+  // Wire-shape fixtures for the single-value paths. Pinning the
+  // exact `kind` + field shape per simple/rich category — M5b's
+  // command layer threads these directly into the SDK call.
+
+  it('1 simple value → change_simple_column_value (bare-string value)', () => {
+    const t = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'Refactor login',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_simple_column_value',
+      columnId: 'notes',
+      value: 'Refactor login',
+    });
+  });
+
+  it('1 simple long_text → change_simple_column_value (still bare string here)', () => {
+    // Pinning the contrast with the multi case: in the *single*
+    // path, long_text uses the bare string Monday's
+    // change_simple_column_value(value: String!) accepts. The
+    // {text: ...} re-wrap only kicks in when bundled into the
+    // multi mutation (different signature accepts both shapes,
+    // and rejects the bare string for long_text).
+    const t = translateColumnValue({
+      column: { id: 'description', type: 'long_text' },
+      value: 'multi\nline',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_simple_column_value',
+      columnId: 'description',
+      value: 'multi\nline',
+    });
+  });
+
+  it('1 simple numbers → change_simple_column_value', () => {
+    const t = translateColumnValue({
+      column: { id: 'estimate', type: 'numbers' },
+      value: '42',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_simple_column_value',
+      columnId: 'estimate',
+      value: '42',
+    });
+  });
+
+  it('1 rich status (label) → change_column_value with object value', () => {
+    const t = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_column_value',
+      columnId: 'status_4',
+      value: { label: 'Done' },
+    });
+  });
+
+  it('1 rich status (index) → change_column_value with {index: N}', () => {
+    const t = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: '2',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_column_value',
+      columnId: 'status_4',
+      value: { index: 2 },
+    });
+  });
+
+  it('1 rich dropdown (labels) → change_column_value with {labels: [...]}', () => {
+    const t = translateColumnValue({
+      column: { id: 'tags', type: 'dropdown' },
+      value: 'Backend,Frontend',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_column_value',
+      columnId: 'tags',
+      value: { labels: ['Backend', 'Frontend'] },
+    });
+  });
+
+  it('1 rich dropdown (ids) → change_column_value with {ids: [...]}', () => {
+    const t = translateColumnValue({
+      column: { id: 'tags', type: 'dropdown' },
+      value: '1,2',
+    });
+    const out = selectMutation([t]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_column_value',
+      columnId: 'tags',
+      value: { ids: [1, 2] },
+    });
+  });
+});
+
+describe('selectMutation — multi value (change_multiple_column_values)', () => {
+  // The multi mutation's `column_values` map projects each
+  // translated value to a string (simple text/numbers) or an
+  // object (rich + long_text re-wrap). Pinning per-cell wire
+  // shape so M5b inherits an identical contract.
+
+  it('2 simple values (text + numbers) → bare strings in the column_values map', () => {
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const numbers = translateColumnValue({
+      column: { id: 'estimate', type: 'numbers' },
+      value: '5',
+    });
+    const out = selectMutation([text, numbers]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_multiple_column_values',
+      columnValues: {
+        notes: 'hi',
+        estimate: '5',
+      },
+    });
+  });
+
+  it('long_text inside multi → re-wrapped as {text: <value>} (spec gap, pinned)', () => {
+    // The single-value path passes long_text through as a bare
+    // string; the multi-value path wraps it as {text: ...}. This
+    // is a wire-shape divergence imposed by Monday's
+    // change_multiple_column_values signature: per-column blob is
+    // string-or-object, and long_text's per-column blob is the
+    // object form. Pinned via fixture so M5b's bulk surface and
+    // v0.2 inherit the wrap unchanged. cli-design.md §5.3 step 5
+    // doesn't call this out — surfaced as a spec gap in
+    // v0.1-plan.md §3 M5a.
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const longText = translateColumnValue({
+      column: { id: 'description', type: 'long_text' },
+      value: 'paragraph\nwith\nnewlines',
+    });
+    const out = selectMutation([text, longText]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_multiple_column_values',
+      columnValues: {
+        notes: 'hi',
+        description: { text: 'paragraph\nwith\nnewlines' },
+      },
+    });
+  });
+
+  it('mixed simple + rich → bare strings + objects keyed by column id', () => {
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const dropdown = translateColumnValue({
+      column: { id: 'tags', type: 'dropdown' },
+      value: 'Backend',
+    });
+    const out = selectMutation([text, status, dropdown]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_multiple_column_values',
+      columnValues: {
+        notes: 'hi',
+        status_4: { label: 'Done' },
+        tags: { labels: ['Backend'] },
+      },
+    });
+  });
+
+  it('two rich values → both objects in the same map (no shape merge)', () => {
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const dropdown = translateColumnValue({
+      column: { id: 'tags', type: 'dropdown' },
+      value: '1,2',
+    });
+    const out = selectMutation([status, dropdown]);
+    expect(out).toEqual<SelectedMutation>({
+      kind: 'change_multiple_column_values',
+      columnValues: {
+        status_4: { label: 'Done' },
+        tags: { ids: [1, 2] },
+      },
+    });
+  });
+
+  it('preserves caller-supplied order in the map insertion order', () => {
+    // JS objects preserve insertion order for string keys — pinning
+    // that the helper iterates `translated` in caller order so the
+    // dry-run renderer's column-by-column diff list matches the
+    // `--set` flag order the agent passed.
+    const a = translateColumnValue({
+      column: { id: 'b_col', type: 'text' },
+      value: 'beta',
+    });
+    const b = translateColumnValue({
+      column: { id: 'a_col', type: 'text' },
+      value: 'alpha',
+    });
+    const out = selectMutation([a, b]);
+    if (out.kind !== 'change_multiple_column_values') {
+      throw new Error('expected multi');
+    }
+    expect(Object.keys(out.columnValues)).toEqual(['b_col', 'a_col']);
+  });
+});
+
+describe('selectMutation — error paths', () => {
+  it('throws usage_error when called with an empty list', () => {
+    expect(() => selectMutation([])).toThrow(UsageError);
+    try {
+      selectMutation([]);
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({ translated_count: 0 });
+    }
+  });
+
+  it('throws usage_error when two translated values share a column id', () => {
+    // Bundling two `--set status=...` values would give the
+    // change_multiple_column_values map last-write-wins
+    // semantics; the agent has no way to know which one Monday
+    // applied. Surfacing as usage_error at the bundling boundary
+    // forces M5b's command layer to reject the duplicate before
+    // the mutation goes out.
+    const a = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const b = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Doing',
+    });
+    expect(() => selectMutation([a, b])).toThrow(UsageError);
+    try {
+      selectMutation([a, b]);
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_id: 'status_4',
+        duplicate_count: 2,
+      });
+    }
+  });
+
+  it('counts all duplicates of a colliding column id, not just the second', () => {
+    const a = translateColumnValue({
+      column: { id: 'tags', type: 'text' },
+      value: 'a',
+    });
+    const b = translateColumnValue({
+      column: { id: 'tags', type: 'text' },
+      value: 'b',
+    });
+    const c = translateColumnValue({
+      column: { id: 'tags', type: 'text' },
+      value: 'c',
+    });
+    try {
+      selectMutation([a, b, c]);
+      throw new Error('expected throw');
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.details).toMatchObject({ duplicate_count: 3 });
+    }
+  });
+});
+
+describe('selectMutation — JSON scalar discipline (no double-stringification)', () => {
+  // Anti-regression: it would be tempting for a future contributor
+  // to JSON.stringify the rich payloads "for the wire". That's
+  // wrong — graphql-request stringifies at the boundary, and a
+  // double-stringified payload would arrive at Monday as the
+  // literal string `'{"label":"Done"}'` (with quotes), which the
+  // GraphQL JSON scalar would then accept as a JSON-encoded string
+  // and fail validation. Pin per category.
+
+  it('change_column_value rich value is a plain JS object, not a JSON string', () => {
+    const t = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const out = selectMutation([t]);
+    if (out.kind !== 'change_column_value') throw new Error('expected single rich');
+    expect(typeof out.value).toBe('object');
+    expect(out.value).not.toBeInstanceOf(String);
+  });
+
+  it('multi columnValues entries are bare strings or plain objects, never JSON strings', () => {
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const out = selectMutation([text, status]);
+    if (out.kind !== 'change_multiple_column_values') throw new Error('expected multi');
+    expect(out.columnValues.notes).toBe('hi');
+    expect(out.columnValues.notes).not.toMatch(/^"/u);
+    const richEntry = out.columnValues.status_4;
+    expect(typeof richEntry).toBe('object');
+    expect(richEntry).toEqual({ label: 'Done' });
   });
 });
 
