@@ -3408,7 +3408,11 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.error?.details?.applied_to).toEqual(['5001']);
   });
 
-  it('empty match set is a clean no-op success envelope', async () => {
+  it('empty match set is a clean no-op success envelope (no --yes required)', async () => {
+    // Codex pass-1 F1 + pass-2 follow-up: empty match must succeed
+    // BEFORE the confirmation gate. Test drops `--yes` so a
+    // regression to the pre-fix ordering would surface as
+    // confirmation_required instead of success.
     const out = await drive(
       [
         'item',
@@ -3419,7 +3423,6 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         'status=Done',
         '--board',
         '111',
-        '--yes',
         '--json',
       ],
       {
@@ -3445,5 +3448,46 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
       applied_count: 0,
       board_id: '111',
     });
+  });
+
+  it('F6 (pass-2): malformed ItemsPage response surfaces typed internal_error', async () => {
+    // Pre-fix the bulk page parse was loose: items_page optional +
+    // boards nullable allowed `{boards:[{}]}` to coerce to an empty
+    // match set silently, hiding schema drift behind a "0 matched,
+    // 0 applied" success. Pass-2 tightened the schema; this test
+    // pins the failure mode.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Done',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              // boards present but items_page missing — pre-fix this
+              // looked like an empty page; post-fix, schema rejects.
+              data: { boards: [{}] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { issues?: readonly unknown[] } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.issues).toBeDefined();
   });
 });

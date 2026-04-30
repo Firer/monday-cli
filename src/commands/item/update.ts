@@ -760,14 +760,20 @@ const NEXT_ITEMS_PAGE_QUERY = `
   }
 `;
 
-// R18 / Codex pass-1 F6: parse boundaries on the bulk items_page +
-// next_items_page responses. Pre-fix, these were trusted via
-// optional chaining — a malformed Monday response (schema drift, a
-// `boards` key missing, `items` not an array) would silently
-// surface as an empty match set, which is the worst-of-both-worlds
-// failure mode for bulk mutations: agents see "0 matched, 0
-// applied" success when the real story is "Monday's response shape
-// changed and we couldn't read it".
+// R18 / Codex pass-1 F6 + pass-2 follow-up: parse boundaries on the
+// bulk items_page + next_items_page responses. Schemas are tight —
+// `boards` is a non-nullable non-empty array; `items_page` is
+// required (not optional). Pre-fix, these were trusted via optional
+// chaining — a malformed Monday response (schema drift, a `boards`
+// key missing, `items` not an array) would silently surface as an
+// empty match set, which is the worst-of-both-worlds failure mode
+// for bulk mutations: agents see "0 matched, 0 applied" success
+// when the real story is "Monday's response shape changed and we
+// couldn't read it". Pass-1's first attempt loosened the schema
+// too far (kept items_page optional + boards nullable); pass-2
+// tightens the schema so missing fields surface as
+// `internal_error` with the failing field path on
+// `details.issues`.
 const bulkItemSchema = z.object({ id: ItemIdSchema }).loose();
 
 const initialPageResponseSchema = z
@@ -776,27 +782,23 @@ const initialPageResponseSchema = z
       .array(
         z
           .object({
-            items_page: z
-              .object({
-                cursor: z.string().nullable(),
-                items: z.array(bulkItemSchema),
-              })
-              .optional(),
+            items_page: z.object({
+              cursor: z.string().nullable(),
+              items: z.array(bulkItemSchema),
+            }),
           })
           .loose(),
       )
-      .nullable(),
+      .min(1),
   })
   .loose();
 
 const nextPageResponseSchema = z
   .object({
-    next_items_page: z
-      .object({
-        cursor: z.string().nullable(),
-        items: z.array(bulkItemSchema),
-      })
-      .nullable(),
+    next_items_page: z.object({
+      cursor: z.string().nullable(),
+      items: z.array(bulkItemSchema),
+    }),
   })
   .loose();
 
@@ -940,15 +942,24 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       if ('next_items_page' in r.data) {
         const nr = (r as MondayResponse<NextPageResponse>).data;
         return {
-          items: nr.next_items_page?.items ?? [],
-          cursor: nr.next_items_page?.cursor ?? null,
+          items: nr.next_items_page.items,
+          cursor: nr.next_items_page.cursor,
         };
       }
       const ir = (r as MondayResponse<InitialPageResponse>).data;
-      const page = ir.boards?.[0]?.items_page;
+      // Schema enforces `boards` is non-empty + `items_page` is
+      // required, so `boards[0]` is non-undefined here. The
+      // type-system doesn't narrow `noUncheckedIndexedAccess` away
+      // from min(1) refinements — the guard keeps TS happy.
+      const board = ir.boards[0];
+      /* c8 ignore next 3 — defensive: schema's `.min(1)` rejects
+         empty arrays. */
+      if (board === undefined) {
+        throw new ApiError('internal_error', 'bulk page: empty boards array');
+      }
       return {
-        items: page?.items ?? [],
-        cursor: page?.cursor ?? null,
+        items: board.items_page.items,
+        cursor: board.items_page.cursor,
       };
     },
     getId: (item) => item.id,
@@ -964,14 +975,22 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //    "no items matched"). Filter warnings still surface so the
   //    agent sees `column_token_collision` / `stale_cache_refreshed`
   //    if the empty result was filter-resolved post-refresh.
+  //
+  // Codex pass-2: source / cacheAgeSeconds aggregate from the metadata
+  // load + the items_page walk (always live). Cache-sourced metadata
+  // + live walk → `mixed`; pure-cache metadata stays `cache` only on
+  // the impossible no-walk path. The live items_page walk forces the
+  // aggregate to `mixed` when metadata was cache-served.
+  const emptyEnvelopeSource: 'live' | 'cache' | 'mixed' =
+    meta.source === 'cache' ? 'mixed' : 'live';
   if (matchedItemIds.length === 0) {
     if (globalFlags.dryRun) {
       emitDryRun({
         ctx,
         programOpts,
         plannedChanges: [],
-        source: 'live',
-        cacheAgeSeconds: null,
+        source: emptyEnvelopeSource,
+        cacheAgeSeconds: meta.cacheAgeSeconds,
         warnings: filterResult.warnings,
         apiVersion,
       });
@@ -986,8 +1005,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       schema: bulkLiveDataSchema,
       programOpts,
       warnings: filterResult.warnings,
-      source: 'live',
-      cacheAgeSeconds: null,
+      source: emptyEnvelopeSource,
+      cacheAgeSeconds: meta.cacheAgeSeconds,
       apiVersion,
     });
     return;
@@ -1251,6 +1270,12 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     }
   }
 
+  // Codex pass-2: aggregate `meta.source` + `cache_age_seconds`
+  // properly per cli-design §6.1. Pre-fix, source was inferred from
+  // warning presence — a plain cache hit (no warning) on metadata
+  // would surface as `live` even though the resolver served from
+  // cache. M4 pinned this exact regression for read commands; the
+  // bulk write path replicated the bug.
   emitMutation({
     ctx,
     data: {
@@ -1264,8 +1289,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     schema: bulkLiveDataSchema,
     programOpts,
     warnings: collectedWarnings,
-    source: collectedWarnings.length > 0 ? 'mixed' : 'live',
-    cacheAgeSeconds: null,
+    source: aggregateSource,
+    cacheAgeSeconds: meta.cacheAgeSeconds,
     apiVersion,
     resolvedIds,
   });
