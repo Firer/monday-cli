@@ -45,6 +45,13 @@ import { accountComplexityCommand } from './account/complexity.js';
 import { workspaceListCommand } from './workspace/list.js';
 import { workspaceGetCommand } from './workspace/get.js';
 import { workspaceFoldersCommand } from './workspace/folders.js';
+import { boardListCommand } from './board/list.js';
+import { boardGetCommand } from './board/get.js';
+import { boardFindCommand } from './board/find.js';
+import { boardDescribeCommand } from './board/describe.js';
+import { boardSubscribersCommand } from './board/subscribers.js';
+import { boardColumnsCommand } from './board/columns.js';
+import { boardGroupsCommand } from './board/groups.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -63,6 +70,13 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     workspaceListCommand,
     workspaceGetCommand,
     workspaceFoldersCommand,
+    boardListCommand,
+    boardGetCommand,
+    boardFindCommand,
+    boardDescribeCommand,
+    boardSubscribersCommand,
+    boardColumnsCommand,
+    boardGroupsCommand,
   ];
   return cached;
 };

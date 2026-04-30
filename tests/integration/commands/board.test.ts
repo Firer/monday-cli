@@ -1,0 +1,547 @@
+/**
+ * Integration tests for `monday board *` (M3 §3).
+ *
+ * Same FixtureTransport drive as the workspace + account suites.
+ * Coverage:
+ *   - board list — happy path, --all paging, error-meta on 401.
+ *   - board get — happy path, not_found on missing, parse boundary.
+ *   - board find — exact, ambiguous_name, --first warning, not_found.
+ *   - board describe — example_set per writable column type.
+ *   - board subscribers / columns / groups — happy + cache flow.
+ *
+ * Each board describe / columns / groups test uses an isolated
+ * tmp XDG cache so cache-write side effects don't bleed across tests.
+ */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { run, type RunOptions } from '../../../src/cli/run.js';
+import { fixedRequestIdGenerator } from '../../../src/utils/request-id.js';
+import {
+  createFixtureTransport,
+  type Cassette,
+  type Interaction,
+} from '../../fixtures/load.js';
+
+const LEAK_CANARY = 'tok-leakcheck-deadbeef-canary';
+
+let xdgRoot: string;
+
+beforeEach(async () => {
+  xdgRoot = await mkdtemp(join(tmpdir(), 'monday-cli-board-int-'));
+});
+
+afterEach(async () => {
+  await rm(xdgRoot, { recursive: true, force: true });
+});
+
+const baseOptions = (
+  overrides: Partial<RunOptions> = {},
+): {
+  options: RunOptions;
+  captured: { stdout: () => string; stderr: () => string };
+} => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  stdout.on('data', (c: Buffer) => stdoutChunks.push(c));
+  stderr.on('data', (c: Buffer) => stderrChunks.push(c));
+  const options: RunOptions = {
+    argv: ['node', 'monday'],
+    env: {
+      MONDAY_API_TOKEN: LEAK_CANARY,
+      MONDAY_API_URL: 'https://api.monday.com/v2',
+      XDG_CACHE_HOME: xdgRoot,
+    },
+    stdout,
+    stderr,
+    isTTY: false,
+    cliVersion: '0.0.0-test',
+    cliDescription: 'CLI under test',
+    requestIdGenerator: fixedRequestIdGenerator(['fixed-req-id']),
+    clock: () => new Date('2026-04-30T10:00:00Z'),
+    ...overrides,
+  };
+  return {
+    options,
+    captured: {
+      stdout: () => Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: () => Buffer.concat(stderrChunks).toString('utf8'),
+    },
+  };
+};
+
+interface EnvelopeShape {
+  readonly ok: boolean;
+  readonly data?: unknown;
+  readonly error?: { readonly code: string };
+  readonly meta: {
+    readonly schema_version: '1';
+    readonly api_version: string;
+    readonly cli_version: string;
+    readonly request_id: string;
+    readonly source: string;
+    readonly cache_age_seconds: number | null;
+    readonly retrieved_at: string;
+    readonly complexity: unknown;
+    readonly has_more?: boolean;
+    readonly total_returned?: number;
+  };
+  readonly warnings?: readonly { readonly code: string }[];
+}
+
+const parseEnvelope = (s: string): EnvelopeShape =>
+  JSON.parse(s) as EnvelopeShape;
+
+const assertEnvelopeContract = (env: EnvelopeShape): void => {
+  expect(env.meta.schema_version).toBe('1');
+  expect(typeof env.meta.api_version).toBe('string');
+  expect(typeof env.meta.cli_version).toBe('string');
+  expect(typeof env.meta.request_id).toBe('string');
+  expect(typeof env.meta.source).toBe('string');
+  expect(env.meta).toHaveProperty('cache_age_seconds');
+  expect(env.meta).toHaveProperty('retrieved_at');
+  expect(env.meta).toHaveProperty('complexity');
+};
+
+const drive = async (
+  argv: readonly string[],
+  cassette: Cassette,
+  overrides: Partial<RunOptions> = {},
+): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  remaining: number;
+  requests: number;
+}> => {
+  const transport = createFixtureTransport(cassette);
+  const { options, captured } = baseOptions({
+    argv: ['node', 'monday', ...argv],
+    transport,
+    ...overrides,
+  });
+  const result = await run(options);
+  return {
+    exitCode: result.exitCode,
+    stdout: captured.stdout(),
+    stderr: captured.stderr(),
+    remaining: transport.remaining(),
+    requests: transport.requests.length,
+  };
+};
+
+const sampleBoard = {
+  id: '111',
+  name: 'Tasks',
+  description: null,
+  state: 'active',
+  board_kind: 'public',
+  board_folder_id: null,
+  workspace_id: '5',
+  url: 'https://x.monday.com/boards/111',
+  items_count: 7,
+  updated_at: '2026-04-30T10:00:00Z',
+};
+
+describe('monday board list', () => {
+  it('returns the projected list', async () => {
+    const out = await drive(
+      ['board', 'list', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardList',
+            response: { data: { boards: [sampleBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    assertEnvelopeContract(env);
+    expect(env.data).toEqual([sampleBoard]);
+    expect(env.meta.total_returned).toBe(1);
+  });
+
+  it('--api-version reaches the error envelope on HTTP 401', async () => {
+    const out = await drive(
+      ['--api-version', '2026-04', 'board', 'list', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardList', http_status: 401, response: {} },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('unauthorized');
+    expect(env.meta.api_version).toBe('2026-04');
+  });
+});
+
+describe('monday board get', () => {
+  it('returns the projected board', async () => {
+    const out = await drive(
+      ['board', 'get', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardGet',
+            match_variables: { ids: ['111'] },
+            response: {
+              data: { boards: [{ ...sampleBoard, permissions: 'collaborators' }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toMatchObject({ id: '111', permissions: 'collaborators' });
+  });
+
+  it('not_found when boards is empty', async () => {
+    const out = await drive(
+      ['board', 'get', '999', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardGet', response: { data: { boards: [] } } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('rejects a non-numeric id at the parse boundary (usage_error)', async () => {
+    const out = await drive(['board', 'get', 'abc', '--json'], { interactions: [] });
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+});
+
+describe('monday board find', () => {
+  // The BoardFind GraphQL document only selects a narrow projection
+  // — match the fixture to it (real GraphQL would never return
+  // unrequested fields).
+  const findFixture = (
+    over: Partial<Readonly<Record<string, unknown>>> = {},
+  ): Readonly<Record<string, unknown>> => ({
+    id: '111',
+    name: 'Tasks',
+    description: null,
+    state: 'active',
+    board_kind: 'public',
+    workspace_id: '5',
+    url: null,
+    ...over,
+  });
+
+  const findInteraction = (
+    boards: readonly unknown[],
+    page = 1,
+  ): Interaction => ({
+    operation_name: 'BoardFind',
+    match_variables: { page },
+    response: { data: { boards } },
+  });
+
+  it('returns a single board on unique match', async () => {
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--json'],
+      { interactions: [findInteraction([findFixture()])] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toMatchObject({ id: '111', name: 'Tasks' });
+    expect(env.warnings ?? []).toEqual([]);
+  });
+
+  it('raises ambiguous_name with candidates on multi-match', async () => {
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--json'],
+      {
+        interactions: [
+          findInteraction([findFixture(), findFixture({ id: '112' })]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error: {
+        readonly code: string;
+        readonly details: { readonly candidates: readonly { id: string }[] };
+      };
+    };
+    expect(env.error.code).toBe('ambiguous_name');
+    expect(env.error.details.candidates.map((c) => c.id)).toEqual([
+      '111',
+      '112',
+    ]);
+  });
+
+  it('--first picks lowest-ID and emits a first_of_many warning', async () => {
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--first', '--json'],
+      {
+        interactions: [
+          findInteraction([
+            findFixture({ id: '300' }),
+            findFixture({ id: '200' }),
+          ]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('200');
+    expect(env.warnings).toBeDefined();
+    expect(env.warnings?.[0]?.code).toBe('first_of_many');
+  });
+
+  it('not_found when nothing matches', async () => {
+    const out = await drive(
+      ['board', 'find', 'Missing', '--json'],
+      { interactions: [findInteraction([findFixture()])] },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+});
+
+const metadataResponse = (
+  columns: readonly Readonly<Record<string, unknown>>[],
+  groups: readonly Readonly<Record<string, unknown>>[] = [],
+): Interaction => ({
+  operation_name: 'BoardMetadata',
+  match_variables: { ids: ['111'] },
+  response: {
+    data: {
+      boards: [
+        {
+          id: '111',
+          name: 'Tasks',
+          description: null,
+          state: 'active',
+          board_kind: 'public',
+          board_folder_id: null,
+          workspace_id: '5',
+          url: null,
+          hierarchy_type: 'top_level',
+          is_leaf: true,
+          updated_at: '2026-04-30T10:00:00Z',
+          groups,
+          columns,
+        },
+      ],
+    },
+  },
+});
+
+const baseColumn = {
+  id: 'col_x',
+  title: 'X',
+  type: 'text',
+  description: null,
+  archived: false,
+  settings_str: null,
+  width: null,
+};
+
+describe('monday board describe', () => {
+  it('emits example_set per writable column type', async () => {
+    const out = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        interactions: [
+          metadataResponse([
+            { ...baseColumn, id: 'name_text', title: 'Notes', type: 'text' },
+            {
+              ...baseColumn,
+              id: 'status_4',
+              title: 'Status',
+              type: 'status',
+              settings_str: JSON.stringify({
+                labels: { '0': 'Backlog', '1': 'Done' },
+              }),
+            },
+            {
+              ...baseColumn,
+              id: 'mirror_x',
+              title: 'Mirror',
+              type: 'mirror',
+            },
+          ]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        hierarchy_type: string | null;
+        is_leaf: boolean | null;
+        columns: readonly {
+          id: string;
+          type: string;
+          writable: boolean;
+          example_set: readonly string[] | null;
+        }[];
+      };
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.hierarchy_type).toBe('top_level');
+    expect(env.data.is_leaf).toBe(true);
+    const text = env.data.columns.find((c) => c.id === 'name_text');
+    const status = env.data.columns.find((c) => c.id === 'status_4');
+    const mirror = env.data.columns.find((c) => c.id === 'mirror_x');
+    expect(text?.writable).toBe(true);
+    expect(text?.example_set).toEqual([`--set name_text='Refactor login'`]);
+    expect(status?.writable).toBe(true);
+    expect(status?.example_set).toEqual([
+      `--set status_4='Backlog'`,
+      `--set status_4=0   # by index`,
+    ]);
+    expect(mirror?.writable).toBe(false);
+    expect(mirror?.example_set).toBeNull();
+  });
+
+  it('serves from cache on the second call', async () => {
+    const out1 = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([baseColumn])] },
+    );
+    expect(out1.exitCode).toBe(0);
+    const env1 = parseEnvelope(out1.stdout);
+    expect(env1.meta.source).toBe('live');
+
+    const out2 = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Cassette returns nothing; the cache must serve.
+      { interactions: [] },
+    );
+    expect(out2.exitCode).toBe(0);
+    const env2 = parseEnvelope(out2.stdout);
+    expect(env2.meta.source).toBe('cache');
+    expect(env2.meta.cache_age_seconds).toBeGreaterThanOrEqual(0);
+    expect(out2.requests).toBe(0);
+  });
+
+  it('--no-cache always fetches live', async () => {
+    // First call seeds the cache.
+    const live1 = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([baseColumn])] },
+    );
+    expect(live1.exitCode).toBe(0);
+
+    const live2 = await drive(
+      ['--no-cache', 'board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([baseColumn])] },
+    );
+    expect(live2.exitCode).toBe(0);
+    const env = parseEnvelope(live2.stdout);
+    expect(env.meta.source).toBe('live');
+    expect(live2.requests).toBe(1);
+  });
+});
+
+describe('monday board subscribers', () => {
+  it('returns subscribers list', async () => {
+    const out = await drive(
+      ['board', 'subscribers', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardSubscribers',
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    subscribers: [
+                      {
+                        id: '1',
+                        name: 'Alice',
+                        email: 'alice@example.test',
+                        is_guest: false,
+                        enabled: true,
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: readonly { id: string }[];
+    };
+    expect(env.data).toEqual([
+      {
+        id: '1',
+        name: 'Alice',
+        email: 'alice@example.test',
+        is_guest: false,
+        enabled: true,
+      },
+    ]);
+  });
+});
+
+describe('monday board columns + groups', () => {
+  it('board columns hides archived by default and reveals with --include-archived', async () => {
+    const cols = [
+      { ...baseColumn, id: 'a', title: 'A' },
+      { ...baseColumn, id: 'b', title: 'B', archived: true },
+    ];
+    const out1 = await drive(
+      ['board', 'columns', '111', '--json'],
+      { interactions: [metadataResponse(cols)] },
+    );
+    const env1 = parseEnvelope(out1.stdout) as EnvelopeShape & {
+      data: readonly { id: string }[];
+    };
+    expect(env1.data.map((c) => c.id)).toEqual(['a']);
+
+    const out2 = await drive(
+      ['--no-cache', 'board', 'columns', '111', '--include-archived', '--json'],
+      { interactions: [metadataResponse(cols)] },
+    );
+    const env2 = parseEnvelope(out2.stdout) as EnvelopeShape & {
+      data: readonly { id: string }[];
+    };
+    expect(env2.data.map((c) => c.id)).toEqual(['a', 'b']);
+  });
+
+  it('board groups returns the projected groups', async () => {
+    const groups = [
+      {
+        id: 'topics',
+        title: 'Topics',
+        color: 'red',
+        position: '1.000',
+        archived: false,
+        deleted: false,
+      },
+    ];
+    const out = await drive(
+      ['board', 'groups', '111', '--json'],
+      { interactions: [metadataResponse([], groups)] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual(groups);
+  });
+});
