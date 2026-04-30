@@ -194,6 +194,39 @@ describe('translateColumnValue — status (rich)', () => {
     expect(out.payload.value).toEqual({ label: '  日本語  ' });
   });
 
+  it('numeric index outside JS safe-integer range → usage_error (no silent precision loss)', () => {
+    // Codex review pass-1 finding F1, status side. Same story as
+    // dropdown: Number("99...9") rounds past 2^53 - 1 and yields
+    // Infinity for ~310+ digit strings. Either case lands at
+    // Monday as the wrong number or null. Pin via test that the
+    // unsafe path throws rather than silently sending corruption.
+    const huge = '9'.repeat(20);
+    expect(() => translate('status', huge, 'project_status')).toThrow(UsageError);
+    expect(() => translate('status', huge, 'project_status')).toThrow(
+      /exceeds JavaScript's safe-integer range/u,
+    );
+    try {
+      translate('status', huge, 'project_status');
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_id: 'project_status',
+        column_type: 'status',
+        raw_input: huge,
+      });
+    }
+  });
+
+  it('status index at MAX_SAFE_INTEGER boundary still works → index path', () => {
+    const max = String(Number.MAX_SAFE_INTEGER);
+    const out = translate('status', max, 'project_status');
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'rich',
+      value: { index: Number.MAX_SAFE_INTEGER },
+    });
+  });
+
   it('does not look up the index from settings_str — labels go through verbatim', () => {
     // §5.3 step 3 says the CLI emits {label: ...} for label input
     // and {index: N} for numeric input. It does NOT traverse the
@@ -290,7 +323,15 @@ describe('translateColumnValue — dropdown (rich)', () => {
   });
 
   it('empty input throws usage_error (use `item clear` to clear)', () => {
+    // Per testing.md: assert both type AND message — both are part
+    // of the contract surface agents rely on for debugging.
     expect(() => translate('dropdown', '', 'tags')).toThrow(UsageError);
+    expect(() => translate('dropdown', '', 'tags')).toThrow(
+      /needs at least one label or numeric ID/u,
+    );
+    expect(() => translate('dropdown', '', 'tags')).toThrow(
+      /monday item clear <iid> tags/u,
+    );
     try {
       translate('dropdown', '', 'tags');
     } catch (err) {
@@ -306,8 +347,37 @@ describe('translateColumnValue — dropdown (rich)', () => {
     }
   });
 
-  it('whitespace-only / commas-only input throws usage_error', () => {
+  it('clear-hint uses placeholder `<iid>` since translator does not know item ID', () => {
+    // Codex review pass-1 finding F2: the helper has no access to
+    // the item ID an agent is trying to update. Pinning the
+    // placeholder shape so a future "personalised hint" refactor
+    // doesn't substitute something that looks like a real ID.
+    try {
+      translate('dropdown', '', 'tags');
+      throw new Error('expected throw');
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.message).toContain('monday item clear <iid> tags');
+      expect(err.message).toContain('[--board <bid>]');
+    }
+  });
+
+  it('whitespace-only / commas-only input throws usage_error with the same shape', () => {
     expect(() => translate('dropdown', ' , ,  ', 'tags')).toThrow(UsageError);
+    expect(() => translate('dropdown', ' , ,  ', 'tags')).toThrow(
+      /needs at least one label or numeric ID/u,
+    );
+    try {
+      translate('dropdown', ' , ,  ', 'tags');
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_id: 'tags',
+        column_type: 'dropdown',
+        raw_input: ' , ,  ',
+      });
+    }
   });
 
   it('numeric label collision known limitation: literal "1" parses as id', () => {
@@ -320,6 +390,52 @@ describe('translateColumnValue — dropdown (rich)', () => {
       format: 'rich',
       value: { ids: [1] },
     });
+  });
+
+  it('numeric ID outside JS safe-integer range → usage_error (no silent precision loss)', () => {
+    // Codex review pass-1 finding F1: `Number("99...9")` either
+    // rounds (for inputs > 2^53 - 1) or yields Infinity (for very
+    // long digit strings, ~310+ chars). JSON.stringify(Infinity)
+    // is "null", so the wire would land at Monday as
+    // `{"ids":[null]}` — a worse failure mode than a typed local
+    // error. Bound the input through Number.isSafeInteger; throw
+    // usage_error for unsafe input.
+    const huge = '9'.repeat(20); // 20-digit number well past 2^53
+    expect(() => translate('dropdown', huge, 'tags')).toThrow(UsageError);
+    expect(() => translate('dropdown', huge, 'tags')).toThrow(
+      /exceeds JavaScript's safe-integer range/u,
+    );
+    try {
+      translate('dropdown', huge, 'tags');
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_id: 'tags',
+        column_type: 'dropdown',
+        raw_input: huge,
+      });
+    }
+  });
+
+  it('numeric ID at MAX_SAFE_INTEGER boundary still works → ids path', () => {
+    // The boundary is 2^53 - 1 = 9007199254740991. One more would
+    // throw; pin both sides of the boundary so a future refactor
+    // (e.g. switching to BigInt) doesn't silently shift it.
+    const max = String(Number.MAX_SAFE_INTEGER);
+    const out = translate('dropdown', max, 'tags');
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'rich',
+      value: { ids: [Number.MAX_SAFE_INTEGER] },
+    });
+  });
+
+  it('one safe + one unsafe ID in mixed input still throws', () => {
+    // The all-numeric branch maps each segment; the first unsafe
+    // segment short-circuits with usage_error. Pinned so a future
+    // "filter unsafe and continue" refactor surfaces loudly.
+    const huge = '9'.repeat(20);
+    expect(() => translate('dropdown', `1,${huge}`, 'tags')).toThrow(UsageError);
   });
 });
 
@@ -616,6 +732,9 @@ describe('selectMutation — multi value (change_multiple_column_values)', () =>
 describe('selectMutation — error paths', () => {
   it('throws usage_error when called with an empty list', () => {
     expect(() => selectMutation([])).toThrow(UsageError);
+    expect(() => selectMutation([])).toThrow(
+      /at least one translated column value/u,
+    );
     try {
       selectMutation([]);
     } catch (err) {
@@ -641,6 +760,9 @@ describe('selectMutation — error paths', () => {
       value: 'Doing',
     });
     expect(() => selectMutation([a, b])).toThrow(UsageError);
+    expect(() => selectMutation([a, b])).toThrow(
+      /Multiple --set values target column "status_4"/u,
+    );
     try {
       selectMutation([a, b]);
     } catch (err) {

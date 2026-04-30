@@ -133,7 +133,7 @@ export const translateColumnValue = (
     case 'numbers':
       return simple(column.id, 'numbers', value);
     case 'status':
-      return rich(column.id, 'status', value, translateStatus(value));
+      return rich(column.id, 'status', value, translateStatus(value, column.id));
     case 'dropdown':
       return rich(column.id, 'dropdown', value, translateDropdown(column.id, value));
     case 'date':
@@ -187,10 +187,27 @@ const rich = (
  * "clear" intent — `monday item clear` is the dedicated verb for
  * that. Pinned in tests so future contributors don't add silent
  * fall-through-to-clear behaviour.
+ *
+ * **Safe-integer bound.** Numeric input larger than
+ * `Number.MAX_SAFE_INTEGER` (2^53 - 1) silently rounds via
+ * `Number(raw)`; very long digit strings yield `Infinity`,
+ * which `JSON.stringify` serialises as `null`. Either case
+ * would corrupt the wire shape. We throw `usage_error` rather
+ * than silently routing to the label path because the input
+ * was unambiguously the index path (all digits, no signs / no
+ * decimals) — sending `{label: "999999999999999999999"}` to
+ * Monday would be a worse surprise than a local error.
  */
-const translateStatus = (raw: string): Readonly<Record<string, unknown>> => {
+const translateStatus = (
+  raw: string,
+  columnId: string,
+): Readonly<Record<string, unknown>> => {
   if (NON_NEGATIVE_INTEGER.test(raw)) {
-    return { index: Number(raw) };
+    const parsed = Number(raw);
+    if (!Number.isSafeInteger(parsed)) {
+      throw unsafeIntegerError(columnId, 'status', raw);
+    }
+    return { index: parsed };
   }
   return { label: raw };
 };
@@ -231,7 +248,8 @@ const translateDropdown = (
   if (parts.length === 0) {
     throw new UsageError(
       `Dropdown column "${columnId}" needs at least one label or numeric ID. ` +
-        `Got "${raw}". To clear a dropdown column, use \`monday item clear ${columnId}\` instead.`,
+        `Got "${raw}". To clear a dropdown column, use ` +
+        `\`monday item clear <iid> ${columnId} [--board <bid>]\` instead.`,
       {
         details: {
           column_id: columnId,
@@ -246,9 +264,57 @@ const translateDropdown = (
     );
   }
   if (parts.every((part) => NON_NEGATIVE_INTEGER.test(part))) {
-    return { ids: parts.map((part) => Number(part)) };
+    const ids = parts.map((part) => {
+      const parsed = Number(part);
+      if (!Number.isSafeInteger(parsed)) {
+        throw unsafeIntegerError(columnId, 'dropdown', part);
+      }
+      return parsed;
+    });
+    return { ids };
   }
   return { labels: parts };
+};
+
+/**
+ * Builds the `usage_error` for numeric input that exceeds
+ * `Number.MAX_SAFE_INTEGER` (2^53 - 1). Shared by status (index)
+ * and dropdown (id) because the failure mode is identical: the
+ * input parsed as an integer-shaped number but `Number(raw)`
+ * lost precision (or yielded `Infinity` for digit strings ~310+
+ * chars long). Either case would land at Monday as the wrong
+ * integer or as `null` after `JSON.stringify`. The error carries
+ * the raw input so an agent's debug log shows exactly what they
+ * sent, and a hint nudging them toward the label path or
+ * `--set-raw`.
+ */
+const unsafeIntegerError = (
+  columnId: string,
+  columnType: 'status' | 'dropdown',
+  raw: string,
+): UsageError => {
+  const titled = columnType === 'status' ? 'Status' : 'Dropdown';
+  const noun = columnType === 'status' ? 'indexes' : 'IDs';
+  const hint =
+    columnType === 'status'
+      ? 'use a status label (e.g. --set status=Done) or an index < 2^53'
+      : 'use dropdown labels (--set tags=Backend,Frontend) or IDs < 2^53';
+  return new UsageError(
+    `${titled} column "${columnId}" got numeric input "${raw}" that ` +
+      `exceeds JavaScript's safe-integer range (2^53 - 1). Number(raw) ` +
+      `would lose precision or yield Infinity, corrupting the wire ` +
+      `shape. Monday's ${columnType} ${noun} are small non-negative ` +
+      `integers — pass a label, a smaller ID, or --set-raw to bypass ` +
+      `the translator entirely.`,
+    {
+      details: {
+        column_id: columnId,
+        column_type: columnType,
+        raw_input: raw,
+        hint,
+      },
+    },
+  );
 };
 
 /**
