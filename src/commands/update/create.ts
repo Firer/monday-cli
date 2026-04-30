@@ -113,10 +113,15 @@ const readBody = async (
     );
   }
   if (inlineBody !== undefined) {
-    if (inlineBody.length === 0) {
+    if (inlineBody.trim().length === 0) {
+      // Codex pass-1 F5: empty-after-trim must reject too — a
+      // user passing `--body "   "` (whitespace-only) shouldn't
+      // sneak past the empty-body check and surface as Monday's
+      // `validation_failed` post-mutation. Same trim policy the
+      // file / stdin branches apply.
       throw new UsageError(
-        '--body cannot be empty. Pass markdown content or use ' +
-          '--body-file <path> to read from disk / stdin.',
+        '--body cannot be empty (or whitespace-only). Pass markdown ' +
+          'content or use --body-file <path> to read from disk / stdin.',
       );
     }
     return inlineBody;
@@ -223,7 +228,9 @@ export const updateCreateCommand: CommandModule<
           // `meta.dry_run: true`, `planned_changes: [{...}]`. The
           // operation is `create_update`; the diff carries the
           // outgoing body so an agent can verify what would be
-          // posted.
+          // posted. Source is `'none'` because no API call fires
+          // (Codex pass-1 minor: `'live'` would imply a network
+          // round-trip; the dry-run is purely argv-derived).
           emitDryRun({
             ctx,
             programOpts: program.opts(),
@@ -235,7 +242,7 @@ export const updateCreateCommand: CommandModule<
                 body_length: body.length,
               },
             ],
-            source: 'live',
+            source: 'none',
             cacheAgeSeconds: null,
             warnings: [],
             apiVersion,

@@ -2,8 +2,17 @@
  * Integration tests for `monday update *` (M3 §3 reads only —
  * `update create` ships in M5b).
  */
-import { describe, expect, it } from 'vitest';
-import { drive, parseEnvelope, type EnvelopeShape } from '../helpers.js';
+import { Readable } from 'node:stream';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  drive,
+  parseEnvelope,
+  LEAK_CANARY,
+  type EnvelopeShape,
+} from '../helpers.js';
 
 const sampleUpdate = {
   id: '77',
@@ -304,5 +313,148 @@ describe('monday update create (integration, M5b)', () => {
     expect(plan?.item_id).toBe('12345');
     expect(plan?.body).toBe('preview only');
     expect(plan?.body_length).toBe(12);
+  });
+
+  // Codex pass-1 F5: empty-after-trim must reject.
+  it('rejects whitespace-only --body as usage_error (F5)', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  // Codex pass-1 F7: --body-file <path> coverage.
+  describe('--body-file', () => {
+    let tmpRoot: string;
+    beforeEach(async () => {
+      tmpRoot = await mkdtemp(join(tmpdir(), 'monday-cli-update-create-'));
+    });
+    afterEach(async () => {
+      await rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    it('reads --body-file <path> and posts the contents', async () => {
+      const path = join(tmpRoot, 'body.md');
+      await writeFile(path, 'Body from disk\n', 'utf8');
+      const created = {
+        id: '88',
+        body: '<p>Body from disk</p>',
+        text_body: 'Body from disk',
+        creator_id: '1',
+        creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+        item_id: '12345',
+        created_at: '2026-04-30T11:00:00Z',
+        updated_at: '2026-04-30T11:00:00Z',
+      };
+      const out = await drive(
+        ['update', 'create', '12345', '--body-file', path, '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'UpdateCreate',
+              response: { data: { create_update: created } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { id: string; text_body: string };
+      };
+      expect(env.data.id).toBe('88');
+    });
+
+    it('reads --body-file - from stdin', async () => {
+      const created = {
+        id: '99',
+        body: '<p>From stdin</p>',
+        text_body: 'From stdin',
+        creator_id: '1',
+        creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+        item_id: '12345',
+        created_at: '2026-04-30T11:00:00Z',
+        updated_at: '2026-04-30T11:00:00Z',
+      };
+      const stdin = Readable.from(['From stdin\n']);
+      const out = await drive(
+        ['update', 'create', '12345', '--body-file', '-', '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'UpdateCreate',
+              response: { data: { create_update: created } },
+            },
+          ],
+        },
+        { stdin },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { id: string };
+      };
+      expect(env.data.id).toBe('99');
+    });
+
+    it('rejects empty stdin as usage_error', async () => {
+      const stdin = Readable.from(['']);
+      const out = await drive(
+        ['update', 'create', '12345', '--body-file', '-', '--json'],
+        { interactions: [] },
+        { stdin },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+    });
+
+    it('rejects --body and --body-file together as usage_error', async () => {
+      const out = await drive(
+        ['update', 'create', '12345', '--body', 'inline', '--body-file', 'nonexistent', '--json'],
+        { interactions: [] },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+    });
+
+    it('surfaces a clear usage_error when --body-file path does not exist', async () => {
+      const out = await drive(
+        ['update', 'create', '12345', '--body-file', join(tmpRoot, 'missing.md'), '--json'],
+        { interactions: [] },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+    });
+  });
+
+  it('surfaces typed internal_error for malformed Monday response', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', 'x', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateCreate',
+            response: { data: { create_update: { id: 'not-numeric-update-id' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('token never leaks in error envelopes (M5b regression)', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });

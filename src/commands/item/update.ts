@@ -460,9 +460,18 @@ export const itemUpdateCommand: CommandModule<
         // before translating, so the agent sees one cumulative
         // resolution-error envelope rather than partial-progress
         // surprises across the array.
+        //
+        // Codex pass-1 F2: track the per-leg resolution source so
+        // F4's `validation_failed` → `column_archived` remap fires
+        // correctly for cache-only legs (without warnings). A plain
+        // cache hit produces no warning but the `source` is `cache`
+        // — checking `collectedWarnings` for `stale_cache_refreshed`
+        // alone misses this branch.
         const collectedWarnings: ResolverWarning[] = [];
         const translated: TranslatedColumnValue[] = [];
         const resolvedIds: Record<string, string> = {};
+        let aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
+          undefined;
         for (const entry of setEntries) {
           const resolution = await resolveColumnWithRefresh({
             client,
@@ -473,6 +482,7 @@ export const itemUpdateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           collectedWarnings.push(...resolution.warnings);
+          aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
 
           if (resolution.match.column.archived === true) {
             throw foldResolverWarningsIntoError(
@@ -558,23 +568,19 @@ export const itemUpdateCommand: CommandModule<
             if (first === undefined) {
               throw folded;
             }
-            // Pick a representative resolution source for the remap
-            // — multi-column resolution may have mixed cache /
-            // live legs; if any leg was non-live we treat the batch
-            // as cache-sourced for remap purposes. mergedSource is
-            // either 'cache' / 'live' / 'mixed'.
-            const mergedSource = collectedWarnings.some(
-              (w) => w.code === 'stale_cache_refreshed',
-            )
-              ? 'mixed'
-              : 'live';
+            // Codex pass-1 F2: pass the actual aggregated resolution
+            // source (live / cache / mixed) so plain cache hits
+            // without `stale_cache_refreshed` warnings still trigger
+            // the remap. Pre-fix this looked at warnings only and
+            // would skip the remap for the most common stale-cache
+            // case.
             throw await maybeRemapValidationFailedToArchived(folded, {
               client,
               boardId,
               columnId: first.columnId,
               env: ctx.env,
               noCache: globalFlags.noCache,
-              resolutionSource: mergedSource,
+              resolutionSource: aggregateSource ?? 'live',
             });
           }
           throw err;
@@ -678,6 +684,50 @@ const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem => {
   return projectItem({ raw: parseRawItem(raw, { item_id: itemId }) });
 };
 
+/**
+ * Aggregates per-leg `source` values into the merge value the F4
+ * remap helper consumes. Same merge rule the dry-run engine applies
+ * (`live + live → live`, `cache + live → mixed`, `mixed → mixed`).
+ * Local copy rather than an export from `api/dry-run.ts` because
+ * the engine's `mergeSource` is a private helper there; lifting it
+ * would expand the engine's surface for one consumer. If a third
+ * consumer arrives, lift to a shared module then.
+ */
+const mergeSourceForRemap = (
+  current: 'live' | 'cache' | 'mixed' | undefined,
+  next: 'live' | 'cache' | 'mixed',
+): 'live' | 'cache' | 'mixed' => {
+  if (current === undefined) return next;
+  if (current === 'mixed' || next === 'mixed') return 'mixed';
+  if (current === next) return current;
+  return 'mixed';
+};
+
+/**
+ * Bulk dry-run aggregates per-item resolver warnings — the same
+ * `stale_cache_refreshed` / `column_token_collision` signals fire
+ * once per item the first time they're triggered (subsequent items
+ * hit the now-warm cache). De-duplicates by `code + message +
+ * details.token` so an agent reading the dry-run envelope sees
+ * each unique warning once rather than N copies. Order-preserving:
+ * the first occurrence wins.
+ */
+const dedupeWarnings = (warnings: readonly Warning[]): readonly Warning[] => {
+  const seen = new Set<string>();
+  const out: Warning[] = [];
+  for (const w of warnings) {
+    const tokenKey =
+      typeof w.details?.token === 'string'
+        ? w.details.token
+        : '';
+    const key = `${w.code}|${w.message}|${tokenKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
+  }
+  return out;
+};
+
 // ============================================================
 // Bulk path (cli-design §10.2 — `--where` / `--filter-json`).
 // ============================================================
@@ -710,27 +760,49 @@ const NEXT_ITEMS_PAGE_QUERY = `
   }
 `;
 
-interface BulkItem {
-  readonly id: string;
-}
+// R18 / Codex pass-1 F6: parse boundaries on the bulk items_page +
+// next_items_page responses. Pre-fix, these were trusted via
+// optional chaining — a malformed Monday response (schema drift, a
+// `boards` key missing, `items` not an array) would silently
+// surface as an empty match set, which is the worst-of-both-worlds
+// failure mode for bulk mutations: agents see "0 matched, 0
+// applied" success when the real story is "Monday's response shape
+// changed and we couldn't read it".
+const bulkItemSchema = z.object({ id: ItemIdSchema }).loose();
 
-interface InitialPageResponse {
-  readonly boards:
-    | readonly {
-        readonly items_page?: {
-          readonly cursor: string | null;
-          readonly items: readonly BulkItem[];
-        };
-      }[]
-    | null;
-}
+const initialPageResponseSchema = z
+  .object({
+    boards: z
+      .array(
+        z
+          .object({
+            items_page: z
+              .object({
+                cursor: z.string().nullable(),
+                items: z.array(bulkItemSchema),
+              })
+              .optional(),
+          })
+          .loose(),
+      )
+      .nullable(),
+  })
+  .loose();
 
-interface NextPageResponse {
-  readonly next_items_page: {
-    readonly cursor: string | null;
-    readonly items: readonly BulkItem[];
-  } | null;
-}
+const nextPageResponseSchema = z
+  .object({
+    next_items_page: z
+      .object({
+        cursor: z.string().nullable(),
+        items: z.array(bulkItemSchema),
+      })
+      .nullable(),
+  })
+  .loose();
+
+type BulkItem = z.infer<typeof bulkItemSchema>;
+type InitialPageResponse = z.infer<typeof initialPageResponseSchema>;
+type NextPageResponse = z.infer<typeof nextPageResponseSchema>;
 
 /**
  * Wrapped data shape for the bulk-live success envelope. cli-design
@@ -824,11 +896,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   });
 
   // 2) Walk items_page collecting matched item IDs. Fail-fast on
-  //    stale-cursor per §5.6.
+  //    stale-cursor per §5.6. Each page response is parsed through
+  //    `unwrapOrThrow` so malformed shapes surface as typed
+  //    `internal_error` (Codex pass-1 F6).
   const matchedItemIds: string[] = [];
   await paginate<BulkItem, InitialPageResponse | NextPageResponse>({
     fetchInitial: async () => {
-      return client.raw<InitialPageResponse>(
+      const response = await client.raw<unknown>(
         ITEMS_PAGE_QUERY,
         {
           boardId,
@@ -837,13 +911,29 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         },
         { operationName: 'ItemsPage' },
       );
+      const data = unwrapOrThrow(
+        initialPageResponseSchema.safeParse(response.data),
+        {
+          context: `Monday returned a malformed ItemsPage response for board ${boardId}`,
+          details: { board_id: boardId },
+        },
+      );
+      return { ...response, data };
     },
     fetchNext: async (cursor) => {
-      return client.raw<NextPageResponse>(
+      const response = await client.raw<unknown>(
         NEXT_ITEMS_PAGE_QUERY,
         { cursor, limit: DEFAULT_PAGE_SIZE },
         { operationName: 'NextItemsPage' },
       );
+      const data = unwrapOrThrow(
+        nextPageResponseSchema.safeParse(response.data),
+        {
+          context: 'Monday returned a malformed NextItemsPage response',
+          details: { cursor },
+        },
+      );
+      return { ...response, data };
     },
     now: ctx.clock,
     extractPage: (r): PaginatedPage<BulkItem> => {
@@ -868,35 +958,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     },
   });
 
-  // 3) Confirmation gate. Bulk mutations without --yes (and without
-  //    --dry-run) surface `confirmation_required` per §3.1 #7 +
-  //    §6.5. Agents read the matched-item count and re-run with
-  //    --yes after reviewing. `--yes` is a global flag (program.ts).
-  if (!globalFlags.dryRun && !globalFlags.yes) {
-    throw new ConfirmationRequiredError(
-      `Bulk item update would mutate ${String(matchedItemIds.length)} ` +
-        `matched item(s). Re-run with --yes to confirm, or --dry-run to ` +
-        `preview.`,
-      {
-        details: {
-          board_id: boardId,
-          matched_count: matchedItemIds.length,
-          where_clauses: parsed.where,
-          ...(parsed.filterJson === undefined
-            ? {}
-            : { filter_json: parsed.filterJson }),
-          hint:
-            'Use --dry-run to inspect the planned_changes for every ' +
-            'matched item before applying.',
-        },
-      },
-    );
-  }
-
+  // 3) Empty match set — both dry-run and live are clean no-ops.
+  //    Emit a success envelope before the confirmation gate fires
+  //    (Codex pass-1 F1: `--yes` shouldn't be required to confirm
+  //    "no items matched"). Filter warnings still surface so the
+  //    agent sees `column_token_collision` / `stale_cache_refreshed`
+  //    if the empty result was filter-resolved post-refresh.
   if (matchedItemIds.length === 0) {
-    // Empty match set — both dry-run and live are no-ops. Emit a
-    // success envelope with zero planned_changes / applied items
-    // rather than a misleading error.
     if (globalFlags.dryRun) {
       emitDryRun({
         ctx,
@@ -925,6 +993,31 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     return;
   }
 
+  // 4) Confirmation gate. Bulk mutations without --yes (and without
+  //    --dry-run) surface `confirmation_required` per §3.1 #7 +
+  //    §6.5. Agents read the matched-item count and re-run with
+  //    --yes after reviewing. `--yes` is a global flag (program.ts).
+  if (!globalFlags.dryRun && !globalFlags.yes) {
+    throw new ConfirmationRequiredError(
+      `Bulk item update would mutate ${String(matchedItemIds.length)} ` +
+        `matched item(s). Re-run with --yes to confirm, or --dry-run to ` +
+        `preview.`,
+      {
+        details: {
+          board_id: boardId,
+          matched_count: matchedItemIds.length,
+          where_clauses: parsed.where,
+          ...(parsed.filterJson === undefined
+            ? {}
+            : { filter_json: parsed.filterJson }),
+          hint:
+            'Use --dry-run to inspect the planned_changes for every ' +
+            'matched item before applying.',
+        },
+      },
+    );
+  }
+
   const setEntries = parsed.set.map(splitSetExpression);
 
   const dateResolution: DateResolutionContext = {
@@ -946,11 +1039,21 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     },
   };
 
-  // 4) Dry-run path: per-item planChanges. Column resolution is
+  // 5) Dry-run path: per-item planChanges. Column resolution is
   //    cached after the first call; per-item state read fires per
   //    item (no item-state cache in v0.1).
+  //
+  // Codex pass-1 F4: aggregate per-item warnings + source + cache
+  // age across the batch. Pre-fix, bulk dry-run dropped per-item
+  // results' `warnings` and hardcoded `source: 'mixed'`, losing
+  // `column_token_collision` / `stale_cache_refreshed` signals
+  // the resolver-warning preservation pattern is meant to keep.
   if (globalFlags.dryRun) {
     const allPlanned: Readonly<Record<string, unknown>>[] = [];
+    const aggregatedWarnings: Warning[] = [...filterResult.warnings];
+    let aggregatedSource: 'live' | 'cache' | 'mixed' =
+      meta.source === 'cache' ? 'cache' : 'live';
+    let aggregatedCacheAge: number | null = meta.cacheAgeSeconds;
     for (const itemId of matchedItemIds) {
       const result = await planChanges({
         client,
@@ -966,14 +1069,29 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       for (const plan of result.plannedChanges) {
         allPlanned.push(plan as unknown as Readonly<Record<string, unknown>>);
       }
+      // Resolver warnings can fire per item (the cache-miss-refresh
+      // dance is per-token). Most fire on the first item only (cache
+      // populated for subsequent items), but the helper deduplicates
+      // by code+message+token below for compactness.
+      for (const w of result.warnings) {
+        aggregatedWarnings.push(w);
+      }
+      aggregatedSource = mergeSourceForRemap(aggregatedSource, result.source);
+      if (
+        result.cacheAgeSeconds !== null &&
+        (aggregatedCacheAge === null ||
+          result.cacheAgeSeconds > aggregatedCacheAge)
+      ) {
+        aggregatedCacheAge = result.cacheAgeSeconds;
+      }
     }
     emitDryRun({
       ctx,
       programOpts,
       plannedChanges: allPlanned,
-      source: 'mixed',
-      cacheAgeSeconds: meta.cacheAgeSeconds,
-      warnings: filterResult.warnings,
+      source: aggregatedSource,
+      cacheAgeSeconds: aggregatedCacheAge,
+      warnings: dedupeWarnings(aggregatedWarnings),
       apiVersion,
     });
     return;
@@ -992,6 +1110,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   const resolverWarnings: ResolverWarning[] = [];
   const translated: TranslatedColumnValue[] = [];
   const resolvedIds: Record<string, string> = {};
+  let aggregateSource: 'live' | 'cache' | 'mixed' =
+    meta.source === 'cache' ? 'cache' : 'live';
   for (const entry of setEntries) {
     const resolution = await resolveColumnWithRefresh({
       client,
@@ -1003,6 +1123,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     });
     collectedWarnings.push(...resolution.warnings);
     resolverWarnings.push(...resolution.warnings);
+    aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
         new ApiError(
@@ -1058,6 +1179,14 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 
   const mutation: SelectedMutation = selectMutation(allTranslated);
   const appliedItems: ProjectedItem[] = [];
+  // Codex pass-1 F3: F4's `validation_failed` → `column_archived`
+  // remap must fire on bulk per-item failures too — agents key off
+  // the stable `column_archived` code regardless of whether the
+  // mutation came from item set / item update single / item update
+  // bulk. Pre-fix, bulk failures only ran the resolver-warning
+  // fold + bulk-progress decoration; the remap was missing.
+  const remapTarget = translated[0];
+  const remapSource = aggregateSource;
   for (const itemId of matchedItemIds) {
     try {
       const result = await executeMutation(client, {
@@ -1070,15 +1199,29 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     } catch (err) {
       if (err instanceof MondayCliError) {
         const folded = foldResolverWarningsIntoError(err, resolverWarnings);
+        // Apply the F4 remap before bulk-progress decoration. The
+        // remap returns the original error unchanged when its
+        // preconditions aren't met (non-validation_failed, live
+        // source, refresh failure, post-refresh column still
+        // active). When it DOES fire, the remapped error keeps the
+        // resolver_warnings slot we just folded in.
+        let remapped: MondayCliError = folded;
+        if (remapTarget !== undefined) {
+          remapped = await maybeRemapValidationFailedToArchived(folded, {
+            client,
+            boardId,
+            columnId: remapTarget.columnId,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+            resolutionSource: remapSource,
+          });
+        }
         // Decorate with bulk-progress details so agents can see how
         // many items mutated successfully before the failure.
-        const existing = folded.details ?? {};
-        const errorClass = folded.code === 'usage_error'
-          ? UsageError
-          : ApiError;
-        if (errorClass === UsageError) {
-          throw new UsageError(folded.message, {
-            ...(folded.cause === undefined ? {} : { cause: folded.cause }),
+        const existing = remapped.details ?? {};
+        if (remapped.code === 'usage_error') {
+          throw new UsageError(remapped.message, {
+            ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
             details: {
               ...existing,
               applied_count: appliedItems.length,
@@ -1088,13 +1231,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
             },
           });
         }
-        throw new ApiError(folded.code, folded.message, {
-          ...(folded.cause === undefined ? {} : { cause: folded.cause }),
-          ...(folded.httpStatus === undefined ? {} : { httpStatus: folded.httpStatus }),
-          ...(folded.mondayCode === undefined ? {} : { mondayCode: folded.mondayCode }),
-          ...(folded.requestId === undefined ? {} : { requestId: folded.requestId }),
-          retryable: folded.retryable,
-          ...(folded.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: folded.retryAfterSeconds }),
+        throw new ApiError(remapped.code, remapped.message, {
+          ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
+          ...(remapped.httpStatus === undefined ? {} : { httpStatus: remapped.httpStatus }),
+          ...(remapped.mondayCode === undefined ? {} : { mondayCode: remapped.mondayCode }),
+          ...(remapped.requestId === undefined ? {} : { requestId: remapped.requestId }),
+          retryable: remapped.retryable,
+          ...(remapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: remapped.retryAfterSeconds }),
           details: {
             ...existing,
             applied_count: appliedItems.length,
