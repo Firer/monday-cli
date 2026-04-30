@@ -48,12 +48,17 @@ import {
 } from '../../api/pagination.js';
 import {
   idFromRawItem,
-  projectItem,
   projectedItemSchema,
-  rawItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
-import type { Warning, ColumnHead } from '../../utils/output/envelope.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  collectColumnHeads,
+  projectFromRaw,
+  resolveMeFactory,
+  titleMap,
+} from '../../api/item-helpers.js';
+import type { Warning } from '../../utils/output/envelope.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
 const ITEMS_PAGE_BY_COLUMN_VALUES_QUERY = `
@@ -69,22 +74,7 @@ const ITEMS_PAGE_BY_COLUMN_VALUES_QUERY = `
     ) {
       cursor
       items {
-        id
-        name
-        state
-        url
-        created_at
-        updated_at
-        board { id }
-        group { id title }
-        parent_item { id }
-        column_values {
-          id
-          type
-          text
-          value
-          column { title }
-        }
+        ${ITEM_FIELDS_FRAGMENT}
       }
     }
   }
@@ -95,22 +85,7 @@ const ITEMS_BY_COLUMN_VALUES_NEXT_QUERY = `
     next_items_page(limit: $limit, cursor: $cursor) {
       cursor
       items {
-        id
-        name
-        state
-        url
-        created_at
-        updated_at
-        board { id }
-        group { id title }
-        parent_item { id }
-        column_values {
-          id
-          type
-          text
-          value
-          column { title }
-        }
+        ${ITEM_FIELDS_FRAGMENT}
       }
     }
   }
@@ -290,39 +265,6 @@ const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> =>
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
-const resolveMeFactory = (client: MondayClient): (() => Promise<string>) => {
-  return async () => {
-    const response = await client.whoami();
-    const me = response.data.me;
-    /* c8 ignore next 5 — defensive guard; same rationale as
-       item/list.ts. */
-    if (me === null) {
-      throw new UsageError(
-        'cannot resolve `me` — token is not associated with a Monday user',
-      );
-    }
-    return me.id;
-  };
-};
-
-const titleMap = (metadata: BoardMetadata): ReadonlyMap<string, string> => {
-  const out = new Map<string, string>();
-  for (const c of metadata.columns) {
-    out.set(c.id, c.title);
-  }
-  return out;
-};
-
-const collectColumnHeads = (
-  metadata: BoardMetadata,
-): Readonly<Record<string, ColumnHead>> => {
-  const out: Record<string, ColumnHead> = {};
-  for (const c of metadata.columns) {
-    out[c.id] = { id: c.id, type: c.type, title: c.title };
-  }
-  return out;
-};
-
 export const itemSearchCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemSearchOutput
@@ -409,13 +351,9 @@ export const itemSearchCommand: CommandModule<
         });
 
         const data: ItemSearchOutput = result.items.map((raw) =>
-          projectItem({
-            raw: rawItemSchema.parse(raw),
-            columnTitles: titles,
-            // §6.3 same-board title de-dup: titles live in
-            // meta.columns, not on each row.
-            omitColumnTitles: true,
-          }),
+          // §6.3 same-board title de-dup: titles live in meta.columns,
+          // not on each row.
+          projectFromRaw(raw, titles, { omitColumnTitles: true }),
         );
         const warnings: Warning[] = [...filterWarnings, ...result.warnings];
 

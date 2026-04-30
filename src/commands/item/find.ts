@@ -29,6 +29,7 @@ import {
   type ProjectedItem,
   type RawItem,
 } from '../../api/item-projection.js';
+import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import type { Warning } from '../../utils/output/envelope.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
@@ -41,22 +42,7 @@ const ITEM_FIND_QUERY = `
       items_page(limit: $limit) {
         cursor
         items {
-          id
-          name
-          state
-          url
-          created_at
-          updated_at
-          board { id }
-          group { id title }
-          parent_item { id }
-          column_values {
-            id
-            type
-            text
-            value
-            column { title }
-          }
+          ${ITEM_FIELDS_FRAGMENT}
         }
       }
     }
@@ -74,22 +60,7 @@ const ITEM_FIND_BY_GROUP_QUERY = `
         items_page(limit: $limit) {
           cursor
           items {
-            id
-            name
-            state
-            url
-            created_at
-            updated_at
-            board { id }
-            group { id title }
-            parent_item { id }
-            column_values {
-              id
-              type
-              text
-              value
-              column { title }
-            }
+            ${ITEM_FIELDS_FRAGMENT}
           }
         }
       }
@@ -102,22 +73,7 @@ const ITEM_FIND_NEXT_QUERY = `
     next_items_page(limit: $limit, cursor: $cursor) {
       cursor
       items {
-        id
-        name
-        state
-        url
-        created_at
-        updated_at
-        board { id }
-        group { id title }
-        parent_item { id }
-        column_values {
-          id
-          type
-          text
-          value
-          column { title }
-        }
+        ${ITEM_FIELDS_FRAGMENT}
       }
     }
   }

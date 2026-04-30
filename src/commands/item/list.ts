@@ -35,7 +35,6 @@ import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError } from '../../utils/errors.js';
 import {
   loadBoardMetadata,
   refreshBoardMetadata,
@@ -49,12 +48,16 @@ import {
 } from '../../api/pagination.js';
 import {
   idFromRawItem,
-  projectItem,
   projectedItemSchema,
-  rawItemSchema,
   type ProjectedItem,
-  type RawItem,
 } from '../../api/item-projection.js';
+import {
+  ITEM_FIELDS_FRAGMENT,
+  collectColumnHeads,
+  projectFromRaw,
+  resolveMeFactory,
+  titleMap,
+} from '../../api/item-helpers.js';
 import {
   buildMeta,
   type ColumnHead,
@@ -78,22 +81,7 @@ const ITEMS_PAGE_QUERY = `
       items_page(limit: $limit, query_params: $queryParams) {
         cursor
         items {
-          id
-          name
-          state
-          url
-          created_at
-          updated_at
-          board { id }
-          group { id title }
-          parent_item { id }
-          column_values {
-            id
-            type
-            text
-            value
-            column { title }
-          }
+          ${ITEM_FIELDS_FRAGMENT}
         }
       }
     }
@@ -119,22 +107,7 @@ const ITEMS_PAGE_BY_GROUP_QUERY = `
         items_page(limit: $limit, query_params: $queryParams) {
           cursor
           items {
-            id
-            name
-            state
-            url
-            created_at
-            updated_at
-            board { id }
-            group { id title }
-            parent_item { id }
-            column_values {
-              id
-              type
-              text
-              value
-              column { title }
-            }
+            ${ITEM_FIELDS_FRAGMENT}
           }
         }
       }
@@ -147,22 +120,7 @@ const NEXT_ITEMS_PAGE_QUERY = `
     next_items_page(limit: $limit, cursor: $cursor) {
       cursor
       items {
-        id
-        name
-        state
-        url
-        created_at
-        updated_at
-        board { id }
-        group { id title }
-        parent_item { id }
-        column_values {
-          id
-          type
-          text
-          value
-          column { title }
-        }
+        ${ITEM_FIELDS_FRAGMENT}
       }
     }
   }
@@ -196,58 +154,6 @@ const inputSchema = z
     pageSize: z.coerce.number().int().positive().max(500).optional(),
   })
   .strict();
-
-const collectColumnHeads = (
-  metadata: { readonly columns: readonly { readonly id: string; readonly type: string; readonly title: string }[] },
-): Readonly<Record<string, ColumnHead>> => {
-  const out: Record<string, ColumnHead> = {};
-  for (const c of metadata.columns) {
-    out[c.id] = { id: c.id, type: c.type, title: c.title };
-  }
-  return out;
-};
-
-const titleMap = (
-  metadata: { readonly columns: readonly { readonly id: string; readonly title: string }[] },
-): ReadonlyMap<string, string> => {
-  const out = new Map<string, string>();
-  for (const c of metadata.columns) {
-    out.set(c.id, c.title);
-  }
-  return out;
-};
-
-const resolveMeFactory = (client: MondayClient): (() => Promise<string>) => {
-  return async () => {
-    const response = await client.whoami();
-    const me = response.data.me;
-    /* c8 ignore next 5 — defensive: Monday's me field is null only
-       when the token is invalid / belongs to a guest, which the
-       transport layer surfaces as `unauthorized` before this
-       resolver runs. The guard exists for type narrowing. */
-    if (me === null) {
-      throw new UsageError(
-        'cannot resolve `me` — token is not associated with a Monday user',
-      );
-    }
-    return me.id;
-  };
-};
-
-const projectFromRaw = (
-  raw: unknown,
-  titles: ReadonlyMap<string, string>,
-): ProjectedItem => {
-  const parsed: RawItem = rawItemSchema.parse(raw);
-  // Same-board collection — drop per-cell titles per §6.3, the
-  // canonical view lives on `meta.columns`.
-  return projectItem({
-    raw: parsed,
-    columnTitles: titles,
-    omitColumnTitles: true,
-  });
-};
-
 
 interface CollectingFlags {
   readonly all: boolean;
@@ -349,7 +255,7 @@ const startNdjsonStream = (inputs: StreamNdjsonInputs): StreamHandle => {
   const { stream, secrets, titles, columns } = inputs;
   return {
     onItem: (raw) => {
-      const projected = projectFromRaw(raw, titles);
+      const projected = projectFromRaw(raw, titles, { omitColumnTitles: true });
       const redacted = redact(projected, { secrets });
       stream.write(`${JSON.stringify(redacted)}\n`);
     },
@@ -546,7 +452,7 @@ export const itemListCommand: CommandModule<
           pageSize,
         });
         const data: ItemListOutput = result.items.map((raw) =>
-          projectFromRaw(raw, titles),
+          projectFromRaw(raw, titles, { omitColumnTitles: true }),
         );
         const warnings: Warning[] = [...filterWarnings, ...result.warnings];
         // Re-parse the global flags so commander's runtime shape gets

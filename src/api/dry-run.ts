@@ -62,6 +62,7 @@ import {
   type RawItem,
   type RawColumnValue,
 } from './item-projection.js';
+import { ITEM_FIELDS_FRAGMENT } from './item-helpers.js';
 import type { BoardColumn } from './board-metadata.js';
 import {
   selectMutation,
@@ -578,22 +579,7 @@ const decodeFrom = (raw: RawColumnValue): JsonValue => {
 const ITEM_DRY_RUN_QUERY = `
   query ItemDryRunRead($ids: [ID!]!) {
     items(ids: $ids) {
-      id
-      name
-      state
-      url
-      created_at
-      updated_at
-      board { id }
-      group { id title }
-      parent_item { id }
-      column_values {
-        id
-        type
-        text
-        value
-        column { title }
-      }
+      ${ITEM_FIELDS_FRAGMENT}
     }
   }
 `;

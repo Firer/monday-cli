@@ -26,6 +26,7 @@ import {
   rawItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
+import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { sortByIdAsc } from '../../api/sort.js';
 
 const ITEM_SUBITEMS_QUERY = `
@@ -33,22 +34,7 @@ const ITEM_SUBITEMS_QUERY = `
     items(ids: $ids) {
       id
       subitems {
-        id
-        name
-        state
-        url
-        created_at
-        updated_at
-        board { id }
-        group { id title }
-        parent_item { id }
-        column_values {
-          id
-          type
-          text
-          value
-          column { title }
-        }
+        ${ITEM_FIELDS_FRAGMENT}
       }
     }
   }
