@@ -8,9 +8,10 @@ terminal, with humans as a welcome second audience.
 > **Status:** v0.1 in progress — M0–M5a shipped (account / workspace /
 > board / user / update / item *reads* + filter DSL + cursor
 > pagination + the seven column-value writers and the dry-run
-> engine that M5b's mutation surfaces will consume). M5b ships
-> the mutation surfaces (`item set` / `item clear` / `item update`
-> + `update create`) next.
+> engine that M5b's mutation surfaces consume). **M5b in progress:
+> `monday item set` shipped** — the first mutation surface, with
+> live + `--dry-run` paths. `item clear` / `item update` /
+> `update create` next.
 > The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
 > if you want to know what the CLI looks like end-to-end.
 > See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.

@@ -295,6 +295,61 @@
   and BigInt (none of which TypeScript can structurally
   exclude).
 
+- `api/item-helpers.ts` (M5b R9) — shared item-command
+  helpers + GraphQL fragments. Exports:
+  - `COLUMN_VALUES_FRAGMENT` — the §6.2 column-value
+    selection (`id type text value column { title }`)
+    used by every item-shape query.
+  - `ITEM_FIELDS_FRAGMENT` — the full §6.2 item shape
+    (id / name / state / url / created_at / updated_at /
+    board { id } / group { id title } / parent_item { id } /
+    column_values).
+  - `collectColumnHeads(metadata)` — per-board column
+    heads for `meta.columns` consolidation.
+  - `titleMap(metadata)` — column-id → title `ReadonlyMap`.
+  - `resolveMeFactory(client)` — closure-cached `me` token
+    resolver via `client.whoami()`.
+  - `parseRawItem(raw, details?)` — R18-wrapped raw item
+    schema parser; safeParse + `ApiError(internal_error)`.
+  - `projectFromRaw(raw, titles, options)` — parse + project
+    + apply §6.3 same-board title de-dup.
+  Six consumers: `item get / list / find / search /
+  subitems` + the dry-run engine + `item set`. R9
+  eliminated 10 verbatim fragment copies + 4 per-command
+  scaffolding duplicates pre-M5b.
+
+- `utils/parse-boundary.ts` (M5b R18) — `unwrapOrThrow`
+  helper centralising the safeParse + `ApiError(internal_
+  error, ..., { details: { issues } })` pattern per
+  validation.md "Never bubble raw ZodError out of a parse
+  boundary". Applied at `api/board-metadata.ts` (live-fetch
+  responseSchema + projectBoard), `api/item-helpers.ts
+  parseRawItem` (4 item commands + dry-run engine),
+  `commands/emit.ts schema.parse` (drift catch),
+  `commands/item/set.ts boardLookupResponseSchema` (the
+  implicit board-lookup boundary). Cache-read parses
+  (`board-metadata parseCacheEntry`, `resolvers.ts
+  readDirectoryCache`) intentionally don't use this — the
+  surrounding cache-miss try/catch swallows them as
+  misses (corrupt cache → re-fetch live).
+
+- `commands/item/set.ts` (M5b) — first M5b mutation
+  surface. `monday item set <iid> <col>=<val> [--board
+  <bid>]`. Two paths share resolution + translation: live
+  goes through `resolveColumnWithRefresh` +
+  `translateColumnValueAsync` + `selectMutation` + the
+  Monday `change_*_column_value` mutation; `--dry-run`
+  delegates to `api/dry-run.ts planChanges`. Live mutation
+  envelope echoes `resolved_ids: { token: column_id }` per
+  cli-design §5.3 step 2. Resolver-warning preservation via
+  `foldResolverWarningsIntoError` covers every typed
+  post-resolution failure (UsageError translators, ApiError
+  `unsupported_column_type` / `user_not_found`, mutation-
+  time `validation_failed`). `maybeRemapValidationFailedTo
+  Archived` remaps `validation_failed` → `column_archived`
+  on cache-sourced resolution if a forced refresh confirms
+  the archived state.
+
 ### Hard rules
 
 - `commands/` never imports the SDK directly — always goes through

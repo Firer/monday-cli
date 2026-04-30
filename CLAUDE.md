@@ -17,13 +17,15 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M5a shipped; M5b next.** The CLI has a
-working network surface across 5 nouns (account / workspace / board /
-user / update / item reads), local-only commands (cache / config /
-schema), filter DSL (`--where` + `--filter-json`), cursor-based
-pagination with stale-cursor fail-fast + NDJSON streaming, and the
-foundations every later milestone depends on (typed errors,
-universal envelope, redaction, retry/abort, fixture transport).
+**v0.1 implementation in progress; M0–M5a shipped; M5b in progress.**
+The CLI has a working network surface across 5 nouns (account /
+workspace / board / user / update / item reads), the first M5b
+mutation (`item set` — single-column write, both live + `--dry-run`
+paths), local-only commands (cache / config / schema), filter DSL
+(`--where` + `--filter-json`), cursor-based pagination with stale-
+cursor fail-fast + NDJSON streaming, and the foundations every later
+milestone depends on (typed errors, universal envelope, redaction,
+retry/abort, fixture transport).
 Two binding documents:
 
 - **[`docs/cli-design.md`](./docs/cli-design.md)** (~1,700 lines) —
@@ -49,7 +51,7 @@ Two binding documents:
 | M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
 | M5a | shipped | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads) + `dry-run.ts` (M3 column resolution + R12 cache-miss-refresh + M5a translation + item-state read; all-or-nothing semantics + cli-design §6.4 byte-snapshot exit gate; resolver-warning preservation across `column_archived` throws) + `me-token.ts` (R15 shared `isMeToken` helper) + `DECIMAL_USER_ID_PATTERN` lift (R16) + R17 ZodError wrap at `userByEmail`. |
-| M5b | future | `item set/clear/update`, `update create` |
+| M5b | in progress | `item set` shipped — single-column write w/ live + `--dry-run` paths; `item-helpers.ts` lift (R9 — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` + `collectColumnHeads` + `titleMap` + `resolveMeFactory` + `projectFromRaw` + `parseRawItem`) + `collectSecrets` consolidation (R10) + `resolveColumnsAcrossClauses` lift (R12) + `parse-boundary.ts unwrapOrThrow` (R18 — `board-metadata` + `item-helpers` + `emit.ts` drift catch); `emitMutation` + `emitDryRun` emit helpers; `MutationEnvelope.resolved_ids` echo per cli-design §5.3 step 2; `boardLookupResponseSchema` for implicit board lookup; `validation_failed` → `column_archived` remap on cache-sourced resolution. `item clear` / `item update` / `update create` are next session(s). |
 | M6 | future | `board doctor`, `raw`, agent-flow E2E |
 | M7 | future | release prep |
 
@@ -404,6 +406,74 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   — `baseOptions / EnvelopeShape / parseEnvelope /
   assertEnvelopeContract / drive` shared by every M2+ integration
   test file. New M5+ test files should start at one import line.
+- **Item-command shared helpers (M5b R9).** `src/api/item-helpers.ts`
+  — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` (the
+  GraphQL projection §6.2 + §6.3 surface across every item-shape
+  query), `collectColumnHeads` + `titleMap` (per-board column
+  heads + title-by-id map), `resolveMeFactory` (whoami-based `me`
+  token resolver), `projectFromRaw` (parse + project with §6.3
+  same-board title de-dup), `parseRawItem` (R18-wrapped raw item
+  schema parser). Six consumers: `item get / list / find /
+  search / subitems` + the dry-run engine + `item set`.
+- **Cross-clause column resolution (M5b R12).**
+  `resolveColumnsAcrossClauses` in `src/api/columns.ts` — batched
+  variant of `resolveColumnWithRefresh` that takes pre-loaded
+  metadata + N tokens + an optional refresh callback, returns N
+  matches in input order with cache-miss-refresh-once semantics.
+  Two consumers (`api/filters.ts` + `commands/item/search.ts`);
+  M5b's bulk `--where` will be the third. The dry-run engine
+  keeps its per-token `resolveColumnWithRefresh` loop because it
+  loads metadata internally per-token (different shape).
+- **Parse-boundary wrap helper (M5b R18).** `src/utils/parse-
+  boundary.ts unwrapOrThrow` — single-line `safeParse + ApiError(
+  internal_error, ..., { details: { issues } })` used at every
+  parse boundary that consumes data from outside the compiled
+  bundle. Live-fetch parses, agent-input parses, output-schema
+  drift catches all funnel through this. Cache-read parses
+  (board-metadata, user directory) intentionally don't — the
+  surrounding cache-miss try/catch swallows them as misses
+  (corrupt cache → re-fetch live, the established contract).
+- **Mutation envelope (M5b).** `src/utils/output/envelope.ts
+  buildMutation` — the §6.4 mutation result envelope shape with
+  optional `side_effects` (for v0.3 dev shortcuts) + optional
+  `resolved_ids` slot (cli-design §5.3 step 2 — token → resolved
+  column ID echo). `emitMutation` (in `commands/emit.ts`) is the
+  call-site helper with R18 outputSchema-drift wrap; M5b's `item
+  set` is the first consumer. Adding `resolved_ids` is the M5b
+  spec-gap candidate — cli-design §6.4's live sample doesn't show
+  the slot; backfill alongside the M5b docs sweep.
+- **Dry-run envelope (M5b).** `buildDryRun` in envelope.ts +
+  `emitDryRun` in `commands/emit.ts`. The §6.4 dry-run shape
+  (`data: null`, `meta.dry_run: true`, top-level
+  `planned_changes: [...]`). JSON-only — the dry-run shape doesn't
+  have a sensible non-JSON rendering. Item set passes the M5a
+  `planChanges` result through `emitDryRun`; bulk paths in M5b's
+  `item update --where` will pass an N-element array with the
+  same shape.
+- **Live mutation `validation_failed` → `column_archived` remap
+  (M5b, Codex pass-1 F4).** `commands/item/set.ts
+  maybeRemapValidationFailedToArchived` — when a live mutation
+  fails with `validation_failed` AFTER cache-sourced resolution
+  succeeded (cache said active), force a metadata refresh. If
+  the column is now archived, remap the error to
+  `column_archived` so agents key off the stable code per
+  cli-design §6.5. Live-sourced resolutions skip the remap (the
+  live read already saw the archived flag). Resolver warnings
+  (collision / stale_cache_refreshed) survive the remap via
+  `error.details.resolver_warnings`. The remapped error carries
+  `details.remapped_from: "validation_failed"` for triage.
+- **Resolver-warning preservation pattern (M5a/M5b).**
+  `commands/item/set.ts foldResolverWarningsIntoError` — folds
+  collision / stale_cache_refreshed warnings into a thrown
+  `MondayCliError`'s `details.resolver_warnings` slot so a
+  stale-cache-then-failure flow doesn't lose the refresh signal.
+  Applies to every typed post-resolution failure: translator
+  `UsageError`s, `ApiError(unsupported_column_type)` /
+  `user_not_found`, mutation-time `validation_failed`. M5a's
+  dry-run engine pins the same pattern for `column_archived`;
+  M5b extended to all post-resolution paths. R19 candidate (§17)
+  is to lift this into a shared module before `item clear` /
+  `item update` copy the pattern.
 
 ## Workflow Rules
 
