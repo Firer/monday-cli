@@ -228,7 +228,15 @@ const buildColumnQueries = async (
       throw new UsageError(`internal: missing value for ${clause.raw}`);
     }
     let value = clause.value;
-    if (match.column.type === 'people' && value.trim() === 'me') {
+    // Case-insensitive `me` matching mirrors filters.ts (`item list
+    // --where`) and api/people.ts (`--set Owner=me`) — one rule
+    // across all three surfaces per cli-design §5.3 step 3 line
+    // 704-707. Codex review pass-2 finding: pass 1 fixed
+    // filters.ts but this surface was overlooked.
+    if (
+      match.column.type === 'people' &&
+      value.trim().toLowerCase() === 'me'
+    ) {
       value = await me();
     }
     const existing = byColumn.get(match.column.id);

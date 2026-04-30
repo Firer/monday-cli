@@ -1244,6 +1244,65 @@ describe('monday item search (integration)', () => {
     expect(out.exitCode).toBe(0);
   });
 
+  it('resolves case-insensitive `me` (`ME`) against a people column', async () => {
+    // Codex review pass-2 finding: pass 1 fixed me-casing parity in
+    // filters.ts (item list --where) but missed item search's
+    // separate clause-resolution path. Pin via integration that
+    // `--where Owner=ME` round-trips through the Whoami query and
+    // sends the resolved ID, not the literal `ME`, to Monday.
+    const peopleMeta = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'person',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'search', '--board', '111', '--where', 'Owner=ME', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardMetadata', response: { data: { boards: [peopleMeta] } } },
+          {
+            operation_name: 'Whoami',
+            response: {
+              data: {
+                me: {
+                  id: '777',
+                  name: 'Alice',
+                  email: 'alice@example.test',
+                  account: { id: '99', name: 'Org', slug: 'org' },
+                },
+              },
+            },
+          },
+          {
+            operation_name: 'ItemsByColumnValues',
+            match_variables: {
+              columns: [{ column_id: 'person', column_values: ['777'] }],
+            },
+            response: {
+              data: {
+                items_page_by_column_values: {
+                  cursor: null,
+                  items: [item('1')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
   it('--all walks via next_items_page', async () => {
     const out = await drive(
       [

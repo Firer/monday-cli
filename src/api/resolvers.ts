@@ -192,9 +192,30 @@ const resolveMulti = <T>(
 // userByEmail — directory cache + users(emails:) fallback
 // ---------------------------------------------------------------------
 
+/**
+ * User-directory entry shape. The `id` field is constrained to a
+ * decimal non-negative integer string (`0`, `42`, `1234567`) — not
+ * just any non-empty string — because callers (M5a's people
+ * translator, future commands) eventually convert it to a JS number
+ * for wire payloads. Loose `z.string().min(1)` would let `"0x2a"` /
+ * `"1e3"` / `"42 "` into the directory cache where they'd silently
+ * corrupt every later consumer's `Number(id)` conversion.
+ *
+ * The same regex shape lives in `api/people.ts`'s
+ * `DECIMAL_NON_NEGATIVE` (which validates AT the translator's
+ * boundary as a defence-in-depth layer per Codex review pass-1
+ * finding F2). Tightening the schema here means the translator's
+ * defence rarely fires for a real Monday response — only on
+ * resolver-wiring bugs or directly-constructed `UserByEmail` mocks.
+ * Codex pass-2 finding.
+ */
+const USER_ID_PATTERN = /^(0|[1-9]\d*)$/u;
+
 const userDirectoryEntrySchema = z
   .object({
-    id: z.string().min(1),
+    id: z.string().regex(USER_ID_PATTERN, {
+      message: 'user id must be a decimal non-negative integer string',
+    }),
     name: z.string(),
     email: z.string(),
   })

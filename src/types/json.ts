@@ -13,9 +13,12 @@
  * disciplined source could land a non-JSON value at Monday's
  * wire boundary and see a silent corruption.
  *
- * This module narrows the type to exactly what the JSON scalar
- * accepts. Any non-JSON value caught at compile time, no runtime
- * cost.
+ * This module narrows the type toward what the JSON scalar
+ * accepts — catching the common non-JSON-shaped values at
+ * compile time with no runtime cost. The narrowing is
+ * structural, not semantic: see "What this does NOT prevent"
+ * on `JsonValue` below for the shapes TypeScript can't catch
+ * (NaN/Infinity, cycles, symbol-keyed properties, BigInt).
  *
  * **Closed-type-literal caveat.** TypeScript treats closed object
  * types (interfaces / type literals) as not implicitly satisfying

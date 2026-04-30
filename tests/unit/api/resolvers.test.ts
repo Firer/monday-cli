@@ -279,6 +279,58 @@ describe('userByEmail — directory cache + live fallback', () => {
     expect(result.source).toBe('live');
   });
 
+  it.each([
+    ['hex-prefixed', '0x2a'],
+    ['scientific notation', '1e3'],
+    ['signed', '-1'],
+    ['decimal', '1.5'],
+    ['leading zeros', '00042'],
+    ['empty string', ''],
+    ['trailing whitespace', '42 '],
+    ['letter-mixed', '42abc'],
+  ])(
+    'rejects malformed live user IDs (%s: %j) — schema enforces decimal non-negative',
+    async (_label, malformedId) => {
+      // Codex review pass-2 finding F4: pre-fix, userByEmail's
+      // `id: z.string().min(1)` schema let malformed IDs into the
+      // directory cache where they'd silently corrupt every later
+      // consumer's `Number(id)` conversion. The translator's
+      // defence-in-depth helper (parsePeopleInput's
+      // DECIMAL_NON_NEGATIVE check) catches the wire path, but the
+      // cache poisoning would still affect any future consumer.
+      // Tightened the schema to use the same regex; pin via test
+      // that malformed IDs from the live fetch fail to parse.
+      const stats = { calls: 0 };
+      const client = buildClient(
+        [{ users: [{ ...alice, id: malformedId }] }],
+        stats,
+      );
+      // Schema parse failure bubbles as ZodError → runner maps to
+      // internal_error. Here we just assert the call rejects (the
+      // exact error wrapping is the runner's job, not the
+      // resolver's).
+      await expect(
+        userByEmail({ client, email: alice.email, env: xdgEnv() }),
+      ).rejects.toThrow();
+    },
+  );
+
+  it('accepts valid live user IDs (0, 1, 42, MAX_SAFE_INTEGER)', async () => {
+    // Pin both sides of the boundary so a future "non-zero only"
+    // tightening doesn't silently reject the system-user ID slot.
+    for (const id of ['0', '1', '42', String(Number.MAX_SAFE_INTEGER)]) {
+      const stats = { calls: 0 };
+      const client = buildClient([{ users: [{ ...alice, id }] }], stats);
+      const result = await userByEmail({
+        client,
+        email: alice.email,
+        env: xdgEnv(),
+        noCache: true,
+      });
+      expect(result.user.id).toBe(id);
+    }
+  });
+
   it('--noCache bypasses both cache layers', async () => {
     const stats = { calls: 0 };
     const client = buildClient(

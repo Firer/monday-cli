@@ -478,6 +478,11 @@ describe('parsePeopleInput — defensive resolver-side ID validation', () => {
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       expect(err.code).toBe('internal_error');
+      // Pin retryable=false so a future "retryable" override doesn't
+      // make agents think retrying will heal a directory data-
+      // integrity issue. internal_error's CODE_RETRYABLE_DEFAULT is
+      // false; this assertion is cheap defence. Codex pass-2 finding.
+      expect(err.retryable).toBe(false);
       expect(err.message).toMatch(/non-decimal user ID/u);
       expect(err.details).toMatchObject({
         column_id: 'owner',
