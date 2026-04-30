@@ -57,7 +57,10 @@ import {
   type SelectedMutation,
 } from '../../api/column-values.js';
 import { userByEmail } from '../../api/resolvers.js';
-import { refreshBoardMetadata } from '../../api/board-metadata.js';
+import {
+  foldResolverWarningsIntoError,
+  maybeRemapValidationFailedToArchived,
+} from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
@@ -241,161 +244,6 @@ const resolveBoardId = async (
   return first.board.id;
 };
 
-/**
- * Folds resolver warnings (collision / stale_cache_refreshed) into a
- * thrown error's details.resolver_warnings slot — same pattern the
- * dry-run engine uses on `column_archived` so a stale-cache-then-
- * archived flow doesn't drop the refresh signal. Returns a NEW
- * error of the same code with merged details; the original is
- * discarded.
- *
- * Accepts any `MondayCliError` (Codex pass-1 finding F2 widened
- * scope from `ApiError` only) so translator `UsageError`s
- * (date / dropdown / people invalid input) and mutation-time
- * `ApiError(validation_failed)` from Monday all carry the
- * resolver context through to the agent's debug log.
- */
-const foldResolverWarningsIntoError = (
-  err: MondayCliError,
-  resolverWarnings: readonly ResolverWarning[],
-): MondayCliError => {
-  if (resolverWarnings.length === 0) return err;
-  const detailWarnings = resolverWarnings.map((w) => ({
-    code: w.code,
-    message: w.message,
-    details: w.details,
-  }));
-  // Reconstruct via the typed-error constructor that matches
-  // `err.code` so the new error stays the same class. Pre-fix
-  // (pass-1 only-ApiError fold), a UsageError translator failure
-  // bypassed the fold and lost the resolver context.
-  const cls =
-    err.code === 'usage_error'
-      ? UsageError
-      : err.code === 'config_error' || err.code === 'cache_error'
-        ? null
-        : ApiError;
-  // For codes outside the ApiError / UsageError pair (config/cache),
-  // construct a base MondayCliError. The cli-design surface for
-  // item set never triggers those classes — but keep the shape
-  // open so the helper remains general.
-  return cls === UsageError
-    ? new UsageError(err.message, mergeDetails(err, detailWarnings))
-    : cls === ApiError
-      ? new ApiError(err.code, err.message, mergeDetails(err, detailWarnings))
-      : new MondayCliError(err.code, err.message, mergeDetails(err, detailWarnings));
-};
-
-/**
- * Pass-1 finding F4: archived-column guarantee was cache-stale in
- * one direction — when cached metadata said active but Monday had
- * since archived the column, the live mutation fired and surfaced
- * as `validation_failed`, not the stable `column_archived` code
- * agents key off (cli-design §6.5).
- *
- * This helper inspects a thrown `validation_failed` after a cache-
- * sourced resolution and remaps it to `column_archived` if a
- * forced-fresh metadata refresh confirms the column is archived.
- * Resolver warnings — already folded by
- * `foldResolverWarningsIntoError` — survive the remap.
- *
- * Why scoped to cache-sourced resolution: a live resolution
- * already saw the live archived flag, so a `validation_failed`
- * after live resolution is genuine (label typo, schema mismatch,
- * etc.). Only cache-sourced resolution can be wrong about
- * archived state.
- *
- * Returns the original error unchanged when the code isn't
- * `validation_failed`, or when the post-refresh column is still
- * active. The cache write that `refreshBoardMetadata` performs is
- * a useful side-effect — agents retrying after the failure see
- * the corrected metadata.
- */
-const maybeRemapValidationFailedToArchived = async (
-  err: MondayCliError,
-  inputs: {
-    readonly client: MondayClient;
-    readonly boardId: string;
-    readonly columnId: string;
-    readonly token: string;
-    readonly env: NodeJS.ProcessEnv;
-    readonly noCache: boolean;
-    readonly resolutionSource: 'live' | 'cache' | 'mixed';
-  },
-): Promise<MondayCliError> => {
-  if (err.code !== 'validation_failed') return err;
-  if (inputs.resolutionSource === 'live') return err;
-  let refreshed;
-  try {
-    refreshed = await refreshBoardMetadata({
-      client: inputs.client,
-      boardId: inputs.boardId,
-      env: inputs.env,
-      noCache: inputs.noCache,
-    });
-  } catch {
-    // Refresh failed — propagate the original validation_failed
-    // unchanged rather than masking with an unrelated refresh
-    // error. The agent's retry loop will hit the same path.
-    return err;
-  }
-  const live = refreshed.metadata.columns.find(
-    (c) => c.id === inputs.columnId,
-  );
-  if (live?.archived !== true) return err;
-  // Confirmed archived. Build a column_archived error preserving
-  // the original error's resolver_warnings.
-  const existing = err.details ?? {};
-  return new ApiError(
-    'column_archived',
-    `Column ${JSON.stringify(inputs.columnId)} on board ` +
-      `${inputs.boardId} is archived (Monday rejected the mutation as ` +
-      `validation_failed; a forced metadata refresh confirmed the ` +
-      `archived state). Un-archive the column in Monday or pick a ` +
-      `different target.`,
-    {
-      cause: err,
-      details: {
-        ...existing,
-        column_id: inputs.columnId,
-        column_title: live.title,
-        column_type: live.type,
-        board_id: inputs.boardId,
-        remapped_from: 'validation_failed',
-        hint:
-          'cache-sourced resolution missed the archived flag; the CLI ' +
-          'forced a live refresh after the mutation failed and confirmed ' +
-          'the column is now archived. Resolver warnings (if any) carry ' +
-          'the pre-refresh state.',
-      },
-    },
-  );
-};
-
-const mergeDetails = (
-  err: MondayCliError,
-  detailWarnings: readonly { readonly code: string; readonly message: string; readonly details: Readonly<Record<string, unknown>> }[],
-): {
-  readonly cause: unknown;
-  readonly httpStatus?: number;
-  readonly mondayCode?: string;
-  readonly requestId?: string;
-  readonly retryable: boolean;
-  readonly retryAfterSeconds?: number;
-  readonly details: Readonly<Record<string, unknown>>;
-} => ({
-  cause: err.cause,
-  ...(err.httpStatus === undefined ? {} : { httpStatus: err.httpStatus }),
-  ...(err.mondayCode === undefined ? {} : { mondayCode: err.mondayCode }),
-  ...(err.requestId === undefined ? {} : { requestId: err.requestId }),
-  retryable: err.retryable,
-  ...(err.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: err.retryAfterSeconds }),
-  details: {
-    ...(err.details ?? {}),
-    resolver_warnings: detailWarnings,
-  },
-});
-
 export const itemSetCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemSetOutput
@@ -564,7 +412,6 @@ export const itemSetCommand: CommandModule<
                 client,
                 boardId,
                 columnId: resolution.match.column.id,
-                token,
                 env: ctx.env,
                 noCache: globalFlags.noCache,
                 resolutionSource: resolution.source,

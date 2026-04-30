@@ -74,6 +74,7 @@ import {
   type SelectedMutation,
   type TranslatedColumnValue,
 } from './column-values.js';
+import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
 
 /**
  * One agent-supplied `--set <token>=<value>` pair, pre-split by the
@@ -239,29 +240,28 @@ export const planChanges = async (
       // success envelope's `warnings` slot. Codex pass-2 finding:
       // a stale-cache-then-archived flow would otherwise drop the
       // refresh signal — the agent would never know the cache was
-      // wrong AND the column was archived.
-      const resolverDetailWarnings = resolution.warnings.map((w) => ({
-        code: w.code,
-        message: w.message,
-        details: w.details,
-      }));
-      throw new ApiError(
-        'column_archived',
-        `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-          `${inputs.boardId} is archived. Monday rejects mutations against ` +
-          `archived columns; un-archive the column in Monday or pick a ` +
-          `different target.`,
-        {
-          details: {
-            column_id: resolution.match.column.id,
-            column_title: resolution.match.column.title,
-            column_type: resolution.match.column.type,
-            board_id: inputs.boardId,
-            ...(resolverDetailWarnings.length > 0
-              ? { resolver_warnings: resolverDetailWarnings }
-              : {}),
+      // wrong AND the column was archived. R19 lift: route through
+      // the shared `foldResolverWarningsIntoError` helper so the
+      // dry-run engine + every M5b mutation surface (item set /
+      // clear / update) preserve the warnings via one source of
+      // truth.
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${inputs.boardId} is archived. Monday rejects mutations against ` +
+            `archived columns; un-archive the column in Monday or pick a ` +
+            `different target.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: inputs.boardId,
+            },
           },
-        },
+        ),
+        resolution.warnings,
       );
     }
 
