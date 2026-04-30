@@ -65,6 +65,7 @@ import { itemSearchCommand } from './item/search.js';
 import { itemSubitemsCommand } from './item/subitems.js';
 // M5b commands — item mutations + update create.
 import { itemSetCommand } from './item/set.js';
+import { itemClearCommand } from './item/clear.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -101,6 +102,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemSearchCommand,
     itemSubitemsCommand,
     itemSetCommand,
+    itemClearCommand,
   ];
   return cached;
 };

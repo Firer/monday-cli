@@ -2383,3 +2383,336 @@ describe('monday item set (integration, M5b)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday item clear (integration, M5b)', () => {
+  // Sample item post-clear: the cleared cell echoes the empty wire
+  // shape Monday returns after `change_*_column_value` resets the
+  // value (text: "", value: null for status — Monday's actual
+  // post-clear shape varies by type but the projector handles both).
+  const clearedItem = {
+    ...sampleItem,
+    column_values: [
+      {
+        id: 'status_4',
+        type: 'status',
+        text: '',
+        value: null,
+        column: { title: 'Status' },
+      },
+      sampleItem.column_values[1],
+    ],
+  };
+
+  it('live: rich type (status) → change_column_value with empty {} payload', async () => {
+    const out = await drive(
+      ['item', 'clear', '12345', 'status', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: clearedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    // resolved_ids echoes the agent token → resolved column ID per
+    // cli-design §5.3 step 2.
+    expect(env.resolved_ids).toEqual({ status: 'status_4' });
+  });
+
+  it('live: simple type (text) → change_simple_column_value with "" payload', async () => {
+    const textBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'text_1',
+          title: 'Notes',
+          type: 'text',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithClearedText = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'text_1',
+          type: 'text',
+          text: '',
+          value: null,
+          column: { title: 'Notes' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'text_1', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [textBoard] } },
+          },
+          {
+            operation_name: 'ItemClearSimple',
+            response: { data: { change_simple_column_value: itemWithClearedText } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ text_1: 'text_1' });
+  });
+
+  it('live: implicit --board lookup fires when --board omitted', async () => {
+    const out = await drive(
+      ['item', 'clear', '12345', 'status', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: { items: [{ id: '12345', board: { id: '111' } }] },
+            },
+          },
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: clearedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: implicit --board lookup surfaces not_found when item is missing', async () => {
+    const out = await drive(
+      ['item', 'clear', '99999', 'status', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: { data: { items: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: column_not_found surfaces typed error envelope', async () => {
+    const out = await drive(
+      ['item', 'clear', '12345', 'NotAColumn', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('column_not_found');
+  });
+
+  it('live: column_archived surfaces with details preserved', async () => {
+    const archivedBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'old_status',
+          title: 'OldStatus',
+          type: 'status',
+          description: null,
+          archived: true,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'old_status', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [archivedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { column_id?: string } };
+    };
+    expect(env.error?.code).toBe('column_archived');
+    expect(env.error?.details?.column_id).toBe('old_status');
+  });
+
+  it('live: unsupported_column_type surfaces typed error', async () => {
+    const formulaBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'formula_1',
+          title: 'Computed',
+          type: 'formula',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'formula_1', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [formulaBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('unsupported_column_type');
+  });
+
+  it('--dry-run: emits §6.4 envelope with empty rich payload as the to side', async () => {
+    const itemWithStatus = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'status', '--board', '111', '--dry-run', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [itemWithStatus] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        resolved_ids: Readonly<Record<string, string>>;
+        diff: Readonly<Record<string, { from: unknown; to: unknown }>>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect((env.meta as { dry_run?: boolean }).dry_run).toBe(true);
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_column_value');
+    expect(plan?.resolved_ids).toEqual({ status: 'status_4' });
+    // The clear diff: from = current value, to = {} (empty rich
+    // payload). cli-design §6.4 requires the wire shape on `to`.
+    expect(plan?.diff.status_4?.from).toEqual({ label: 'Done', index: 1 });
+    expect(plan?.diff.status_4?.to).toEqual({});
+  });
+
+  it('--dry-run: simple type renders to: "" on the diff', async () => {
+    const textBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'text_1',
+          title: 'Notes',
+          type: 'text',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithText = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'text_1',
+          type: 'text',
+          text: 'something',
+          value: '"something"',
+          column: { title: 'Notes' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'text_1', '--board', '111', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [textBoard] } },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [itemWithText] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, { from: unknown; to: unknown }>>;
+      }[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('change_simple_column_value');
+    expect(plan?.diff.text_1?.from).toBe('something');
+    expect(plan?.diff.text_1?.to).toBe('');
+  });
+
+  it('rejects non-numeric item ID as usage_error', async () => {
+    const out = await drive(
+      ['item', 'clear', 'not-a-number', 'status', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('token never leaks in mutation error envelopes (M5b regression)', async () => {
+    const out = await drive(
+      ['item', 'clear', '12345', 'NotAColumn', '--board', '111', '--json'],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});

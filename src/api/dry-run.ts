@@ -68,6 +68,7 @@ import {
 import type { BoardColumn } from './board-metadata.js';
 import {
   selectMutation,
+  translateColumnClear,
   translateColumnValueAsync,
   type DateResolutionContext,
   type PeopleResolutionContext,
@@ -416,6 +417,127 @@ export const planChanges = async (
  */
 const isArchivedColumn = (column: BoardColumn): boolean =>
   column.archived === true;
+
+export interface PlanClearInputs {
+  readonly client: MondayClient;
+  readonly boardId: string;
+  readonly itemId: string;
+  /** The single column token the agent typed (`status`, `id:status_4`). */
+  readonly token: string;
+  /** Cache root + tz from process.env; defaults to `process.env`. */
+  readonly env?: NodeJS.ProcessEnv;
+  /** `--no-cache`: skip the column-metadata cache entirely. */
+  readonly noCache?: boolean;
+}
+
+/**
+ * Single-column clear-mode dry-run. cli-design §4.3 ships `item clear`
+ * as a single-column-only verb (no `--where` bulk path; that's
+ * `item update`'s territory), so the engine doesn't need a
+ * setEntries-style multi-token shape — one token in, one
+ * `PlannedChange` out. Reuses the same column-resolution +
+ * archived-detection + item-state-read machinery as `planChanges`,
+ * routed through `translateColumnClear` for the per-type clear
+ * payload.
+ *
+ * **`from` / `to` shape.** Same `DiffCell` contract as
+ * `planChanges` — the `from` side decodes the current Monday cell
+ * value (or `null` for empty cells); the `to` side is the wire
+ * payload the live mutation would send (`""` for simple types, `{}`
+ * for rich types). cli-design §6.4's diff-cell shape is invariant
+ * across set / clear.
+ */
+export const planClear = async (
+  inputs: PlanClearInputs,
+): Promise<PlanChangesResult> => {
+  const warnings: ResolverWarning[] = [];
+  const resolution = await resolveColumnWithRefresh({
+    client: inputs.client,
+    boardId: inputs.boardId,
+    token: inputs.token,
+    includeArchived: true,
+    ...(inputs.env === undefined ? {} : { env: inputs.env }),
+    ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+  });
+  warnings.push(...resolution.warnings);
+
+  if (isArchivedColumn(resolution.match.column)) {
+    throw foldResolverWarningsIntoError(
+      new ApiError(
+        'column_archived',
+        `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+          `${inputs.boardId} is archived. Monday rejects mutations against ` +
+          `archived columns; un-archive the column in Monday or pick a ` +
+          `different target.`,
+        {
+          details: {
+            column_id: resolution.match.column.id,
+            column_title: resolution.match.column.title,
+            column_type: resolution.match.column.type,
+            board_id: inputs.boardId,
+          },
+        },
+      ),
+      resolution.warnings,
+    );
+  }
+
+  const translated = translateColumnClear({
+    id: resolution.match.column.id,
+    type: resolution.match.column.type,
+  });
+
+  const itemRead = await fetchItem(inputs.client, inputs.itemId);
+  let aggregateSource: 'live' | 'cache' | 'mixed' = mergeSource(
+    resolution.source,
+    'live',
+  );
+
+  if (itemRead.boardId !== null && itemRead.boardId !== inputs.boardId) {
+    throw new ApiError(
+      'usage_error',
+      `Item ${inputs.itemId} lives on board ${itemRead.boardId} but the ` +
+        `dry-run was issued against board ${inputs.boardId}. Re-run ` +
+        `with the correct --board, or omit --board to let the CLI ` +
+        `look it up.`,
+      {
+        details: {
+          item_id: inputs.itemId,
+          item_board_id: itemRead.boardId,
+          requested_board_id: inputs.boardId,
+        },
+      },
+    );
+  }
+
+  const mutation: SelectedMutation = selectMutation([translated]);
+  const operation: PlannedChange['operation'] = mutation.kind;
+  const wireTo = projectWireTo(translated, mutation);
+  const diffCell = buildDiffCell(
+    translated,
+    wireTo,
+    itemRead.byColumnId.get(translated.columnId),
+  );
+
+  const plannedChange: PlannedChange = {
+    operation,
+    board_id: inputs.boardId,
+    item_id: inputs.itemId,
+    resolved_ids: { [inputs.token]: resolution.match.column.id },
+    diff: { [translated.columnId]: diffCell },
+  };
+  // Item read is always live; aggregate source folds the resolution's
+  // source with `live`. `mergeSource` treats `live + live → live`,
+  // `cache + live → mixed`, `mixed → mixed`.
+  aggregateSource = mergeSource(aggregateSource, 'live');
+
+  return {
+    plannedChanges: [plannedChange],
+    source: aggregateSource,
+    cacheAgeSeconds: resolution.cacheAgeSeconds,
+    warnings,
+  };
+};
 
 /**
  * Merges per-leg `source` values into the aggregate envelope source

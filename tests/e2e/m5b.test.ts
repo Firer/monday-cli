@@ -169,6 +169,72 @@ describe('M5b e2e — item set (live)', () => {
   });
 });
 
+describe('M5b e2e — item clear (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips clearing status; envelope carries the projected item', async () => {
+    const clearedItem = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: '',
+          value: null,
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'BoardMetadata',
+          response: { data: { boards: [sampleBoardMetadata] } },
+        },
+        {
+          operation_name: 'ItemClearRich',
+          response: { data: { change_column_value: clearedItem } },
+        },
+      ],
+    };
+    const xdg = await mkdtemp(join(tmpdir(), 'monday-cli-e2e-clear-'));
+    try {
+      server = await startFixtureServer({ cassette });
+      const result = await spawnCli({
+        args: [
+          'item',
+          'clear',
+          '12345',
+          'status',
+          '--board',
+          '111',
+          '--json',
+          '--no-cache',
+        ],
+        env: fixtureEnv(server, { XDG_CACHE_HOME: xdg }),
+      });
+      expect(result.exitCode).toBe(0);
+      const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+        data: { id: string };
+        resolved_ids?: Readonly<Record<string, string>>;
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.id).toBe('12345');
+      expect(env.resolved_ids).toEqual({ status: 'status_4' });
+      expect(result.stdout).not.toContain(LEAK_CANARY);
+      expect(result.stderr).not.toContain(LEAK_CANARY);
+    } finally {
+      await rm(xdg, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('M5b e2e — item set --dry-run', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {

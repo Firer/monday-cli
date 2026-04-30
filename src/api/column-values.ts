@@ -322,6 +322,63 @@ export const translateColumnValue = (
  *   - `ApiError(internal_error)` — `peopleResolution` was omitted
  *     for a people column.
  */
+/**
+ * Builds the per-type "clear" payload for `monday item clear`. The
+ * dedicated verb keeps `--set <col>=<value>` and the clear path
+ * non-overlapping (cli-design §5.3 step 3 explicitly notes that
+ * empty-string input on `status` is `{label: ""}`, NOT a clear; the
+ * translator is value-shaping, not intent-disambiguating).
+ *
+ * Per-type clear shapes:
+ *   - `text` / `long_text` / `numbers` → simple bare empty string
+ *     (`change_simple_column_value(value: "")` clears the cell).
+ *   - `status` / `dropdown` / `date` / `people` → empty JSON object
+ *     `{}` via `change_column_value(value: JSON!)`. Monday's
+ *     official "clear all column values" pattern.
+ *
+ * **Throws** `unsupported_column_type` for types outside the v0.1
+ * writable allowlist — same code path the value translator uses.
+ * Agents that hit it on `item clear` get the same `--set-raw` hint
+ * (irrelevant for clear, but consistent with the value path so the
+ * error surface is predictable).
+ *
+ * Sync entry — `people` clear doesn't need email resolution (the
+ * payload is `{}` regardless of who's currently assigned). Reused
+ * by the `item clear` dry-run + live paths.
+ */
+export const translateColumnClear = (
+  column: { readonly id: string; readonly type: string },
+): TranslatedColumnValue => {
+  if (!isWritableColumnType(column.type)) {
+    throw unsupportedColumnTypeError(column.id, column.type);
+  }
+  switch (column.type) {
+    case 'text':
+    case 'long_text':
+    case 'numbers':
+      return {
+        columnId: column.id,
+        columnType: column.type,
+        rawInput: '',
+        payload: { format: 'simple', value: '' },
+        resolvedFrom: null,
+        peopleResolution: null,
+      };
+    case 'status':
+    case 'dropdown':
+    case 'date':
+    case 'people':
+      return {
+        columnId: column.id,
+        columnType: column.type,
+        rawInput: '',
+        payload: { format: 'rich', value: {} },
+        resolvedFrom: null,
+        peopleResolution: null,
+      };
+  }
+};
+
 export const translateColumnValueAsync = async (
   inputs: TranslateColumnValueAsyncInputs,
 ): Promise<TranslatedColumnValue> => {

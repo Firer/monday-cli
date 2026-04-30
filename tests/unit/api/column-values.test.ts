@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, UsageError } from '../../../src/utils/errors.js';
 import {
   selectMutation,
+  translateColumnClear,
   translateColumnValue,
   translateColumnValueAsync,
   unsupportedColumnTypeError,
@@ -1105,5 +1106,71 @@ describe('unsupportedColumnTypeError', () => {
     // allows quoted IDs, this test is the trigger to add escaping.
     const err = unsupportedColumnTypeError("o'brien_col", 'mirror');
     expect(err.details?.set_raw_example).toBe(`--set-raw o'brien_col='<json>'`);
+  });
+});
+
+describe('translateColumnClear', () => {
+  // Per-type clear payload (M5b `item clear` verb). Pinned via wire-
+  // shape fixtures so the dry-run engine + live mutation see the
+  // exact same `to` shape across every type. Drift here would split
+  // the v0.1 contract between dry-run preview and live execution.
+
+  it('text → simple bare empty string', () => {
+    const out = translateColumnClear({ id: 'text_1', type: 'text' });
+    expect(out.payload).toEqual({ format: 'simple', value: '' });
+    expect(out.columnType).toBe('text');
+    expect(out.rawInput).toBe('');
+    expect(out.resolvedFrom).toBeNull();
+    expect(out.peopleResolution).toBeNull();
+  });
+
+  it('long_text → simple bare empty string', () => {
+    const out = translateColumnClear({ id: 'lt_1', type: 'long_text' });
+    expect(out.payload).toEqual({ format: 'simple', value: '' });
+    expect(out.columnType).toBe('long_text');
+  });
+
+  it('numbers → simple bare empty string', () => {
+    const out = translateColumnClear({ id: 'n_1', type: 'numbers' });
+    expect(out.payload).toEqual({ format: 'simple', value: '' });
+    expect(out.columnType).toBe('numbers');
+  });
+
+  it('status → rich empty object {}', () => {
+    const out = translateColumnClear({ id: 'status_4', type: 'status' });
+    expect(out.payload).toEqual({ format: 'rich', value: {} });
+    expect(out.columnType).toBe('status');
+  });
+
+  it('dropdown → rich empty object {}', () => {
+    const out = translateColumnClear({ id: 'tags_d', type: 'dropdown' });
+    expect(out.payload).toEqual({ format: 'rich', value: {} });
+    expect(out.columnType).toBe('dropdown');
+  });
+
+  it('date → rich empty object {}', () => {
+    const out = translateColumnClear({ id: 'date_4', type: 'date' });
+    expect(out.payload).toEqual({ format: 'rich', value: {} });
+    expect(out.columnType).toBe('date');
+  });
+
+  it('people → rich empty object {} (no email resolution required for clear)', () => {
+    const out = translateColumnClear({ id: 'owner_p', type: 'people' });
+    expect(out.payload).toEqual({ format: 'rich', value: {} });
+    expect(out.columnType).toBe('people');
+  });
+
+  it('unsupported types throw unsupported_column_type ApiError', () => {
+    expect(() =>
+      translateColumnClear({ id: 'formula_1', type: 'formula' }),
+    ).toThrow(ApiError);
+    try {
+      translateColumnClear({ id: 'formula_1', type: 'formula' });
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      const err = e as ApiError;
+      expect(err.code).toBe('unsupported_column_type');
+      expect(err.details?.column_id).toBe('formula_1');
+    }
   });
 });
