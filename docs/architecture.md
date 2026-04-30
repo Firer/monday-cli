@@ -350,6 +350,61 @@
   on cache-sourced resolution if a forced refresh confirms
   the archived state.
 
+- `commands/item/clear.ts` (M5b session 2) — dedicated
+  per-column clear verb. `monday item clear <iid> <col>
+  [--board <bid>]`. Reuses the resolution / mutation
+  selection / projection pipeline; the only divergence from
+  `item set` is the value source: `translateColumnClear` in
+  `api/column-values.ts` returns the per-type clear payload
+  (text → `""`, status → `{}`, etc.) rather than translating
+  user input. Per-type table is the canonical "what's a
+  clear" mapping and lives alongside the writer's
+  set-payload table.
+
+- `commands/item/update.ts` (M5b session 2) — multi-column
+  atomic update + bulk path. `monday item update <iid>
+  --set <col>=<val> [--set ...] [--name <n>]` for
+  single-item; `monday item update --where <expr> --set
+  ... --board <bid> --yes` for bulk. Single-item uses
+  `selectMutation` to pick simple / rich / multi mutation;
+  `--name` synthesises a `name` translated value that
+  bundles into `change_multiple_column_values` alongside
+  real columns (Monday's multi mutation accepts `name` as
+  a key). Bulk walks `items_page` / `next_items_page`
+  cursor pagination, fail-fast on `stale_cursor`. Bulk
+  without `--yes` / `--dry-run` → `confirmation_required`
+  with `matched_count` + filter shape. Bulk live: per-item
+  sequential mutation; per-item failure decorates error
+  with `applied_count` / `applied_to` / `failed_at_item`
+  / `matched_count`. Bulk dry-run: aggregates per-item
+  `planChanges` results into one N-element
+  `planned_changes`; deduplicates resolver warnings by
+  `code+message+token`. Cache-source aggregation across
+  metadata + page walk + mutation legs (cli-design §6.1).
+
+- `commands/update/create.ts` (M5b session 2) — posts a
+  Monday update (comment) on an item via `create_update`.
+  Body sources: `--body <md>` inline, `--body-file <path>`,
+  or `--body-file -` for stdin (whitespace-only / empty
+  input → `usage_error`). `idempotent: false` because
+  re-running produces duplicate comments. `--dry-run` is
+  supported despite that; the dry-run shape diverges from
+  column-mutation shape (no `board_id` / `resolved_ids`
+  / `diff` — instead `operation: "create_update"` +
+  `body` + `body_length`); `meta.source: "none"` because
+  no API call fires.
+
+- `api/resolver-error-fold.ts` (M5b R19, session 2) —
+  `foldResolverWarningsIntoError` + `mergeDetails` +
+  `maybeRemapValidationFailedToArchived`. Six consumers:
+  `item set` / `item clear` / `item update` single + bulk /
+  the dry-run engine / `update create`. Centralises the
+  resolver-warning preservation + cache-sourced remap
+  pattern so each consumer is a one-line call rather than
+  20-30 lines of inline fold + remap. Lifted on the third
+  consumer per the §17 R-class timing rule (item set + dry-
+  run engine → item clear was the third).
+
 ### Hard rules
 
 - `commands/` never imports the SDK directly — always goes through

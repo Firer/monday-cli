@@ -5,13 +5,15 @@ Monday Dev — designed first for AI coding agents (Claude Code, Codex, etc.)
 that need to pull tasks, file backlog items, and edit boards from the
 terminal, with humans as a welcome second audience.
 
-> **Status:** v0.1 in progress — M0–M5a shipped (account / workspace /
-> board / user / update / item *reads* + filter DSL + cursor
-> pagination + the seven column-value writers and the dry-run
-> engine that M5b's mutation surfaces consume). **M5b in progress:
-> `monday item set` shipped** — the first mutation surface, with
-> live + `--dry-run` paths. `item clear` / `item update` /
-> `update create` next.
+> **Status:** v0.1 in progress — M0–M5b shipped. Network surface
+> spans 5 nouns (account / workspace / board / user / update / item
+> reads), the four M5b mutation commands (`item set` /
+> `item clear` / `item update` single + bulk / `update create`),
+> filter DSL (`--where` + `--filter-json`), cursor-based pagination
+> with stale-cursor fail-fast + NDJSON streaming, the seven
+> column-value writers, the dry-run engine, plus local-only
+> commands (cache / config / schema). M6 (`board doctor` + `raw`
+> + agent-flow E2E) is next.
 > The full design lives in [`docs/cli-design.md`](./docs/cli-design.md) — read it
 > if you want to know what the CLI looks like end-to-end.
 > See [CLAUDE.md](./CLAUDE.md) for agent-facing project context.
