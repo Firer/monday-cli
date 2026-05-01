@@ -219,6 +219,11 @@ without `--first` raises `ambiguous_name`. Narrow projection — no
 Single resource. The agent's discovery hammer for a board. Each
 column carries `writable` + (when writable) `example_set` — concrete
 `--set <token>=<value>` strings the agent can paste into `item set`.
+`writable` is `true` for the ten friendly-translator types (text /
+long_text / numbers / status / dropdown / date / people / link /
+email / phone) and `false` for everything else; `example_set` is
+populated for every writable column. M8 firm-row examples include
+the pipe-form shapes for `link` / `email` / `phone`.
 
 ```json
 {
@@ -231,10 +236,15 @@ column carries `writable` + (when writable) `example_set` — concrete
       "writable": true,
       "example_set": ["--set status_4='Backlog'",
                       "--set status_4=0   # by index"] },
+    { "id": "site", "title": "Site", "type": "link",
+      "writable": true,
+      "example_set": ["--set site=https://example.com",
+                      "--set site='https://example.com|Site'"] },
+    { "id": "mobile", "title": "Mobile", "type": "phone",
+      "writable": true,
+      "example_set": ["--set mobile='+15551234567|US'"] },
     { "id": "mirror_x", "title": "Mirror", "type": "mirror",
-      "writable": false, "example_set": null,
-      "writer_phase": { "deferred_to": null, "read_only": true,
-                        "category": "read_only_forever" } }
+      "writable": false, "example_set": null }
   ]
 }
 ```
@@ -478,12 +488,28 @@ item, projected through the same shape as `item get`),
 `meta.source: "live"` (or `"mixed"` when board metadata came from
 cache and the mutation hit live).
 
-### `item set <id> <token>=<value>`
+### `item set <id> (<token>=<value> | --set-raw <token>=<json>)`
 
 Single-column write. `--board <bid>` is optional; without it, the
 item's board is looked up via `ItemBoardLookup`. Implicit lookup
 adds one round-trip; agents that already know the board should
 pass `--board`.
+
+Two shapes (mutually exclusive — exactly one per call):
+- **Friendly** — positional `<token>=<value>`. Goes through the
+  10-type translator (text / long_text / numbers / status /
+  dropdown / date / people / link / email / phone). Pipe-form
+  shapes for the M8 firm row: `link=<url>|<text>`,
+  `email=<email>|<text>`, `phone=<phone>|<country>` (country code
+  is uppercase ISO 3166-1 alpha-2).
+- **Raw** — `--set-raw <token>=<json>` (M8 escape hatch). The CLI
+  parses `<json>` as a JsonObject, runs the read-only-forever /
+  files-shaped reject lists, and dispatches via
+  `change_column_value` (always — never the simple variant per
+  cli-design §5.3). Read-only-forever (mirror / formula /
+  auto_number / creation_log / last_updated / item_id) →
+  `unsupported_column_type` with `read_only: true`. Files-shaped
+  (file) → `unsupported_column_type` with `deferred_to: "v0.4"`.
 
 `--dry-run` returns a planned-change envelope (no API write):
 
@@ -504,11 +530,26 @@ pass `--board`.
 }
 ```
 
+**M8 firm-row wire shapes** (per `change_column_value(value: JSON!)`):
+
+| Type | Friendly input | Wire `value` |
+|------|----------------|--------------|
+| `link` | `https://example.com` | `{"url":"https://example.com","text":"https://example.com"}` |
+| `link` | `https://example.com\|Site` | `{"url":"https://example.com","text":"Site"}` |
+| `email` | `alice@example.com` | `{"email":"alice@example.com","text":"alice@example.com"}` |
+| `email` | `alice@example.com\|Alice` | `{"email":"alice@example.com","text":"Alice"}` |
+| `phone` | `+15551234567\|US` | `{"phone":"+15551234567","countryShortName":"US"}` |
+
+`--set-raw` echoes the parsed JsonObject verbatim — agents own
+wire-shape correctness; Monday's server-side validation surfaces
+as `validation_failed` with Monday's message.
+
 ### `item clear <id> <token>`
 
 Per-column clear. Per-type wire payload:
 - simple (`text`, `long_text`, `numbers`) → `""`
-- rich (`status`, `dropdown`, `date`, `people`) → `{}`
+- rich (`status`, `dropdown`, `date`, `people`, M8 firm row
+  `link` / `email` / `phone`) → `{}`
 
 Same envelope as `item set`. Cleared cell shows `text: ""` /
 `value: null` (Monday's post-clear shape varies by type; the
@@ -516,8 +557,13 @@ projector handles both).
 
 ### `item update <id>`
 
-Atomic multi-`--set`. `--name <new-name>` optional; can combine with
-`--set` (synthetic `name` column inside `change_multiple_column_values`).
+Atomic multi-`--set` and/or `--set-raw`. `--name <new-name>` optional;
+can combine with `--set` / `--set-raw` (synthetic `name` column
+inside `change_multiple_column_values`). `--set` and `--set-raw`
+against the same resolved column ID raise `usage_error` per
+cli-design §5.3 mutual-exclusion contract (resolution-time
+enforcement — argv-parse can't tell whether two distinct tokens
+alias to the same column).
 
 Single-target shape:
 
@@ -530,7 +576,8 @@ Single-target shape:
 
 ### `item update --where ... --board <bid>` (bulk)
 
-Bulk write across `--where` matches. Without `--yes` or `--dry-run`,
+Bulk write across `--where` matches. Accepts `--set` and `--set-raw`
+in any combination (M8 escape hatch). Without `--yes` or `--dry-run`,
 returns `confirmation_required` (exit 1) with `matched_count`,
 `where_clauses`, `board_id` in `error.details`.
 
@@ -540,7 +587,10 @@ envelope with `applied_count` + `applied_to` + `failed_at_item` +
 `matched_count` so agents can reconstruct partial progress.
 
 Bulk dry-run aggregates per-item `planChanges` results into one
-N-element `planned_changes` array.
+N-element `planned_changes` array. Both `--set` and `--set-raw`
+column-resolution failures fail-fast before the items_page walk
+fires (no metadata round-trip wasted on a malformed JSON or a
+typo'd column token).
 
 ---
 

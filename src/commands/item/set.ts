@@ -1,9 +1,18 @@
 /**
- * `monday item set <iid> <col>=<val>` — single-column write
- * (`cli-design.md` §5.3, `v0.1-plan.md` §3 M5b).
+ * `monday item set <iid> (<col>=<val> | --set-raw <col>=<json>)` —
+ * single-column write (`cli-design.md` §4.3 + §5.3 + §5.3 escape-
+ * hatch, `v0.1-plan.md` §3 M5b, `v0.2-plan.md` §3 M8).
  *
- * The first M5b mutation surface. Single `<col>=<val>` positional;
- * multi-`--set` is `monday item update`'s concern (next session).
+ * Two argv shapes (mutually exclusive — exactly one fires per call):
+ *   1. **Friendly** — positional `<col>=<val>`. Resolves the column,
+ *      translates the value through `column-values.ts
+ *      translateColumnValueAsync`, dispatches via `selectMutation`.
+ *   2. **Raw** — `--set-raw <col>=<json>` (M8). Resolves the column,
+ *      runs the read-only-forever / files-shaped reject lists from
+ *      `raw-write.ts translateRawColumnValue`, dispatches via the
+ *      same `selectMutation` (always `change_column_value` for
+ *      single-column raw — never the simple variant per cli-design
+ *      §5.3 line 898-901).
  *
  * **Two paths.** `--dry-run` orchestrates the M5a engine
  * (`api/dry-run.ts planChanges`) which reads the item state, builds
@@ -11,6 +20,7 @@
  * (`data: null`, `meta.dry_run: true`, `planned_changes: [{...}]`).
  * Live writes resolve the column + translate the value + select the
  * mutation + fire it directly, returning the projected item per §6.2.
+ * Both shapes go through the same dry-run + live paths.
  *
  * **Board resolution** (cli-design §5.3 step 1). `--board <bid>` is
  * authoritative; without it the CLI calls `items(ids:[<iid>])` to
@@ -55,7 +65,12 @@ import {
   type DateResolutionContext,
   type PeopleResolutionContext,
   type SelectedMutation,
+  type TranslatedColumnValue,
 } from '../../api/column-values.js';
+import {
+  parseSetRawExpression,
+  translateRawColumnValue,
+} from '../../api/raw-write.js';
 import { userByEmail } from '../../api/resolvers.js';
 import {
   foldResolverWarningsIntoError,
@@ -158,10 +173,23 @@ export type ItemSetOutput = ProjectedItem;
 const inputSchema = z
   .object({
     itemId: ItemIdSchema,
-    setExpr: z.string().min(1),
+    // Positional `<col>=<val>` is optional in M8 — `--set-raw` is the
+    // alternative shape per cli-design §4.3 line 492-494. Exactly one
+    // of `setExpr` / `setRaw` must be present (validated below).
+    setExpr: z.string().min(1).optional(),
+    setRaw: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) => (v.setExpr === undefined) !== (v.setRaw === undefined),
+    {
+      message:
+        'item set requires exactly one of <col>=<val> (positional) or ' +
+        '--set-raw <col>=<json>',
+      path: ['setExpr'],
+    },
+  );
 
 /**
  * Splits `<col>=<val>` on the FIRST `=` per cli-design §5.3 lines
@@ -255,6 +283,8 @@ export const itemSetCommand: CommandModule<
     'monday item set 12345 status=Done --board 67890',
     "monday item set 12345 owner=alice@example.com --dry-run",
     'monday item set 12345 due=+1w --json',
+    "monday item set 12345 --set-raw status='{\"label\":\"Done\"}'",
+    "monday item set 12345 --set-raw tags='{\"tag_ids\":[1,2]}' --board 67890",
   ],
   idempotent: true,
   inputSchema,
@@ -262,9 +292,16 @@ export const itemSetCommand: CommandModule<
   attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun
-      .command('set <itemId> <setExpr>')
+      // Positional `[setExpr]` optional so the parser accepts the
+      // `--set-raw`-only invocation per cli-design §4.3 line 492-494.
+      // The zod refinement enforces "exactly one of setExpr / setRaw".
+      .command('set <itemId> [setExpr]')
       .description(itemSetCommand.summary)
       .option('--board <bid>', 'board ID (skip implicit lookup)')
+      .option(
+        '--set-raw <expr>',
+        '<col>=<json> raw write (escape hatch — bypasses friendly translator)',
+      )
       // `--dry-run` is a global flag (`src/cli/program.ts`) — read
       // it via `globalFlags.dryRun` rather than redeclaring on this
       // subcommand so the flag stays single-source-of-truth across
@@ -276,7 +313,7 @@ export const itemSetCommand: CommandModule<
       .action(async (itemId: unknown, setExpr: unknown, opts: unknown) => {
         const parsed = parseArgv(itemSetCommand.inputSchema, {
           itemId,
-          setExpr,
+          ...(setExpr === undefined ? {} : { setExpr }),
           ...(opts as Readonly<Record<string, unknown>>),
         });
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
@@ -284,7 +321,23 @@ export const itemSetCommand: CommandModule<
           program.opts(),
         );
 
-        const { token, value } = splitSetExpression(parsed.setExpr);
+        // Exactly one of setExpr / setRaw is present (zod refinement
+        // enforces XOR). Discriminate to keep the downstream code
+        // shape clear.
+        const isRaw = parsed.setRaw !== undefined;
+        const friendly =
+          parsed.setExpr === undefined ? null : splitSetExpression(parsed.setExpr);
+        const rawParsed =
+          parsed.setRaw === undefined ? null : parseSetRawExpression(parsed.setRaw);
+        // The token under either shape — used for resolved_ids echo +
+        // dry-run engine input.
+        const token = friendly?.token ?? rawParsed?.token;
+        /* c8 ignore next 5 — defensive: zod refinement guarantees one
+           of friendly / rawParsed is non-null, so token is non-undefined.
+           The guard exists for `noUncheckedIndexedAccess` narrowing. */
+        if (token === undefined) {
+          throw new UsageError('item set: token narrowing failed');
+        }
 
         const boardId = await resolveBoardId(
           client,
@@ -320,7 +373,8 @@ export const itemSetCommand: CommandModule<
             client,
             boardId,
             itemId: parsed.itemId,
-            setEntries: [{ token, value }],
+            setEntries: friendly === null ? [] : [friendly],
+            ...(rawParsed === null ? {} : { rawEntries: [rawParsed] }),
             dateResolution,
             peopleResolution,
             env: ctx.env,
@@ -385,19 +439,42 @@ export const itemSetCommand: CommandModule<
         // stale_cache_refreshed warnings folded into
         // details.resolver_warnings — pass-1 finding F2 widened the
         // fold from ApiError-only to MondayCliError to cover the
-        // full error surface.
-        let translated;
+        // full error surface. M8: --set-raw branch uses the same
+        // shape — `translateRawColumnValue` runs the read-only-
+        // forever / files-shaped reject lists, then dispatch.
+        let translated: TranslatedColumnValue;
         let mutationResult;
         try {
-          translated = await translateColumnValueAsync({
-            column: {
-              id: resolution.match.column.id,
-              type: resolution.match.column.type,
-            },
-            value,
-            dateResolution,
-            peopleResolution,
-          });
+          if (isRaw) {
+            /* c8 ignore next 4 — defensive: isRaw === true means
+               rawParsed is non-null per the discriminator above. */
+            if (rawParsed === null) {
+              throw new UsageError('item set: rawParsed narrowing failed');
+            }
+            translated = translateRawColumnValue(
+              {
+                id: resolution.match.column.id,
+                type: resolution.match.column.type,
+              },
+              rawParsed.value,
+              rawParsed.rawJson,
+            );
+          } else {
+            /* c8 ignore next 4 — defensive: isRaw === false means
+               friendly is non-null per the discriminator above. */
+            if (friendly === null) {
+              throw new UsageError('item set: friendly narrowing failed');
+            }
+            translated = await translateColumnValueAsync({
+              column: {
+                id: resolution.match.column.id,
+                type: resolution.match.column.type,
+              },
+              value: friendly.value,
+              dateResolution,
+              peopleResolution,
+            });
+          }
           const mutation: SelectedMutation = selectMutation([translated]);
           mutationResult = await executeMutation(client, {
             mutation,

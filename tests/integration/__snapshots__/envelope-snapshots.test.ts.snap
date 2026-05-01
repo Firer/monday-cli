@@ -739,6 +739,94 @@ exports[`envelope snapshot — item mutations > item set --dry-run (planned_chan
 }
 `;
 
+exports[`envelope snapshot — item mutations > item set --set-raw (M8 escape hatch — single column) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item set link (M8 firm row — pipe form) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "site_1": {
+        "id": "site_1",
+        "text": "Example",
+        "title": "Site",
+        "type": "link",
+        "value": {
+          "text": "Example",
+          "url": "https://example.com",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "site_1": "site_1",
+  },
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — item mutations > item update (single, multi --set) 1`] = `
 {
   "data": {

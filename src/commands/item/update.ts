@@ -63,6 +63,11 @@ import {
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
+import {
+  parseSetRawExpression,
+  translateRawColumnValue,
+  type ParsedSetRawExpression,
+} from '../../api/raw-write.js';
 import { userByEmail } from '../../api/resolvers.js';
 import {
   foldResolverWarningsIntoError,
@@ -206,6 +211,11 @@ const inputSchema = z
   .object({
     itemId: ItemIdSchema.optional(),
     set: z.array(z.string()).default([]),
+    // M8: --set-raw <col>=<json>... repeatable raw escape hatch.
+    // Mutually exclusive per-column with --set; the duplicate-ID
+    // check fires in the dry-run engine + selectMutation per
+    // cli-design §5.3 line 961-972 (resolution-time, not parse-time).
+    setRaw: z.array(z.string()).default([]),
     name: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
     where: z.array(z.string()).default([]),
@@ -233,13 +243,15 @@ const inputSchema = z
     createLabelsIfMissing: z.boolean().optional(),
   })
   .strict()
-  // At least one of --set or --name must be provided. An empty
-  // call (`monday item update 12345`) is meaningless and would
-  // produce a zero-mutation envelope that surprises agents.
+  // At least one of --set / --set-raw / --name must be provided. An
+  // empty call (`monday item update 12345`) is meaningless and would
+  // produce a zero-mutation envelope that surprises agents. M8 widens
+  // the rule to include --set-raw.
   .refine(
-    (v) => v.set.length > 0 || v.name !== undefined,
+    (v) => v.set.length > 0 || v.setRaw.length > 0 || v.name !== undefined,
     {
-      message: 'item update requires at least one of --set or --name',
+      message:
+        'item update requires at least one of --set / --set-raw / --name',
       path: ['set'],
     },
   );
@@ -364,6 +376,8 @@ export const itemUpdateCommand: CommandModule<
     'monday item update 12345 --name "New title" --set status=Done',
     'monday item update 12345 --set tags=Backend,Frontend --create-labels-if-missing',
     'monday item update 12345 --set status=Done --dry-run --json',
+    "monday item update 12345 --set-raw status='{\"label\":\"Done\"}'",
+    "monday item update 12345 --set status=Done --set-raw tags_1='{\"tag_ids\":[1,2]}'",
   ],
   idempotent: true,
   inputSchema,
@@ -376,6 +390,12 @@ export const itemUpdateCommand: CommandModule<
       .option(
         '--set <expr>',
         'repeatable <col>=<val> column write',
+        (value: string, prev: readonly string[]) => [...prev, value],
+        [] as readonly string[],
+      )
+      .option(
+        '--set-raw <expr>',
+        'repeatable <col>=<json> raw write (escape hatch — bypasses friendly translator)',
         (value: string, prev: readonly string[]) => [...prev, value],
         [] as readonly string[],
       )
@@ -432,6 +452,11 @@ export const itemUpdateCommand: CommandModule<
         );
 
         const setEntries = parsed.set.map(splitSetExpression);
+        // M8: parse all --set-raw expressions at argv-time so a
+        // malformed JSON input fails fast (no network round-trip
+        // to Monday for board metadata or item state).
+        const rawEntries: readonly ParsedSetRawExpression[] =
+          parsed.setRaw.map(parseSetRawExpression);
 
         const dateResolution: DateResolutionContext = {
           now: ctx.clock,
@@ -458,6 +483,7 @@ export const itemUpdateCommand: CommandModule<
             boardId,
             itemId: dispatch.itemId,
             setEntries,
+            ...(rawEntries.length === 0 ? {} : { rawEntries }),
             ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
             dateResolution,
             peopleResolution,
@@ -549,6 +575,71 @@ export const itemUpdateCommand: CommandModule<
               dateResolution,
               peopleResolution,
             });
+            translated.push(t);
+            resolvedIds[entry.token] = resolution.match.column.id;
+          } catch (err) {
+            if (err instanceof MondayCliError) {
+              throw foldResolverWarningsIntoError(err, collectedWarnings);
+            }
+            throw err;
+          }
+        }
+
+        // M8 raw entries: same shape as the friendly loop above —
+        // resolve, archived-check, translate via the raw-write helper
+        // (which runs the read-only-forever / files-shaped reject
+        // lists), push into the same `translated` array. Order:
+        // friendly first (preserving argv order), then raw
+        // (preserving argv order). selectMutation handles both kinds
+        // uniformly; the duplicate-column-id check catches --set vs
+        // --set-raw collisions per cli-design §5.3 line 961-972.
+        for (const entry of rawEntries) {
+          const resolution = await resolveColumnWithRefresh({
+            client,
+            boardId,
+            token: entry.token,
+            includeArchived: true,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          collectedWarnings.push(...resolution.warnings);
+          aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
+          if (
+            resolution.cacheAgeSeconds !== null &&
+            (aggregateCacheAge === null ||
+              resolution.cacheAgeSeconds > aggregateCacheAge)
+          ) {
+            aggregateCacheAge = resolution.cacheAgeSeconds;
+          }
+          if (resolution.match.column.archived === true) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'column_archived',
+                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+                  `${boardId} is archived. Monday rejects mutations against ` +
+                  `archived columns; un-archive the column in Monday or pick ` +
+                  `a different target.`,
+                {
+                  details: {
+                    column_id: resolution.match.column.id,
+                    column_title: resolution.match.column.title,
+                    column_type: resolution.match.column.type,
+                    board_id: boardId,
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
+          try {
+            const t = translateRawColumnValue(
+              {
+                id: resolution.match.column.id,
+                type: resolution.match.column.type,
+              },
+              entry.value,
+              entry.rawJson,
+            );
             translated.push(t);
             resolvedIds[entry.token] = resolution.match.column.id;
           } catch (err) {
@@ -913,6 +1004,17 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   }
   const boardId = parsed.board;
 
+  // 0) Argv-parse-time failures before any network call. Splits +
+  //    JSON parse run on pure strings; surfacing here means a
+  //    malformed --set or malformed --set-raw fails fast without
+  //    burning a board-metadata fetch + items_page walk + the
+  //    confirmation prompt. M8 finding from review pass: pre-fix the
+  //    parse ran AFTER the walk, so a malformed JSON paid two
+  //    GraphQL round-trips before the agent saw the parse error.
+  const setEntries = parsed.set.map(splitSetExpression);
+  const rawEntries: readonly ParsedSetRawExpression[] =
+    parsed.setRaw.map(parseSetRawExpression);
+
   // 1) Load board metadata (cache-aware, refresh on column-not-found
   //    during filter parsing per §5.3 step 5).
   const meta = await loadBoardMetadata({
@@ -1081,7 +1183,10 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     );
   }
 
-  const setEntries = parsed.set.map(splitSetExpression);
+  // setEntries + rawEntries pre-parsed at the top of runBulk for the
+  // fail-fast invariant. (See step 0 above — moving the parse there
+  // means a malformed --set / --set-raw doesn't pay for the metadata
+  // load + items_page walk first.)
 
   const dateResolution: DateResolutionContext = {
     now: ctx.clock,
@@ -1123,6 +1228,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         boardId,
         itemId,
         setEntries,
+        ...(rawEntries.length === 0 ? {} : { rawEntries }),
         ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
         dateResolution,
         peopleResolution,
@@ -1215,6 +1321,61 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         dateResolution,
         peopleResolution,
       });
+      translated.push(t);
+      resolvedIds[entry.token] = resolution.match.column.id;
+    } catch (err) {
+      if (err instanceof MondayCliError) {
+        throw foldResolverWarningsIntoError(err, resolverWarnings);
+      }
+      throw err;
+    }
+  }
+
+  // M8 raw entries: same shape as the friendly loop above. Resolved
+  // once across the whole bulk batch (column resolution doesn't vary
+  // per item); translateRawColumnValue runs the read-only-forever /
+  // files-shaped reject lists post-resolution. selectMutation handles
+  // both kinds uniformly; the duplicate-column-id check catches
+  // --set vs --set-raw collisions per cli-design §5.3 line 961-972.
+  for (const entry of rawEntries) {
+    const resolution = await resolveColumnWithRefresh({
+      client,
+      boardId,
+      token: entry.token,
+      includeArchived: true,
+      env: ctx.env,
+      noCache: globalFlags.noCache,
+    });
+    collectedWarnings.push(...resolution.warnings);
+    resolverWarnings.push(...resolution.warnings);
+    aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
+    if (resolution.match.column.archived === true) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${boardId} is archived.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: boardId,
+            },
+          },
+        ),
+        resolverWarnings,
+      );
+    }
+    try {
+      const t = translateRawColumnValue(
+        {
+          id: resolution.match.column.id,
+          type: resolution.match.column.type,
+        },
+        entry.value,
+        entry.rawJson,
+      );
       translated.push(t);
       resolvedIds[entry.token] = resolution.match.column.id;
     } catch (err) {

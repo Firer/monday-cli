@@ -1563,3 +1563,247 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.error?.details?.remapped_from).toBe('validation_failed');
   });
 });
+
+describe('monday item update bulk — --set-raw (M8)', () => {
+  it('bulk --set-raw applies same JsonObject payload to every matched item', async () => {
+    // Bulk with --set-raw resolves the column once, translates once,
+    // then fires the same SelectedMutation against every matched
+    // item (cli-design §10.2 + §9.3 sequential execution).
+    const tagsBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--filter-json',
+        '{"rules":[]}',
+        '--set-raw',
+        'tags_1={"tag_ids":[1,2]}',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [tagsBoard] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            // First per-item mutation — pin the wire payload shape.
+            match_variables: {
+              itemId: '5001',
+              boardId: '111',
+              columnId: 'tags_1',
+              value: { tag_ids: [1, 2] },
+            },
+            response: { data: { change_column_value: { ...sampleItem, id: '5001' } } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            match_variables: {
+              itemId: '5002',
+              boardId: '111',
+              columnId: 'tags_1',
+              value: { tag_ids: [1, 2] },
+            },
+            response: { data: { change_column_value: { ...sampleItem, id: '5002' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number };
+      };
+    };
+    expect(env.data.summary.matched_count).toBe(2);
+    expect(env.data.summary.applied_count).toBe(2);
+  });
+
+  it('bulk --set + --set-raw mixed bundle → change_multiple_column_values per item', async () => {
+    const tagsBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--filter-json',
+        '{"rules":[]}',
+        '--set',
+        'status=Done',
+        '--set-raw',
+        'tags_1={"tag_ids":[1]}',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [tagsBoard] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateMulti',
+            match_variables: {
+              itemId: '5001',
+              boardId: '111',
+              columnValues: {
+                status_4: { label: 'Done' },
+                tags_1: { tag_ids: [1] },
+              },
+            },
+            response: {
+              data: {
+                change_multiple_column_values: { ...sampleItem, id: '5001' },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { summary: { matched_count: number; applied_count: number } };
+    };
+    expect(env.data.summary.matched_count).toBe(1);
+    expect(env.data.summary.applied_count).toBe(1);
+  });
+
+  it('bulk --set-raw with malformed JSON fails fast — no GraphQL request fires', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--filter-json',
+        '{"rules":[]}',
+        '--set-raw',
+        'tags_1={broken',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('bulk --set-raw rejects read-only-forever post-resolution (no per-item call fires)', async () => {
+    const mirrorBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'mirror_1',
+          title: 'Sprint mirror',
+          type: 'mirror',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--filter-json',
+        '{"rules":[]}',
+        '--set-raw',
+        'mirror_1={"whatever":1}',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [mirrorBoard] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: null, items: [{ id: '5001' }] } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { read_only?: boolean } };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.read_only).toBe(true);
+  });
+});

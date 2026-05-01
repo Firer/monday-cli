@@ -765,6 +765,99 @@ describe('envelope snapshot — item mutations', () => {
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 
+  it('item set link (M8 firm row — pipe form)', async () => {
+    const linkBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'site_1',
+          title: 'Site',
+          type: 'link',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const updatedLinkItem = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'site_1',
+          type: 'link',
+          text: 'Example',
+          value: '{"url":"https://example.com","text":"Example"}',
+          column: { title: 'Site' },
+        },
+      ],
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'set',
+        '12345',
+        'site_1=https://example.com|Example',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [linkBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: updatedLinkItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item set --set-raw (M8 escape hatch — single column)', async () => {
+    const updatedRawItem = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'set',
+        '12345',
+        '--set-raw',
+        'status={"label":"Done"}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: updatedRawItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
   it('item clear (single, rich)', async () => {
     const clearedItem = {
       ...sampleItem,

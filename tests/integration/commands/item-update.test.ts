@@ -1093,3 +1093,298 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.meta.cache_age_seconds).not.toBeNull();
   });
 });
+
+describe('monday item update — --set-raw escape hatch (M8, single-item path)', () => {
+  it('--set-raw alone (single column) → change_column_value with parsed JsonObject', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set-raw',
+        'status={"label":"Done"}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateRich',
+            // Wire payload pin — value reaches Monday verbatim.
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'status_4',
+              value: { label: 'Done' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'status_4',
+                      type: 'status',
+                      text: 'Done',
+                      value: '{"label":"Done","index":1}',
+                      column: { title: 'Status' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('12345');
+  });
+
+  it('--set + --set-raw (different columns) → change_multiple_column_values bundle', async () => {
+    // Mixed friendly + raw bundles into one atomic multi-column
+    // mutation per cli-design §5.3 step 5. Both translated values
+    // land in change_multiple_column_values.column_values.
+    const tagsBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set-raw',
+        'tags_1={"tag_ids":[1,2]}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [tagsBoard] } },
+          },
+          {
+            operation_name: 'ItemUpdateMulti',
+            // Wire pin: both columns appear in the column_values map.
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnValues: {
+                status_4: { label: 'Done' },
+                tags_1: { tag_ids: [1, 2] },
+              },
+            },
+            response: {
+              data: {
+                change_multiple_column_values: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'status_4',
+                      type: 'status',
+                      text: 'Done',
+                      value: '{"label":"Done","index":1}',
+                      column: { title: 'Status' },
+                    },
+                    {
+                      id: 'tags_1',
+                      type: 'tags',
+                      text: 'Backend, Frontend',
+                      value: '{"tag_ids":[1,2]}',
+                      column: { title: 'Tags' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.data.id).toBe('12345');
+    // Both tokens echoed in resolved_ids.
+    expect(env.resolved_ids).toMatchObject({
+      status: 'status_4',
+      tags_1: 'tags_1',
+    });
+  });
+
+  it('--set and --set-raw against the same resolved column → usage_error', async () => {
+    // cli-design §5.3 line 961-972: mutual exclusion is resolution-
+    // time enforced. selectMutation owns the duplicate-column-id
+    // check; the agent sees usage_error with the column_id.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set-raw',
+        'status={"label":"Doing"}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--set-raw with --dry-run echoes parsed JsonObject in diff `to`', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set-raw',
+        'status={"label":"Done"}',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: {
+              data: {
+                items: [
+                  {
+                    ...sampleItem,
+                    column_values: [
+                      {
+                        id: 'status_4',
+                        type: 'status',
+                        text: 'Backlog',
+                        value: '{"label":"Backlog","index":0}',
+                        column: { title: 'Status' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes?: readonly {
+        operation: string;
+        diff: Readonly<Record<string, { to: unknown }>>;
+      }[];
+    };
+    expect(env.planned_changes?.[0]?.operation).toBe('change_column_value');
+    expect(env.planned_changes?.[0]?.diff.status_4?.to).toEqual({
+      label: 'Done',
+    });
+  });
+
+  it('--set-raw against read-only-forever column (mirror) → unsupported_column_type', async () => {
+    const mirrorBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'mirror_1',
+          title: 'Sprint mirror',
+          type: 'mirror',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set-raw',
+        'mirror_1={"whatever":1}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [mirrorBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { read_only?: boolean } };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.read_only).toBe(true);
+  });
+
+  it('--set-raw with malformed JSON fails fast — no GraphQL request fires', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set-raw',
+        'status={broken',
+        '--board',
+        '111',
+        '--json',
+      ],
+      // Empty cassette: an exhausted-cassette error from the
+      // FixtureTransport would surface as `internal_error` with a
+      // recognisable shape; usage_error means the parse failed
+      // pre-network as designed.
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('empty call (no --set / --set-raw / --name) → usage_error', async () => {
+    const out = await drive(
+      ['item', 'update', '12345', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+});
