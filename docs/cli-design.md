@@ -576,8 +576,9 @@ monday dev task done <iid> [--message <m>] # status → "Done" + optional update
 monday dev task block <iid> --reason <r>  # status → "Stuck" + comment       v0.3
 
 # === RAW (escape hatch) ===
-monday raw <query> [--vars <json>]                                           v0.1
-monday raw --query-file <path> [--vars-file <path>]                          v0.1
+monday raw <query> [--vars <json>] [--allow-mutation] [--operation-name <n>] v0.1
+monday raw --query-file <path> [--vars-file <path>] [--allow-mutation]       v0.1
+                                                    [--operation-name <n>]
 
 # === SCHEMA ===
 monday schema                             # full CLI schema as JSON Schema   v0.1
@@ -643,8 +644,15 @@ Available on every command:
 | `--dry-run` | off | Mutations: print planned change, don't execute. |
 | `--yes` / `-y` | off | Skip confirmation gate on destructive ops. |
 | `--body-file <path>` | — | Where a command takes a `--body` (long-form text), read it from this file. `--body-file -` reads stdin. Avoids shell-quoting hell for multi-line markdown. |
-| `--query-file <path>` | — | For `monday raw`: read the GraphQL document from a file (or `-` for stdin). |
-| `--vars-file <path>` | — | For `monday raw`: read GraphQL variables JSON from a file (or `-` for stdin). |
+
+The `monday raw` command additionally takes `--query-file <path>` /
+`--vars-file <path>` for the GraphQL document and variables (each
+also accepts `-` for stdin), `--allow-mutation` (required to send
+`mutation` operations — read paths are safe-by-default), and
+`--operation-name <name>` (required when the document defines more
+than one executable operation). These are subcommand-scoped, not
+global, because they're raw-only (M6 close — Codex pass-2 alignment
+note).
 
 ## 5. Where the CLI diverges from the API (and why)
 
@@ -1912,7 +1920,13 @@ scoped idempotent changes, and post comments narrating its work.**
   update mutations — reply/edit/delete/like/pin — wait for v0.2.)
 - `cache list/clear/stats`
 - `config show/path`
-- `schema` (with full JSON Schema), `raw` (with `--query-file`)
+- `schema` (with full JSON Schema), `raw` (with `--query-file`,
+  `--vars-file`, `--allow-mutation`, `--operation-name`; mutations
+  are blocked by default and the `operationName` is selected from
+  the parsed AST — M6 close)
+- `board doctor` (3 diagnostics: duplicate column titles,
+  unsupported column types per roadmap category, broken
+  `board_relation` targets — M6)
 - All global flags from §4.4
 - Stable JSON envelope (§6) and full v0.1 error code set
 - **Test fixtures + recorded GraphQL responses** before any v0.2
