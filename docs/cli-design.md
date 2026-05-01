@@ -702,8 +702,9 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `board.id`, then proceeds. Caches the item→board mapping for the
      lifetime of the process.
    When ambiguity is impossible (the agent already passed `--board`),
-   the implicit lookup is skipped entirely. Raw mode (`--set-raw`)
-   without `--board` is a `usage_error`.
+   the implicit lookup is skipped entirely. (Raw mode — `--set-raw
+   <col>=<json>` — is **deferred to v0.2**; see "Escape hatch" below
+   and the writer-expansion roadmap. v0.1 has no raw-write surface.)
 
    **`--board` / item-board mismatch.** If `--board <bid>` is passed
    and the item actually lives on a different board, the live path
@@ -783,11 +784,12 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `error.code = "user_not_found"` with the unmatched email in
      `details`.
 4. **All other column types in v0.1 → `unsupported_column_type`.**
-   The error includes `column_id`, `type`, the literal Monday-style
-   JSON shape the type expects, and a `--set-raw` example. v0.2+
-   may extend the allowlist; the contract here is "we either know
-   how to translate it, or we tell you exactly how to write it
-   yourself". No silent partial support.
+   The error includes `column_id`, `type`, and `deferred_to: "v0.2"`
+   plus a hint pointing at the v0.2 writer-expansion milestone. v0.1
+   ships no escape hatch — the contract here is "we know how to
+   translate the seven allowlisted types, and every other type is
+   not writable via the CLI until v0.2." No silent partial support;
+   no dead `--set-raw` suggestion in v0.1 (see "Escape hatch" below).
 5. **Picks the right mutation.** Of the v0.1 allowlist:
    - `change_simple_column_value` (plain string) — for `text`,
      `long_text`, `numbers`. These types accept a bare string.
@@ -798,9 +800,9 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      more `--set` flags. Saves a round-trip and is **atomic on
      Monday's side** (all columns succeed together or all fail;
      never partial success).
-   For non-allowlist types reached via `--set-raw`, the CLI uses
-   `change_column_value` for everything (the simple variant is just
-   an optimisation; the full variant accepts the same payloads).
+   (v0.2's `--set-raw` will use `change_column_value` for everything
+   — the simple variant is an optimisation; the full variant accepts
+   the same payloads. Non-allowlist types have no v0.1 write path.)
 
    **Per-column-blob shapes inside `change_multiple_column_values`.**
    The multi mutation accepts a `column_values` JSON object keyed
@@ -823,16 +825,24 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
 the same call: `monday item update <iid> --name "New title" --set
 status=Done` bundles the rename and the column write atomically.
 
-**Escape hatch:** `--set-raw <col>=<json>` skips the friendly
-translation and writes the literal Monday-shape JSON. Required for
-column types not in the v0.1 allowlist; available always for power
-users / agents that already know the shape.
+**Escape hatch (v0.2 — deferred from v0.1):** `--set-raw
+<col>=<json>` will skip the friendly translation and write the
+literal Monday-shape JSON. The flag is **not implemented in v0.1**;
+it lands in v0.2's writer-expansion milestone alongside the next
+batch of friendly types (link / email / phone / tags /
+board_relation / dependency). v0.1 agents hitting an unsupported
+type get `unsupported_column_type` with `deferred_to: "v0.2"` and
+no escape — the friendly translator covers the seven types
+(`text`, `long_text`, `numbers`, `status`, `dropdown`, `date`,
+`people`) the v0.1 contract commits to.
 
 **Writer-expansion roadmap.** Per-type slots for the friendly
 translator (`--set <col>=<val>`). Until a type lands in the
-allowlist for a given version, agents use `--set-raw` (or wait).
-Slots are the *current best plan* — the v0.2 writer-expansion
-milestone may re-slot the harder types (`tags`,
+allowlist for a given version, agents wait — v0.1 has no escape
+hatch. The v0.2 writer-expansion milestone lands `--set-raw
+<col>=<json>` alongside the next friendly-type batch, which is
+the unified write-side expansion. Slots are the *current best
+plan* — v0.2 may re-slot the harder types (`tags`,
 `board_relation`, `dependency`) to v0.3 after fixture work surfaces
 the design cost; this table is a planning anchor, not a binding
 schedule beyond v0.1.
@@ -1784,7 +1794,8 @@ to largest scope:
   accepts on items in that board. Returns:
   - All columns with `id`, `type`, `title`, `archived`, `description`,
     `settings_str` (parsed where possible), and a `writable` boolean
-    (true if the type is in the v0.1 allowlist or `--set-raw` works).
+    (true if the type is in the v0.1 friendly-translator allowlist;
+    v0.2 widens this when `--set-raw` lands).
   - For `status` columns: the full label/index map with style.
   - For `dropdown` columns: the option list with IDs and labels.
   - For `board_relation` columns: the `linked_board_id`(s).
@@ -1799,8 +1810,8 @@ to largest scope:
 - `monday board doctor <bid>` — diagnostics. Surfaces:
   - Duplicate column titles (would cause `ambiguous_column` on
     title-based `--set`).
-  - Columns of types not in the v0.1 allowlist (would need
-    `--set-raw`).
+  - Columns of types not in the v0.1 allowlist (not writable in
+    v0.1; v0.2 widens write coverage via `--set-raw` + new types).
   - Stale cache entries vs. live state.
   - Missing/broken `board_relation` targets (linked board archived).
   - For `dev`-mapped boards: missing expected columns
@@ -1866,7 +1877,10 @@ scoped idempotent changes, and post comments narrating its work.**
 - `item subitems`
 - `item set`, `item clear`, and `item update --set` with **only** the
   v0.1 column allowlist (`status`, `text`, `long_text`, `numbers`,
-  `dropdown`, `date`, `people`). Other types via `--set-raw`.
+  `dropdown`, `date`, `people`). Other types are not writable in
+  v0.1 — they surface `unsupported_column_type` with
+  `deferred_to: "v0.2"`; the `--set-raw` escape hatch lands in
+  v0.2 with the writer-expansion milestone.
 - `update list/get/create` — read AND post comments. (`update create`
   is in v0.1 because the agent workflow narrative — start a task,
   do the work, post a result comment — is meaningfully degraded
@@ -1883,6 +1897,13 @@ scoped idempotent changes, and post comments narrating its work.**
 
 ### v0.2 (mutating core — "agents can drive a backlog")
 
+- **Writer expansion** — `--set-raw <col>=<json>` escape hatch
+  (deferred from v0.1) on `item set` / `item update` / bulk
+  `item update --where`, alongside friendly-type expansion for
+  `link`, `email`, `phone`, `tags` (tentative), `board_relation`
+  (tentative), and `dependency` (tentative). v0.1's
+  `unsupported_column_type` `deferred_to: "v0.2"` becomes
+  actionable here.
 - `item create/move/archive/delete/duplicate`
 - `item upsert` (idempotency via `--match-by`; see §5.8)
 - `update reply/edit/delete/like/pin` (with `--body-file` where

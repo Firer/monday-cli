@@ -167,9 +167,10 @@ Two consequences:
   abstraction (§5.3) gets exercised against real fixtures before
   multi-column bulk and dry-run pile on. Picks the simple-vs-rich
   mutation per column type so dry-run reports the right operation.
-  Errors `unsupported_column_type` for non-allowlisted types with the
-  literal `--set-raw` example in `details` — agents shouldn't have to
-  guess the JSON shape.
+  Errors `unsupported_column_type` for non-allowlisted types with
+  `deferred_to: "v0.2"` in `details` — points agents at the v0.2
+  writer-expansion milestone rather than a v0.1 escape hatch
+  that doesn't exist.
   ```
 
   If a change doesn't have a meaningful why/how worth saying, the

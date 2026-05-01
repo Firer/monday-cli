@@ -383,8 +383,9 @@ const outOfRangeRelativeOffsetError = (
     `Date column "${columnId}" relative offset "${input}" resolves to ` +
       `${amount.toString()} ${unit}, which exceeds the translator's ` +
       `maximum magnitude of ${maxAmount.toString()} ${unit} (~100 ` +
-      `years). Use an explicit ISO date instead, or pass --set-raw to ` +
-      `bypass the friendly translator.`,
+      `years). Use an explicit ISO date instead. (v0.1 has no ` +
+      `raw-write escape; v0.2's writer-expansion milestone adds ` +
+      `--set-raw.)`,
     {
       details: {
         column_id: columnId,
@@ -393,9 +394,7 @@ const outOfRangeRelativeOffsetError = (
         unit,
         amount,
         max_amount: maxAmount,
-        hint:
-          `examples: --set ${columnId}=2126-04-29 (explicit ISO), or ` +
-          `--set-raw ${columnId}='{"date":"2126-04-29"}'`,
+        hint: `example: --set ${columnId}=2126-04-29 (explicit ISO)`,
       },
     },
   );

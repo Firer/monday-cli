@@ -237,9 +237,12 @@
   `userByEmail`'s schema enforces — malformed IDs surface as
   `internal_error` rather than silently corrupting the wire
   payload via `Number()`. Numeric tokens (`--set
-  Owner=12345`) rejected with a literal `--set-raw` hint;
-  unknown emails bubble `user_not_found` from the resolveEmail
-  callback per cli-design §5.3 line 733. `parsePeopleInput`
+  Owner=12345`) rejected with `usage_error` carrying
+  `deferred_to: "v0.2"` (M5b post-mortem Path B — `--set-raw`
+  itself was deferred to v0.2's writer-expansion milestone, so
+  the original paste-ready hint pointed at a non-existent
+  flag); unknown emails bubble `user_not_found` from the
+  resolveEmail callback per cli-design §5.3 line 733. `parsePeopleInput`
   also returns a `resolution: PeopleResolution` echo (one
   `{input, resolved_id}` entry per non-empty input token) the
   dry-run engine renders as `details.resolved_from` on the diff

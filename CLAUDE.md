@@ -195,8 +195,11 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   features (will need raw GraphQL where the SDK doesn't type them). (§2)
 - **Column-value abstraction (§5.3)** is what makes `--set` work.
   v0.1 allowlist: `status`, `text`, `long_text`, `numbers`, `dropdown`,
-  `date`, `people`. Other types return `unsupported_column_type` with a
-  `--set-raw` example. The CLI resolves `<col>` as ID > NFC-normalised
+  `date`, `people`. Other types return `unsupported_column_type` with
+  `deferred_to: "v0.2"` — the `--set-raw <col>=<json>` escape hatch
+  was **deferred to v0.2's writer-expansion milestone** (M5b
+  post-mortem Path B; v0.1 has no raw-write surface). The CLI
+  resolves `<col>` as ID > NFC-normalised
   exact title > NFC + case-fold > `ambiguous_column`. `me` is a
   recognised token for people columns. **Read-side resolver lives at
   `src/api/columns.ts`** (M3) and is the seam M5a's value translator
@@ -254,8 +257,10 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `{personsAndTeams:[{id:N,kind:'person'},...]}` with `id` as JS
   number; `kind` literal `'person'` only (teams deferred to
   v0.2). Numeric tokens (`--set Owner=12345`) rejected with
-  `--set-raw` hint; unknown emails surface as
-  `user_not_found` (bubbled from `resolveEmail`). The full
+  `usage_error` carrying `deferred_to: "v0.2"` (no `--set-raw`
+  in v0.1; the original paste-ready hint pointed at a flag
+  that didn't exist — M5b post-mortem Path B); unknown emails
+  surface as `user_not_found` (bubbled from `resolveEmail`). The full
   grammar lives in `src/api/people.ts`. Defence-in-depth ID
   validation: `userByEmail`'s schema enforces decimal
   non-negative integer strings, AND the translator's

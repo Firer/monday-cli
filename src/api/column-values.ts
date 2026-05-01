@@ -81,10 +81,11 @@
  * per type as a fixture so M5b and v0.2's bulk surface inherit the
  * rule unchanged.
  *
- * **`--set-raw` escape hatch.** Lives at the command boundary, not
- * here — `--set-raw <col>=<json>` skips the friendly translator
- * entirely and uses `change_column_value` with the literal payload.
- * This module is only invoked for the friendly path.
+ * **No `--set-raw` escape hatch in v0.1.** The cli-design `--set-raw
+ * <col>=<json>` flag is deferred to v0.2's writer-expansion milestone.
+ * Non-allowlisted column types surface `unsupported_column_type` with
+ * `deferred_to: "v0.2"` and no escape; the v0.1 contract is "we
+ * translate the seven allowlisted types and reject everything else."
  */
 
 import { ApiError, UsageError } from '../utils/errors.js';
@@ -231,10 +232,10 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
  *
  * **Throws** `ApiError`:
  *   - `unsupported_column_type` — type not in the v0.1 friendly
- *     allowlist. Carries `column_id`, `type`, and a literal
- *     `--set-raw` example so an agent that hits an unsupported
- *     type can paste a working command without consulting
- *     Monday's docs.
+ *     allowlist. Carries `column_id`, `type`, and
+ *     `deferred_to: "v0.2"` pointing at the v0.2 writer-expansion
+ *     milestone (which will land `--set-raw` plus broader friendly
+ *     types). v0.1 has no escape hatch.
  *   - `internal_error` — sync entry was called on a `people`
  *     column. Programmer error: M5b's write surface always uses
  *     `translateColumnValueAsync`. The check exists so a future
@@ -338,9 +339,9 @@ export const translateColumnValue = (
  *
  * **Throws** `unsupported_column_type` for types outside the v0.1
  * writable allowlist — same code path the value translator uses.
- * Agents that hit it on `item clear` get the same `--set-raw` hint
- * (irrelevant for clear, but consistent with the value path so the
- * error surface is predictable).
+ * Agents that hit it on `item clear` get the same v0.2-deferral
+ * hint as `item set` / `item update` so the error surface is
+ * predictable across the mutation surfaces.
  *
  * Sync entry — `people` clear doesn't need email resolution (the
  * payload is `{}` regardless of who's currently assigned). Reused
@@ -515,12 +516,13 @@ const translateStatus = (
  *
  * **Disambiguation rule, pinned.** A label literally named `"1"`
  * cannot be set via `--set tags=1` — that input parses as the
- * `id` path. Agents who hit this collision use `--set-raw
- * tags='{"labels":["1"]}'` to bypass the translator. Surfaced
- * in the module header as a known limitation; documented via
- * unit test rather than runtime warning because it's a corner
- * case (Monday-generated dropdown labels are strings the user
- * typed; integer-only labels are vanishingly rare).
+ * `id` path. v0.1 has no escape; v0.2's `--set-raw
+ * tags='{"labels":["1"]}'` will be the workaround once the
+ * writer-expansion milestone lands. Surfaced in the module header
+ * as a known limitation; documented via unit test rather than
+ * runtime warning because it's a corner case (Monday-generated
+ * dropdown labels are strings the user typed; integer-only labels
+ * are vanishingly rare).
  *
  * **Empty-after-filter throws `usage_error`.** Inputs like
  * `--set tags=""` or `--set tags=" , "` carry no labels and no
@@ -550,7 +552,8 @@ const translateDropdown = (
           hint:
             'pass a comma-separated list of labels (e.g. --set ' +
             `${columnId}='Backend,Frontend') or numeric IDs (--set ` +
-            `${columnId}=1,2); use --set-raw to bypass the friendly translator.`,
+            `${columnId}=1,2). v0.1 has no raw-write escape — v0.2's ` +
+            `writer-expansion milestone adds --set-raw.`,
         },
       },
     );
@@ -577,8 +580,9 @@ const translateDropdown = (
  * chars long). Either case would land at Monday as the wrong
  * integer or as `null` after `JSON.stringify`. The error carries
  * the raw input so an agent's debug log shows exactly what they
- * sent, and a hint nudging them toward the label path or
- * `--set-raw`.
+ * sent, and a hint nudging them toward the label path. (v0.2
+ * adds `--set-raw` as a paste-ready alternative; v0.1 has no
+ * raw-write escape.)
  */
 const unsafeIntegerError = (
   columnId: string,
@@ -606,8 +610,9 @@ const unsafeIntegerError = (
       `exceeds JavaScript's safe-integer range (2^53 - 1, i.e. ` +
       `9007199254740991). Number(raw) would lose precision or yield ` +
       `Infinity, corrupting the wire shape. Monday's ${columnType} ` +
-      `${noun} are small non-negative integers — pass a label, ` +
-      `${smaller}, or --set-raw to bypass the translator entirely.`,
+      `${noun} are small non-negative integers — pass a label or ` +
+      `${smaller}. (v0.1 has no raw-write escape; v0.2's writer-` +
+      `expansion milestone adds --set-raw.)`,
     {
       details: {
         column_id: columnId,
@@ -797,9 +802,10 @@ const projectForMulti = (t: TranslatedColumnValue): MultiColumnValue => {
 
 /**
  * Builds the canonical `unsupported_column_type` error (`cli-design.md`
- * §5.3 step 4 + §6.5). The `--set-raw` example uses the literal
- * column ID so an agent can paste-and-edit. Exported for unit
- * coverage.
+ * §5.3 step 4 + §6.5). v0.1 has no raw-write escape — the error
+ * carries `deferred_to: "v0.2"` pointing at the writer-expansion
+ * milestone (which lands `--set-raw` plus broader friendly types).
+ * Exported for unit coverage.
  */
 export const unsupportedColumnTypeError = (
   columnId: string,
@@ -808,22 +814,23 @@ export const unsupportedColumnTypeError = (
   new ApiError(
     'unsupported_column_type',
     `Column "${columnId}" has type "${type}", which is not in the v0.1 ` +
-      `friendly --set translator allowlist. Use --set-raw with the ` +
-      `Monday-shape JSON, or wait for v0.2 / a later M5a session for ` +
-      `built-in support.`,
+      `friendly --set translator allowlist (text, long_text, numbers, ` +
+      `status, dropdown, date, people). v0.1 ships no raw-write escape ` +
+      `hatch — the v0.2 writer-expansion milestone will add ` +
+      `--set-raw <col>=<json> plus friendly support for link, email, ` +
+      `phone, tags, board_relation, and dependency types.`,
     {
       details: {
         column_id: columnId,
         type,
-        // The hint is intentionally generic: when the CLI knows the
-        // exact Monday shape for a type, we add it to the friendly
-        // allowlist instead of leaving callers to copy a hint. The
-        // --set-raw example below is the always-correct escape.
+        deferred_to: 'v0.2',
         hint:
-          'pass the Monday-shape JSON with --set-raw; see ' +
-          'https://developer.monday.com/api-reference/reference/column-types-reference ' +
-          'for per-type shapes.',
-        set_raw_example: `--set-raw ${columnId}='<json>'`,
+          'this column type is not writable via the CLI in v0.1; the ' +
+          'v0.2 writer-expansion milestone will add the --set-raw ' +
+          '<col>=<json> escape hatch and broader friendly-type coverage. ' +
+          'See https://developer.monday.com/api-reference/reference/' +
+          'column-types-reference for the per-type Monday wire shapes ' +
+          'that --set-raw will accept.',
       },
     },
   );

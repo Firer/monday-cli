@@ -609,11 +609,13 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.error?.details?.column_id).toBe('status_4');
   });
 
-  it('live: --set against an unsupported column type surfaces with --set-raw hint', async () => {
+  it('live: --set against an unsupported column type surfaces with v0.2 deferral', async () => {
     // Single-path translation-error branch: column resolves OK, but
     // translateColumnValueAsync throws ApiError(unsupported_column_type)
     // for non-allowlisted types. Covers update.ts:521 idx 0 (the
     // err instanceof MondayCliError check after translation).
+    // Path B (M5b cleanup): the error advertises v0.2's writer-
+    // expansion milestone instead of a dead --set-raw suggestion.
     const linkMeta = {
       ...sampleBoardMetadata,
       columns: [
@@ -650,9 +652,18 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     );
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-      error?: { code: string; details?: { hint?: string } };
+      error?: {
+        code: string;
+        details?: {
+          deferred_to?: string;
+          set_raw_example?: string;
+          hint?: string;
+        };
+      };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });
 
   it('F4 (single path): validation_failed after cache-sourced resolution remaps to column_archived', async () => {

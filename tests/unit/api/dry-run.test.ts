@@ -491,7 +491,7 @@ describe('planChanges — all-or-nothing on resolution failure', () => {
     expect(stats.operations).not.toContain('ItemDryRunRead');
   });
 
-  it('unsupported_column_type: surfaces with --set-raw hint', async () => {
+  it('unsupported_column_type: surfaces with v0.2 deferral details', async () => {
     const stats: Stats = { calls: 0, operations: [] };
     const client = buildClient([board67890(), itemAtBacklog()], stats);
     let caught: unknown;
@@ -511,6 +511,10 @@ describe('planChanges — all-or-nothing on resolution failure', () => {
     expect((caught as ApiError).details).toMatchObject({
       column_id: 'mirror_1',
       type: 'mirror',
+      // Path B (M5b cleanup): v0.1 has no --set-raw, so the error
+      // advertises the v0.2 writer-expansion milestone instead of
+      // a dead `set_raw_example` slot.
+      deferred_to: 'v0.2',
     });
     expect(stats.operations).not.toContain('ItemDryRunRead');
   });

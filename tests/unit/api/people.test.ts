@@ -260,12 +260,13 @@ describe('parsePeopleInput — empty / whitespace input', () => {
 });
 
 describe('parsePeopleInput — numeric token rejection', () => {
-  it('purely numeric token throws usage_error with a --set-raw hint', async () => {
+  it('purely numeric token throws usage_error pointing at v0.2 deferral', async () => {
     // cli-design.md §5.3 step 3 only lists emails + `me` for the
     // people grammar. Numeric tokens (`--set Owner=12345`) are
-    // rejected because the column-type grammar is the contract;
-    // agents who already have a user ID use --set-raw. Logged as
-    // a spec gap in v0.1-plan.md §3 M5a.
+    // rejected because the column-type grammar is the contract.
+    // Path B (M5b cleanup): v0.1 has no --set-raw flag, so the
+    // error advertises the v0.2 writer-expansion milestone instead
+    // of a dead --set-raw paste-ready hint.
     await expect(parsePeopleInput('12345', 'owner', ctx())).rejects.toThrow(
       UsageError,
     );
@@ -282,12 +283,17 @@ describe('parsePeopleInput — numeric token rejection', () => {
         column_type: 'people',
         token: '12345',
         raw_input: '12345',
+        deferred_to: 'v0.2',
       });
-      // Hint must point at the literal --set-raw shape with the
-      // token interpolated so an agent can paste-and-edit.
-      expect(err.details?.hint).toBe(
-        `--set-raw owner='{"personsAndTeams":[{"id":12345,"kind":"person"}]}'`,
-      );
+      // Hint guides the agent to the email form (the v0.1 escape)
+      // and references v0.2's --set-raw without instructing the
+      // agent to use it today.
+      const hint = err.details?.hint;
+      expect(typeof hint).toBe('string');
+      expect(hint as string).toMatch(/--set owner=/u);
+      expect(hint as string).toMatch(/v0\.2/u);
+      // Pin: the dead "Use --set-raw" instruction must not return.
+      expect(err.message).not.toMatch(/Use --set-raw/u);
     }
   });
 
@@ -419,9 +425,15 @@ describe('parsePeopleInput — safe-integer guard on resolved IDs', () => {
         column_type: 'people',
         token: 'alice@example.com',
         resolved_id: huge,
+        // Path B (M5b cleanup): v0.1 has no --set-raw flag, so the
+        // error advertises the v0.2 writer-expansion milestone
+        // rather than emitting a paste-ready dead command.
+        deferred_to: 'v0.2',
       });
-      expect(err.details?.hint).toContain('--set-raw');
-      expect(err.details?.hint).toContain(huge);
+      const hint = err.details?.hint;
+      expect(typeof hint).toBe('string');
+      expect(hint as string).toContain('v0.2');
+      expect(hint as string).not.toMatch(/^--set-raw /u);
     }
   });
 

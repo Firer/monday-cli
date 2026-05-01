@@ -394,8 +394,8 @@ describe('translateColumnValue — dropdown (rich)', () => {
   it('numeric label collision known limitation: literal "1" parses as id', () => {
     // A dropdown label literally named "1" cannot be set via the
     // friendly translator — `--set tags=1` resolves to {ids: [1]}.
-    // Pinned so the limitation is loud, not silent: agents who
-    // hit it use --set-raw to bypass.
+    // Pinned so the limitation is loud, not silent. v0.1 has no
+    // raw-write escape; v0.2's --set-raw will be the workaround.
     const out = translate('dropdown', '1');
     expect(out.payload).toEqual<ColumnValuePayload>({
       format: 'rich',
@@ -573,7 +573,7 @@ describe('translateColumnValue — non-allowlisted types', () => {
     'last_updated',
     'phone',
     'rating',
-  ])('%s → unsupported_column_type with column_id + type + --set-raw example', (type) => {
+  ])('%s → unsupported_column_type with column_id + type + v0.2 deferral', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
       /not in the v0.1/u,
     );
@@ -585,12 +585,19 @@ describe('translateColumnValue — non-allowlisted types', () => {
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         type,
-        set_raw_example: `--set-raw col_z='<json>'`,
-        // The hint must point an agent at Monday's docs without
-        // pretending to know the exact shape — see the module
-        // header for why we don't stub a per-type guess here.
-        hint: expect.stringContaining('--set-raw') as unknown,
+        // v0.1 ships no raw-write escape; the error advertises the
+        // v0.2 writer-expansion milestone via deferred_to. Pre-Path-B
+        // this slot was a (dead-suggestion) `set_raw_example`.
+        deferred_to: 'v0.2',
+        // Hint must reference the v0.2 milestone so agents don't
+        // chase a non-existent --set-raw flag in v0.1.
+        hint: expect.stringContaining('v0.2') as unknown,
       });
+      // Negative assertion: no v0.1 --set-raw suggestion sneaks back
+      // in — a regression where the dead suggestion returns is the
+      // exact thing Path B was meant to remove.
+      expect(err.details).not.toHaveProperty('set_raw_example');
+      expect(err.message).not.toMatch(/Use --set-raw/u);
     }
   });
 
@@ -1085,7 +1092,7 @@ describe('translateColumnValueAsync — surface contract', () => {
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('builds an ApiError with the documented details shape', () => {
+  it('builds an ApiError with the v0.2 deferral details shape', () => {
     const err = unsupportedColumnTypeError('col_42', 'mirror');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
@@ -1093,19 +1100,27 @@ describe('unsupportedColumnTypeError', () => {
     expect(err.details).toMatchObject({
       column_id: 'col_42',
       type: 'mirror',
-      set_raw_example: `--set-raw col_42='<json>'`,
+      // Path B (M5b cleanup): v0.1 has no --set-raw flag, so the
+      // error carries `deferred_to: 'v0.2'` instead of a dead
+      // `set_raw_example` suggestion. v0.2's writer-expansion
+      // milestone lands the escape hatch + broader friendly types.
+      deferred_to: 'v0.2',
     });
+    // Pin: the dead `set_raw_example` slot must not return.
+    expect(err.details).not.toHaveProperty('set_raw_example');
   });
 
-  it('does not leak a column-id with an unescaped quote — agents read this verbatim', () => {
-    // The example is cosmetic but the column-id appears inside a
-    // single-quoted shell context. If a future column ID ever
-    // contains a `'` (Monday IDs are snake_case so today this is
-    // moot), the example would mislead. Pin the current behaviour
-    // so a regression is loud rather than silent — if Monday ever
-    // allows quoted IDs, this test is the trigger to add escaping.
-    const err = unsupportedColumnTypeError("o'brien_col", 'mirror');
-    expect(err.details?.set_raw_example).toBe(`--set-raw o'brien_col='<json>'`);
+  it('hint references v0.2 deferral, not a v0.1 --set-raw command', () => {
+    // Path B regression guard: the message + hint must not advertise
+    // a `--set-raw` flag that doesn't exist in v0.1. They may name
+    // the flag in the context of v0.2 ("v0.2 adds --set-raw"), but
+    // never as a v0.1 instruction ("Use --set-raw...").
+    const err = unsupportedColumnTypeError('col_42', 'mirror');
+    expect(err.message).not.toMatch(/^Use --set-raw/u);
+    expect(err.message).toContain('v0.2');
+    const hint = (err.details as { hint?: string } | undefined)?.hint ?? '';
+    expect(hint).toContain('v0.2');
+    expect(hint).not.toMatch(/^pass the Monday-shape JSON with --set-raw/u);
   });
 });
 

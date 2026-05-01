@@ -379,7 +379,7 @@ describe('monday item set (integration, M5b)', () => {
     ).toBe(true);
   });
 
-  it('live: unsupported_column_type surfaces with --set-raw hint', async () => {
+  it('live: unsupported_column_type surfaces with v0.2 deferral details', async () => {
     const formulaBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -409,11 +409,23 @@ describe('monday item set (integration, M5b)', () => {
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: {
         code: string;
-        details?: { set_raw_example?: string };
+        message?: string;
+        details?: {
+          column_id?: string;
+          type?: string;
+          deferred_to?: string;
+          set_raw_example?: string;
+          hint?: string;
+        };
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.set_raw_example).toMatch(/--set-raw/);
+    // Path B (M5b cleanup): no --set-raw flag in v0.1; the error
+    // advertises the v0.2 writer-expansion milestone instead of
+    // a dead `set_raw_example` slot.
+    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details).not.toHaveProperty('set_raw_example');
+    expect(env.error?.message).not.toMatch(/Use --set-raw/);
   });
 
   it('--dry-run: emits the §6.4 envelope with planned_changes, no mutation fires', async () => {

@@ -40,10 +40,11 @@
  *
  * **Numeric tokens rejected.** cli-design.md §5.3 step 3 only
  * lists emails + `me`. Numeric tokens (`--set Owner=12345`) are
- * rejected with a `usage_error` pointing at `--set-raw '{
- * "personsAndTeams": [{"id": 12345, "kind": "person"}]}'` so
- * agents that already have a user ID can paste-and-edit. cli-
- * design doesn't say either way; logged as a spec gap.
+ * rejected with a `usage_error`. v0.1 has no raw-write escape —
+ * agents with a raw user ID either look up the email and use
+ * the email form, or wait for v0.2's `--set-raw` (writer-
+ * expansion milestone). cli-design doesn't say either way;
+ * logged as a spec gap.
  *
  * **Shared seams.** `isMeToken` lives in `src/api/me-token.ts`
  * (R15) — same helper backs `--where Owner=me` (filters.ts) and
@@ -170,9 +171,10 @@ export interface ParsedPeopleInput {
  *
  * Throws `usage_error` (UsageError):
  *   - empty input after trim+filter (no labels, no IDs);
- *   - numeric token (`--set Owner=12345`) — agents with a raw
- *     user ID use `--set-raw '{"personsAndTeams":[{"id":N,
- *     "kind":"person"}]}'` to bypass the friendly translator.
+ *   - numeric token (`--set Owner=12345`) — v0.1 only accepts
+ *     emails / `me`. Agents with a raw user ID look up the
+ *     email, or wait for v0.2's `--set-raw` (writer-expansion
+ *     milestone).
  *   - resolved user ID exceeds `Number.MAX_SAFE_INTEGER` (2^53 - 1)
  *     — defensive guard against a future Monday user-ID range
  *     expansion. Same shape as the status / dropdown safe-integer
@@ -213,9 +215,10 @@ export const parsePeopleInput = async (
   for (const token of tokens) {
     if (NON_NEGATIVE_INTEGER.test(token)) {
       // Numeric tokens aren't in cli-design's people grammar. Reject
-      // with a hint pointing at --set-raw so an agent who already has
-      // a user ID can paste-and-edit. Logged as a spec gap in
-      // v0.1-plan.md §3 M5a.
+      // with a v0.2-deferral hint — v0.1 has no raw-write escape, so
+      // agents with a raw user ID either look up the email or wait
+      // for v0.2's `--set-raw`. Logged as a spec gap in v0.1-plan.md
+      // §3 M5a.
       throw numericPeopleTokenError(columnId, token, raw);
     }
     const id =
@@ -300,15 +303,20 @@ const idStringToNumber = (id: string, columnId: string, token: string): number =
       `People column "${columnId}" got a resolved user ID "${id}" ` +
         `(from token "${token}") that exceeds JavaScript's safe-integer ` +
         `range (2^53 - 1, i.e. 9007199254740991). Number(id) would lose ` +
-        `precision, corrupting the personsAndTeams wire payload. Pass ` +
-        `--set-raw to bypass the friendly translator.`,
+        `precision, corrupting the personsAndTeams wire payload. v0.1 ` +
+        `has no raw-write escape; v0.2's writer-expansion milestone ` +
+        `adds --set-raw.`,
       {
         details: {
           column_id: columnId,
           column_type: 'people',
           token,
           resolved_id: id,
-          hint: `--set-raw ${columnId}='{"personsAndTeams":[{"id":${id},"kind":"person"}]}'`,
+          deferred_to: 'v0.2',
+          hint:
+            'this user ID exceeds JS safe-integer range; the friendly ' +
+            'translator can\'t round-trip it. v0.2\'s --set-raw will ' +
+            'accept the literal Monday wire shape.',
         },
       },
     );
@@ -340,7 +348,8 @@ const emptyPeopleInputError = (columnId: string, raw: string): UsageError =>
         hint:
           'pass a comma-separated list of emails (e.g. --set ' +
           `${columnId}=alice@example.com,bob@example.com), or ` +
-          `--set ${columnId}=me, or --set-raw to bypass the friendly translator.`,
+          `--set ${columnId}=me. (v0.1 has no raw-write escape; v0.2's ` +
+          `writer-expansion milestone adds --set-raw.)`,
       },
     },
   );
@@ -349,8 +358,9 @@ const emptyPeopleInputError = (columnId: string, raw: string): UsageError =>
  * Builds the `usage_error` for a numeric token that the translator
  * doesn't accept. cli-design.md §5.3 step 3 only lists emails and
  * `me` for the people grammar — numeric tokens are an explicit
- * v0.1 spec gap. The hint interpolates the literal token so the
- * `--set-raw` example is paste-ready.
+ * v0.1 spec gap. v0.1 has no raw-write escape; agents with a raw
+ * user ID look up the email, or wait for v0.2's `--set-raw`
+ * (writer-expansion milestone).
  *
  * `raw` is included alongside `token` because the failing token
  * may be one of many in a comma list (`alice@example.com,12345`)
@@ -364,15 +374,20 @@ const numericPeopleTokenError = (
   new UsageError(
     `People column "${columnId}" got numeric token "${token}", which ` +
       `is not in the v0.1 people grammar (cli-design.md §5.3 step 3 ` +
-      `only lists emails and \`me\`). Agents with a raw user ID can ` +
-      `bypass the friendly translator with --set-raw.`,
+      `only lists emails and \`me\`). v0.1 has no raw-write escape; ` +
+      `look up the user's email and use the email form, or wait for ` +
+      `v0.2's --set-raw (writer-expansion milestone).`,
     {
       details: {
         column_id: columnId,
         column_type: 'people',
         token,
         raw_input: raw,
-        hint: `--set-raw ${columnId}='{"personsAndTeams":[{"id":${token},"kind":"person"}]}'`,
+        deferred_to: 'v0.2',
+        hint:
+          `pass the user's email instead (e.g. --set ${columnId}=` +
+          `alice@example.com); v0.2's --set-raw will accept ` +
+          `'{"personsAndTeams":[{"id":${token},"kind":"person"}]}'.`,
       },
     },
   );
