@@ -38,7 +38,8 @@ Two binding documents:
   (M0–M7 with M5 split + M2.5 refactor pass inserted post-M2),
   per-milestone deliverables, testing-pyramid commitments, risk
   register, exit checklist, and per-milestone post-mortems
-  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a — what Codex
+  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b —
+  what Codex
   review caught after each cluster shipped).
 
 **Milestones:**
