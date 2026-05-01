@@ -137,11 +137,20 @@ might otherwise expect:
   cli-design §13.5 Permanent non-goals (with the concurrency-CAS
   argument added).
 - **Activity logs / audit trail** as a top-level read verb.
-  *(Tension with `item history` above — `item history` is a
-  per-item view of the same underlying data; the org-wide audit
-  log is admin-flavored and probably belongs to the
-  webhook/notification surface, which is itself v0.3.)* Move
-  here only if v0.3 review concludes it's not worth shipping.
+  Held here, not yet promoted to §13.5 — the call genuinely
+  depends on what `item history` (now slotted v0.3) looks like
+  once shipped. Tension worth re-checking at decision time:
+  - If `item history`'s envelope generalises cleanly to scoped
+    queries (`item history --workspace <wid>` / `--board <bid>`),
+    a separate org-wide verb may not be needed.
+  - If the natural shape is admin-flavored (push-stream, time-
+    bounded, cross-actor), it likely belongs to the v0.3
+    webhook/notification surface rather than a top-level read.
+  - Promoting to §13.5 too early forecloses options.
+
+  **Decision trigger: post-v0.3-`item history`-ship.** Whoever
+  reviews this then either pulls to a v0.x slot, promotes to
+  §13.5, or leaves the entry with a fresh trigger.
 
 ## How to use this file
 
