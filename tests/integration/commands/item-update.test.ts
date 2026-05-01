@@ -830,6 +830,112 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     };
     expect(env.error?.code).toBe('validation_failed');
   });
+
+  it('live: cache-sourced resolution surfaces source: "mixed" with cache_age_seconds (single-item)', async () => {
+    // Codex M5b finding #2: single-item update derived `meta.source`
+    // from warning presence and hardcoded `cacheAgeSeconds: null`.
+    // A warmed-cache resolution + live mutation is structurally
+    // 'mixed' (cache resolution + live wire call) — pre-fix it
+    // surfaced as 'live' with no cache age, contradicting item set,
+    // item clear, and bulk item update which all aggregated correctly.
+    //
+    // Setup: warm the metadata cache via a list call, then run a
+    // single-item update with no BoardMetadata interaction (cache hit).
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const updatedSingle = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'update', '12345', '--set', 'status=Done', '--board', '111', '--json'],
+      {
+        // No BoardMetadata interaction — cache serves it.
+        interactions: [
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: updatedSingle } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.source).toBe('mixed');
+    expect(env.meta.cache_age_seconds).not.toBeNull();
+  });
+
+  it('live: multi --set with cache-sourced resolution aggregates source + cache age', async () => {
+    // Multi-token variant of the test above. The aggregator must
+    // walk all setEntries (not just one), tracking the max
+    // cache_age_seconds across the legs. With every leg cache-served,
+    // source: 'mixed' (cache + live mutation), cache_age_seconds set.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        // No BoardMetadata interaction — cache serves both legs.
+        interactions: [
+          {
+            operation_name: 'ItemUpdateMulti',
+            response: {
+              data: {
+                change_multiple_column_values: updatedMultiItem,
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.meta.source).toBe('mixed');
+    expect(env.meta.cache_age_seconds).not.toBeNull();
+  });
 });
 
 describe('monday item update (integration, M5b — bulk --where path)', () => {

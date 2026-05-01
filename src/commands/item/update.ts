@@ -492,6 +492,13 @@ export const itemUpdateCommand: CommandModule<
         const resolvedIds: Record<string, string> = {};
         let aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
           undefined;
+        // Track the max cache age across cache-served column-resolution
+        // legs so the success envelope's `meta.cache_age_seconds`
+        // reports worst-case staleness. Mirrors the bulk path's
+        // aggregator (~line 1095). Pre-fix this slot was hardcoded
+        // null, contradicting `meta.source: "mixed"` for cache-hit
+        // resolutions (Codex M5b finding #2).
+        let aggregateCacheAge: number | null = null;
         for (const entry of setEntries) {
           const resolution = await resolveColumnWithRefresh({
             client,
@@ -503,6 +510,13 @@ export const itemUpdateCommand: CommandModule<
           });
           collectedWarnings.push(...resolution.warnings);
           aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
+          if (
+            resolution.cacheAgeSeconds !== null &&
+            (aggregateCacheAge === null ||
+              resolution.cacheAgeSeconds > aggregateCacheAge)
+          ) {
+            aggregateCacheAge = resolution.cacheAgeSeconds;
+          }
 
           if (resolution.match.column.archived === true) {
             throw foldResolverWarningsIntoError(
@@ -607,6 +621,16 @@ export const itemUpdateCommand: CommandModule<
         }
 
         const warnings: readonly Warning[] = collectedWarnings;
+        // The mutation leg is always live, so the final envelope source
+        // merges `aggregateSource union 'live'`. Mirrors the bulk path
+        // (~line 1305) and item set (`resolution.source === 'cache' ?
+        // 'mixed' : resolution.source`). Pre-fix this derived source
+        // from warning presence alone, missing plain cache hits without
+        // `stale_cache_refreshed` warnings (Codex M5b finding #2).
+        const finalSource: 'live' | 'cache' | 'mixed' = mergeSourceForRemap(
+          aggregateSource,
+          'live',
+        );
         emitMutation({
           ctx,
           data: mutationResult.projected,
@@ -614,8 +638,8 @@ export const itemUpdateCommand: CommandModule<
           programOpts: program.opts(),
           warnings,
           ...toEmit(mutationResult.response),
-          source: collectedWarnings.length > 0 ? 'mixed' : 'live',
-          cacheAgeSeconds: null,
+          source: finalSource,
+          cacheAgeSeconds: aggregateCacheAge,
           // resolved_ids — same shape as `item set`. The synthetic
           // `name` field doesn't appear here because the slot only
           // echoes RESOLVED tokens (those that went through the
