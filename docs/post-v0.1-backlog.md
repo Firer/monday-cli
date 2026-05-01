@@ -85,12 +85,13 @@
 
 ### Diagnostics
 
-- **`monday status`** — connectivity + auth probe. Today the
+- ~~**`monday status`** — connectivity + auth probe. Today the
   closest is `monday account whoami`, which is a real GraphQL
   query against `me { id }`. A dedicated probe could short-circuit
   on auth/network without touching account state. *Suggested
   slot: v0.3 (low value alone; bundles well with other diagnostic
-  verbs).*
+  verbs).*~~ → now in cli-design §13 v0.3 + §4.3 `monday status`
+  entry under new DIAGNOSTICS section.
 
 - **`monday usage` / `quota`** — current account's daily API
   budget remaining. Today `account complexity` is a per-query

@@ -592,6 +592,13 @@ monday cache stats                                                           v0.
 monday config show                        # resolved config (token redacted) v0.1
 monday config path                        # location(s) considered           v0.1
 
+# === DIAGNOSTICS ===
+monday status                             # connectivity + auth probe        v0.3
+                                          # short-circuits on DNS / TCP / TLS / 401
+                                          # without touching account state;
+                                          # bundles api-version + cache dir +
+                                          # redaction self-test
+
 # === HELP / VERSION (commander defaults) ===
 monday --help                                                                v0.1
 monday --version                                                             v0.1
@@ -1905,6 +1912,14 @@ scoped idempotent changes, and post comments narrating its work.**
   fixture-pins the existing failure-decoration shape first; the
   partial-success envelope design pass benefits from one milestone
   of operational signal on the fail-fast variant
+- `monday status` — connectivity + auth probe (DNS / TCP / TLS /
+  401) that short-circuits without touching account state. Bundles
+  pinned API version vs. server's reported version, cache dir +
+  writability, redaction self-test, env-var pickup summary. Lands
+  with the v0.3 diagnostics cluster (`auth login`, `dev doctor`,
+  `monday usage`) — solo it's low value once `account whoami`
+  works, but together they form a coherent "is everything working?"
+  surface
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`
