@@ -38,10 +38,11 @@
   (already v0.2). *Suggested slot: v0.2.*~~ → now in cli-design §13
   v0.2 + §4.3 `update list <iid>` `--with-replies` comment.
 
-- **NDJSON streaming on `item search` / `update list`** — today
+- ~~**NDJSON streaming on `item search` / `update list`** — today
   only `item list` (v0.1) and `item watch` (v0.4) stream. Long
   searches and large comment lists could benefit from incremental
-  output. *Suggested slot: v0.2 alongside the above.*
+  output. *Suggested slot: v0.2 alongside the above.*~~ → now in
+  cli-design §13 v0.2 + §5.6 ndjson surface note.
 
 - **Cross-board `item search`** (omit `--board`, scan every
   visible board). Currently `--board` is required. Agent use case:

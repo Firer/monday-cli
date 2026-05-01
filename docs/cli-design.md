@@ -952,7 +952,10 @@ both layers, with explicit semantics around expiry:
   whole walk fits well inside 60 minutes.
 - **`--limit <N>`** caps total returned items across pages.
 - **`ndjson` output** streams items as they arrive — agents can
-  start processing without waiting for the whole walk.
+  start processing without waiting for the whole walk. v0.1 covers
+  `item list`; v0.2 extends streaming to `item search` and the
+  `update list` verbs (`<iid>`, `--board`) as the comment surface
+  bulks up to volumes that benefit from incremental output.
 
 **Stale cursor handling — fail, don't silently re-issue.** If the
 60-minute window elapses mid-walk (e.g. an agent paused between
@@ -1845,6 +1848,10 @@ scoped idempotent changes, and post comments narrating its work.**
 - `update list <iid> --with-replies` — comment-thread expansion;
   v0.1 surfaces only top-level updates, reply trees require a nested
   Monday query that pairs with `update reply` above
+- NDJSON streaming for `item search` and `update list` (`<iid>` +
+  `--board`) — symmetric with v0.1's `item list` streaming once the
+  comment-surface verbs land and grow the data volumes that benefit
+  from incremental output
 - `board create/archive/delete/duplicate`
 - `board column-create/column-update/column-delete`
 - `board group-create/group-update/group-archive/group-duplicate/group-delete`
