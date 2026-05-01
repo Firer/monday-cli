@@ -197,10 +197,16 @@ linked sections of `docs/cli-design.md` for the full reasoning.
 - **Column-value abstraction (§5.3)** is what makes `--set` work.
   v0.1 allowlist: `status`, `text`, `long_text`, `numbers`, `dropdown`,
   `date`, `people`. Other types return `unsupported_column_type` with
-  `deferred_to: "v0.2"` — the `--set-raw <col>=<json>` escape hatch
-  was **deferred to v0.2's writer-expansion milestone** (M5b
-  post-mortem Path B; v0.1 has no raw-write surface). The CLI
-  resolves `<col>` as ID > NFC-normalised
+  per-category guidance (M5b cleanup re-review #1):
+  v0.2-roadmap types (`link` / `email` / `phone` / `tags` /
+  `board_relation` / `dependency`) carry `deferred_to: "v0.2"`;
+  read-only-forever types (`mirror` / `formula` / `auto_number`
+  / `creation_log` / `last_updated` / `item_id`) carry
+  `read_only: true` with a hint pointing at the underlying
+  source column; other types carry `deferred_to: "future"`.
+  The `--set-raw <col>=<json>` escape hatch is deferred to v0.2's
+  writer-expansion milestone (Path B); v0.1 has no raw-write surface.
+  The CLI resolves `<col>` as ID > NFC-normalised
   exact title > NFC + case-fold > `ambiguous_column`. `me` is a
   recognised token for people columns. **Read-side resolver lives at
   `src/api/columns.ts`** (M3) and is the seam M5a's value translator

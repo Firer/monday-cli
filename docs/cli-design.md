@@ -895,8 +895,12 @@ it's the only surface that produces the right payload across all
 seven writable types. Bulk clear via `--where` is a v0.2 candidate;
 today, bulk reset is achieved by walking matched items through
 `xargs monday item clear`. Non-allowlisted column types return
-`unsupported_column_type` from `clear` with a `--set-raw` hint,
-mirroring `set`.
+`unsupported_column_type` from `clear` matching the `set` policy:
+v0.2-roadmap types (link / email / phone / tags / board_relation
+/ dependency) carry `deferred_to: "v0.2"`; read-only-forever
+types (mirror / formula / auto_number / creation_log /
+last_updated / item_id) carry `read_only: true` with a hint
+pointing at the underlying source column.
 
 **Relative dates and timezone.** `today`, `tomorrow`, `+3d`, `-1w`,
 `+2h` are resolved against the active **profile timezone**, set in

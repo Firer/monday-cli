@@ -200,7 +200,14 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.details?.column_id).toBe('old_status');
   });
 
-  it('live: unsupported_column_type surfaces typed error', async () => {
+  it('live: unsupported_column_type — read-only-forever (formula) surfaces with read_only: true', async () => {
+    // Codex M5b cleanup re-review #2: cli-design line 897 originally
+    // said `item clear` non-allowlisted types surfaced
+    // `unsupported_column_type` "with a `--set-raw` hint" — that
+    // hint was the exact dead v0.1 suggestion Path B was meant to
+    // remove. The new policy mirrors `item set`: read-only-forever
+    // types get `read_only: true`, v0.2-roadmap types get
+    // `deferred_to: "v0.2"`. No --set-raw hint anywhere in v0.1.
     const formulaBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -227,8 +234,70 @@ describe('monday item clear (integration, M5b)', () => {
       },
     );
     expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        message?: string;
+        details?: {
+          deferred_to?: string;
+          read_only?: boolean;
+          set_raw_example?: string;
+        };
+      };
+    };
     expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.read_only).toBe(true);
+    // Negative pins: read-only-forever types must not advertise a
+    // future write path or a v0.1 --set-raw flag.
+    expect(env.error?.details).not.toHaveProperty('deferred_to');
+    expect(env.error?.details).not.toHaveProperty('set_raw_example');
+    expect(env.error?.message).not.toMatch(/--set-raw/);
+  });
+
+  it('live: unsupported_column_type — v0.2 writer-expansion (link) surfaces with deferred_to: v0.2', async () => {
+    // Companion test: v0.2-roadmap types carry `deferred_to: "v0.2"`,
+    // mirroring `item set`. Pinned at the integration layer so a
+    // regression in either branch fails an end-to-end test.
+    const linkBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'link_1',
+          title: 'External link',
+          type: 'link',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'clear', '12345', 'link_1', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [linkBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          deferred_to?: string;
+          read_only?: boolean;
+          set_raw_example?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details).not.toHaveProperty('read_only');
+    expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });
 
   it('--dry-run: archived column surfaces column_archived before item-state read fires', async () => {

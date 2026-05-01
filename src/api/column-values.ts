@@ -91,6 +91,7 @@
 import { ApiError, UsageError } from '../utils/errors.js';
 import type { JsonObject } from '../types/json.js';
 import {
+  getColumnRoadmapCategory,
   isWritableColumnType,
   type WritableColumnType,
 } from './column-types.js';
@@ -802,35 +803,108 @@ const projectForMulti = (t: TranslatedColumnValue): MultiColumnValue => {
 
 /**
  * Builds the canonical `unsupported_column_type` error (`cli-design.md`
- * §5.3 step 4 + §6.5). v0.1 has no raw-write escape — the error
- * carries `deferred_to: "v0.2"` pointing at the writer-expansion
- * milestone (which lands `--set-raw` plus broader friendly types).
+ * §5.3 step 4 + §6.5). Branches on the type's roadmap category so
+ * agents get accurate guidance instead of a blanket "wait for v0.2"
+ * hint.
+ *
+ * Three categories per `column-types.ts getColumnRoadmapCategory`:
+ *
+ *   - **v0.2 writer-expansion** (`link` / `email` / `phone` / `tags`
+ *     / `board_relation` / `dependency`) — `deferred_to: "v0.2"`,
+ *     message names the v0.2 writer-expansion milestone (which
+ *     lands `--set-raw` plus the new friendly types).
+ *   - **read-only forever** (`mirror` / `formula` / `auto_number` /
+ *     `creation_log` / `last_updated` / `item_id`) — Monday-computed
+ *     columns that are not writable via the API regardless of CLI
+ *     version. `read_only: true`, hint points at the underlying
+ *     source column. cli-design.md §5.3 writer-expansion roadmap
+ *     "read-only forever" row says this explicitly.
+ *   - **future** (anything else) — `deferred_to: "future"`, generic
+ *     message. Examples include `battery`, `item_assignees`,
+ *     `time_tracking`, `files`, `rating`. The roadmap doesn't
+ *     promise these for v0.2, so over-promising would be the same
+ *     drift Codex M5b cleanup re-review caught.
+ *
  * Exported for unit coverage.
  */
 export const unsupportedColumnTypeError = (
   columnId: string,
   type: string,
-): ApiError =>
-  new ApiError(
+): ApiError => {
+  const category = getColumnRoadmapCategory(type);
+  if (category === 'read_only_forever') {
+    return new ApiError(
+      'unsupported_column_type',
+      `Column "${columnId}" has type "${type}", which Monday computes ` +
+        `server-side and does not make writable via the API. This is ` +
+        `not a v0.1 limitation — Monday's API rejects write attempts ` +
+        `against this type regardless of CLI version, so no future ` +
+        `release will lift the restriction. Set the underlying source ` +
+        `column instead (e.g. for a mirror column, write to the column ` +
+        `the mirror reflects on the linked board).`,
+      {
+        details: {
+          column_id: columnId,
+          type,
+          read_only: true,
+          hint:
+            'this column type is computed by Monday and is permanently ' +
+            'read-only via the API. Do not attempt --set / --set-raw — ' +
+            'identify the underlying source column (the column the ' +
+            'mirror / formula / auto_number / etc. reflects) and write ' +
+            'to that instead. See cli-design.md §5.3 writer-expansion ' +
+            'roadmap (read-only-forever row) for the full type list.',
+        },
+      },
+    );
+  }
+  if (category === 'v0_2_writer_expansion') {
+    return new ApiError(
+      'unsupported_column_type',
+      `Column "${columnId}" has type "${type}", which is not in the v0.1 ` +
+        `friendly --set translator allowlist (text, long_text, numbers, ` +
+        `status, dropdown, date, people). v0.1 ships no raw-write ` +
+        `escape hatch — the v0.2 writer-expansion milestone will add ` +
+        `--set-raw <col>=<json> plus friendly support for link, email, ` +
+        `phone, tags, board_relation, and dependency types.`,
+      {
+        details: {
+          column_id: columnId,
+          type,
+          deferred_to: 'v0.2',
+          hint:
+            'this column type is not writable via the CLI in v0.1; the ' +
+            'v0.2 writer-expansion milestone will add the --set-raw ' +
+            '<col>=<json> escape hatch and broader friendly-type ' +
+            'coverage. See https://developer.monday.com/api-reference/' +
+            'reference/column-types-reference for the per-type Monday ' +
+            'wire shapes that --set-raw will accept.',
+        },
+      },
+    );
+  }
+  // category === 'future'
+  return new ApiError(
     'unsupported_column_type',
     `Column "${columnId}" has type "${type}", which is not in the v0.1 ` +
       `friendly --set translator allowlist (text, long_text, numbers, ` +
-      `status, dropdown, date, people). v0.1 ships no raw-write escape ` +
-      `hatch — the v0.2 writer-expansion milestone will add ` +
-      `--set-raw <col>=<json> plus friendly support for link, email, ` +
-      `phone, tags, board_relation, and dependency types.`,
+      `status, dropdown, date, people) and is not on the v0.2 ` +
+      `writer-expansion roadmap. v0.1 ships no raw-write escape hatch; ` +
+      `support for this type will arrive in a future writer-expansion ` +
+      `milestone (or remain unsupported if Monday's API doesn't expose ` +
+      `a write path for it).`,
     {
       details: {
         column_id: columnId,
         type,
-        deferred_to: 'v0.2',
+        deferred_to: 'future',
         hint:
-          'this column type is not writable via the CLI in v0.1; the ' +
-          'v0.2 writer-expansion milestone will add the --set-raw ' +
-          '<col>=<json> escape hatch and broader friendly-type coverage. ' +
-          'See https://developer.monday.com/api-reference/reference/' +
-          'column-types-reference for the per-type Monday wire shapes ' +
-          'that --set-raw will accept.',
+          'this column type is not in the v0.1 allowlist or the v0.2 ' +
+          'writer-expansion roadmap; track cli-design.md §5.3 writer-' +
+          'expansion roadmap for future-version coverage. Some types ' +
+          '(time_tracking, files) have dedicated verbs planned; others ' +
+          '(battery, item_assignees) are not yet scoped.',
       },
     },
   );
+};

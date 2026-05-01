@@ -379,7 +379,12 @@ describe('monday item set (integration, M5b)', () => {
     ).toBe(true);
   });
 
-  it('live: unsupported_column_type surfaces with v0.2 deferral details', async () => {
+  it('live: unsupported_column_type — read-only-forever type (formula) surfaces with read_only: true', async () => {
+    // Codex M5b cleanup re-review #1: formula is on the
+    // read-only-forever roadmap row. Monday computes the column
+    // server-side and the API never lets you write to it, so the
+    // error must say so explicitly rather than falsely deferring
+    // to v0.2's writer-expansion milestone.
     const formulaBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -414,16 +419,69 @@ describe('monday item set (integration, M5b)', () => {
           column_id?: string;
           type?: string;
           deferred_to?: string;
+          read_only?: boolean;
           set_raw_example?: string;
           hint?: string;
         };
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    // Path B (M5b cleanup): no --set-raw flag in v0.1; the error
-    // advertises the v0.2 writer-expansion milestone instead of
-    // a dead `set_raw_example` slot.
+    expect(env.error?.details?.read_only).toBe(true);
+    // Negative pins: read-only-forever types must not advertise a
+    // future write path or a v0.1 --set-raw flag.
+    expect(env.error?.details).not.toHaveProperty('deferred_to');
+    expect(env.error?.details).not.toHaveProperty('set_raw_example');
+    expect(env.error?.message).not.toMatch(/v0\.2/);
+    expect(env.error?.message).not.toMatch(/--set-raw/);
+  });
+
+  it('live: unsupported_column_type — v0.2 writer-expansion type (link) surfaces with deferred_to: v0.2', async () => {
+    // Codex M5b cleanup re-review #1 (companion test): types on
+    // the v0.2 writer-expansion roadmap (link / email / phone /
+    // tags / board_relation / dependency) get `deferred_to: "v0.2"`
+    // because v0.2 will land friendly translators + --set-raw for
+    // them. Pinning both branches end-to-end so a regression in
+    // either direction fails an integration test, not just a unit.
+    const linkBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'link_1',
+          title: 'External link',
+          type: 'link',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'set', '12345', 'link_1=https://example.com', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [linkBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        message?: string;
+        details?: {
+          deferred_to?: string;
+          read_only?: boolean;
+          set_raw_example?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
     expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details).not.toHaveProperty('read_only');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
     expect(env.error?.message).not.toMatch(/Use --set-raw/);
   });

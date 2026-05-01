@@ -561,19 +561,21 @@ describe('translateColumnValue — sync entry on a people column', () => {
   });
 });
 
-describe('translateColumnValue — non-allowlisted types', () => {
+describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion)', () => {
+  // Codex M5b cleanup re-review #1: types on the v0.2 writer-
+  // expansion roadmap (link / email / phone / tags / board_relation
+  // / dependency) get `deferred_to: "v0.2"` because v0.2 will add
+  // both the friendly translator AND --set-raw for them. Non-v0.2,
+  // non-read-only types fall into the "future" branch (separate
+  // describe below).
   it.each([
-    'mirror',
-    'formula',
-    'battery',
-    'item_assignees',
-    'time_tracking',
-    'auto_number',
-    'creation_log',
-    'last_updated',
+    'link',
+    'email',
     'phone',
-    'rating',
-  ])('%s → unsupported_column_type with column_id + type + v0.2 deferral', (type) => {
+    'tags',
+    'board_relation',
+    'dependency',
+  ])('%s → unsupported_column_type with deferred_to: v0.2', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
       /not in the v0.1/u,
     );
@@ -585,18 +587,88 @@ describe('translateColumnValue — non-allowlisted types', () => {
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         type,
-        // v0.1 ships no raw-write escape; the error advertises the
-        // v0.2 writer-expansion milestone via deferred_to. Pre-Path-B
-        // this slot was a (dead-suggestion) `set_raw_example`.
         deferred_to: 'v0.2',
-        // Hint must reference the v0.2 milestone so agents don't
-        // chase a non-existent --set-raw flag in v0.1.
         hint: expect.stringContaining('v0.2') as unknown,
       });
-      // Negative assertion: no v0.1 --set-raw suggestion sneaks back
-      // in — a regression where the dead suggestion returns is the
-      // exact thing Path B was meant to remove.
+      // Negative assertions: no dead v0.1 --set-raw suggestion;
+      // no read_only flag (this type IS writable, just not yet).
       expect(err.details).not.toHaveProperty('set_raw_example');
+      expect(err.details).not.toHaveProperty('read_only');
+      expect(err.message).not.toMatch(/Use --set-raw/u);
+    }
+  });
+});
+
+describe('translateColumnValue — read-only-forever types', () => {
+  // Codex M5b cleanup re-review #1: types Monday computes server-
+  // side and never makes writable via the API (mirror / formula /
+  // auto_number / creation_log / last_updated / item_id) get
+  // `read_only: true` instead of `deferred_to`. Pre-fix the error
+  // blanket-deferred them to v0.2, falsely promising agents a
+  // future write path that will never exist. cli-design.md §5.3
+  // writer-expansion roadmap "read-only forever" row pins this.
+  it.each([
+    'mirror',
+    'formula',
+    'auto_number',
+    'creation_log',
+    'last_updated',
+    'item_id',
+  ])('%s → unsupported_column_type with read_only: true (no v0.2 promise)', (type) => {
+    expect(() => translate(type, 'whatever', 'col_z')).toThrow(
+      /computed by Monday|not.*writable.*via the API/u,
+    );
+    try {
+      translate(type, 'whatever', 'col_z');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('unsupported_column_type');
+      expect(err.details).toMatchObject({
+        column_id: 'col_z',
+        type,
+        read_only: true,
+      });
+      // Negative regression pins. The whole point of the split is
+      // that read-only types must NOT advertise a future write path.
+      expect(err.details).not.toHaveProperty('deferred_to');
+      expect(err.details).not.toHaveProperty('set_raw_example');
+      expect(err.message).not.toMatch(/v0\.2/u);
+      expect(err.message).not.toMatch(/--set-raw/u);
+      expect(err.message).not.toMatch(/Use --set-raw/u);
+    }
+  });
+});
+
+describe('translateColumnValue — future-roadmap types', () => {
+  // Codex M5b cleanup re-review #1: types not in v0.1, not on the
+  // v0.2 roadmap, and not read-only-forever (battery /
+  // item_assignees / time_tracking / files / rating / etc.) fall
+  // into the generic "future" branch. The error advertises future
+  // coverage without committing to a specific version — the
+  // roadmap doesn't promise these for v0.2 yet.
+  it.each([
+    'battery',
+    'item_assignees',
+    'time_tracking',
+    'files',
+    'rating',
+  ])('%s → unsupported_column_type with deferred_to: future', (type) => {
+    expect(() => translate(type, 'whatever', 'col_z')).toThrow(
+      /not in the v0.1/u,
+    );
+    try {
+      translate(type, 'whatever', 'col_z');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('unsupported_column_type');
+      expect(err.details).toMatchObject({
+        column_id: 'col_z',
+        type,
+        deferred_to: 'future',
+      });
+      // Negative pins.
+      expect(err.details).not.toHaveProperty('set_raw_example');
+      expect(err.details).not.toHaveProperty('read_only');
       expect(err.message).not.toMatch(/Use --set-raw/u);
     }
   });
@@ -1092,35 +1164,68 @@ describe('translateColumnValueAsync — surface contract', () => {
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('builds an ApiError with the v0.2 deferral details shape', () => {
-    const err = unsupportedColumnTypeError('col_42', 'mirror');
+  it('v0.2 writer-expansion type (link) → deferred_to: "v0.2"', () => {
+    const err = unsupportedColumnTypeError('col_42', 'link');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
     expect(err.retryable).toBe(false);
     expect(err.details).toMatchObject({
       column_id: 'col_42',
-      type: 'mirror',
-      // Path B (M5b cleanup): v0.1 has no --set-raw flag, so the
-      // error carries `deferred_to: 'v0.2'` instead of a dead
-      // `set_raw_example` suggestion. v0.2's writer-expansion
-      // milestone lands the escape hatch + broader friendly types.
+      type: 'link',
+      // Codex M5b cleanup re-review #1: v0.2 writer-expansion types
+      // get `deferred_to: "v0.2"` because v0.2 lands the friendly
+      // translator AND --set-raw for them. Pre-Path-B this slot was
+      // a dead-suggestion `set_raw_example`.
       deferred_to: 'v0.2',
     });
-    // Pin: the dead `set_raw_example` slot must not return.
     expect(err.details).not.toHaveProperty('set_raw_example');
+    expect(err.details).not.toHaveProperty('read_only');
   });
 
-  it('hint references v0.2 deferral, not a v0.1 --set-raw command', () => {
-    // Path B regression guard: the message + hint must not advertise
-    // a `--set-raw` flag that doesn't exist in v0.1. They may name
-    // the flag in the context of v0.2 ("v0.2 adds --set-raw"), but
-    // never as a v0.1 instruction ("Use --set-raw...").
+  it('read-only-forever type (mirror) → read_only: true (no v0.2 promise)', () => {
     const err = unsupportedColumnTypeError('col_42', 'mirror');
-    expect(err.message).not.toMatch(/^Use --set-raw/u);
-    expect(err.message).toContain('v0.2');
-    const hint = (err.details as { hint?: string } | undefined)?.hint ?? '';
-    expect(hint).toContain('v0.2');
-    expect(hint).not.toMatch(/^pass the Monday-shape JSON with --set-raw/u);
+    expect(err.code).toBe('unsupported_column_type');
+    expect(err.details).toMatchObject({
+      column_id: 'col_42',
+      type: 'mirror',
+      // Codex M5b cleanup re-review #1: types Monday computes
+      // server-side never become writable via the API. The error
+      // says so explicitly instead of falsely deferring to v0.2.
+      read_only: true,
+    });
+    // Negative regression pins: read-only types must not advertise
+    // a future write path or a --set-raw escape.
+    expect(err.details).not.toHaveProperty('deferred_to');
+    expect(err.details).not.toHaveProperty('set_raw_example');
+    expect(err.message).not.toMatch(/v0\.2/u);
+    expect(err.message).not.toMatch(/--set-raw/u);
+  });
+
+  it('future / unspecified type (battery) → deferred_to: "future" (no v0.2 promise)', () => {
+    const err = unsupportedColumnTypeError('col_42', 'battery');
+    expect(err.code).toBe('unsupported_column_type');
+    expect(err.details).toMatchObject({
+      column_id: 'col_42',
+      type: 'battery',
+      // Codex M5b cleanup re-review #1: types not on the v0.2
+      // roadmap and not read-only-forever fall into the "future"
+      // bucket — surface that explicitly rather than over-promise.
+      deferred_to: 'future',
+    });
+    expect(err.details).not.toHaveProperty('set_raw_example');
+    expect(err.details).not.toHaveProperty('read_only');
+  });
+
+  it('all branches: hint never instructs the agent to "Use --set-raw" (v0.1 has no flag)', () => {
+    // Path B regression guard, applied across all three categories.
+    // The flag may be named in the context of v0.2 ("v0.2 adds
+    // --set-raw"), but never as a v0.1 instruction.
+    for (const type of ['link', 'mirror', 'battery']) {
+      const err = unsupportedColumnTypeError('col_42', type);
+      expect(err.message).not.toMatch(/^Use --set-raw/u);
+      const hint = (err.details as { hint?: string } | undefined)?.hint ?? '';
+      expect(hint).not.toMatch(/^pass the Monday-shape JSON with --set-raw/u);
+    }
   });
 });
 

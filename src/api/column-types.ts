@@ -74,3 +74,100 @@ export const parseColumnSettings = (raw: string | null): unknown => {
     return null;
   }
 };
+
+/**
+ * Column types the v0.2 writer-expansion milestone will add to the
+ * friendly translator (`cli-design.md` §5.3 writer-expansion roadmap
+ * table). v0.2 also lands the `--set-raw <col>=<json>` escape hatch.
+ * Source-of-truth alongside `WRITABLE_COLUMN_TYPES` so the
+ * `unsupported_column_type` error builder can give per-type-accurate
+ * guidance instead of blanket-deferring every non-allowlisted type.
+ *
+ * `tags` / `board_relation` / `dependency` are tentative on the
+ * roadmap (table calls them "may slip to v0.3"); we still surface
+ * them as v0.2-deferred today because the agent-facing message
+ * ("v0.2's writer-expansion adds this") is right whether they ship
+ * in v0.2 or get re-slotted. If they slip, the writer-expansion
+ * milestone post-mortem updates this list.
+ */
+export const V0_2_WRITER_EXPANSION_TYPES = [
+  'link',
+  'email',
+  'phone',
+  'tags',
+  'board_relation',
+  'dependency',
+] as const;
+
+export type V0_2WriterExpansionType =
+  (typeof V0_2_WRITER_EXPANSION_TYPES)[number];
+
+const V0_2_WRITER_EXPANSION_SET: ReadonlySet<string> = new Set<string>(
+  V0_2_WRITER_EXPANSION_TYPES,
+);
+
+/**
+ * Column types Monday computes server-side and **never makes
+ * writable via the API** (`cli-design.md` §5.3 writer-expansion
+ * roadmap table — "read-only forever" row). cli-design says
+ * explicitly:
+ *
+ *   > The "read-only forever" row matters for agents: trying `--set`
+ *   > on a mirror/formula/etc. surfaces `unsupported_column_type`
+ *   > and will *always* surface that, regardless of version. The
+ *   > hint should point at the underlying source column, not at
+ *   > `--set-raw`.
+ *
+ * The error builder branches on this set to emit `read_only: true`
+ * (no `deferred_to`) and a hint that names the underlying-source
+ * pattern instead of advertising a future flag.
+ */
+export const READ_ONLY_FOREVER_TYPES = [
+  'mirror',
+  'formula',
+  'auto_number',
+  'creation_log',
+  'last_updated',
+  'item_id',
+] as const;
+
+export type ReadOnlyForeverType = (typeof READ_ONLY_FOREVER_TYPES)[number];
+
+const READ_ONLY_FOREVER_SET: ReadonlySet<string> = new Set<string>(
+  READ_ONLY_FOREVER_TYPES,
+);
+
+/**
+ * Roadmap category for an unsupported column type. The
+ * `unsupported_column_type` error builder uses this to pick a
+ * per-category message + details slot.
+ *
+ *   - `'v0_2_writer_expansion'` — link / email / phone / tags
+ *     (tentative) / board_relation (tentative) / dependency
+ *     (tentative). Surfaces `deferred_to: "v0.2"` and says the
+ *     v0.2 writer-expansion milestone adds the friendly type +
+ *     `--set-raw`.
+ *   - `'read_only_forever'` — Monday-computed columns (mirror /
+ *     formula / auto_number / creation_log / last_updated /
+ *     item_id). Surfaces `read_only: true` and points at the
+ *     underlying source column.
+ *   - `'future'` — any other unsupported type (battery /
+ *     item_assignees / time_tracking / rating / files / etc.).
+ *     Surfaces `deferred_to: "future"` with a generic message.
+ *
+ * Codex M5b cleanup re-review #1: pre-fix `unsupportedColumnType
+ * Error` blanket-deferred every non-allowlisted type to v0.2, which
+ * over-promised for the read-only-forever row and the v0.3+ rows.
+ */
+export type ColumnRoadmapCategory =
+  | 'v0_2_writer_expansion'
+  | 'read_only_forever'
+  | 'future';
+
+export const getColumnRoadmapCategory = (
+  type: string,
+): ColumnRoadmapCategory => {
+  if (V0_2_WRITER_EXPANSION_SET.has(type)) return 'v0_2_writer_expansion';
+  if (READ_ONLY_FOREVER_SET.has(type)) return 'read_only_forever';
+  return 'future';
+};
