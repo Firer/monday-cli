@@ -466,6 +466,70 @@ describe('monday raw (integration)', () => {
     expect(env.meta.source).toBe('live');
   });
 
+  it('mixed doc + --operation-name selects query: --dry-run is a no-op (M6 P2 pass-5)', async () => {
+    // Codex M6 pass-5 P2: dry-run gating must use the *selected*
+    // op's kind, not the document-wide `hasMutation`. A mixed doc
+    // with `--operation-name <a-query>` selects a read-only op,
+    // so `--dry-run` is a no-op and Read executes against Monday.
+    const out = await drive(
+      [
+        'raw',
+        'query Read { me { id name } } mutation Write { create_workspace(name: "X", kind: open) { id } }',
+        '--operation-name',
+        'Read',
+        '--allow-mutation',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'Read',
+            response: { data: { me: { id: '7', name: 'Alice' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data?: { me?: { id?: string } };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data?.me?.id).toBe('7');
+    // Live execution, not dry-run — the query side of the mixed
+    // doc is read-only.
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('mixed doc + --operation-name selects mutation: --dry-run emits planned-change (M6 P2 pass-5)', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'query Read { me { id name } } mutation Write { create_workspace(name: "X", kind: open) { id } }',
+        '--operation-name',
+        'Write',
+        '--allow-mutation',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data).toBeNull();
+    expect(env.meta.dry_run).toBe(true);
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes[0]).toMatchObject({
+      operation: 'raw_graphql',
+      operation_kind: 'mutation',
+      operation_name: 'Write',
+    });
+  });
+
   it('subscription always rejected (HTTP transport can\'t carry it)', async () => {
     const out = await drive(
       [

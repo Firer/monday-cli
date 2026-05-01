@@ -418,16 +418,23 @@ export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
         });
 
         // §9.2 binds every mutating command to honour `--dry-run`.
-        // When the analyser detected a mutation AND `--dry-run` is
-        // set, emit the planned-change envelope and skip the wire
-        // call entirely. `resolveClient` is intentionally NOT called:
-        // no auth, no network, no `setSource('live')` commit. This
-        // closes Codex M6 pass-4 P1 — pre-fix, `monday raw 'mutation
-        // ...' --allow-mutation --dry-run` silently sent the
-        // mutation. For read-only documents `--dry-run` is a no-op
-        // (queries don't mutate) so the query path keeps running.
+        // When the analyser's *selected* operation is a mutation
+        // AND `--dry-run` is set, emit the planned-change envelope
+        // and skip the wire call entirely. `resolveClient` is
+        // intentionally NOT called: no auth, no network, no
+        // `setSource('live')` commit. This closes Codex M6 pass-4
+        // P1 — pre-fix, `monday raw 'mutation ...' --allow-mutation
+        // --dry-run` silently sent the mutation. Codex pass-5 P2
+        // tightened this from `hasMutation` (any op in the doc) to
+        // `selectedOperationKind === 'mutation'` (the op Monday
+        // would actually execute) — a mixed doc with
+        // `--operation-name <a-query>` selects the query, so
+        // `--dry-run` is a no-op there.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (globalFlags.dryRun && analysis.hasMutation) {
+        if (
+          globalFlags.dryRun &&
+          analysis.selectedOperationKind === 'mutation'
+        ) {
           const apiVersion =
             globalFlags.apiVersion ??
             ctx.env.MONDAY_API_VERSION ??

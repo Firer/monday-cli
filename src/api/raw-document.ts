@@ -43,6 +43,17 @@ export interface RawDocumentAnalysis {
    * document has exactly one anonymous operation (Monday picks it).
    */
   readonly operationName: string | undefined;
+  /**
+   * The kind of the *selected* operation — the one Monday will
+   * actually execute. For 1-op docs this is the only operation's
+   * kind; for N-op docs `--operation-name` picks one and that
+   * pick's kind lands here. Callers gating on "is the executed
+   * op a mutation?" (e.g. raw's `--dry-run` branch — Codex M6
+   * pass-5 P2) should key off this, NOT off `hasMutation`, since
+   * a mixed doc selecting a query operation should be treated as
+   * read-only at execution time.
+   */
+  readonly selectedOperationKind: 'query' | 'mutation' | 'subscription';
   /** `true` when at least one operation in the doc is a mutation. */
   readonly hasMutation: boolean;
   /** `true` when at least one operation is a subscription. */
@@ -207,6 +218,7 @@ export const analyzeRawDocument = (
     }
     return {
       operationName: only.name,
+      selectedOperationKind: only.operation,
       hasMutation,
       hasSubscription,
       operations: opSummaries,
@@ -243,8 +255,21 @@ export const analyzeRawDocument = (
       },
     );
   }
+  // Multi-op: pull the selected op's kind out of opSummaries by
+  // matching on name (length === namedOps.length when we land here
+  // because the inclusion check above passed).
+  const selected = opSummaries.find(
+    (o) => o.name === inputs.explicitOperationName,
+  );
+  /* c8 ignore next 5 — defensive: the inclusion check above
+     guarantees a match exists. The branch satisfies
+     noUncheckedIndexedAccess without a non-null assertion. */
+  if (selected === undefined) {
+    throw new UsageError('monday raw: internal — selected operation missing.');
+  }
   return {
     operationName: inputs.explicitOperationName,
+    selectedOperationKind: selected.operation,
     hasMutation,
     hasSubscription,
     operations: opSummaries,

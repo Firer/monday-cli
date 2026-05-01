@@ -40,6 +40,7 @@ describe('analyzeRawDocument — single anonymous operation', () => {
       allowMutation: false,
     });
     expect(r.operationName).toBeUndefined();
+    expect(r.selectedOperationKind).toBe('query');
     expect(r.operations).toHaveLength(1);
     expect(r.operations[0]).toEqual({
       operation: 'query',
@@ -190,5 +191,43 @@ describe('analyzeRawDocument — subscription gate', () => {
         allowMutation: true,
       }),
     ).toThrow(/subscription/iu);
+  });
+});
+
+describe('analyzeRawDocument — selectedOperationKind', () => {
+  // Codex M6 pass-5 P2: dry-run gating must key off the *selected*
+  // op's kind, not the document-wide `hasMutation`. A mixed doc
+  // selecting a query is read-only at execution time.
+  it('returns "query" when --operation-name selects the query in a mixed doc', () => {
+    const r = analyzeRawDocument({
+      query:
+        'query Read { me { id } } mutation Write { create_workspace(name: "X", kind: open) { id } }',
+      explicitOperationName: 'Read',
+      allowMutation: true,
+    });
+    expect(r.selectedOperationKind).toBe('query');
+    expect(r.operationName).toBe('Read');
+    expect(r.hasMutation).toBe(true);
+  });
+
+  it('returns "mutation" when --operation-name selects the mutation in a mixed doc', () => {
+    const r = analyzeRawDocument({
+      query:
+        'query Read { me { id } } mutation Write { create_workspace(name: "X", kind: open) { id } }',
+      explicitOperationName: 'Write',
+      allowMutation: true,
+    });
+    expect(r.selectedOperationKind).toBe('mutation');
+    expect(r.operationName).toBe('Write');
+  });
+
+  it('returns the kind directly for a single-op doc', () => {
+    const r = analyzeRawDocument({
+      query:
+        'mutation Bump { create_workspace(name: "X", kind: open) { id } }',
+      explicitOperationName: undefined,
+      allowMutation: true,
+    });
+    expect(r.selectedOperationKind).toBe('mutation');
   });
 });
