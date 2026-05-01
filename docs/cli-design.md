@@ -1999,6 +1999,15 @@ So an agent reading the contract knows what's *not* there yet:
   surface alone isn't worth a verb-noun expansion when `board
   describe` already covers column mappings and `monday raw` covers
   the rare power-user case.
+- Saved queries / aliases (e.g. `monday alias save my-tasks "..."`).
+  The CLI reads only from env/argv, with the §8 cache as the sole
+  derived state — that statelessness is what makes `monday item
+  list | jq` predictable across machines and lets agents reason
+  about behavior from argv alone. Local aliases would silently
+  change behavior across machines; synced aliases would be a
+  hosted-service shape. Shell aliases / shell functions are the
+  established UNIX answer — the CLI doesn't need to compete with
+  `bash`.
 
 ## 14. Open questions
 

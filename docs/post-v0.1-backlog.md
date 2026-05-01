@@ -125,10 +125,11 @@ might otherwise expect:
 - ~~**Forms** — Monday's public-submission forms feature.
   Different product surface; out of CLI scope.~~ → now in cli-design
   §13.5 Permanent non-goals.
-- **Saved queries / aliases** (`monday alias save my-tasks
+- ~~**Saved queries / aliases** (`monday alias save my-tasks
   "..."`). Violates the CLI's stateless principle (every
   invocation reads from env/argv only; no persistent state
-  beyond the cache, which is a derived read).
+  beyond the cache, which is a derived read).~~ → now in
+  cli-design §13.5 Permanent non-goals.
 - **`monday undo`** — replay-based reversal of recent
   mutations. Requires a local mutation log; conflicts with the
   stateless principle and with Monday's authoritative state
