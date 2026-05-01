@@ -127,7 +127,21 @@ const mergeDetails = (
 export interface MaybeRemapValidationFailedInputs {
   readonly client: MondayClient;
   readonly boardId: string;
-  readonly columnId: string;
+  /**
+   * Real column IDs translated for the failing mutation. The remap
+   * probes ALL of them after one forced metadata refresh; the first
+   * archived column wins (deterministic for multi-column updates).
+   * Empty array → no-op.
+   *
+   * Codex M5b finding #3: pre-fix the helper accepted a single
+   * `columnId` and only probed that one column. For multi-column
+   * `item update`, callers passed `translated[0]` as a best-effort
+   * remap target, so a multi-column mutation where the FIRST target
+   * stayed active and a LATER target was archived after a stale
+   * cache read still surfaced `validation_failed` instead of the
+   * stable `column_archived` code (cli-design §6.5).
+   */
+  readonly columnIds: readonly string[];
   readonly env: NodeJS.ProcessEnv;
   readonly noCache: boolean;
   /**
@@ -143,7 +157,8 @@ export interface MaybeRemapValidationFailedInputs {
 /**
  * Inspects a thrown `validation_failed` after a cache-sourced
  * resolution and remaps it to `column_archived` if a forced-fresh
- * metadata refresh confirms the column is archived.
+ * metadata refresh confirms ANY of the translated columns is
+ * archived.
  *
  * Codex pass-1 finding F4: the archived-column guarantee was
  * cache-stale in one direction — when cached metadata said active
@@ -151,6 +166,12 @@ export interface MaybeRemapValidationFailedInputs {
  * and surfaced as `validation_failed`, not the stable
  * `column_archived` code agents key off (cli-design §6.5). This
  * helper closes that gap.
+ *
+ * **Multi-column probe** (Codex M5b finding #3). Callers pass every
+ * translated real column ID; the helper scans them in input order
+ * and remaps to the first archived one. Single-column callers pass
+ * a one-element array. Multi-column updates pass every column they
+ * tried to write so a later-archived column is still caught.
  *
  * **Resolver warnings preserved.** When the caller has already
  * folded resolver warnings (via `foldResolverWarningsIntoError`)
@@ -161,10 +182,10 @@ export interface MaybeRemapValidationFailedInputs {
  *
  * **Identity preservation.** Returns the original error unchanged
  * when the code isn't `validation_failed`, when the resolution was
- * live-sourced, or when the post-refresh column is still active.
- * The cache write that `refreshBoardMetadata` performs is a useful
- * side-effect — agents retrying after the failure see the corrected
- * metadata.
+ * live-sourced, when `columnIds` is empty, or when the post-refresh
+ * scan finds no archived target. The cache write that
+ * `refreshBoardMetadata` performs is a useful side-effect — agents
+ * retrying after the failure see the corrected metadata.
  */
 export const maybeRemapValidationFailedToArchived = async (
   err: MondayCliError,
@@ -172,6 +193,7 @@ export const maybeRemapValidationFailedToArchived = async (
 ): Promise<MondayCliError> => {
   if (err.code !== 'validation_failed') return err;
   if (inputs.resolutionSource === 'live') return err;
+  if (inputs.columnIds.length === 0) return err;
   let refreshed;
   try {
     refreshed = await refreshBoardMetadata({
@@ -186,16 +208,25 @@ export const maybeRemapValidationFailedToArchived = async (
     // error. The agent's retry loop will hit the same path.
     return err;
   }
-  const live = refreshed.metadata.columns.find(
-    (c) => c.id === inputs.columnId,
-  );
-  if (live?.archived !== true) return err;
+  // Walk `columnIds` in input order; first archived match wins.
+  // Pre-fix this only checked `inputs.columnIds[0]` (then named
+  // `columnId`), missing later-archived columns in multi-column
+  // updates — Codex M5b finding #3.
+  let archived: { id: string; title: string; type: string } | undefined;
+  for (const columnId of inputs.columnIds) {
+    const live = refreshed.metadata.columns.find((c) => c.id === columnId);
+    if (live?.archived === true) {
+      archived = { id: columnId, title: live.title, type: live.type };
+      break;
+    }
+  }
+  if (archived === undefined) return err;
   // Confirmed archived. Build a column_archived error preserving
   // the original error's resolver_warnings slot.
   const existing = err.details ?? {};
   return new ApiError(
     'column_archived',
-    `Column ${JSON.stringify(inputs.columnId)} on board ` +
+    `Column ${JSON.stringify(archived.id)} on board ` +
       `${inputs.boardId} is archived (Monday rejected the mutation as ` +
       `validation_failed; a forced metadata refresh confirmed the ` +
       `archived state). Un-archive the column in Monday or pick a ` +
@@ -204,9 +235,9 @@ export const maybeRemapValidationFailedToArchived = async (
       cause: err,
       details: {
         ...existing,
-        column_id: inputs.columnId,
-        column_title: live.title,
-        column_type: live.type,
+        column_id: archived.id,
+        column_title: archived.title,
+        column_type: archived.type,
         board_id: inputs.boardId,
         remapped_from: 'validation_failed',
         hint:

@@ -744,6 +744,121 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.error?.details?.remapped_from).toBe('validation_failed');
   });
 
+  it('F4 (multi-column single path): later-archived column still remaps via probe-all', async () => {
+    // Codex M5b finding #3: the remap helper used to probe only the
+    // FIRST translated column. A multi-column update where the
+    // first target stays active and a LATER target was archived
+    // after a stale cache read would surface `validation_failed`,
+    // not `column_archived`. This test pins the fix: probe every
+    // translated column id; remap surfaces the archived one.
+    const cachedActive = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'date4',
+          title: 'Due date',
+          type: 'date',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const refreshedSecondArchived = {
+      ...cachedActive,
+      columns: [
+        // status_4 stayed active.
+        cachedActive.columns[0],
+        // date4 archived after the cache snapshot.
+        { ...cachedActive.columns[1], archived: true },
+      ],
+    };
+    // Seed cache via item list.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        // Cache hit on both column resolutions; live multi mutation
+        // fails as validation_failed (Monday rejected the archived
+        // column); forced refresh confirms date4 is archived.
+        interactions: [
+          {
+            operation_name: 'ItemUpdateMulti',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedSecondArchived] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          column_id?: string;
+          column_title?: string;
+          remapped_from?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('column_archived');
+    // Pre-fix the helper picked translated[0] (status_4) as the
+    // probe target and would not remap because status_4 was still
+    // active. The fix probes both translated columns and surfaces
+    // the archived one (date4).
+    expect(env.error?.details?.column_id).toBe('date4');
+    expect(env.error?.details?.column_title).toBe('Due date');
+    expect(env.error?.details?.remapped_from).toBe('validation_failed');
+  });
+
   it('live: implicit --board lookup + successful mutation completes (covers lookup-success branch)', async () => {
     // Implicit lookup happy path: ItemBoardLookup returns the item's
     // board, then resolveColumnWithRefresh + executeMutation fire
@@ -2334,5 +2449,133 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.error?.details?.applied_to).toEqual(['5001']);
     expect(env.error?.details?.matched_count).toBe(2);
     expect(env.error?.details?.failed_at_item).toBe('5002');
+  });
+
+  it('F3 (multi-column bulk): later-archived column still remaps via probe-all', async () => {
+    // Codex M5b finding #3 — bulk variant. The bulk path used to
+    // probe only the first translated column (`translated[0]`).
+    // A bulk multi-column update where the first target stays
+    // active and a LATER target was archived would surface
+    // `validation_failed`; the fix walks every translated column
+    // and surfaces `column_archived` with bulk-progress details.
+    const cachedActive = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'date4',
+          title: 'Due date',
+          type: 'date',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const refreshedSecondArchived = {
+      ...cachedActive,
+      columns: [
+        cachedActive.columns[0],
+        { ...cachedActive.columns[1], archived: true },
+      ],
+    };
+    // Seed cache.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          // Multi mutation rejected; F4 forces refresh; refresh shows
+          // date4 archived, status_4 still active.
+          {
+            operation_name: 'ItemUpdateMulti',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedSecondArchived] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          column_id?: string;
+          column_title?: string;
+          remapped_from?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('column_archived');
+    // Pre-fix: helper probes translated[0] (status_4, still active)
+    // → no remap → validation_failed surfaces. Fix probes both,
+    // surfaces date4 (the actually-archived column).
+    expect(env.error?.details?.column_id).toBe('date4');
+    expect(env.error?.details?.column_title).toBe('Due date');
+    expect(env.error?.details?.remapped_from).toBe('validation_failed');
   });
 });

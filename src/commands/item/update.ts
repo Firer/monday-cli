@@ -592,14 +592,14 @@ export const itemUpdateCommand: CommandModule<
           if (err instanceof MondayCliError) {
             // F4 remap: cache-sourced resolution + Monday rejecting
             // as validation_failed → check live archived state.
-            // For multi-column updates we don't know which column
-            // triggered the rejection; pick the first translated
-            // column as a "best effort" remap target. This is a
-            // simplification: a future enhancement might iterate
-            // every translated column to find the archived one.
-            const first = translated[0];
+            // Codex M5b finding #3: pass every translated column ID so
+            // a multi-column update where a LATER target was archived
+            // (post stale-cache read) still remaps. Pre-fix this only
+            // probed `translated[0]` and missed multi-column cases
+            // where the first target stayed active.
             const folded = foldResolverWarningsIntoError(err, collectedWarnings);
-            if (first === undefined) {
+            const columnIds = translated.map((t) => t.columnId);
+            if (columnIds.length === 0) {
               throw folded;
             }
             // Codex pass-1 F2: pass the actual aggregated resolution
@@ -611,7 +611,7 @@ export const itemUpdateCommand: CommandModule<
             throw await maybeRemapValidationFailedToArchived(folded, {
               client,
               boardId,
-              columnId: first.columnId,
+              columnIds,
               env: ctx.env,
               noCache: globalFlags.noCache,
               resolutionSource: aggregateSource ?? 'live',
@@ -1248,7 +1248,12 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // mutation came from item set / item update single / item update
   // bulk. Pre-fix, bulk failures only ran the resolver-warning
   // fold + bulk-progress decoration; the remap was missing.
-  const remapTarget = translated[0];
+  // Codex M5b finding #3: probe every translated column id, not
+  // just the first, so a multi-column bulk update where a LATER
+  // target was archived after a stale cache read still surfaces
+  // `column_archived`. Single-column bulk passes a one-element
+  // array, same as before.
+  const remapColumnIds: readonly string[] = translated.map((t) => t.columnId);
   const remapSource = aggregateSource;
   for (const itemId of matchedItemIds) {
     try {
@@ -1269,11 +1274,11 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         // active). When it DOES fire, the remapped error keeps the
         // resolver_warnings slot we just folded in.
         let remapped: MondayCliError = folded;
-        if (remapTarget !== undefined) {
+        if (remapColumnIds.length > 0) {
           remapped = await maybeRemapValidationFailedToArchived(folded, {
             client,
             boardId,
-            columnId: remapTarget.columnId,
+            columnIds: remapColumnIds,
             env: ctx.env,
             noCache: globalFlags.noCache,
             resolutionSource: remapSource,

@@ -411,7 +411,7 @@ export const itemSetCommand: CommandModule<
               {
                 client,
                 boardId,
-                columnId: resolution.match.column.id,
+                columnIds: [resolution.match.column.id],
                 env: ctx.env,
                 noCache: globalFlags.noCache,
                 resolutionSource: resolution.source,

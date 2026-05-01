@@ -277,7 +277,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'cache',
@@ -293,7 +293,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'live',
@@ -309,7 +309,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'cache',
@@ -325,7 +325,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'cache',
@@ -361,7 +361,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'cache',
@@ -376,7 +376,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'cache',
@@ -411,7 +411,7 @@ describe('maybeRemapValidationFailedToArchived', () => {
     const out = await maybeRemapValidationFailedToArchived(original, {
       client,
       boardId: '111',
-      columnId: 'status_4',
+      columnIds: ['status_4'],
       env: xdgEnv(),
       noCache: true,
       resolutionSource: 'mixed',
@@ -424,5 +424,207 @@ describe('maybeRemapValidationFailedToArchived', () => {
         details: { token: 'Status' },
       },
     ]);
+  });
+
+  it('returns the original error unchanged when columnIds is empty', async () => {
+    // Codex M5b finding #3: the array-form helper must no-op on
+    // empty input (preserves the previous "no remap target → bail"
+    // semantics single-column callers relied on).
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([archivedBoardResponse()], stats);
+    const original = new ApiError('validation_failed', 'invalid');
+    const out = await maybeRemapValidationFailedToArchived(original, {
+      client,
+      boardId: '111',
+      columnIds: [],
+      env: xdgEnv(),
+      noCache: true,
+      resolutionSource: 'cache',
+    });
+    expect(out).toBe(original);
+    expect(stats.calls).toBe(0);
+  });
+
+  it('multi-column: first active + second archived → remaps to second column', async () => {
+    // Codex M5b finding #3: pre-fix, the helper only probed the
+    // first column. A multi-column update where the first target
+    // stayed active and a LATER target was archived after a stale
+    // cache read still surfaced `validation_failed`. The fix walks
+    // every column in input order and remaps to the first archived
+    // match.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([
+      {
+        boards: [
+          {
+            id: '111',
+            name: 'Sprint',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: null,
+            url: null,
+            hierarchy_type: null,
+            is_leaf: true,
+            updated_at: null,
+            groups: [],
+            columns: [
+              {
+                id: 'status_4',
+                title: 'Status',
+                type: 'status',
+                description: null,
+                archived: false,
+                settings_str: '{}',
+                width: null,
+              },
+              {
+                id: 'date4',
+                title: 'Due date',
+                type: 'date',
+                description: null,
+                archived: true,
+                settings_str: null,
+                width: null,
+              },
+            ],
+          },
+        ],
+      },
+    ], stats);
+    const original = new ApiError('validation_failed', 'invalid');
+    const out = await maybeRemapValidationFailedToArchived(original, {
+      client,
+      boardId: '111',
+      // Input order: status_4 first (active), date4 second (archived).
+      columnIds: ['status_4', 'date4'],
+      env: xdgEnv(),
+      noCache: true,
+      resolutionSource: 'cache',
+    });
+    expect(out).not.toBe(original);
+    expect(out.code).toBe('column_archived');
+    // The remap surfaces the LATER archived column, not the first
+    // one — pre-fix this would have returned the original error
+    // unchanged because the helper only checked status_4.
+    expect(out.details?.column_id).toBe('date4');
+    expect(out.details?.column_title).toBe('Due date');
+    expect(out.details?.column_type).toBe('date');
+    expect(out.details?.remapped_from).toBe('validation_failed');
+  });
+
+  it('multi-column: first archived + second active → remaps to first column (deterministic)', async () => {
+    // Mirror of the above: when the FIRST column is archived, the
+    // helper picks it (input order wins). Pinned so a future
+    // refactor can't silently pick a different column.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([
+      {
+        boards: [
+          {
+            id: '111',
+            name: 'Sprint',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: null,
+            url: null,
+            hierarchy_type: null,
+            is_leaf: true,
+            updated_at: null,
+            groups: [],
+            columns: [
+              {
+                id: 'status_4',
+                title: 'Status',
+                type: 'status',
+                description: null,
+                archived: true,
+                settings_str: '{}',
+                width: null,
+              },
+              {
+                id: 'date4',
+                title: 'Due date',
+                type: 'date',
+                description: null,
+                archived: false,
+                settings_str: null,
+                width: null,
+              },
+            ],
+          },
+        ],
+      },
+    ], stats);
+    const original = new ApiError('validation_failed', 'invalid');
+    const out = await maybeRemapValidationFailedToArchived(original, {
+      client,
+      boardId: '111',
+      columnIds: ['status_4', 'date4'],
+      env: xdgEnv(),
+      noCache: true,
+      resolutionSource: 'cache',
+    });
+    expect(out.code).toBe('column_archived');
+    expect(out.details?.column_id).toBe('status_4');
+  });
+
+  it('multi-column: all active → no remap', async () => {
+    // Sanity: when no column is archived post-refresh, the original
+    // validation_failed bubbles through unchanged.
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([
+      {
+        boards: [
+          {
+            id: '111',
+            name: 'Sprint',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: null,
+            url: null,
+            hierarchy_type: null,
+            is_leaf: true,
+            updated_at: null,
+            groups: [],
+            columns: [
+              {
+                id: 'status_4',
+                title: 'Status',
+                type: 'status',
+                description: null,
+                archived: false,
+                settings_str: '{}',
+                width: null,
+              },
+              {
+                id: 'date4',
+                title: 'Due date',
+                type: 'date',
+                description: null,
+                archived: false,
+                settings_str: null,
+                width: null,
+              },
+            ],
+          },
+        ],
+      },
+    ], stats);
+    const original = new ApiError('validation_failed', 'invalid');
+    const out = await maybeRemapValidationFailedToArchived(original, {
+      client,
+      boardId: '111',
+      columnIds: ['status_4', 'date4'],
+      env: xdgEnv(),
+      noCache: true,
+      resolutionSource: 'cache',
+    });
+    expect(out).toBe(original);
   });
 });

@@ -456,15 +456,23 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   `item update --where` will pass an N-element array with the
   same shape.
 - **Live mutation `validation_failed` → `column_archived` remap
-  (M5b, Codex pass-1 F4).** `commands/item/set.ts
-  maybeRemapValidationFailedToArchived` — when a live mutation
-  fails with `validation_failed` AFTER cache-sourced resolution
+  (M5b, Codex pass-1 F4 + M5b cleanup).**
+  `maybeRemapValidationFailedToArchived` (in
+  `src/api/resolver-error-fold.ts`) — when a live mutation fails
+  with `validation_failed` AFTER cache-sourced resolution
   succeeded (cache said active), force a metadata refresh. If
-  the column is now archived, remap the error to
-  `column_archived` so agents key off the stable code per
-  cli-design §6.5. Live-sourced resolutions skip the remap (the
-  live read already saw the archived flag). Resolver warnings
-  (collision / stale_cache_refreshed) survive the remap via
+  any of the translated column IDs is now archived, remap the
+  error to `column_archived` so agents key off the stable code
+  per cli-design §6.5. **Probes every translated column id**
+  (M5b finding #3 — pre-fix probed only `translated[0]`, missing
+  multi-column updates where a later target was archived).
+  Single-column callers (`item set`, `item clear`) pass a
+  one-element array; multi-column callers (`item update` single
+  + bulk) pass every translated real column ID. First archived
+  match in input order wins (deterministic). Live-sourced
+  resolutions skip the remap (the live read already saw the
+  archived flag). Resolver warnings (collision /
+  stale_cache_refreshed) survive the remap via
   `error.details.resolver_warnings`. The remapped error carries
   `details.remapped_from: "validation_failed"` for triage.
 - **Resolver-warning fold module (M5b R19).**
@@ -515,12 +523,15 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   one N-element `planned_changes`; warnings dedupe by
   `code+message+token` so collision warnings don't spam the
   envelope. F3 (Codex pass-1): bulk per-item failures run the
-  F4 `validation_failed` → `column_archived` remap too, using
-  the first translated column as a best-effort target. Bulk
-  envelope source aggregation (Codex pass-2): merges metadata
-  + column-resolution + walk + mutation legs per cli-design
-  §6.1 — cache-served metadata + live wire calls correctly
-  surfaces as `meta.source: 'mixed'`.
+  F4 `validation_failed` → `column_archived` remap too. M5b
+  cleanup widened the probe to every translated column id, so a
+  bulk multi-column update where a later target was archived
+  still surfaces `column_archived` (pre-fix only the first
+  translated column was checked). Bulk envelope source
+  aggregation (Codex pass-2): merges metadata + column-resolution
+  + walk + mutation legs per cli-design §6.1 — cache-served
+  metadata + live wire calls correctly surfaces as
+  `meta.source: 'mixed'`.
 - **Update create (M5b).** `src/commands/update/create.ts` —
   posts a comment (Monday "update") on an item via
   `create_update`. Body sources: `--body <md>` inline,
