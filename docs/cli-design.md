@@ -504,6 +504,8 @@ monday item delete <iid> --yes                                               v0.
                                           # No `restore` — see §5.4
 monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.4
                                           # polls; emits NDJSON change events
+monday item history <iid>                 # activity log: status / col / assign  v0.3
+                                          # changes + comments, chronological
 
 # Subitems
 monday item subitems <iid>                # list children                    v0.1
@@ -1868,6 +1870,12 @@ scoped idempotent changes, and post comments narrating its work.**
   a per-call complexity-budget design pass (Monday charges
   complexity per-board scanned); interacts with v0.3 `board
   favorites` and likely workspace scoping (`--workspace <wid>`)
+- `item history <iid>` — per-item activity log (status changes,
+  column edits, assignments, comments interleaved chronologically).
+  Introduces a new §6 envelope shape (event objects with
+  `created_at`, `actor_id`, `kind`, `before` / `after`); distinct
+  from the org-wide audit feed listed as a non-goal candidate in
+  §13.5
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`

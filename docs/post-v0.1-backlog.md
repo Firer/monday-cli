@@ -51,11 +51,12 @@
   expensive on large accounts.*~~ → now in cli-design §13 v0.3 +
   §4.3 `item search` comment.
 
-- **`monday item history <iid>`** — Monday's per-item activity
+- ~~**`monday item history <iid>`** — Monday's per-item activity
   log (status changes + comments + assignments interleaved
   chronologically). cli-design.md:803 mentions "activity log"
   only as a `restore`-deprecation argument; no read verb.
-  *Suggested slot: v0.3.*
+  *Suggested slot: v0.3.*~~ → now in cli-design §13 v0.3 + §4.3
+  `item history <iid>` entry.
 
 - **`monday board favorites`** — list the current user's starred
   boards. Monday surfaces this concept; agent use case: "orient
