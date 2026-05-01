@@ -1,9 +1,8 @@
 {
   "name": "monday-cli",
   "version": "0.1.0",
-  "description": "CLI for interacting with Monday.com (and Monday Dev) — designed for AI coding agents and humans alike.",
+  "description": "Agent-first CLI for Monday.com — read boards, file backlog items, transition statuses, and post comments from the terminal. Built for AI coding agents (Claude Code, Codex) with humans as a welcome second audience.",
   "type": "module",
-  "private": true,
   "engines": {
     "node": ">=22.0.0"
   },
@@ -15,8 +14,35 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
+  "keywords": [
+    "monday",
+    "monday.com",
+    "cli",
+    "graphql",
+    "agent",
+    "ai-agent",
+    "claude-code",
+    "codex",
+    "automation",
+    "task-management",
+    "kanban",
+    "boards",
+    "typescript"
+  ],
+  "homepage": "https://github.com/Firer/monday-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Firer/monday-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Firer/monday-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
@@ -32,7 +58,8 @@
     "test:e2e": "vitest run tests/e2e",
     "start": "node dist/cli/index.js",
     "dev": "tsx src/cli/index.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration && npm run build"
   },
   "dependencies": {
     "@mondaydotcomorg/api": "^14.0.0",
@@ -56,5 +83,5 @@
     "vitest": "^4.1.2"
   },
   "author": "Nick Webster",
-  "license": "UNLICENSED"
+  "license": "MIT"
 }
