@@ -488,7 +488,12 @@ monday item search --board <bid> --where <col>=<val>...                      v0.
 monday item set <iid> <col>=<val> [--board <bid>]   # single column write    v0.1
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
 monday item update <iid> [--name <n>] [--set <col>=<val>]... [--board <bid>] [--create-labels-if-missing]   v0.1
-                                          # multi-column atomic update
+                                          # single-item multi-column atomic update
+                                          # at least one of --name / --set required
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--create-labels-if-missing] [--yes] [--dry-run]   v0.1
+                                          # bulk update — at least one of --name / --set required
+                                          # live (non-empty match): requires --yes unless --dry-run is set
+                                          # --dry-run takes precedence over --yes when both are passed
 monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
 monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
@@ -668,13 +673,35 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
 1. **Resolves `board_id`.** `change_column_value` requires it, but
    most CLI commands take only an item ID. Two paths:
    - **Explicit (preferred):** `--board <bid>` skips a lookup and is
-     authoritative.
+     authoritative — the resolver works against the user-provided
+     board, even if the item actually lives elsewhere.
    - **Implicit:** the CLI calls `items(ids: [<iid>])` to get
      `board.id`, then proceeds. Caches the item→board mapping for the
      lifetime of the process.
    When ambiguity is impossible (the agent already passed `--board`),
    the implicit lookup is skipped entirely. Raw mode (`--set-raw`)
    without `--board` is a `usage_error`.
+
+   **`--board` / item-board mismatch.** If `--board <bid>` is passed
+   and the item actually lives on a different board, the live path
+   trusts `--board` and proceeds (the resolver hits the user-named
+   board's columns; column IDs are board-scoped, so resolution
+   typically fails with `column_not_found` and the cache-miss
+   refresh re-confirms). `--dry-run` is stricter, but the
+   mismatch check fires **late** in the dry-run pipeline — only
+   after column resolution, archived-state checks, value
+   translation, and duplicate-token checks have all passed
+   against the requested board. The pipeline reads the item
+   *after* those steps, then compares `item.board.id` against
+   `--board`. So a wrong `--board` can still surface earlier
+   typed errors first (`column_not_found`, `column_archived`,
+   `unsupported_column_type`, translator `usage_error` for
+   invalid dates / empty dropdowns / unknown emails, duplicate
+   target). When all of those pass and boards diverge, dry-run
+   returns `usage_error` with `details.item_board_id` (the
+   item's real board) and `details.requested_board_id` (the
+   `--board` value) so the agent can self-correct rather than
+   committing a write against the wrong board.
 2. **Resolves `<col>` to a column ID.** Resolution rules:
    1. **Exact match against column IDs** on the board (case-sensitive
       — Monday IDs are stable, lowercase, snake-case strings).
@@ -744,21 +771,75 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    - `change_column_value` (JSON) — for `status`, `dropdown`, `date`,
      `people`. These types need a JSON object.
    - `change_multiple_column_values` — when the same item has 2+
-     `--set` flags. Saves a round-trip and is **atomic on Monday's
-     side** (all columns succeed together or all fail; never partial
-     success).
+     `--set` flags, OR when `--name <n>` is combined with one or
+     more `--set` flags. Saves a round-trip and is **atomic on
+     Monday's side** (all columns succeed together or all fail;
+     never partial success).
    For non-allowlist types reached via `--set-raw`, the CLI uses
    `change_column_value` for everything (the simple variant is just
    an optimisation; the full variant accepts the same payloads).
 
+   **Per-column-blob shapes inside `change_multiple_column_values`.**
+   The multi mutation accepts a `column_values` JSON object keyed
+   by column ID. Most types use the same blob the single mutation
+   uses, but two divergences are pinned by fixture and form part
+   of the contract:
+   - `long_text` is re-wrapped as `{"text": "<value>"}` inside
+     multi (the simple mutation accepts a bare string for the same
+     column; multi requires the object form).
+   - `name` is accepted as a synthetic key alongside real column
+     IDs when `--name` is combined with `--set`. `name` is *not* a
+     real board column — it's Monday's per-item title field — but
+     `change_multiple_column_values` honours it as a key, so the
+     CLI bundles it into the same atomic mutation rather than
+     issuing a separate `change_item_name` call.
+
 **Multi-column update:** `monday item update <iid> --set status=Done
 --set owner=alice@x.com --set due=2026-05-01` consolidates into one
-`change_multiple_column_values` call.
+`change_multiple_column_values` call. `--name` may be added in
+the same call: `monday item update <iid> --name "New title" --set
+status=Done` bundles the rename and the column write atomically.
 
 **Escape hatch:** `--set-raw <col>=<json>` skips the friendly
 translation and writes the literal Monday-shape JSON. Required for
 column types not in the v0.1 allowlist; available always for power
 users / agents that already know the shape.
+
+**Clearing column values.** `monday item clear <iid> <col>` is the
+dedicated, type-portable verb for resetting a column to empty.
+Per-type payload sent to `change_simple_column_value` /
+`change_column_value`:
+
+| Type | Clear payload | Mutation |
+|------|---------------|----------|
+| `text` | `""` | `change_simple_column_value` |
+| `long_text` | `""` | `change_simple_column_value` |
+| `numbers` | `""` | `change_simple_column_value` |
+| `status` | `{}` | `change_column_value` |
+| `dropdown` | `{}` | `change_column_value` |
+| `date` | `{}` | `change_column_value` |
+| `people` | `{}` | `change_column_value` |
+
+`--set <col>=""` does **not** clear uniformly — it's
+value-shaping, not intent-disambiguating, so the translator's
+behavior is type-specific:
+
+- `text` / `long_text` / `numbers` pass `""` through (which
+  Monday treats as a clear for these types).
+- `status` sends `{"label": ""}` (an empty label, *not* a
+  clear — Monday will reject this if the board has no empty
+  status entry).
+- `dropdown` / `date` / `people` reject empty input with
+  `usage_error` (the per-translator emptiness check fires
+  before the dispatcher).
+
+Use `monday item clear` whenever you mean "reset this column" —
+it's the only surface that produces the right payload across all
+seven writable types. Bulk clear via `--where` is a v0.2 candidate;
+today, bulk reset is achieved by walking matched items through
+`xargs monday item clear`. Non-allowlisted column types return
+`unsupported_column_type` from `clear` with a `--set-raw` hint,
+mirroring `set`.
 
 **Relative dates and timezone.** `today`, `tomorrow`, `+3d`, `-1w`,
 `+2h` are resolved against the active **profile timezone**, set in
@@ -946,10 +1027,12 @@ double-escaping it).
   exists for humans).
 - Returns `error.code = "not_found"` if zero match.
 
-Mutation outputs **always echo** the resolved IDs (item, board,
-column, group, etc.) under `data` and `data.resolved_ids`, so an
-agent doing a `find` followed by an action captures the stable ID
-once and reuses it.
+Mutation outputs **always echo** the resolved resource IDs (item,
+board, group, etc.) under `data`, and resolved column-token
+echoes (`<col>=<value>` → resolved column ID) under the
+top-level `resolved_ids` slot (§6.4). An agent doing a `find`
+followed by an action captures the stable IDs once and reuses
+them.
 
 ### 5.8 Idempotency for `create_item`
 
@@ -1012,9 +1095,9 @@ Mechanics:
 ## 6. Output schema (JSON contract)
 
 The output contract is part of the CLI's public surface. Breaking it
-requires a major version bump. The rules below are normative; per-
-command shapes live in `docs/output-shapes.md` (to be added per
-command implementation).
+requires a major version bump. The rules below are normative;
+per-command JSON shapes are pinned by integration-test fixtures and
+described inline in §6.1–§6.5 alongside the universal envelope.
 
 **Schema version.** Every JSON output carries
 `meta.schema_version: "1"`. Adding a field is non-breaking (no bump);
@@ -1125,7 +1208,9 @@ Rules:
     columns rely on this.
   - typed fields — type-specific keys like `label`/`index` (status),
     `date`/`time` (date), `people: [...]` (people), `from`/`to`
-    (timeline), etc. See `docs/output-shapes.md` per type.
+    (timeline), etc. See `monday board describe <bid>`'s
+    `example_set` per writable column for the per-type shape an
+    agent can write back; read-side projection is fixture-pinned.
 - **Read-only columns** (mirror, formula, dependency, battery,
   formula, item_assignees, time_tracking, etc.) include `text` and
   whatever typed payload Monday exposes; consumers should not pass
@@ -1182,9 +1267,29 @@ Notes:
   "data": <resource>,
   "meta": { ... },
   "warnings": [],
-  "side_effects": [ ... ]
+  "side_effects": [ ... ],
+  "resolved_ids": { "status": "status_4", "due": "date4" }
 }
 ```
+
+`resolved_ids` (optional) echoes the token → column-ID mapping
+that §5.3 step 2 promised. Present on every column-mutation
+envelope (`item set` / `item clear` / `item update`) where the
+command initialised a `resolvedIds` map — including
+`item update --name "..."` with no `--set`, which emits `{}`
+because the command path constructs the empty map and passes
+it through (no column resolver actually runs). **Absent** on:
+- mutations that don't take column tokens at all (e.g.
+  `update create`);
+- bulk `item update` no-op success (zero matches → the bulk
+  walker returns before constructing the resolved-id map,
+  so the slot is omitted).
+
+Agents should treat absent and empty `{}` equivalently — both
+mean "no token-to-ID echoes to capture". Canonical key order in
+the envelope: after `side_effects`, before the closing brace.
+Agents that capture `resolved_ids` once can skip subsequent
+metadata lookups when issuing follow-up writes.
 
 `side_effects` (optional) lists secondary operations the CLI
 performed implicitly — e.g. `monday dev task done --message "..."`
@@ -1195,6 +1300,39 @@ posts an update; that's a side-effect:
   { "kind": "update_created", "id": "u_77", "item_id": "5001", "body": "..." }
 ]
 ```
+
+**Bulk mutations** (`--where` / `--filter-json`) wrap the
+per-item resources in a `data` envelope with a `summary` slot
+and emit the same top-level `resolved_ids` echo as single-item
+mutations (one `--set` token resolves once, applies to N items):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "summary": {
+      "matched_count": 12,
+      "applied_count": 12,
+      "board_id": "67890"
+    },
+    "items": [
+      { "id": "5001", "name": "...", "columns": { ... } },
+      { "id": "5002", "name": "...", "columns": { ... } }
+    ]
+  },
+  "meta": { ... },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+`matched_count` is the number of items the filter resolved
+against. On success, `applied_count === matched_count` — every
+matched item was mutated; both fields appear identically. The
+partial-progress shape (`applied_count < matched_count`) lives
+on the error envelope, not here — see §6.5 for the bulk
+per-item failure error decoration. `items` carries the same
+per-item resource shape as single-item mutations.
 
 For `--dry-run`:
 
@@ -1220,8 +1358,47 @@ For `--dry-run`:
 ```
 
 `planned_changes` is **always an array** — single-item mutations get
-a one-element array. Bulk mutations (via `--filter`) populate it
-fully. `data` is `null` for dry-runs.
+a one-element array. Bulk mutations (via `--where` /
+`--filter-json`) populate it fully. `data` is `null` for dry-runs.
+
+**Per-mutation-kind `planned_changes` shapes.** Different
+mutation verbs produce different planned-change shapes; the
+`operation` slot is the discriminator. Two shapes ship in v0.1:
+
+- **Column-mutation shape** (`item set` / `item clear` /
+  `item update`). The shape shown above:
+  `operation: "change_simple_column_value" |
+  "change_column_value" | "change_multiple_column_values"`,
+  with `board_id`, `item_id`, `resolved_ids`, and `diff`.
+- **Comment-create shape** (`update create`). Diverges
+  intentionally — there's no column to resolve and no `from →
+  to` diff to render. Carries `operation: "create_update"`,
+  `item_id`, `body`, and `body_length`; *omits* `board_id`,
+  `resolved_ids`, and `diff`. `meta.source: "none"` (no API
+  call fired). Re-running without `--dry-run` creates a fresh
+  comment, so `update create --dry-run` is a preview-of-payload
+  rather than a preview-of-state-change:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "create_update",
+        "item_id": "12345",
+        "body": "Tagging @ops — please review the staging deploy.",
+        "body_length": 48
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+Future mutation verbs may add new shapes; `operation` stays the
+discriminator. Agents should switch on `operation` rather than
+assume a fixed slot list.
 
 For upsert-style commands, `data.created: true | false` indicates
 which path ran:
@@ -1266,7 +1443,7 @@ Fields:
 | `request_id` | string | The `meta.request_id` from this invocation. |
 | `retryable` | boolean | Whether the CLI considers automated retry safe. |
 | `retry_after_seconds` | number \| null | Hint for caller-driven retry. |
-| `details` | object | Code-specific extra context. Schema per code documented in `docs/output-shapes.md`. |
+| `details` | object | Code-specific extra context. Per-code schemas listed below. |
 
 **Stable error codes (v0.1).** The full list grows over time;
 removals are major bumps.
@@ -1299,6 +1476,80 @@ removals are major bumps.
 | `dev_not_configured` | `monday dev …` without dev config | No |
 | `dev_board_misconfigured` | Configured dev board missing expected column | No |
 | `internal_error` | CLI bug; report it | No |
+
+**`details` schemas per code.** The `details` slot is code-specific;
+slots that ship in v0.1 across multiple codes:
+
+- `details.resolver_warnings: [{code, ...}, ...]` — present
+  when the column resolver emitted warnings during the
+  resolution that fed the failing call. Folds
+  `column_token_collision` and `stale_cache_refreshed` into the
+  error envelope so a cache-stale-then-failure flow doesn't lose
+  the cache-was-stale signal. **Applied across all live
+  mutation paths** (`item set` / `item clear` / `item update`):
+  translator `usage_error`, `unsupported_column_type`,
+  `user_not_found`, mutation-time `validation_failed` (and its
+  `column_archived` remap). Also folded on the dry-run engine's
+  `column_archived` throw. Other dry-run translator failures
+  (`unsupported_column_type`, `user_not_found`, translator
+  `usage_error`) currently bubble without the warnings fold —
+  parity gap logged for v0.2 review.
+- `details.remapped_from: "validation_failed"` — only on
+  `column_archived` errors that came through a live mutation
+  whose pre-mutation resolution was cache-sourced. The CLI
+  re-fetches metadata, confirms the column is now archived, and
+  remaps `validation_failed` → `column_archived` so agents key
+  off the stable code rather than English. Live-sourced
+  resolutions skip the remap (the live read already saw the
+  archived flag).
+
+**Per-code `details` schemas:**
+
+- `confirmation_required` (bulk mutations without `--yes` or
+  `--dry-run`):
+  - `matched_count: number` — count of items the filter
+    resolved against.
+  - `where_clauses: string[]` — always present. Carries the
+    raw `--where` clauses verbatim; empty array (`[]`) when
+    only `--filter-json` was passed.
+  - `filter_json: string` — present only when `--filter-json
+    <s>` was passed; absent otherwise. Carries the raw JSON
+    string the user supplied (not the parsed object).
+  - `board_id: string` — the `--board <bid>` the bulk runs
+    against.
+- `column_archived`:
+  - `column_id: string`, `column_title: string` — the archived
+    column the agent targeted.
+  - `details.remapped_from` (optional, see above).
+  - `details.resolver_warnings` (optional, see above).
+- `ambiguous_column`:
+  - `candidates: [{ id, title, type }, ...]` — the matching
+    columns. Agents retry with explicit `id:<column_id>` prefix.
+- `usage_error` for `--board` / item-board mismatch (dry-run
+  only — see §5.3 step 1):
+  - `item_board_id: string` — the item's actual `board.id`.
+  - `requested_board_id: string` — the value passed to
+    `--board`.
+- **Bulk per-item failure** — when a bulk mutation fails
+  partway through, the typed error envelope is decorated with
+  partial-progress slots so agents can resume cleanly:
+  - `matched_count: number` — same as above.
+  - `applied_count: number` — items mutated before the
+    failure.
+  - `applied_to: [string, ...]` — IDs of items mutated before
+    the failure (in mutation order).
+  - `failed_at_item: string` — ID of the item the failure
+    fired on.
+
+  The error `code` is whichever the per-item mutation produced
+  (`column_archived`, `validation_failed`, `complexity_exceeded`,
+  …). The bulk envelope wraps these so agents can implement
+  resume-on-rerun using `applied_to` to scope follow-up work in
+  their own orchestration (e.g. by narrowing the filter to
+  exclude already-applied IDs, or by issuing per-item retries
+  for the items in `matched_count − applied_count`). The v0.1
+  filter DSL doesn't include an `id_not_in` operator; bulk
+  resume is caller-orchestrated, not a single re-run.
 
 Exit codes (unchanged from §3.1): 0 success, 1 usage, 2 API/network,
 3 config, 130 SIGINT.
