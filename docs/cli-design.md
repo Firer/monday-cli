@@ -150,8 +150,8 @@ the `ColumnType` enum:
 | Category | Types |
 |----------|-------|
 | **Simple writable** | `text`, `long_text`, `numbers`, `checkbox`, `link`, `email`, `phone`, `country`, `hour`, `rating`, `vote`, `tags`, `world_clock`, `week`, `color_picker`, `location` |
-| **Structured writable** | `status`, `dropdown`, `date`, `timeline`, `people` (the deprecated singular `person` too), `team`, `board_relation`, `file`, `doc` |
-| **Read-only / system** | `creation_log`, `last_updated`, `item_id`, `auto_number`, `name`, `formula`, `mirror`, `dependency`, `progress`, `subtasks`, `time_tracking`, `item_assignees`, `button`, `integration`, `unsupported` |
+| **Structured writable** | `status`, `dropdown`, `date`, `timeline`, `people` (the deprecated singular `person` too), `team`, `board_relation`, `dependency`, `file`, `doc` |
+| **Read-only / system** | `creation_log`, `last_updated`, `item_id`, `auto_number`, `name`, `formula`, `mirror`, `progress`, `subtasks`, `time_tracking`, `item_assignees`, `button`, `integration`, `unsupported` |
 
 Reading: every column type has its own GraphQL type implementing
 `ColumnValue` (e.g. `StatusValue`, `DateValue`, `PeopleValue`). The
@@ -489,16 +489,19 @@ monday item find <name> --board <bid> [--first]                              v0.
 monday item search --board <bid> --where <col>=<val>...                      v0.1
                                           # uses items_page_by_column_values
                                           # cross-board (omit --board): v0.3
-monday item set <iid> <col>=<val> [--board <bid>]   # single column write    v0.1
+monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>]   # single column write   v0.1 (--set-raw v0.2)
+                                          # positional <col>=<val> uses friendly translator (§5.3)
+                                          # --set-raw skips translation; agent supplies wire-shape JSON
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
 monday item clear --board <bid> <col> (--where <c>=<v>... | --filter-json <json>) [--yes] [--dry-run]   v0.2
                                           # bulk clear — same gating as item update --where
                                           # live (non-empty match): requires --yes unless --dry-run is set
-monday item update <iid> [--name <n>] [--set <col>=<val>]... [--board <bid>] [--create-labels-if-missing]   v0.1
+monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--board <bid>] [--create-labels-if-missing]   v0.1 (--set-raw v0.2)
                                           # single-item multi-column atomic update
-                                          # at least one of --name / --set required
-monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--create-labels-if-missing] [--yes] [--dry-run]   v0.1
-                                          # bulk update — at least one of --name / --set required
+                                          # at least one of --name / --set / --set-raw required
+                                          # --set and --set-raw against the same <col> → usage_error
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--yes] [--dry-run]   v0.1 (--set-raw v0.2)
+                                          # bulk update — at least one of --name / --set / --set-raw required
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
                                           # --continue-on-error (partial-success envelope): v0.3
@@ -710,9 +713,11 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `board.id`, then proceeds. Caches the item→board mapping for the
      lifetime of the process.
    When ambiguity is impossible (the agent already passed `--board`),
-   the implicit lookup is skipped entirely. (Raw mode — `--set-raw
-   <col>=<json>` — is **deferred to v0.2**; see "Escape hatch" below
-   and the writer-expansion roadmap. v0.1 has no raw-write surface.)
+   the implicit lookup is skipped entirely. The same `<board_id>`
+   resolution applies to `--set-raw <col>=<json>` (v0.2): the raw
+   payload bypasses the friendly translator but the column still
+   resolves through the standard board metadata, so `--board <bid>`
+   has the same effect on both flags.
 
    **`--board` / item-board mismatch.** If `--board <bid>` is passed
    and the item actually lives on a different board, the live path
@@ -791,39 +796,109 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `users(emails: [...])` call. Unknown email →
      `error.code = "user_not_found"` with the unmatched email in
      `details`.
-4. **All other column types in v0.1 → `unsupported_column_type`,
+
+   **v0.2 expansion** (additions to the v0.1 allowlist; ships
+   alongside `--set-raw` in the M8 writer-expansion milestone).
+   All v0.2-additions are rich payloads — they go through
+   `change_column_value` like the v0.1 rich types (`status` /
+   `dropdown` / `date` / `people`):
+
+   - `link` — `<url>` (one segment) → `{"url":<url>,"text":<url>}`;
+     `<url>|<text>` (pipe-split, max 1 split, both segments
+     trimmed) → `{"url":<url>,"text":<text>}`. URL validated via
+     `z.string().url()`; failure → `usage_error`. Pipe-form with
+     empty trailer rejected (`usage_error`); use `--set-raw`
+     (below) to write a link with empty `text`.
+   - `email` — single email → `{"email":<value>,"text":<value>}`;
+     `<email>|<text>` → `{"email":<email>,"text":<text>}`. Email
+     validated via `z.string().email()`; failure → `usage_error`.
+   - `phone` — `<phone>|<country>` (pipe form mandatory) →
+     `{"phone":<phone>,"countryShortName":<country>}` where
+     `<country>` is a 2-letter ISO 3166-1 alpha-2 code (uppercase
+     — `US`, `GB`, `JP`). E.164-loose validation
+     (`+?\d{6,15}`); ISO code validated against a frozen allowlist.
+     Single-segment form (`--set Mobile=+15551234567` without
+     `|US`) is rejected with `usage_error` — Monday's phone-column
+     validation requires both the number and a 2-letter country
+     code AND verifies they match (per Monday's phone-validation
+     changelog), so the friendly translator can't safely default
+     `countryShortName: ""`. Agents who need to write a phone with
+     no country (Monday allows it for some legacy fixtures) use
+     `--set-raw`.
+   - `tags` (tentative — may slip to v0.3) — comma-split tag
+     names → `{"tag_ids":[N1,N2]}` via account-tag directory
+     lookup. Cache mirrors the user directory pattern from M5a.
+     Unknown tag name → `error.code = "tag_not_found"` with the
+     unmatched name in `details` (new stable code — 27th if
+     `tags` ships firm; the v0.2-plan §9.2 "Before M12" gate
+     adds it to §6.5). Slip risk: per-account `tags` query may
+     be too expensive to cache cleanly; M8 fixture work decides
+     at close.
+   - `board_relation` (tentative — may slip to v0.3) —
+     comma-split item IDs → `{"item_ids":[N1,N2]}`. Item IDs
+     accepted directly (no name-resolution sugar in v0.2 — agents
+     `item find <name>` first, then `--set`). Cross-board
+     references validated against the source column's allowed
+     boards — Monday's `board_relation` column settings expose
+     `boardIds` (array) or `boardId` (singular) per
+     `get_column_type_schema`; the CLI normalises to
+     `allowed_boards = settings.boardIds ?? [settings.boardId]`.
+     Off-board IDs → `usage_error` with `details.allowed_boards:
+     [...]` for self-correction. Slip risk: linked-board
+     enumeration may require a per-call complexity-budget design
+     pass.
+   - `dependency` (tentative — may slip to v0.3) — same shape
+     as `board_relation` but uses Monday's separate `dependency`
+     column payload. Same slip risk.
+
+4. **All other column types in v0.2 → `unsupported_column_type`,
    keyed by roadmap category.** The error always includes `column_id`
    and `type`; the rest of the details depend on which row of the
    writer-expansion roadmap the type sits on:
-   - **v0.2 writer-expansion** types (`link`, `email`, `phone`,
-     `tags`, `board_relation`, `dependency`) carry `deferred_to:
-     "v0.2"`. v0.2 will land both the friendly translator and
-     `--set-raw` for these.
+   - **v0.3 writer-expansion candidates** (any of `tags`,
+     `board_relation`, `dependency` slipped from v0.2's tentative
+     row, plus `time_tracking`) carry `deferred_to: "v0.3"`. The
+     `--set-raw` escape hatch (below) accepts these types in v0.2
+     for agents that own the wire shape.
    - **read-only-forever** types (`mirror`, `formula`, `auto_number`,
      `creation_log`, `last_updated`, `item_id`) carry `read_only:
      true` (no `deferred_to`). Monday computes these server-side;
      the API never makes them writable, regardless of CLI version.
-     The hint points at the underlying source column.
+     The hint points at the underlying source column. `--set-raw`
+     does **not** accept these types — the read-only-forever check
+     fires after column resolution but before mutation (the type
+     is only known once the column resolves).
    - **future** types (anything else — e.g. `battery`,
-     `item_assignees`, `time_tracking`, `files`, `rating`) carry
-     `deferred_to: "future"` with a generic message that doesn't
-     commit to a specific version.
-   v0.1 ships no escape hatch in any branch — no dead `--set-raw`
-   suggestion in v0.1 (see "Escape hatch" below). No silent partial
-   support.
-5. **Picks the right mutation.** Of the v0.1 allowlist:
+     `item_assignees`, `rating`) carry `deferred_to: "future"`
+     with a generic message that doesn't commit to a specific
+     version. `--set-raw` accepts these (the user owns the wire
+     shape) provided the type accepts a payload via
+     `change_column_value` / `change_multiple_column_values`.
+   - **`files`-shaped types** (`file`, anything else where Monday
+     uses `add_file_to_column` rather than `change_column_value`)
+     carry `deferred_to: "v0.4"` (asset upload is pinned to v0.4
+     per §13). `--set-raw` rejects these too — the underlying
+     mutation isn't `change_column_value` so a raw payload can't
+     reach the right wire surface.
+   No silent partial support — every translator either lands
+   end-to-end or surfaces `unsupported_column_type` with a
+   hint that points at `--set-raw` or the type's roadmap slot.
+5. **Picks the right mutation.** Of the writable allowlist:
    - `change_simple_column_value` (plain string) — for `text`,
      `long_text`, `numbers`. These types accept a bare string.
-   - `change_column_value` (JSON) — for `status`, `dropdown`, `date`,
-     `people`. These types need a JSON object.
+   - `change_column_value` (JSON) — for `status`, `dropdown`,
+     `date`, `people` (v0.1) and `link`, `email`, `phone`,
+     `tags`, `board_relation`, `dependency` (v0.2 expansion).
+     These types need a JSON object.
    - `change_multiple_column_values` — when the same item has 2+
-     `--set` flags, OR when `--name <n>` is combined with one or
-     more `--set` flags. Saves a round-trip and is **atomic on
-     Monday's side** (all columns succeed together or all fail;
-     never partial success).
-   (v0.2's `--set-raw` will use `change_column_value` for everything
-   — the simple variant is an optimisation; the full variant accepts
-   the same payloads. Non-allowlist types have no v0.1 write path.)
+     `--set` / `--set-raw` flags, OR when `--name <n>` is
+     combined with one or more `--set` / `--set-raw` flags.
+     Saves a round-trip and is **atomic on Monday's side** (all
+     columns succeed together or all fail; never partial success).
+   `--set-raw` (v0.2) always uses `change_column_value` for the
+   single-column case and `change_multiple_column_values` for the
+   bundled case — the simple variant is an optimisation that
+   doesn't apply to user-supplied raw payloads.
 
    **Per-column-blob shapes inside `change_multiple_column_values`.**
    The multi mutation accepts a `column_values` JSON object keyed
@@ -846,39 +921,100 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
 the same call: `monday item update <iid> --name "New title" --set
 status=Done` bundles the rename and the column write atomically.
 
-**Escape hatch (v0.2 — deferred from v0.1):** `--set-raw
-<col>=<json>` will skip the friendly translation and write the
-literal Monday-shape JSON. The flag is **not implemented in v0.1**;
-it lands in v0.2's writer-expansion milestone alongside the next
-batch of friendly types (link / email / phone / tags /
-board_relation / dependency). v0.1 agents hitting an unsupported
-type get `unsupported_column_type` keyed by roadmap category (per
-step 4 above) — `deferred_to: "v0.2"` for the v0.2 row,
-`read_only: true` for read-only-forever types, `deferred_to:
-"future"` for everything else. The friendly translator covers
-the seven types (`text`, `long_text`, `numbers`, `status`,
-`dropdown`, `date`, `people`) the v0.1 contract commits to.
+**Escape hatch (v0.2):** `--set-raw <col>=<json>` skips the
+friendly translation and writes the literal Monday-shape JSON
+the user supplies. The flag is **not implemented in v0.1**; it
+lands in v0.2's M8 writer-expansion milestone. Contract:
+
+- **Column resolution still applies.** `<col>` resolves through
+  the same ID/title/case-fold path as `--set` (step 2 above),
+  including the cache-miss-refresh-once rule (step 5 there). The
+  resolved column's type is checked against two reject lists
+  before mutation:
+  - **Read-only-forever** (`mirror`, `formula`, `auto_number`,
+    `creation_log`, `last_updated`, `item_id`) → surfaces
+    `unsupported_column_type` with `read_only: true`. Monday
+    never accepts writes against these regardless of payload.
+  - **`files`-shaped** (`file`, anything else where Monday's
+    write path is `add_file_to_column` rather than
+    `change_column_value`) → surfaces `unsupported_column_type`
+    with `deferred_to: "v0.4"`. The friendly translator and
+    `--set-raw` both go through `change_column_value` /
+    `change_multiple_column_values`, so a `--set-raw` raw
+    payload can't reach the right wire surface for these
+    types. Asset upload is pinned to v0.4 (§13).
+  Every other type (writable + tentative-slipped + future where
+  the API accepts `change_column_value`) is accepted by
+  `--set-raw`; the user owns wire-shape correctness.
+- **JSON boundary validation; no type-shape validation.** The
+  CLI parses `<json>` once at the argv boundary and verifies
+  it is a JSON object (a `JsonObject` per zod) — malformed JSON
+  or non-object JSON (string / number / array / null at the
+  top level) returns `usage_error` with the parse error in
+  `details`. The CLI does **not** validate the parsed object
+  against any per-type schema; Monday's server-side rejection
+  surfaces as `validation_failed` with Monday's message.
+  `--set-raw` is for agents that have read Monday's developer
+  docs and want to bypass the friendly translator's grammar
+  (e.g. to write a `link` with empty `text`, which the friendly
+  pipe-form rejects).
+- **Mutual exclusion with `--set`.** `--set <col>=<val>` and
+  `--set-raw <col>=<json>` against the **same** `<col>` (same
+  resolved column ID) are mutually exclusive. Detection is
+  resolution-time, not parse-time: the argv-parse layer can't
+  tell whether two distinct tokens (`--set status=Done` and
+  `--set-raw "Status Column"='{...}'`) resolve to the same
+  column ID without board metadata. After both flags' tokens
+  resolve, a duplicate-ID check fires before mutation; collision
+  → `usage_error` with `details.column_id` and the conflicting
+  tokens. Different columns in the same call are fine
+  (`--set status=Done --set-raw weird_col='{...}'` bundles into
+  one `change_multiple_column_values`).
+- **`--dry-run` supported.** The dry-run echoes the **parsed**
+  JSON object in `planned_changes[].diff[<col>].to` (no
+  translator round-trip; the parsed object is what would be
+  sent on the wire). Whitespace and key ordering from the
+  original `<json>` argv string are not preserved — equivalent
+  payloads can render differently.
+
+The friendly translator covers up to thirteen types (`text`,
+`long_text`, `numbers`, `status`, `dropdown`, `date`, `people`
+from v0.1; `link`, `email`, `phone` firm v0.2 additions; `tags`,
+`board_relation`, `dependency` tentative v0.2 additions, any of
+which may slip to v0.3 — so the v0.2 firm count is ten and the
+v0.2 stretch count is thirteen).
+Anything outside that allowlist has two escape paths: `--set-raw`
+for the per-column write (provided the type accepts
+`change_column_value` — read-only-forever and `files`-shaped
+types are excluded), or the `monday raw` GraphQL escape (§4.3)
+for the whole-mutation write (file upload via
+`add_file_to_column` falls here until v0.4).
 
 **Writer-expansion roadmap.** Per-type slots for the friendly
-translator (`--set <col>=<val>`). Until a type lands in the
-allowlist for a given version, agents wait — v0.1 has no escape
-hatch. The v0.2 writer-expansion milestone lands `--set-raw
-<col>=<json>` alongside the next friendly-type batch, which is
-the unified write-side expansion. Slots are the *current best
-plan* — v0.2 may re-slot the harder types (`tags`,
-`board_relation`, `dependency`) to v0.3 after fixture work surfaces
-the design cost; this table is a planning anchor, not a binding
-schedule beyond v0.1.
+translator (`--set <col>=<val>`). v0.1 had no escape hatch — types
+outside the allowlist waited on the next version. v0.2 ships
+`--set-raw <col>=<json>` alongside the friendly-type batch
+(M8 — see "Escape hatch" above), so v0.2+ agents have a write
+path for any type that accepts `change_column_value` /
+`change_multiple_column_values` even when the friendly translator
+hasn't landed for it yet. Read-only-forever types and
+`files`-shaped types (which use `add_file_to_column`) remain
+unreachable through `--set-raw`; file upload waits for v0.4.
+Slots in the table below
+are the *current best plan* — v0.2 may re-slot the harder types
+(`tags`, `board_relation`, `dependency`) to v0.3 after M8 fixture
+work surfaces the design cost; this table is a planning anchor,
+not a binding schedule.
 
 | Type | Target version | Notes |
 |------|----------------|-------|
-| `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** | Current allowlist (M5a). |
-| `link`, `email`, `phone` | v0.2 | Trivial — simple-form translators. |
-| `tags` | v0.2 (tentative) | Needs account-tag list lookup; may slip to v0.3. |
-| `board_relation`, `dependency` | v0.2 (tentative) | Cross-board ID resolution; may slip to v0.3. |
-| `time-tracking` | v0.3 | Start/stop semantics — verbs, not value writes. |
-| `files` | v0.4 | Already pinned via `add_file_to_column` (§13 v0.4). |
-| `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. |
+| `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** | Initial allowlist (M5a). |
+| `link`, `email`, `phone` | **v0.2** (firm) | M8 — pipe-form translator + URL/email/E.164 validation. |
+| `tags` | v0.2 (tentative) | M8 — needs account-tag directory lookup. May slip to v0.3 if per-account `tags` query proves too expensive to cache. |
+| `board_relation`, `dependency` | v0.2 (tentative) | M8 — cross-board item-ID validation against the column's `boardIds` (or singular `boardId`) settings. May slip to v0.3 if linked-board enumeration needs a complexity-budget design pass. |
+| `time_tracking` | v0.3 | Start/stop semantics — verbs, not value writes. |
+| `files` | v0.4 | Pinned via `add_file_to_column` (§13 v0.4). |
+| `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
 mirror/formula/etc. surfaces `unsupported_column_type` and will
@@ -914,16 +1050,23 @@ behavior is type-specific:
   before the dispatcher).
 
 Use `monday item clear` whenever you mean "reset this column" —
-it's the only surface that produces the right payload across all
-seven writable types. Bulk clear via `--where` is a v0.2 candidate;
-today, bulk reset is achieved by walking matched items through
-`xargs monday item clear`. Non-allowlisted column types return
-`unsupported_column_type` from `clear` matching the `set` policy:
-v0.2-roadmap types (link / email / phone / tags / board_relation
-/ dependency) carry `deferred_to: "v0.2"`; read-only-forever
-types (mirror / formula / auto_number / creation_log /
-last_updated / item_id) carry `read_only: true` with a hint
-pointing at the underlying source column.
+it's the only surface that produces the right payload across the
+writable types. Bulk clear via `monday item clear --board <bid>
+<col> --where <c>=<v>... --yes` ships in v0.2 (M12); v0.1
+agents fall back to `xargs monday item clear`. The v0.2 expansion
+extends the per-type clear table — `link` / `email` / `phone` /
+`tags` / `board_relation` / `dependency` all clear to `{}` via
+`change_column_value`, mirroring v0.1's rich-type clear payloads.
+Non-allowlisted column types return `unsupported_column_type`
+from `clear` matching the `set` policy: any v0.3-deferred types
+(tentative slips from v0.2's row, plus `time_tracking`) carry
+`deferred_to: "v0.3"`; read-only-forever types (`mirror` /
+`formula` / `auto_number` / `creation_log` / `last_updated` /
+`item_id`) carry `read_only: true` with a hint pointing at the
+underlying source column. `clear` does not accept `--set-raw` —
+the dedicated verb's whole point is type-portable reset; agents
+who need to write a custom JSON value use `--set-raw` on `set`
+or `update`.
 
 **Relative dates and timezone.** `today`, `tomorrow`, `+3d`, `-1w`,
 `+2h` are resolved against the active **profile timezone**, set in
@@ -1295,17 +1438,20 @@ Rules:
   - `title` — current human title (see §6.5 on bloat).
   - `text` — Monday's rendered display value (best-effort string
     representation — present even for read-only columns where the
-    typed shape isn't writable). Mirror, formula, and dependency
-    columns rely on this.
+    typed shape isn't writable). Mirror and formula columns rely
+    on this. (`dependency` is writable as of v0.2 via `item_ids`;
+    its read shape exposes `display_value` and `linked_item_ids`
+    rather than relying on `text`.)
   - typed fields — type-specific keys like `label`/`index` (status),
     `date`/`time` (date), `people: [...]` (people), `from`/`to`
-    (timeline), etc. See `monday board describe <bid>`'s
-    `example_set` per writable column for the per-type shape an
-    agent can write back; read-side projection is fixture-pinned.
-- **Read-only columns** (mirror, formula, dependency, battery,
-  formula, item_assignees, time_tracking, etc.) include `text` and
-  whatever typed payload Monday exposes; consumers should not pass
-  `--set` against them (`unsupported_column_type`).
+    (timeline), `linked_item_ids` (dependency / board_relation),
+    etc. See `monday board describe <bid>`'s `example_set` per
+    writable column for the per-type shape an agent can write
+    back; read-side projection is fixture-pinned.
+- **Read-only columns** (mirror, formula, battery, item_assignees,
+  time_tracking, etc.) include `text` and whatever typed payload
+  Monday exposes; consumers should not pass `--set` against them
+  (`unsupported_column_type`).
 
 ### 6.3 Collection (`data` shape)
 
@@ -1856,13 +2002,19 @@ to largest scope:
   accepts on items in that board. Returns:
   - All columns with `id`, `type`, `title`, `archived`, `description`,
     `settings_str` (parsed where possible), and a `writable` boolean
-    (true if the type is in the v0.1 friendly-translator allowlist;
-    v0.2 widens this when `--set-raw` lands).
+    (true if the type is in the friendly-translator allowlist —
+    seven types in v0.1; widens to ten firm (up to thirteen if
+    the tentative `tags` / `board_relation` / `dependency`
+    translators ship) in v0.2 with the M8 additions, plus
+    `--set-raw` accepts every type the API will write to via
+    `change_column_value` / `change_multiple_column_values`).
   - For `status` columns: the full label/index map with style.
   - For `dropdown` columns: the option list with IDs and labels.
-  - For `board_relation` columns: the `linked_board_id`(s).
-  - For `mirror` / `formula` / `dependency` / battery (rollup):
-    the source column, formula text, or dependency rules.
+  - For `board_relation` and `dependency` columns: the
+    `boardIds` / `boardId` allowlist (writable in v0.2 — see
+    §5.3 step 3 v0.2 expansion).
+  - For `mirror` / `formula` / battery (rollup): the source
+    column or formula text. (Read-only.)
   - Groups (id, title, color, position).
   - `hierarchy_type` and `is_leaf` (multi-level boards; via raw
     GraphQL — see §2.8).
@@ -1872,8 +2024,11 @@ to largest scope:
 - `monday board doctor <bid>` — diagnostics. Surfaces:
   - Duplicate column titles (would cause `ambiguous_column` on
     title-based `--set`).
-  - Columns of types not in the v0.1 allowlist (not writable in
-    v0.1; v0.2 widens write coverage via `--set-raw` + new types).
+  - Columns of types not in the friendly-translator allowlist
+    (not writable via `--set` in v0.1; v0.2 widens coverage by
+    up to six new types — three firm + three tentative — plus
+    `--set-raw` for everything else the API will write to via
+    `change_column_value`).
   - Stale cache entries vs. live state.
   - Missing/broken `board_relation` targets (linked board archived).
   - For `dev`-mapped boards: missing expected columns
