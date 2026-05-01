@@ -65,14 +65,16 @@
  * operations may or may not be. The `idempotent` slot on the
  * `CommandModule` is `false` (we can't narrow at registration
  * time). For `--dry-run`: cli-design §9.2 binds every mutating
- * command to support it, so when the analyser detects a mutation
- * AND `--dry-run` is set, the command emits a §6.4 dry-run
- * envelope (`data: null`, `meta.dry_run: true`,
- * `planned_changes: [{operation: 'raw_graphql', kind: 'mutation',
- * operation_name, query, variables}]`) and skips the network call
- * entirely (no `resolveClient`, `meta.source: 'none'`). For
- * read-only documents `--dry-run` is a no-op — there's no mutation
- * to "not execute" — and the query runs normally.
+ * command to support it, so when the analyser's *selected*
+ * operation is a mutation AND `--dry-run` is set, the command
+ * emits a §6.4 dry-run envelope (`data: null`,
+ * `meta.dry_run: true`, `planned_changes: [{operation:
+ * 'raw_graphql', operation_kind: 'mutation', operation_name,
+ * query, variables}]`) and skips the network call entirely (no
+ * `resolveClient`, `meta.source: 'none'`). For read-only
+ * documents (or mixed docs where `--operation-name` selects a
+ * query) `--dry-run` is a no-op — there's no mutation to "not
+ * execute" — and the query runs normally.
  *
  * **No envelope summarisation.** Monday's response shape is
  * passed through verbatim under `data`. A schema-validating

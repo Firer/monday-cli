@@ -42,9 +42,8 @@ Two binding documents:
   (M0–M7 with M5 split + M2.5 refactor pass inserted post-M2),
   per-milestone deliverables, testing-pyramid commitments, risk
   register, exit checklist, and per-milestone post-mortems
-  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b —
-  what Codex
-  review caught after each cluster shipped).
+  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b,
+  §20 M6 — what Codex review caught after each cluster shipped).
 
 **Milestones:**
 
@@ -58,7 +57,7 @@ Two binding documents:
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
 | M5a | shipped | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads) + `dry-run.ts` (M3 column resolution + R12 cache-miss-refresh + M5a translation + item-state read; all-or-nothing semantics + cli-design §6.4 byte-snapshot exit gate; resolver-warning preservation across `column_archived` throws) + `me-token.ts` (R15 shared `isMeToken` helper) + `DECIMAL_USER_ID_PATTERN` lift (R16) + R17 ZodError wrap at `userByEmail`. |
 | M5b | shipped | All four mutation commands: `item set` (single-column write) + `item clear` (per-type dedicated clear payload) + `item update` (multi-`--set` atomic + bulk `--where` w/ `confirmation_required`) + `update create` (`--body` / `--body-file` / stdin, `--dry-run` supported despite non-idempotent). Five supporting refactors: `item-helpers.ts` lift (R9 — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` + `collectColumnHeads` + `titleMap` + `resolveMeFactory` + `projectFromRaw` + `parseRawItem`) + `collectSecrets` consolidation (R10) + `resolveColumnsAcrossClauses` lift (R12) + `parse-boundary.ts unwrapOrThrow` (R18 — `board-metadata` + `item-helpers` + `emit.ts` drift catch) + `resolver-error-fold.ts` lift (R19 — `foldResolverWarningsIntoError` + `mergeDetails` + `maybeRemapValidationFailedToArchived`, six consumers); `emitMutation` + `emitDryRun` emit helpers; `MutationEnvelope.resolved_ids` echo per cli-design §5.3 step 2; `boardLookupResponseSchema` for implicit board lookup; `validation_failed` → `column_archived` remap on cache-sourced resolution (single + bulk per-item). |
-| M6 | shipped | `board doctor` (3 diagnostic kinds: duplicate_column_title / unsupported_column_type per roadmap category / broken_board_relation) + `raw` (GraphQL escape hatch w/ `<query>` positional, `--query-file <path|->`, `--vars <json>`, `--vars-file <path|->`) + agent-flow E2E (4-spawn list → start → done → comment) |
+| M6 | shipped | `board doctor` (3 diagnostic kinds: duplicate_column_title / unsupported_column_type per roadmap category / broken_board_relation) + `raw` (GraphQL escape hatch w/ `<query>` positional, `--query-file <path\|->`, `--vars <json>`, `--vars-file <path\|->`, `--allow-mutation` gate, `--operation-name <n>`, AST-aware `analyzeRawDocument` analyser keying off the `graphql` reference parser, `--dry-run` honoured for mutations per §9.2 — close-arc Codex P1 fixes) + agent-flow E2E (4-spawn list → start → done → comment with `assertEnvelopeContract` per §6.1) |
 | M7 | future | release prep |
 
 > **If you're implementing anything in this repo, read
