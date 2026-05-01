@@ -66,11 +66,13 @@
 
 ### Bulk operation symmetry
 
-- **`monday item clear --where ... <col> --yes`** — bulk clear
+- ~~**`monday item clear --where ... <col> --yes`** — bulk clear
   symmetric with `item update --where`. Currently
   `monday item update --where ... --set X=` is rejected by the
   translator (empty values aren't valid set inputs); the dedicated
-  verb is the right contract surface. *Suggested slot: v0.2.*
+  verb is the right contract surface. *Suggested slot: v0.2.*~~ →
+  now in cli-design §13 v0.2 + §4.3 `item clear --board ...
+  --where` entry.
 
 - **`monday item update --continue-on-error`** — partial-progress
   bulk recovery. Today bulk `item update --where` fails fast on

@@ -491,6 +491,9 @@ monday item search --board <bid> --where <col>=<val>...                      v0.
                                           # cross-board (omit --board): v0.3
 monday item set <iid> <col>=<val> [--board <bid>]   # single column write    v0.1
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
+monday item clear --board <bid> <col> (--where <c>=<v>... | --filter-json <json>) [--yes] [--dry-run]   v0.2
+                                          # bulk clear — same gating as item update --where
+                                          # live (non-empty match): requires --yes unless --dry-run is set
 monday item update <iid> [--name <n>] [--set <col>=<val>]... [--board <bid>] [--create-labels-if-missing]   v0.1
                                           # single-item multi-column atomic update
                                           # at least one of --name / --set required
@@ -1858,6 +1861,14 @@ scoped idempotent changes, and post comments narrating its work.**
   `--board`) — symmetric with v0.1's `item list` streaming once the
   comment-surface verbs land and grow the data volumes that benefit
   from incremental output
+- `item clear --where ... <col> --yes` — bulk clear symmetric with
+  v0.1's bulk `item update --where`; reuses the cursor-walk +
+  `confirmation_required` + `--yes` / `--dry-run` gating + per-item
+  `applied_count` / `failed_at_item` decoration. Per-item leg
+  already built (M5b's `translateColumnClear`); bulk path just
+  walks `items_page`. Dedicated verb because empty `--set` values
+  are rejected at the translator boundary, so faking bulk clear via
+  `item update --where ... --set X=` doesn't work
 - `board create/archive/delete/duplicate`
 - `board column-create/column-update/column-delete`
 - `board group-create/group-update/group-archive/group-duplicate/group-delete`
