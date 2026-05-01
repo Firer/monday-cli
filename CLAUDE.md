@@ -17,15 +17,16 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M5a shipped; M5b in progress.**
+**v0.1 implementation in progress; M0–M5b shipped; M6 next.**
 The CLI has a working network surface across 5 nouns (account /
-workspace / board / user / update / item reads), the first M5b
-mutation (`item set` — single-column write, both live + `--dry-run`
-paths), local-only commands (cache / config / schema), filter DSL
-(`--where` + `--filter-json`), cursor-based pagination with stale-
-cursor fail-fast + NDJSON streaming, and the foundations every later
-milestone depends on (typed errors, universal envelope, redaction,
-retry/abort, fixture transport).
+workspace / board / user / update / item reads + the four M5b
+mutation commands: `item set` / `item clear` / `item update`
+single + bulk / `update create`), local-only commands (cache /
+config / schema), filter DSL (`--where` + `--filter-json`),
+cursor-based pagination with stale-cursor fail-fast + NDJSON
+streaming, and the foundations every later milestone depends on
+(typed errors, universal envelope, redaction, retry/abort, fixture
+transport).
 Two binding documents:
 
 - **[`docs/cli-design.md`](./docs/cli-design.md)** (~1,700 lines) —
