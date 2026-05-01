@@ -58,10 +58,11 @@
   *Suggested slot: v0.3.*~~ → now in cli-design §13 v0.3 + §4.3
   `item history <iid>` entry.
 
-- **`monday board favorites`** — list the current user's starred
+- ~~**`monday board favorites`** — list the current user's starred
   boards. Monday surfaces this concept; agent use case: "orient
   on what the user actively works with, skip rarely-touched
-  boards". *Suggested slot: v0.3.*
+  boards". *Suggested slot: v0.3.*~~ → now in cli-design §13 v0.3 +
+  §4.3 `board favorites` entry.
 
 ### Bulk operation symmetry
 

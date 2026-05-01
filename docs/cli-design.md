@@ -454,6 +454,9 @@ monday board find <name> [--workspace <wid>] [--first]                       v0.
 monday board describe <bid>               # full schema; see §11.2           v0.1
 monday board doctor <bid>                 # diagnostics; see §11.2           v0.1
 monday board subscribers <bid>                                               v0.1
+monday board favorites                    # current user's starred boards   v0.3
+                                          # natural scoping lever for v0.3
+                                          # cross-board `item search`
 monday board create --name <n> [--workspace <wid>] [--kind public|private|share]  v0.2
 monday board update <bid> [--name <n>] [--description <d>]                   v0.2
 monday board archive <bid> --yes                                             v0.2
@@ -1876,6 +1879,10 @@ scoped idempotent changes, and post comments narrating its work.**
   `created_at`, `actor_id`, `kind`, `before` / `after`); distinct
   from the org-wide audit feed listed as a non-goal candidate in
   §13.5
+- `board favorites` — current user's starred boards. Pairs with the
+  v0.3 cross-board `item search` as a natural scoping lever
+  (`item search --favorites`); shipping it in isolation buys little
+  agent value, so the two land together
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`
