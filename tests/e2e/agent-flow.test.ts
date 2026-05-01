@@ -107,15 +107,76 @@ const buildItem = (
   ],
 });
 
+interface EnvelopeMeta {
+  readonly schema_version: string;
+  readonly api_version: string;
+  readonly cli_version: string;
+  readonly request_id: string;
+  readonly source: 'live' | 'cache' | 'mixed' | 'none';
+  readonly cache_age_seconds: number | null;
+  readonly retrieved_at: string;
+  readonly complexity: Readonly<Record<string, unknown>> | null;
+}
+
 interface EnvelopeShape {
   readonly ok: boolean;
   readonly data?: unknown;
   readonly error?: { readonly code: string };
-  readonly meta: Readonly<Record<string, unknown>>;
+  readonly meta: EnvelopeMeta & Readonly<Record<string, unknown>>;
+  readonly warnings?: readonly { readonly code: string }[];
 }
 
 const parseEnvelope = (s: string): EnvelopeShape =>
   JSON.parse(s) as EnvelopeShape;
+
+const SOURCE_VALUES: readonly EnvelopeMeta['source'][] = [
+  'live',
+  'cache',
+  'mixed',
+  'none',
+];
+
+/**
+ * Pin the §6.1 universal envelope contract on every spawn — the
+ * point of an end-to-end test is that the envelope shape doesn't
+ * drift between v0.1 and v0.2. Asserts every required `meta` slot
+ * and the `source` enum that downstream agent code keys off.
+ */
+const assertEnvelopeContract = (
+  env: EnvelopeShape,
+  expected: {
+    readonly source?: EnvelopeMeta['source'];
+  },
+): void => {
+  expect(env.ok).toBe(true);
+  expect(env.meta.schema_version).toBe('1');
+  // The CLI runs against the SDK pin; M0 plumbed `MONDAY_API_VERSION`
+  // override so this slot must always carry the resolved value.
+  expect(env.meta.api_version).toMatch(/^\d{4}-\d{2}$/u);
+  expect(typeof env.meta.cli_version).toBe('string');
+  expect(env.meta.cli_version.length).toBeGreaterThan(0);
+  expect(env.meta.request_id).toMatch(/^[0-9a-f-]{8,}/u);
+  if (expected.source !== undefined) {
+    expect(env.meta.source).toBe(expected.source);
+  } else {
+    expect(SOURCE_VALUES).toContain(env.meta.source);
+  }
+  // cache_age_seconds is `number | null` per §6.1; assert the type
+  // contract (not the exact value, which depends on cache state).
+  expect(
+    env.meta.cache_age_seconds === null ||
+      typeof env.meta.cache_age_seconds === 'number',
+  ).toBe(true);
+  expect(env.meta.retrieved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+  // §6.1: complexity is `object | null`. Always null without
+  // `--verbose`; the agent flow doesn't pass verbose so the slot
+  // must be `null` (not absent).
+  expect(env.meta.complexity).toBeNull();
+  // §6 says `warnings` is always delivered as part of the stdout
+  // envelope. Pin the type-shape on every spawn so a v0.2 schema
+  // drift that drops the slot fails loudly.
+  expect(Array.isArray(env.warnings)).toBe(true);
+};
 
 const whoamiInteraction: Interaction = {
   // `--where owner=me` resolves `me` via account.whoami; the fixture
@@ -234,7 +295,13 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       const listEnv = parseEnvelope(listResult.stdout) as EnvelopeShape & {
         data: readonly { id: string; name: string }[];
       };
-      expect(listEnv.ok).toBe(true);
+      // Cold-start `item list` — no cache yet. Filter resolution
+      // fetches metadata live (no stale-cache refresh path), and
+      // items_page is also live; M3's source aggregation keeps
+      // `meta.source` as `'live'` when there's nothing cache-sourced
+      // in the call. The cache file gets populated as a side-effect,
+      // which the next spawn picks up.
+      assertEnvelopeContract(listEnv, { source: 'live' });
       expect(listEnv.data).toHaveLength(1);
       expect(listEnv.data[0]?.id).toBe('5001');
       expect(listEnv.data[0]?.name).toBe('Refactor login');
@@ -262,7 +329,11 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
           columns: Readonly<Record<string, { type: string; label?: string }>>;
         };
       };
-      expect(startEnv.ok).toBe(true);
+      // `item set` resolves `status_4` against board metadata. The
+      // first spawn populated the cache; this spawn picks the cached
+      // shape and the live mutation, so source should be `'mixed'`
+      // and `meta.idempotent` is set per cli-design §6.4.
+      assertEnvelopeContract(startEnv, { source: 'mixed' });
       expect(startEnv.data.id).toBe('5001');
       expect(startEnv.data.columns.status_4).toMatchObject({
         type: 'status',
@@ -291,7 +362,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
           columns: Readonly<Record<string, { type: string; label?: string }>>;
         };
       };
-      expect(doneEnv.ok).toBe(true);
+      assertEnvelopeContract(doneEnv, { source: 'mixed' });
       expect(doneEnv.data.columns.status_4).toMatchObject({
         type: 'status',
         label: 'Done',
@@ -313,7 +384,9 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       const commentEnv = parseEnvelope(commentResult.stdout) as EnvelopeShape & {
         data: { id: string; text_body: string | null; item_id: string | null };
       };
-      expect(commentEnv.ok).toBe(true);
+      // `update create` doesn't touch board metadata — single live
+      // mutation, no cache leg, so source stays `'live'`.
+      assertEnvelopeContract(commentEnv, { source: 'live' });
       expect(commentEnv.data.id).toBe('777');
       expect(commentEnv.data.text_body).toBe('Shipped in PR #1234');
       expect(commentEnv.data.item_id).toBe('5001');
