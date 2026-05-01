@@ -122,8 +122,9 @@ app frameworks, real-time subscriptions, telemetry / update-
 notifier / analytics. These additions plug visible gaps an agent
 might otherwise expect:
 
-- **Forms** — Monday's public-submission forms feature.
-  Different product surface; out of CLI scope.
+- ~~**Forms** — Monday's public-submission forms feature.
+  Different product surface; out of CLI scope.~~ → now in cli-design
+  §13.5 Permanent non-goals.
 - **Saved queries / aliases** (`monday alias save my-tasks
   "..."`). Violates the CLI's stateless principle (every
   invocation reads from env/argv only; no persistent state

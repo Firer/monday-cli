@@ -1993,6 +1993,12 @@ So an agent reading the contract knows what's *not* there yet:
 - Real-time GraphQL subscriptions (Monday's endpoint doesn't support
   them).
 - Telemetry, update-notifier, analytics — ever.
+- Forms (Monday's public-submission feature) — receiving submissions
+  from outside the account is the same hosted-endpoint shape as
+  webhooks (already non-goal). The read-only "what forms exist?"
+  surface alone isn't worth a verb-noun expansion when `board
+  describe` already covers column mappings and `monday raw` covers
+  the rare power-user case.
 
 ## 14. Open questions
 
