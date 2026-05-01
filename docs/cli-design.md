@@ -485,6 +485,7 @@ monday item get <iid>                     # single item with column values   v0.
 monday item find <name> --board <bid> [--first]                              v0.1
 monday item search --board <bid> --where <col>=<val>...                      v0.1
                                           # uses items_page_by_column_values
+                                          # cross-board (omit --board): v0.3
 monday item set <iid> <col>=<val> [--board <bid>]   # single column write    v0.1
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
 monday item update <iid> [--name <n>] [--set <col>=<val>]... [--board <bid>] [--create-labels-if-missing]   v0.1
@@ -1862,6 +1863,11 @@ scoped idempotent changes, and post comments narrating its work.**
 
 - `dev sprint/epic/release/task` workflow shortcuts
 - `dev discover/configure/doctor`
+- `item search` cross-board (omit `--board`) — "find my open tasks
+  anywhere I have access" without the agent iterating boards. Needs
+  a per-call complexity-budget design pass (Monday charges
+  complexity per-board scanned); interacts with v0.3 `board
+  favorites` and likely workspace scoping (`--workspace <wid>`)
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`

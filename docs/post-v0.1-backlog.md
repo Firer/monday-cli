@@ -44,11 +44,12 @@
   output. *Suggested slot: v0.2 alongside the above.*~~ → now in
   cli-design §13 v0.2 + §5.6 ndjson surface note.
 
-- **Cross-board `item search`** (omit `--board`, scan every
+- ~~**Cross-board `item search`** (omit `--board`, scan every
   visible board). Currently `--board` is required. Agent use case:
   "find my open tasks anywhere I have access". *Suggested slot:
   v0.2 / v0.3 — needs a complexity-budget design pass; could be
-  expensive on large accounts.*
+  expensive on large accounts.*~~ → now in cli-design §13 v0.3 +
+  §4.3 `item search` comment.
 
 - **`monday item history <iid>`** — Monday's per-item activity
   log (status changes + comments + assignments interleaved
