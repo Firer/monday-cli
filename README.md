@@ -40,16 +40,36 @@ npm link        # exposes the `monday` bin in your PATH
 For the dev workflow (no build step), see
 [docs/development.md](./docs/development.md).
 
-## Configuration
+## Auth quickstart
 
-Configuration is read from environment variables. The simplest setup:
+The CLI authenticates with a Monday.com API token. The simplest setup:
 
 ```bash
 export MONDAY_API_TOKEN="<your-token>"
+monday account whoami            # smoke test
 ```
 
-A `.env` file in the working directory is also picked up. See
-[`.env.example`](./.env.example) for the full set of supported variables.
+**Where to get a token.** From your Monday admin panel, at
+`https://<your-org>.monday.com/admin/integrations/api`. Admins or
+members only — guests cannot mint API tokens.
+
+**Source priority.** The CLI looks for the token in this order, first
+match wins:
+
+1. `MONDAY_API_TOKEN` in `process.env` (current shell — always wins).
+2. `MONDAY_API_TOKEN=...` in a `.env` file in the working directory.
+
+`--token <value>` is **not** a supported flag. Tokens passed on the
+command line leak via `ps`, shell history, and crash dumps. If you
+need to pass one inline, prefer `MONDAY_API_TOKEN=... monday ...` —
+that keeps the token in the process env only.
+
+**Wire format.** The CLI sends `Authorization: <token>` (no
+`Bearer ` prefix). Monday's API rejects the `Bearer ` form — don't
+add it manually if you ever inspect the wire.
+
+See [`.env.example`](./.env.example) for the full set of supported
+variables (API URL override, API-Version pin, request-timeout, etc.).
 
 ## Usage (v0.1 in progress — read commands + safe mutations shipping)
 
@@ -88,6 +108,11 @@ monday board doctor <board-id>         # flag duplicate titles, non-writable
 monday raw '{ me { id name email } }'  # GraphQL escape hatch
 ```
 
+For longer worked examples — the canonical agent flow (pick up a
+backlog item → mark in-progress → leave a comment → mark done),
+filter syntax, dry-run shapes, error handling — see
+[`docs/examples.md`](./docs/examples.md).
+
 ### Output format
 
 - **TTY (you in a terminal):** human-friendly tables, truncated to fit width.
@@ -114,6 +139,42 @@ The full envelope contract is locked in `docs/cli-design.md` §6.
 | 2 | API or network error |
 | 3 | Config error (missing token, etc.) |
 | 130 | SIGINT |
+
+## Agent quickstart
+
+If you're an AI coding agent driving this CLI:
+
+1. **Always pass `--json`** — pseudo-TTY detection isn't reliable
+   inside an agent harness. `--json` is an alias for
+   `--output json` and forces JSON on every command. JSON is never
+   truncated; tables are.
+2. **Branch on `error.code`, not `error.message`.** The 26 stable
+   v0.1 codes are listed in [`docs/cli-design.md`](./docs/cli-design.md) §6.5
+   — `not_found`, `confirmation_required`, `column_archived`,
+   `unsupported_column_type`, `rate_limited`, `stale_cursor`, etc.
+   Codes are part of the contract; messages are not.
+3. **Read `meta.source`** to know whether the data is `"live"` /
+   `"cache"` / `"mixed"` / `"none"`. `"mixed"` means board metadata
+   came from cache and the rest hit live — non-trivial for write
+   operations because Monday's column state may have drifted.
+   `cache_age_seconds` tells you how stale the cached portion is.
+4. **Pass `--verbose`** if you want `meta.complexity` populated.
+   Without `--verbose`, complexity is `null` (the CLI doesn't add a
+   complexity field on every query). Useful when planning a bulk
+   walk against the 5M points/min budget.
+5. **Discover commands and their schemas** with `monday schema --json`
+   (full registry as JSON Schema 2020-12) or
+   `monday schema <command-name> --json` (one command). No
+   `--help`-scraping needed — every command's input flags + output
+   `data` shape are introspectable.
+6. **Discover board structure** with
+   `monday board describe <board-id> --json`. Each writable column
+   carries `example_set` — paste-ready `--set <token>=<value>`
+   strings the agent can use without consulting external Monday docs.
+7. **Per-command output reference** lives in
+   [`docs/output-shapes.md`](./docs/output-shapes.md) — what `data`
+   looks like for every shipped command. Worked agent sessions in
+   [`docs/examples.md`](./docs/examples.md).
 
 ## Documentation
 
