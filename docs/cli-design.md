@@ -598,6 +598,10 @@ monday status                             # connectivity + auth probe        v0.
                                           # without touching account state;
                                           # bundles api-version + cache dir +
                                           # redaction self-test
+monday usage                              # rolling 24h API budget remaining v0.3
+                                          # complements per-query `account
+                                          # complexity`; agents self-throttle
+                                          # ahead of bulk operations
 
 # === HELP / VERSION (commander defaults) ===
 monday --help                                                                v0.1
@@ -1920,6 +1924,13 @@ scoped idempotent changes, and post comments narrating its work.**
   `monday usage`) — solo it's low value once `account whoami`
   works, but together they form a coherent "is everything working?"
   surface
+- `monday usage` — rolling 24h API complexity budget remaining.
+  Complements v0.1's per-query `account complexity` (spot probe)
+  with the "have I burned through my daily budget?" shape, so an
+  agent can self-throttle before a bulk run. Minimum-viable shape
+  (24h rolling) lands at v0.3; per-minute rate-limit headroom +
+  concurrency-cap headroom can grow into the same envelope at v0.4
+  alongside `--concurrency` without re-pinning the contract
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`

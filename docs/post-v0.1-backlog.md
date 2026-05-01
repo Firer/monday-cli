@@ -93,11 +93,14 @@
   verbs).*~~ → now in cli-design §13 v0.3 + §4.3 `monday status`
   entry under new DIAGNOSTICS section.
 
-- **`monday usage` / `quota`** — current account's daily API
+- ~~**`monday usage` / `quota`** — current account's daily API
   budget remaining. Today `account complexity` is a per-query
   spot probe; nothing tracks the rolling daily total. Agent use
   case: "should I throttle myself before this 500-item bulk?"
-  *Suggested slot: v0.3.*
+  *Suggested slot: v0.3.*~~ → now in cli-design §13 v0.3 + §4.3
+  `monday usage` entry under DIAGNOSTICS section. Naming chosen
+  as `usage` (descriptive — "what have I used") over `quota`
+  ("hard cap") since Monday's budget is a soft rolling window.
 
 ## Doc-only gaps (no behavior change, just clearer contract)
 
