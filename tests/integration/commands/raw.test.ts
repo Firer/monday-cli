@@ -415,6 +415,57 @@ describe('monday raw (integration)', () => {
     expect(env.data?.create_workspace?.id).toBe('999');
   });
 
+  it('mutation + --dry-run: emits planned-change envelope, no wire call (M6 P1)', async () => {
+    // cli-design §9.2 binds every mutating command to support
+    // `--dry-run`. Pre-fix, raw silently sent the mutation
+    // regardless. The fix emits the §6.4 dry-run envelope and
+    // skips the network entirely (cassette stays empty).
+    const out = await drive(
+      [
+        'raw',
+        'mutation Bump { create_workspace(name: "X", kind: open) { id } }',
+        '--allow-mutation',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data).toBeNull();
+    expect(env.meta.dry_run).toBe(true);
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes).toHaveLength(1);
+    const planned = env.planned_changes[0];
+    expect(planned).toMatchObject({
+      operation: 'raw_graphql',
+      operation_kind: 'mutation',
+      operation_name: 'Bump',
+    });
+    expect(planned?.query).toContain('mutation Bump');
+  });
+
+  it('query + --dry-run: --dry-run is a no-op (read-only) and the query executes', async () => {
+    // cli-design §9.2 only binds `--dry-run` for *mutating*
+    // commands. Queries are read-only, so `--dry-run` is a
+    // no-op and the document goes out as normal.
+    const out = await drive(
+      ['raw', '{ me { id name } }', '--dry-run', '--json'],
+      { interactions: [meQueryInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data?: { me?: { id?: string } };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data?.me?.id).toBe('7');
+    expect(env.meta.source).toBe('live');
+  });
+
   it('subscription always rejected (HTTP transport can\'t carry it)', async () => {
     const out = await drive(
       [

@@ -60,13 +60,19 @@
  * --all` / `item search --all` verbs handle the walk; `raw` doesn't,
  * because it can't tell which selection set is the cursor source.
  *
- * **Idempotency** depends on the query — `query { … }` operations
- * are idempotent reads; `mutation { … }` operations may or may not
- * be. The `idempotent` slot on the `CommandModule` is `false`
- * because we can't tell at registration time. Callers that want
- * preview before execute should hand-roll a query → review → run
- * dance; `--dry-run` does NOT short-circuit raw because the CLI
- * has no insight into what the document does.
+ * **Idempotency + dry-run.** Idempotency depends on the document —
+ * `query { … }` operations are idempotent reads; `mutation { … }`
+ * operations may or may not be. The `idempotent` slot on the
+ * `CommandModule` is `false` (we can't narrow at registration
+ * time). For `--dry-run`: cli-design §9.2 binds every mutating
+ * command to support it, so when the analyser detects a mutation
+ * AND `--dry-run` is set, the command emits a §6.4 dry-run
+ * envelope (`data: null`, `meta.dry_run: true`,
+ * `planned_changes: [{operation: 'raw_graphql', kind: 'mutation',
+ * operation_name, query, variables}]`) and skips the network call
+ * entirely (no `resolveClient`, `meta.source: 'none'`). For
+ * read-only documents `--dry-run` is a no-op — there's no mutation
+ * to "not execute" — and the query runs normally.
  *
  * **No envelope summarisation.** Monday's response shape is
  * passed through verbatim under `data`. A schema-validating
@@ -76,11 +82,13 @@
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import type { CommandModule } from '../types.js';
-import { emitSuccess } from '../emit.js';
+import { emitSuccess, emitDryRun } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError } from '../../utils/errors.js';
 import { analyzeRawDocument } from '../../api/raw-document.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
+import { PINNED_API_VERSION } from '../../api/client.js';
 import type { RunContext } from '../../cli/run.js';
 
 const inputSchema = z
@@ -408,6 +416,41 @@ export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
           explicitOperationName: parsed.operationName,
           allowMutation: parsed.allowMutation,
         });
+
+        // §9.2 binds every mutating command to honour `--dry-run`.
+        // When the analyser detected a mutation AND `--dry-run` is
+        // set, emit the planned-change envelope and skip the wire
+        // call entirely. `resolveClient` is intentionally NOT called:
+        // no auth, no network, no `setSource('live')` commit. This
+        // closes Codex M6 pass-4 P1 — pre-fix, `monday raw 'mutation
+        // ...' --allow-mutation --dry-run` silently sent the
+        // mutation. For read-only documents `--dry-run` is a no-op
+        // (queries don't mutate) so the query path keeps running.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        if (globalFlags.dryRun && analysis.hasMutation) {
+          const apiVersion =
+            globalFlags.apiVersion ??
+            ctx.env.MONDAY_API_VERSION ??
+            PINNED_API_VERSION;
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'raw_graphql',
+                operation_kind: 'mutation',
+                operation_name: analysis.operationName ?? null,
+                query: queryDoc,
+                variables: vars,
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
 
         const { client, toEmit } = resolveClient(ctx, program.opts());
 
