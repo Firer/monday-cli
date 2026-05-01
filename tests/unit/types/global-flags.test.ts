@@ -151,6 +151,13 @@ describe('parseGlobalFlags — columns split', () => {
   it('a single column is a single-element array, not a bare string', () => {
     expect(runArgv(['--columns', 'id']).columns).toEqual(['id']);
   });
+
+  it('all-comma input collapses to undefined (post-trim empty)', () => {
+    // Drives the `parts.length === 0 → undefined` branch in
+    // splitColumns: `,,,` splits into ["","",""], all trim to "",
+    // all filtered out, length 0 → undefined (not an empty array).
+    expect(runArgv(['--columns', ',,,']).columns).toBeUndefined();
+  });
 });
 
 describe('parseGlobalFlags — numeric coercion', () => {

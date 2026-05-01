@@ -187,6 +187,14 @@ describe('redact — extension points', () => {
       apiToken: '<hidden>',
     });
   });
+
+  it('extraKeys with no match leaves the value untouched', () => {
+    // Drives the "extraKeys loop iterates without matching" branch
+    // — extraKey list is non-empty but the input key doesn't match.
+    expect(redact({ harmless: 'value' }, { extraKeys: ['secretField'] })).toEqual(
+      { harmless: 'value' },
+    );
+  });
 });
 
 describe('redact — token-string scrub end-to-end', () => {
@@ -233,6 +241,17 @@ describe('redact — value-scanning (Codex review §1)', () => {
     const out = redact(err, { secrets: [TOKEN] }) as { stack: string };
     expect(out.stack.includes(TOKEN)).toBe(false);
     expect(out.stack).toContain('[REDACTED]');
+  });
+
+  it('handles an Error with stack=undefined (custom subclass)', () => {
+    // Some custom Error subclasses or env-cleaned errors don't carry
+    // `.stack`. The redactor's Error-branch must not blow up — it
+    // should just omit the stack from the cloned shape.
+    const err = new Error('boom');
+    Object.defineProperty(err, 'stack', { value: undefined, configurable: true });
+    const out = redact(err, { secrets: [TOKEN] }) as Record<string, unknown>;
+    expect(out.message).toBe('boom');
+    expect(out).not.toHaveProperty('stack');
   });
 
   it('scrubs the token from a chained Error.cause.message', () => {

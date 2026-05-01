@@ -137,9 +137,38 @@ describe('projectColumnValue — typed inline fields', () => {
     expect(out.index).toBeNull();
   });
 
+  it('handles unset status value (null label / non-numeric index) gracefully', () => {
+    // Drives projectStatus's per-key typeof guards (`label === 'string'`
+    // and `index === 'number'` ternaries) — Monday returns this exact
+    // shape for a status column that's been cleared in the UI: the
+    // value is a valid JSON object, but `label` is null and `index`
+    // is missing. Pre-guard, the projector would echo `null` as a
+    // valid string label, masking the unset state.
+    const out = projectColumnValue(
+      cv({ value: '{"label":null}' }),
+      undefined,
+    );
+    expect(out.value).toEqual({ label: null });
+    expect(out.label).toBeNull();
+    expect(out.index).toBeNull();
+  });
+
   it('handles malformed date value gracefully', () => {
     const out = projectColumnValue(
       cv({ type: 'date', value: 'garbage' }),
+      undefined,
+    );
+    expect(out.date).toBeNull();
+    expect(out.time).toBeNull();
+  });
+
+  it('handles unset date value (object with missing date/time keys) gracefully', () => {
+    // Drives projectDate's per-key typeof guards — Monday returns
+    // `{}` for a date column that's been cleared. Both `v.date` and
+    // `v.time` are undefined, both ternaries take the else branch
+    // (returning null).
+    const out = projectColumnValue(
+      cv({ type: 'date', value: '{}' }),
       undefined,
     );
     expect(out.date).toBeNull();

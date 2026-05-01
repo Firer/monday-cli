@@ -240,6 +240,26 @@ describe('monday update create (integration, M5b)', () => {
     updated_at: '2026-04-30T11:00:00Z',
   };
 
+  it('surfaces internal_error when Monday returns a null create_update payload', async () => {
+    // Drives the projectCreatedUpdate null-guard — Monday returning
+    // `create_update: null` is unexpected but possible. The guard
+    // surfaces it as internal_error rather than a TypeError.
+    const out = await drive(
+      ['update', 'create', '12345', '--body', 'x', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateCreate',
+            response: { data: { create_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
   it('live: --body posts the comment and emits the projected update', async () => {
     const out = await drive(
       ['update', 'create', '12345', '--body', 'Done — moved to QA.', '--json'],

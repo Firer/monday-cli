@@ -415,6 +415,33 @@ describe('monday raw (integration)', () => {
     expect(env.data?.create_workspace?.id).toBe('999');
   });
 
+  it('anonymous mutation + --dry-run: operation_name echoes null', async () => {
+    // Drives raw/index.ts:451 `analysis.operationName ?? null` — when
+    // the mutation has no name (`mutation { ... }`), the planned-change
+    // shape echoes operation_name as JSON null, not omits the field.
+    // Agents reading the dry-run envelope rely on the slot being
+    // present even for unnamed mutations.
+    const out = await drive(
+      [
+        'raw',
+        'mutation { create_workspace(name: "X", kind: open) { id } }',
+        '--allow-mutation',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(env.planned_changes[0]).toMatchObject({
+      operation: 'raw_graphql',
+      operation_kind: 'mutation',
+      operation_name: null,
+    });
+  });
+
   it('mutation + --dry-run: emits planned-change envelope, no wire call (M6 P1)', async () => {
     // cli-design §9.2 binds every mutating command to support
     // `--dry-run`. Pre-fix, raw silently sent the mutation

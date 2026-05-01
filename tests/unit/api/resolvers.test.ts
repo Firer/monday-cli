@@ -362,4 +362,47 @@ describe('userByEmail — directory cache + live fallback', () => {
     });
     expect(stats.calls).toBe(2);
   });
+
+  it('treats a missing `users` field on the live response as empty', async () => {
+    // Drives the `response.data.users ?? []` ?? branch — Monday
+    // returning `{ data: {} }` (no `users` selection) is rare but
+    // possible (defensive partial response). Should surface as
+    // user_not_found, not crash on undefined.
+    const stats = { calls: 0 };
+    const client = buildClient([{}], stats);
+    await expect(
+      userByEmail({ client, email: 'nobody@example.test', env: xdgEnv() }),
+    ).rejects.toMatchObject({ code: 'user_not_found' });
+  });
+
+  it('uses plural "issues" in the error message when multiple fields are malformed', async () => {
+    // Drives the `issues.length === 1 ? '' : 's'` plural branch —
+    // a single malformed user only produces one issue (just `id`),
+    // so we need a response with two malformed users to force >=2
+    // issues. Mirrors the malformed-id-each test but on the
+    // multi-user shape.
+    const stats = { calls: 0 };
+    const client = buildClient(
+      [
+        {
+          users: [
+            { ...alice, id: '0x2a' },
+            { ...alice, id: '1e3', email: 'bob@example.test' },
+          ],
+        },
+      ],
+      stats,
+    );
+    let thrown: unknown;
+    try {
+      await userByEmail({ client, email: alice.email, env: xdgEnv() });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ApiError);
+    const apiErr = thrown as ApiError;
+    expect(apiErr.message).toMatch(/at \d+ issues\./u);
+    const details = apiErr.details as { issues: readonly unknown[] };
+    expect(details.issues.length).toBeGreaterThanOrEqual(2);
+  });
 });

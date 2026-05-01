@@ -43,6 +43,29 @@ describe('monday item set (integration, M5b)', () => {
     ],
   };
 
+  it('surfaces internal_error when Monday returns a null mutation payload', async () => {
+    // Drives the projectMutationItem null-guard — Monday returning
+    // `change_column_value: null` from a mutation is unexpected but
+    // possible (rare server-side glitch). The guard surfaces it as
+    // a typed internal_error rather than crashing on a TypeError.
+    const out = await drive(
+      ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.message).toMatch(/no item payload/u);
+  });
+
   it('live: --board explicit + status (rich) mutation succeeds; projected item envelope emitted', async () => {
     const out = await drive(
       ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],

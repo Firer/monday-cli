@@ -41,6 +41,27 @@ describe('monday item clear (integration, M5b)', () => {
     ],
   };
 
+  it('surfaces internal_error when Monday returns a null mutation payload', async () => {
+    // Drives the projectMutationItem null-guard — Monday returning
+    // `change_column_value: null` is unexpected but possible. The
+    // guard surfaces it as internal_error rather than a TypeError.
+    const out = await drive(
+      ['item', 'clear', '12345', 'status', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
   it('live: rich type (status) → change_column_value with empty {} payload', async () => {
     const out = await drive(
       ['item', 'clear', '12345', 'status', '--board', '111', '--json'],

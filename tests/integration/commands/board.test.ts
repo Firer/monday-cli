@@ -127,11 +127,50 @@ describe('monday board get', () => {
     expect(env.error?.code).toBe('not_found');
   });
 
+  it('not_found when Monday returns a non-object data slot (defensive)', async () => {
+    // Drives the run-by-id-lookup helper's structural guards
+    // (`isObject(data)` false → null collection → undefined first →
+    // not_found). Defensive against a malformed proxy / version-skew
+    // response. Without the guards, the runner would surface
+    // internal_error from a TypeError.
+    const out = await drive(
+      ['board', 'get', '111', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardGet', response_body: { data: null } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
   it('rejects a non-numeric id at the parse boundary (usage_error)', async () => {
     const out = await drive(['board', 'get', 'abc', '--json'], { interactions: [] });
     expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
+  });
+});
+
+describe('monday board find — null-data resilience', () => {
+  it('treats a missing `boards` field on the response as empty (not_found)', async () => {
+    // Drives the `r.data.boards ?? []` ?? branch — Monday returning
+    // `{ data: {} }` from BoardFind (no boards selection) shouldn't
+    // crash the walker; the empty array surfaces as not_found per
+    // the unique-match contract.
+    const out = await drive(
+      ['board', 'find', 'Tasks', '--json'],
+      {
+        interactions: [
+          { operation_name: 'BoardFind', response_body: { data: {} } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
   });
 });
 
