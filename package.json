@@ -1,6 +1,6 @@
 {
   "name": "monday-cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "CLI for interacting with Monday.com (and Monday Dev) — designed for AI coding agents and humans alike.",
   "type": "module",
   "private": true,
