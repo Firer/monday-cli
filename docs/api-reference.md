@@ -120,6 +120,13 @@ construct a mutation against any M5b-writable column without
 consulting Monday's docs. Ships live for v0.1 reads; M5b mutations
 read it through the cached `loadBoardMetadata` helper.
 
+`monday board doctor <bid>` (M6) layers diagnostics on top of the
+same metadata: duplicate column titles (would cause
+`ambiguous_column` at write time), columns with non-writable types
+(per the v0.1 / v0.2 / read-only-forever roadmap split), and
+broken `board_relation` targets. Run it before a bulk update
+session to catch problems up front.
+
 ## Monday Dev specifics
 
 Monday Dev is built on top of normal boards/items with conventions:

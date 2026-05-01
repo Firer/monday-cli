@@ -17,16 +17,20 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1 implementation in progress; M0–M5b shipped; M6 next.**
+**v0.1 implementation in progress; M0–M6 shipped; M7 (release prep)
+next.**
 The CLI has a working network surface across 5 nouns (account /
 workspace / board / user / update / item reads + the four M5b
 mutation commands: `item set` / `item clear` / `item update`
-single + bulk / `update create`), local-only commands (cache /
+single + bulk / `update create`), the M6 diagnostics + escape
+hatch (`board doctor` + `raw`), local-only commands (cache /
 config / schema), filter DSL (`--where` + `--filter-json`),
 cursor-based pagination with stale-cursor fail-fast + NDJSON
 streaming, and the foundations every later milestone depends on
 (typed errors, universal envelope, redaction, retry/abort, fixture
-transport).
+transport). The agent-flow E2E (`tests/e2e/agent-flow.test.ts`)
+exercises the full v0.1 contract across four binary spawns —
+`item list` → `item set` → `item set` → `update create`.
 Two binding documents:
 
 - **[`docs/cli-design.md`](./docs/cli-design.md)** (~1,700 lines) —
@@ -54,7 +58,7 @@ Two binding documents:
 | M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
 | M5a | shipped | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads) + `dry-run.ts` (M3 column resolution + R12 cache-miss-refresh + M5a translation + item-state read; all-or-nothing semantics + cli-design §6.4 byte-snapshot exit gate; resolver-warning preservation across `column_archived` throws) + `me-token.ts` (R15 shared `isMeToken` helper) + `DECIMAL_USER_ID_PATTERN` lift (R16) + R17 ZodError wrap at `userByEmail`. |
 | M5b | shipped | All four mutation commands: `item set` (single-column write) + `item clear` (per-type dedicated clear payload) + `item update` (multi-`--set` atomic + bulk `--where` w/ `confirmation_required`) + `update create` (`--body` / `--body-file` / stdin, `--dry-run` supported despite non-idempotent). Five supporting refactors: `item-helpers.ts` lift (R9 — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` + `collectColumnHeads` + `titleMap` + `resolveMeFactory` + `projectFromRaw` + `parseRawItem`) + `collectSecrets` consolidation (R10) + `resolveColumnsAcrossClauses` lift (R12) + `parse-boundary.ts unwrapOrThrow` (R18 — `board-metadata` + `item-helpers` + `emit.ts` drift catch) + `resolver-error-fold.ts` lift (R19 — `foldResolverWarningsIntoError` + `mergeDetails` + `maybeRemapValidationFailedToArchived`, six consumers); `emitMutation` + `emitDryRun` emit helpers; `MutationEnvelope.resolved_ids` echo per cli-design §5.3 step 2; `boardLookupResponseSchema` for implicit board lookup; `validation_failed` → `column_archived` remap on cache-sourced resolution (single + bulk per-item). |
-| M6 | future | `board doctor`, `raw`, agent-flow E2E |
+| M6 | shipped | `board doctor` (3 diagnostic kinds: duplicate_column_title / unsupported_column_type per roadmap category / broken_board_relation) + `raw` (GraphQL escape hatch w/ `<query>` positional, `--query-file <path|->`, `--vars <json>`, `--vars-file <path|->`) + agent-flow E2E (4-spawn list → start → done → comment) |
 | M7 | future | release prep |
 
 > **If you're implementing anything in this repo, read

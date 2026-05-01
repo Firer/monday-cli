@@ -406,7 +406,39 @@
   pattern so each consumer is a one-line call rather than
   20-30 lines of inline fold + remap. Lifted on the third
   consumer per the §17 R-class timing rule (item set + dry-
-  run engine → item clear was the third).
+  run engine → item clear was the third). M5b cleanup
+  generalised the remap from a single `columnId` to a
+  `columnIds: readonly string[]` array so multi-column
+  updates probe every translated column for the archived
+  flag, not just `translated[0]`.
+
+- `commands/raw/index.ts` (M6) — generic GraphQL escape
+  hatch. Six argv shapes (positional `<query>` /
+  `--query-file <path|->` × `--vars <json>` /
+  `--vars-file <path|->` / no vars), each with empty-after-
+  trim rejection. `--query-file -` and `--vars-file -` are
+  mutually exclusive (one stdin reader per call). Variables
+  must parse to a plain JSON object — null / array /
+  primitive surface as `usage_error`. Result wrapped in
+  the §6 envelope; raw GraphQL/HTTP errors map via the
+  existing `api/errors.ts` chain so error codes are stable
+  even on raw queries.
+
+- `commands/board/doctor.ts` (M6) — three diagnostic kinds:
+  `duplicate_column_title` (NFC + case-fold + whitespace-
+  collapse, same as the §5.3 column resolver, so doctor's
+  "duplicate" matches runtime's "ambiguous"),
+  `unsupported_column_type` (per non-allowlisted column,
+  keyed by `column-types.ts getColumnRoadmapCategory`'s
+  three-category split — agents reading doctor output get
+  the same `read_only_forever` / `v0.2_writer_expansion` /
+  `future` classification the runtime's
+  `unsupportedColumnTypeError` ships), and
+  `broken_board_relation` (parses `settings_str.boardIds`
+  for every `board_relation` column, queries linked boards
+  via `boards(ids:)` aggregated into one round-trip, flags
+  any archived/deleted/unreachable target). Force-refreshes
+  metadata so diagnostics describe live state.
 
 ### Hard rules
 
