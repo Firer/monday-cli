@@ -515,6 +515,34 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 
+  it('user-input canary: malformed --set expression echoing the token is redacted', async () => {
+    // Codex M5b finding #4 (P2): coverage proof for the value-
+    // scanning redactor on user-input echo paths. update.ts:300
+    // splits each --set expr on `=` and surfaces a UsageError that
+    // echoes the malformed input via `JSON.stringify(raw)` and
+    // `details.input: raw`. Drive a malformed `--set` whose value
+    // literally contains the canary bytes; verify the redactor
+    // scrubs them before any envelope reaches stdout/stderr.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        LEAK_CANARY, // no `=` → splitSetExpression rejects
+        '--board',
+        '111',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    // No `=` triggers splitSetExpression's UsageError before any
+    // network call fires → usage_error, exit 1.
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+
   it('rejects empty bulk-shape (no positional, no --where, no --filter-json) as usage_error', async () => {
     // validateInputShape's "no item ID + no filter" arm — covers
     // the second UsageError branch. The zod refinement requires

@@ -475,4 +475,23 @@ describe('monday update create (integration, M5b)', () => {
     expect(out.stdout).not.toContain(LEAK_CANARY);
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
+
+  it('user-input canary: --body-file path containing the token is redacted on read failure', async () => {
+    // Codex M5b finding #4 (P2): coverage proof for the value-
+    // scanning redactor on a user-input echo path that landed in
+    // M5b. `update create --body-file <path>` echoes the path via
+    // `JSON.stringify(bodyFile)` and `details.body_file` when the
+    // read fails. Drive a non-existent path whose name LITERALLY
+    // CONTAINS the canary bytes and verify the redactor scrubs
+    // them before the UsageError envelope is emitted.
+    const path = `/tmp/nonexistent-${LEAK_CANARY}.md`;
+    const out = await drive(
+      ['update', 'create', '12345', '--body-file', path, '--json'],
+      { interactions: [] },
+    );
+    // ENOENT → UsageError, exit 1.
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
 });

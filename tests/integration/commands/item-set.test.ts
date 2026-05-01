@@ -987,6 +987,27 @@ describe('monday item set (integration, M5b)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 
+  it('user-input canary: malformed --set expression echoing the token is redacted', async () => {
+    // Codex M5b finding #4 (P2): coverage proof for the value-
+    // scanning redactor on the user-input echo path. M5b error
+    // messages echo user-controlled strings — the splitSetExpression
+    // UsageError emits `JSON.stringify(raw)` in the message and
+    // `details.input: raw`. The previous canary tests asserted that
+    // the env-loaded token doesn't leak; this one drives a malformed
+    // `<col>=<val>` expression that LITERALLY CONTAINS the canary
+    // bytes and verifies the redactor scrubs them before emit.
+    const malformed = LEAK_CANARY; // no `=` → splitSetExpression rejects
+    const out = await drive(
+      ['item', 'set', '12345', malformed, '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    // splitSetExpression throws before any network call fires →
+    // usage_error with exit 1.
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+
   it('live: cache-sourced resolution surfaces source: "mixed" on the success envelope', async () => {
     // Covers set.ts:446 — when the column resolution serves from
     // cache, the success envelope reports source: 'mixed' (the
