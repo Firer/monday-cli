@@ -32,10 +32,11 @@
   discussed on this board today?" *Suggested slot: v0.2.*~~ → now in
   cli-design §13 v0.2 + §4.3 `update list --board <bid>` entry.
 
-- **`monday update list <iid> --with-replies`** — comment-thread
+- ~~**`monday update list <iid> --with-replies`** — comment-thread
   expansion. Today only top-level updates surface; replies are a
   separate Monday query. Pairs naturally with `update reply`
-  (already v0.2). *Suggested slot: v0.2.*
+  (already v0.2). *Suggested slot: v0.2.*~~ → now in cli-design §13
+  v0.2 + §4.3 `update list <iid>` `--with-replies` comment.
 
 - **NDJSON streaming on `item search` / `update list`** — today
   only `item list` (v0.1) and `item watch` (v0.4) stream. Long

@@ -510,6 +510,7 @@ monday item subitems <iid>                # list children                    v0.
 
 # === UPDATE (comments) ===
 monday update list <iid>                  # comments on an item              v0.1
+                                          # --with-replies: thread expansion (v0.2)
 monday update list --board <bid>          # all updates across the board     v0.2
 monday update get <uid>                                                      v0.1
 monday update create <iid> --body <md> | --body-file <path>                  v0.1
@@ -1841,6 +1842,9 @@ scoped idempotent changes, and post comments narrating its work.**
 - `update list --board <bid>` — board-wide updates feed (companion to
   the per-item `update list <iid>` already in v0.1; pairs with the
   v0.2 update mutations above)
+- `update list <iid> --with-replies` — comment-thread expansion;
+  v0.1 surfaces only top-level updates, reply trees require a nested
+  Monday query that pairs with `update reply` above
 - `board create/archive/delete/duplicate`
 - `board column-create/column-update/column-delete`
 - `board group-create/group-update/group-archive/group-duplicate/group-delete`
