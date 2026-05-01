@@ -106,6 +106,26 @@ describe('exampleSetForColumn — every writable column type', () => {
       `--set owner=me`,
     ]);
   });
+
+  it('link: bare URL + pipe form', () => {
+    expect(exampleSetForColumn(col({ id: 'site', type: 'link' }))).toEqual([
+      `--set site=https://example.com`,
+      `--set site='https://example.com|Site'`,
+    ]);
+  });
+
+  it('email: single email + pipe form', () => {
+    expect(exampleSetForColumn(col({ id: 'contact', type: 'email' }))).toEqual([
+      `--set contact=alice@example.com`,
+      `--set contact='alice@example.com|Alice'`,
+    ]);
+  });
+
+  it('phone: pipe form (mandatory <phone>|<country>)', () => {
+    expect(exampleSetForColumn(col({ id: 'mobile', type: 'phone' }))).toEqual([
+      `--set mobile='+15551234567|US'`,
+    ]);
+  });
 });
 
 describe('exampleSetForColumn — non-writable types', () => {
@@ -118,7 +138,11 @@ describe('exampleSetForColumn — non-writable types', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    'phone',
+    // M8 tentative-row v0.2 types — still unwritable via the friendly
+    // translator until fixture work clears.
+    'tags',
+    'board_relation',
+    'dependency',
     'rating',
   ])('%s returns null', (type) => {
     expect(exampleSetForColumn(col({ type }))).toBeNull();

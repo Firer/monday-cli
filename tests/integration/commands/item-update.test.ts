@@ -657,13 +657,13 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     // err instanceof MondayCliError check after translation).
     // Path B (M5b cleanup): the error advertises v0.2's writer-
     // expansion milestone instead of a dead --set-raw suggestion.
-    const linkMeta = {
+    const tagsMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'link_42',
-          title: 'External link',
-          type: 'link',
+          id: 'tags_42',
+          title: 'Tags',
+          type: 'tags',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -677,7 +677,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         'update',
         '12345',
         '--set',
-        'link_42=https://example.com',
+        'tags_42=Backend',
         '--board',
         '111',
         '--json',
@@ -686,7 +686,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [linkMeta] } },
+            response: { data: { boards: [tagsMeta] } },
           },
         ],
       },

@@ -18,19 +18,27 @@
  */
 
 /**
- * v0.1-allowlisted column types per `cli-design.md` §5.3.3. Order is
- * frozen — not because Sets are ordered, but because tests iterate
- * the array form and the snapshot is part of the contract surface.
+ * Writable column types per `cli-design.md` §5.3.3 + the v0.2 writer-
+ * expansion roadmap (M8). Order is frozen — not because Sets are
+ * ordered, but because tests iterate the array form and the snapshot
+ * is part of the contract surface. v0.1 entries appear first (they
+ * shipped first); M8 firm additions follow in roadmap order.
  *
- * Three categories baked into the same allowlist:
+ * Categories baked into the same allowlist:
  *   - **simple** (`text` / `long_text` / `numbers`) — translate to a
  *     bare string and use `change_simple_column_value`.
- *   - **rich** (`status` / `dropdown` / `date` / `people`) — translate
- *     to a JSON object and use `change_column_value` /
+ *   - **rich (v0.1)** (`status` / `dropdown` / `date` / `people`) —
+ *     translate to a JSON object and use `change_column_value` /
  *     `change_multiple_column_values`.
+ *   - **rich (v0.2 firm)** (`link` / `email` / `phone`) — pipe-form
+ *     `<value>|<text>` parsers in `links.ts` / `emails.ts` /
+ *     `phones.ts`; same `change_column_value` wire path.
  *
  * The split lives in `column-values.ts`; here we just enumerate the
- * v0.1 allowlist itself.
+ * full allowlist. Tentative v0.2 types (`tags` / `board_relation` /
+ * `dependency`) stay in `V0_2_WRITER_EXPANSION_TYPES` until their
+ * fixture work clears — they ship firm via the same array's expansion
+ * once translators land, or slip to v0.3 in the M8 post-mortem.
  */
 export const WRITABLE_COLUMN_TYPES = [
   'text',
@@ -40,6 +48,9 @@ export const WRITABLE_COLUMN_TYPES = [
   'dropdown',
   'date',
   'people',
+  'link',
+  'email',
+  'phone',
 ] as const;
 
 export type WritableColumnType = (typeof WRITABLE_COLUMN_TYPES)[number];
@@ -76,24 +87,20 @@ export const parseColumnSettings = (raw: string | null): unknown => {
 };
 
 /**
- * Column types the v0.2 writer-expansion milestone will add to the
- * friendly translator (`cli-design.md` §5.3 writer-expansion roadmap
- * table). v0.2 also lands the `--set-raw <col>=<json>` escape hatch.
+ * Column types still pending in the v0.2 writer-expansion milestone
+ * (`cli-design.md` §5.3 writer-expansion roadmap table). M8 shipped
+ * `link` / `email` / `phone` firm — those moved to
+ * `WRITABLE_COLUMN_TYPES` and are no longer surfaced here. The
+ * remaining three are M8's tentative row; their fixture work decides
+ * whether they ship firm in v0.2 (move to `WRITABLE_COLUMN_TYPES`) or
+ * slip to v0.3 (move to a v0.3 deferral surfaced via the same
+ * roadmap-category branch).
+ *
  * Source-of-truth alongside `WRITABLE_COLUMN_TYPES` so the
  * `unsupported_column_type` error builder can give per-type-accurate
  * guidance instead of blanket-deferring every non-allowlisted type.
- *
- * `tags` / `board_relation` / `dependency` are tentative on the
- * roadmap (table calls them "may slip to v0.3"); we still surface
- * them as v0.2-deferred today because the agent-facing message
- * ("v0.2's writer-expansion adds this") is right whether they ship
- * in v0.2 or get re-slotted. If they slip, the writer-expansion
- * milestone post-mortem updates this list.
  */
 export const V0_2_WRITER_EXPANSION_TYPES = [
-  'link',
-  'email',
-  'phone',
   'tags',
   'board_relation',
   'dependency',
@@ -138,22 +145,74 @@ const READ_ONLY_FOREVER_SET: ReadonlySet<string> = new Set<string>(
 );
 
 /**
+ * Membership test for the read-only-forever row. Used by `--set-raw`
+ * (M8) to reject these types post-resolution per cli-design §5.3
+ * escape-hatch contract — Monday's API never makes them writable
+ * regardless of payload, so accepting a raw payload would just shift
+ * the failure from CLI-time to Monday-time.
+ */
+export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType =>
+  READ_ONLY_FOREVER_SET.has(type);
+
+/**
+ * Column types Monday writes via `add_file_to_column` (file upload
+ * via multipart) rather than `change_column_value` / `change_multiple_
+ * column_values` (`cli-design.md` §5.3 writer-expansion roadmap "files"
+ * row + the escape-hatch contract).
+ *
+ * The friendly translator and `--set-raw` both go through
+ * `change_column_value` / `change_multiple_column_values`, so a
+ * `--set-raw` raw payload cannot reach the right wire surface for
+ * these types — `--set-raw` rejects them with `unsupported_column_
+ * type` carrying `deferred_to: "v0.4"` (asset upload pinned to v0.4
+ * per cli-design §13).
+ *
+ * Currently one entry (`file`); the slot is plural because Monday may
+ * surface other multipart-upload-shaped types in future API versions
+ * and the contract should accommodate adding rows without touching
+ * the consumer.
+ */
+export const FILES_SHAPED_TYPES = ['file'] as const;
+
+export type FilesShapedType = (typeof FILES_SHAPED_TYPES)[number];
+
+const FILES_SHAPED_SET: ReadonlySet<string> = new Set<string>(
+  FILES_SHAPED_TYPES,
+);
+
+/**
+ * Membership test for the files-shaped row. Used by `--set-raw` (M8)
+ * to reject these types post-resolution per cli-design §5.3 escape-
+ * hatch contract — the underlying mutation isn't `change_column_value`
+ * so a raw payload can't reach the right wire surface.
+ */
+export const isFilesShapedType = (type: string): type is FilesShapedType =>
+  FILES_SHAPED_SET.has(type);
+
+/**
  * Roadmap category for an unsupported column type. The
  * `unsupported_column_type` error builder uses this to pick a
  * per-category message + details slot.
  *
- *   - `'v0_2_writer_expansion'` — link / email / phone / tags
- *     (tentative) / board_relation (tentative) / dependency
- *     (tentative). Surfaces `deferred_to: "v0.2"` and says the
- *     v0.2 writer-expansion milestone adds the friendly type +
- *     `--set-raw`.
+ *   - `'v0_2_writer_expansion'` — tentative-row v0.2 types still
+ *     pending (`tags` / `board_relation` / `dependency`). Surfaces
+ *     `deferred_to: "v0.2"` and points at the writer-expansion
+ *     milestone. M8 shipped `link` / `email` / `phone` firm so the
+ *     branch no longer fires for those types — they resolve through
+ *     the friendly translator.
  *   - `'read_only_forever'` — Monday-computed columns (mirror /
  *     formula / auto_number / creation_log / last_updated /
  *     item_id). Surfaces `read_only: true` and points at the
- *     underlying source column.
+ *     underlying source column. `--set-raw` rejects these too —
+ *     the read-only-forever check fires after column resolution
+ *     but before mutation.
  *   - `'future'` — any other unsupported type (battery /
  *     item_assignees / time_tracking / rating / files / etc.).
- *     Surfaces `deferred_to: "future"` with a generic message.
+ *     Surfaces `deferred_to: "future"` with a generic message that
+ *     doesn't commit to a specific version. The friendly translator
+ *     rejects; `--set-raw` accepts when the underlying mutation is
+ *     `change_column_value` (files-shaped types like `file` are a
+ *     v0.4 deferral and `--set-raw` rejects them too).
  *
  * Codex M5b cleanup re-review #1: pre-fix `unsupportedColumnType
  * Error` blanket-deferred every non-allowlisted type to v0.2, which

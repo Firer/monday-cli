@@ -561,23 +561,22 @@ describe('translateColumnValue — sync entry on a people column', () => {
   });
 });
 
-describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion)', () => {
-  // Codex M5b cleanup re-review #1: types on the v0.2 writer-
-  // expansion roadmap (link / email / phone / tags / board_relation
-  // / dependency) get `deferred_to: "v0.2"` because v0.2 will add
-  // both the friendly translator AND --set-raw for them. Non-v0.2,
-  // non-read-only types fall into the "future" branch (separate
-  // describe below).
+describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion tentatives)', () => {
+  // M8 firm row (link / email / phone) ships in WRITABLE_COLUMN_TYPES
+  // — those are tested as happy-path translators below, not here. The
+  // tentative row (tags / board_relation / dependency) stays
+  // unsupported until the per-account directory + linked-board
+  // enumeration design clears; their `unsupported_column_type` errors
+  // continue to point at v0.2 writer-expansion. The `--set-raw`
+  // escape hatch (M8) accepts these types in the meantime — the
+  // hint surfaces that.
   it.each([
-    'link',
-    'email',
-    'phone',
     'tags',
     'board_relation',
     'dependency',
   ])('%s → unsupported_column_type with deferred_to: v0.2', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
-      /not in the v0.1/u,
+      /not yet in the friendly --set translator allowlist/u,
     );
     try {
       translate(type, 'whatever', 'col_z');
@@ -588,13 +587,13 @@ describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion)
         column_id: 'col_z',
         type,
         deferred_to: 'v0.2',
-        hint: expect.stringContaining('v0.2') as unknown,
+        hint: expect.stringContaining('--set-raw') as unknown,
       });
-      // Negative assertions: no dead v0.1 --set-raw suggestion;
-      // no read_only flag (this type IS writable, just not yet).
+      // Negative assertions: no dead `set_raw_example` slot; no
+      // read_only flag (this type IS writable via --set-raw and the
+      // friendly translator is just pending).
       expect(err.details).not.toHaveProperty('set_raw_example');
       expect(err.details).not.toHaveProperty('read_only');
-      expect(err.message).not.toMatch(/Use --set-raw/u);
     }
   });
 });
@@ -654,7 +653,7 @@ describe('translateColumnValue — future-roadmap types', () => {
     'rating',
   ])('%s → unsupported_column_type with deferred_to: future', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
-      /not in the v0.1/u,
+      /not in the friendly --set translator allowlist/u,
     );
     try {
       translate(type, 'whatever', 'col_z');
@@ -1164,18 +1163,18 @@ describe('translateColumnValueAsync — surface contract', () => {
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('v0.2 writer-expansion type (link) → deferred_to: "v0.2"', () => {
-    const err = unsupportedColumnTypeError('col_42', 'link');
+  it('v0.2 writer-expansion tentative (tags) → deferred_to: "v0.2"', () => {
+    // M8 firm row (link/email/phone) ships in WRITABLE_COLUMN_TYPES;
+    // tentative row (tags / board_relation / dependency) stays in the
+    // v0.2 deferral until per-account directory + linked-board
+    // enumeration design clears.
+    const err = unsupportedColumnTypeError('col_42', 'tags');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
     expect(err.retryable).toBe(false);
     expect(err.details).toMatchObject({
       column_id: 'col_42',
-      type: 'link',
-      // Codex M5b cleanup re-review #1: v0.2 writer-expansion types
-      // get `deferred_to: "v0.2"` because v0.2 lands the friendly
-      // translator AND --set-raw for them. Pre-Path-B this slot was
-      // a dead-suggestion `set_raw_example`.
+      type: 'tags',
       deferred_to: 'v0.2',
     });
     expect(err.details).not.toHaveProperty('set_raw_example');
@@ -1216,16 +1215,25 @@ describe('unsupportedColumnTypeError', () => {
     expect(err.details).not.toHaveProperty('read_only');
   });
 
-  it('all branches: hint never instructs the agent to "Use --set-raw" (v0.1 has no flag)', () => {
-    // Path B regression guard, applied across all three categories.
-    // The flag may be named in the context of v0.2 ("v0.2 adds
-    // --set-raw"), but never as a v0.1 instruction.
-    for (const type of ['link', 'mirror', 'battery']) {
-      const err = unsupportedColumnTypeError('col_42', type);
-      expect(err.message).not.toMatch(/^Use --set-raw/u);
-      const hint = (err.details as { hint?: string } | undefined)?.hint ?? '';
-      expect(hint).not.toMatch(/^pass the Monday-shape JSON with --set-raw/u);
-    }
+  it('read-only-forever branch never positively advertises --set-raw (escape hatch rejects these)', () => {
+    // Path B regression guard for the read-only-forever row. M8's
+    // `--set-raw` rejects mirror / formula / etc. post-resolution,
+    // so the unsupported_column_type error must not POSITIVELY
+    // suggest the escape hatch. The message MAY mention `--set-raw`
+    // in the negative ("Do not attempt --set / --set-raw") so an
+    // agent reading the error knows the escape hatch is out too.
+    // v0.2 writer-expansion tentatives + future types DO get
+    // pointed at --set-raw as the suggested workaround — that's
+    // the whole point of the escape hatch.
+    const err = unsupportedColumnTypeError('col_42', 'mirror');
+    // Positive-advertise patterns (forbidden):
+    expect(err.message).not.toMatch(/[Uu]se --set-raw/u);
+    expect(err.message).not.toMatch(/[Tt]ry --set-raw/u);
+    expect(err.message).not.toMatch(/[Pp]ass.*--set-raw/u);
+    const hint = (err.details as { hint?: string } | undefined)?.hint ?? '';
+    expect(hint).not.toMatch(/[Uu]se --set-raw/u);
+    expect(hint).not.toMatch(/[Tt]ry --set-raw/u);
+    expect(hint).not.toMatch(/[Pp]ass.*--set-raw/u);
   });
 });
 
@@ -1279,6 +1287,21 @@ describe('translateColumnClear', () => {
     expect(out.payload).toEqual({ format: 'rich', value: {} });
     expect(out.columnType).toBe('people');
   });
+
+  it.each(['link', 'email', 'phone'])(
+    '%s (M8 firm row) → rich empty object {} (clear via change_column_value)',
+    (type) => {
+      // M8 firm row clears match the rich-type pattern verbatim per
+      // cli-design §5.3 "Clearing column values" table — payload `{}`,
+      // mutation `change_column_value`. No special-casing.
+      const out = translateColumnClear({ id: `${type}_1`, type });
+      expect(out.payload).toEqual({ format: 'rich', value: {} });
+      expect(out.columnType).toBe(type);
+      expect(out.rawInput).toBe('');
+      expect(out.resolvedFrom).toBeNull();
+      expect(out.peopleResolution).toBeNull();
+    },
+  );
 
   it('unsupported types throw unsupported_column_type ApiError', () => {
     expect(() =>

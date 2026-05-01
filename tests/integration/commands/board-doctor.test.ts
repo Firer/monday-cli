@@ -198,16 +198,20 @@ describe('monday board doctor (integration)', () => {
     expect(dx?.category).toBe('read_only_forever');
   });
 
-  it('unsupported_column_type: v0.2-roadmap (link) surfaces with v0.2_writer_expansion category', async () => {
+  it('unsupported_column_type: v0.2-tentative (tags) surfaces with v0.2_writer_expansion category', async () => {
+    // M8 firm row (link / email / phone) is now writable through the
+    // friendly translator — board doctor no longer flags them. The
+    // tentative row (tags / board_relation / dependency) holds the
+    // v0.2_writer_expansion category until fixture work clears.
     const out = await drive(
       ['board', 'doctor', '111', '--json'],
       {
         interactions: [
           boardWithColumns([
             {
-              id: 'link_1',
-              title: 'External',
-              type: 'link',
+              id: 'tags_1',
+              title: 'Tags',
+              type: 'tags',
               description: null,
               archived: null,
               settings_str: '{}',

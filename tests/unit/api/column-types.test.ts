@@ -6,7 +6,13 @@ import {
 } from '../../../src/api/column-types.js';
 
 describe('WRITABLE_COLUMN_TYPES', () => {
-  it('matches the v0.1 §5.3.3 allowlist exactly, in declared order', () => {
+  it('matches the v0.1 + M8 firm allowlist exactly, in declared order', () => {
+    // Order is part of the contract — tests iterate the array form
+    // and downstream snapshots pin the literal sequence. v0.1 entries
+    // come first (`text` … `people`); M8 firm additions follow in
+    // roadmap order (`link` / `email` / `phone`). Tentative v0.2
+    // types (tags / board_relation / dependency) stay outside this
+    // list until their fixture work clears.
     expect(WRITABLE_COLUMN_TYPES).toEqual([
       'text',
       'long_text',
@@ -15,6 +21,9 @@ describe('WRITABLE_COLUMN_TYPES', () => {
       'dropdown',
       'date',
       'people',
+      'link',
+      'email',
+      'phone',
     ]);
   });
 });
@@ -33,7 +42,12 @@ describe('isWritableColumnType', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    'phone',
+    // M8 tentative-row types (still v0.2-deferred until fixture work
+    // clears). `tags` / `board_relation` / `dependency` are NOT in
+    // the firm allowlist yet.
+    'tags',
+    'board_relation',
+    'dependency',
     'rating',
     '',
     'TEXT', // case-sensitive — Monday types are stable lowercase strings
@@ -45,8 +59,19 @@ describe('isWritableColumnType', () => {
     const candidate = 'status' as string;
     if (isWritableColumnType(candidate)) {
       // Compile-time check: this would not type-check if the predicate
-      // didn't narrow `candidate` to `WritableColumnType`.
-      const narrowed: 'text' | 'long_text' | 'numbers' | 'status' | 'dropdown' | 'date' | 'people' = candidate;
+      // didn't narrow `candidate` to `WritableColumnType`. Union
+      // includes M8 firm additions (link / email / phone).
+      const narrowed:
+        | 'text'
+        | 'long_text'
+        | 'numbers'
+        | 'status'
+        | 'dropdown'
+        | 'date'
+        | 'people'
+        | 'link'
+        | 'email'
+        | 'phone' = candidate;
       expect(narrowed).toBe('status');
     } else {
       throw new Error('expected status to be writable');

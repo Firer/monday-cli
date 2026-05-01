@@ -458,20 +458,20 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.2 writer-expansion type (link) surfaces with deferred_to: v0.2', async () => {
-    // Codex M5b cleanup re-review #1 (companion test): types on
-    // the v0.2 writer-expansion roadmap (link / email / phone /
-    // tags / board_relation / dependency) get `deferred_to: "v0.2"`
-    // because v0.2 will land friendly translators + --set-raw for
-    // them. Pinning both branches end-to-end so a regression in
-    // either direction fails an integration test, not just a unit.
-    const linkBoard = {
+  it('live: unsupported_column_type — v0.2 writer-expansion tentative (tags) surfaces with deferred_to: v0.2', async () => {
+    // Codex M5b cleanup re-review #1 (companion test): tentative
+    // v0.2 writer-expansion types (`tags` / `board_relation` /
+    // `dependency`) still surface as `deferred_to: "v0.2"` until
+    // their friendly translators land. M8 firm row (link / email /
+    // phone) is now writable through the friendly translator and
+    // tested as happy-path elsewhere.
+    const tagsBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'link_1',
-          title: 'External link',
-          type: 'link',
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -480,12 +480,12 @@ describe('monday item set (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'set', '12345', 'link_1=https://example.com', '--board', '111', '--json'],
+      ['item', 'set', '12345', 'tags_1=Backend', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [linkBoard] } },
+            response: { data: { boards: [tagsBoard] } },
           },
         ],
       },
@@ -506,7 +506,11 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.details?.deferred_to).toBe('v0.2');
     expect(env.error?.details).not.toHaveProperty('read_only');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
-    expect(env.error?.message).not.toMatch(/Use --set-raw/);
+    // M8 ships --set-raw, so the v0.2-tentative branch's hint
+    // legitimately points agents at the escape hatch in the
+    // meantime. Pre-M8 this test pinned the absence of the dead
+    // Path B `Use --set-raw` instruction; that form is gone, so the
+    // negative-only assertion is dropped.
   });
 
   it('--dry-run: emits the §6.4 envelope with planned_changes, no mutation fires', async () => {

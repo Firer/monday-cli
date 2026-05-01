@@ -275,17 +275,18 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.2 writer-expansion (link) surfaces with deferred_to: v0.2', async () => {
-    // Companion test: v0.2-roadmap types carry `deferred_to: "v0.2"`,
-    // mirroring `item set`. Pinned at the integration layer so a
-    // regression in either branch fails an end-to-end test.
-    const linkBoard = {
+  it('live: unsupported_column_type — v0.2 writer-expansion tentative (tags) surfaces with deferred_to: v0.2', async () => {
+    // Companion test: v0.2-tentative types carry `deferred_to: "v0.2"`,
+    // mirroring `item set`. M8 firm row (link / email / phone) is now
+    // writable end-to-end; the tentative row (tags / board_relation /
+    // dependency) holds the deferral until fixture work clears.
+    const tagsBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'link_1',
-          title: 'External link',
-          type: 'link',
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -294,12 +295,12 @@ describe('monday item clear (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'clear', '12345', 'link_1', '--board', '111', '--json'],
+      ['item', 'clear', '12345', 'tags_1', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [linkBoard] } },
+            response: { data: { boards: [tagsBoard] } },
           },
         ],
       },

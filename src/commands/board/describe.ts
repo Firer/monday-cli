@@ -103,6 +103,20 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         `--set ${column.id}=alice@example.com`,
         `--set ${column.id}=me`,
       ];
+    case 'link':
+      return [
+        `--set ${column.id}=https://example.com`,
+        `--set ${column.id}='https://example.com|Site'`,
+      ];
+    case 'email':
+      return [
+        `--set ${column.id}=alice@example.com`,
+        `--set ${column.id}='alice@example.com|Alice'`,
+      ];
+    case 'phone':
+      return [
+        `--set ${column.id}='+15551234567|US'`,
+      ];
     /* c8 ignore next 2 — unreachable: isWritableColumnType gates the
        entry, so any column.type that lands here is one of the cases
        above. */

@@ -1136,13 +1136,13 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     // Covers update.ts:1177 — bulk path's translateColumnValueAsync
     // throws ApiError(unsupported_column_type) → folded with
     // resolverWarnings and re-thrown.
-    const linkMeta = {
+    const tagsMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'link_42',
-          title: 'External link',
-          type: 'link',
+          id: 'tags_42',
+          title: 'Tags',
+          type: 'tags',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -1157,7 +1157,7 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         '--filter-json',
         '{"rules":[]}',
         '--set',
-        'link_42=https://example.com',
+        'tags_42=Backend',
         '--board',
         '111',
         '--yes',
@@ -1167,7 +1167,7 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [linkMeta] } },
+            response: { data: { boards: [tagsMeta] } },
           },
           {
             operation_name: 'ItemsPage',

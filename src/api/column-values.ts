@@ -7,26 +7,27 @@
  * `change_column_value` / `change_multiple_column_values` mutations
  * accept.
  *
- * **Two entry points.** Six of the seven v0.1-allowlisted types
- * translate purely locally — no network, no clock dependency
- * beyond the date module's injectable clock — and live behind
- * the sync `translateColumnValue`. `people` is the seventh, and
- * it differs: email→ID resolution can hit the network. Rather
- * than forcing a `Promise<TranslatedColumnValue>` on every call
- * site for the six sync types, `translateColumnValueAsync` is
- * the unified async entry point M5b's command layer always
- * calls. It delegates to the sync version for non-people types
- * and dispatches to `parsePeopleInput` for `people`. Existing
- * call sites that handle non-people types stay sync; M5b's
- * write surface goes through async exclusively (people may
- * appear in any `--set` bundle).
+ * **Two entry points.** Nine of the ten allowlisted types translate
+ * purely locally — no network, no clock dependency beyond the date
+ * module's injectable clock — and live behind the sync
+ * `translateColumnValue`. `people` is the exception: email→ID
+ * resolution can hit the network. Rather than forcing a
+ * `Promise<TranslatedColumnValue>` on every call site for the nine
+ * sync types, `translateColumnValueAsync` is the unified async entry
+ * point the command layer always calls. It delegates to the sync
+ * version for non-people types and dispatches to `parsePeopleInput`
+ * for `people`. M5b's write surface goes through async exclusively
+ * (people may appear in any `--set` bundle).
  *
- * **Scope.** All seven v0.1-allowlisted types translate:
+ * **Scope.** All ten allowlisted types translate:
  * `text` / `long_text` / `numbers` (simple-string payloads, M5a
  * skeleton); `status` / `dropdown` (rich-object payloads); `date`
  * (rich, with relative-token resolution against the profile
- * timezone); and `people` (rich, with `me`-token + email
- * resolution via the M3 `userByEmail` directory cache).
+ * timezone); `people` (rich, with `me`-token + email resolution via
+ * the M3 `userByEmail` directory cache); and the M8 firm additions
+ * `link` / `email` / `phone` (pipe-form parsers in `links.ts` /
+ * `emails.ts` / `phones.ts`; same `change_column_value` wire path
+ * as the v0.1 rich types).
  *
  * **Date resolution context** (cli-design §5.3 step 3 + the
  * "Relative dates and timezone" subsection). Relative tokens
@@ -109,6 +110,9 @@ import {
   type PeopleResolution,
   type PeopleResolutionContext,
 } from './people.js';
+import { parseLinkInput } from './links.js';
+import { parseEmailInput } from './emails.js';
+import { parsePhoneInput } from './phones.js';
 
 export type { DateResolution, DateResolutionContext } from './dates.js';
 export type {
@@ -118,6 +122,9 @@ export type {
   PeopleResolutionContext,
   PeopleResolutionToken,
 } from './people.js';
+export type { LinkPayload } from './links.js';
+export type { EmailPayload } from './emails.js';
+export type { PhonePayload } from './phones.js';
 
 /**
  * Discriminator on the wire payload's *shape*, not the GraphQL
@@ -229,23 +236,24 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
 
 /**
  * Translates a single `<column>=<value>` pair into the Monday wire
- * payload. **Sync entry point — handles the six v0.1 types whose
+ * payload. **Sync entry point — handles the nine types whose
  * translation is purely local computation** (`text` / `long_text` /
- * `numbers` / `status` / `dropdown` / `date`). For `people` columns,
- * use `translateColumnValueAsync`: people resolution can hit the
- * network (email→ID lookup) and is therefore async-only.
+ * `numbers` / `status` / `dropdown` / `date` / `link` / `email` /
+ * `phone`). For `people` columns, use `translateColumnValueAsync`:
+ * people resolution can hit the network (email→ID lookup) and is
+ * therefore async-only.
  *
  * **Throws** `ApiError`:
- *   - `unsupported_column_type` — type not in the v0.1 friendly
+ *   - `unsupported_column_type` — type not in the friendly
  *     allowlist. Carries `column_id` + `type` plus per-category
- *     details: `deferred_to: "v0.2"` for v0.2-roadmap types
- *     (link / email / phone / tags / board_relation / dependency),
- *     `read_only: true` for read-only-forever types (mirror /
- *     formula / auto_number / creation_log / last_updated /
- *     item_id), `deferred_to: "future"` for anything else.
- *     v0.1 has no escape hatch.
+ *     details: `deferred_to: "v0.2"` for the still-pending v0.2
+ *     row (`tags` / `board_relation` / `dependency`), `read_only:
+ *     true` for read-only-forever types (mirror / formula /
+ *     auto_number / creation_log / last_updated / item_id),
+ *     `deferred_to: "future"` for anything else. The `--set-raw`
+ *     escape hatch (M8) accepts most non-allowlisted types.
  *   - `internal_error` — sync entry was called on a `people`
- *     column. Programmer error: M5b's write surface always uses
+ *     column. Programmer error: the write surface always uses
  *     `translateColumnValueAsync`. The check exists so a future
  *     contributor doesn't accidentally regress to a sync code
  *     path that silently mis-translates people input.
@@ -253,11 +261,15 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
  * **Throws** `UsageError`:
  *   - `usage_error` — for status / dropdown numeric input that
  *     exceeds `Number.MAX_SAFE_INTEGER`, dropdown input that
- *     contains no labels and no IDs after trim + filter, or
- *     `date` input that does not match any supported form
- *     (ISO date, ISO date+time, or relative token). See
- *     `unsafeIntegerError`, the dropdown empty-input branch,
- *     and `dates.parseDateInput` for the documented messages.
+ *     contains no labels and no IDs after trim + filter, `date`
+ *     input that does not match any supported form (ISO date,
+ *     ISO date+time, or relative token), invalid URL / email /
+ *     phone in the link / email / phone translators, or
+ *     pipe-form input with empty leader/trailer in those types.
+ *     See `unsafeIntegerError`, the dropdown empty-input branch,
+ *     `dates.parseDateInput`, `links.parseLinkInput`,
+ *     `emails.parseEmailInput`, and `phones.parsePhoneInput` for
+ *     the documented messages.
  */
 export const translateColumnValue = (
   inputs: TranslateColumnValueInputs,
@@ -285,6 +297,44 @@ export const translateColumnValue = (
         rawInput: value,
         payload: { format: 'rich', value: parsed.payload },
         resolvedFrom: parsed.resolvedFrom,
+        peopleResolution: null,
+      };
+    }
+    case 'link': {
+      // LinkPayload's `{url, text}` literal type is structurally a
+      // JsonObject (both fields are JsonValues) but TypeScript treats
+      // closed object types as not implicitly satisfying the open
+      // index signature. Same cast pattern the people translator
+      // uses; see src/types/json.ts for the documented trade.
+      const parsed = parseLinkInput(value, column.id);
+      return {
+        columnId: column.id,
+        columnType: 'link',
+        rawInput: value,
+        payload: { format: 'rich', value: parsed as unknown as JsonObject },
+        resolvedFrom: null,
+        peopleResolution: null,
+      };
+    }
+    case 'email': {
+      const parsed = parseEmailInput(value, column.id);
+      return {
+        columnId: column.id,
+        columnType: 'email',
+        rawInput: value,
+        payload: { format: 'rich', value: parsed as unknown as JsonObject },
+        resolvedFrom: null,
+        peopleResolution: null,
+      };
+    }
+    case 'phone': {
+      const parsed = parsePhoneInput(value, column.id);
+      return {
+        columnId: column.id,
+        columnType: 'phone',
+        rawInput: value,
+        payload: { format: 'rich', value: parsed as unknown as JsonObject },
+        resolvedFrom: null,
         peopleResolution: null,
       };
     }
@@ -379,6 +429,13 @@ export const translateColumnClear = (
     case 'dropdown':
     case 'date':
     case 'people':
+    case 'link':
+    case 'email':
+    case 'phone':
+      // Rich types clear to `{}` via change_column_value per
+      // cli-design §5.3 "Clearing column values" table. M8 firm row
+      // (link / email / phone) extends the table verbatim — same
+      // payload, same mutation, same dispatch.
       return {
         columnId: column.id,
         columnType: column.type,
@@ -870,24 +927,23 @@ export const unsupportedColumnTypeError = (
   if (category === 'v0_2_writer_expansion') {
     return new ApiError(
       'unsupported_column_type',
-      `Column "${columnId}" has type "${type}", which is not in the v0.1 ` +
-        `friendly --set translator allowlist (text, long_text, numbers, ` +
-        `status, dropdown, date, people). v0.1 ships no raw-write ` +
-        `escape hatch — the v0.2 writer-expansion milestone will add ` +
-        `--set-raw <col>=<json> plus friendly support for link, email, ` +
-        `phone, tags, board_relation, and dependency types.`,
+      `Column "${columnId}" has type "${type}", which is not yet in the ` +
+        `friendly --set translator allowlist. The v0.2 writer-expansion ` +
+        `milestone covers tags / board_relation / dependency tentatively; ` +
+        `their friendly translators land later in v0.2 once the per-account ` +
+        `directory + linked-board enumeration design clears. Use ` +
+        `--set-raw <col>=<json> with the documented Monday wire shape in ` +
+        `the meantime.`,
       {
         details: {
           column_id: columnId,
           type,
           deferred_to: 'v0.2',
           hint:
-            'this column type is not writable via the CLI in v0.1; the ' +
-            'v0.2 writer-expansion milestone will add the --set-raw ' +
-            '<col>=<json> escape hatch and broader friendly-type ' +
-            'coverage. See https://developer.monday.com/api-reference/' +
-            'reference/column-types-reference for the per-type Monday ' +
-            'wire shapes that --set-raw will accept.',
+            `use --set-raw <col>=<json> with the Monday wire shape (e.g. ` +
+            `--set-raw ${columnId}='{"tag_ids":[1,2]}' for tags). ` +
+            `See https://developer.monday.com/api-reference/reference/` +
+            `column-types-reference for per-type wire shapes.`,
         },
       },
     );
@@ -895,24 +951,25 @@ export const unsupportedColumnTypeError = (
   // category === 'future'
   return new ApiError(
     'unsupported_column_type',
-    `Column "${columnId}" has type "${type}", which is not in the v0.1 ` +
+    `Column "${columnId}" has type "${type}", which is not in the ` +
       `friendly --set translator allowlist (text, long_text, numbers, ` +
-      `status, dropdown, date, people) and is not on the v0.2 ` +
-      `writer-expansion roadmap. v0.1 ships no raw-write escape hatch; ` +
-      `support for this type will arrive in a future writer-expansion ` +
-      `milestone (or remain unsupported if Monday's API doesn't expose ` +
-      `a write path for it).`,
+      `status, dropdown, date, people, link, email, phone) and is not ` +
+      `on the v0.2 writer-expansion roadmap. Try --set-raw <col>=<json> ` +
+      `with the documented Monday wire shape — that path accepts any ` +
+      `type Monday writes via change_column_value. Files-shaped types ` +
+      `(file) and read-only-forever types (mirror / formula / etc.) are ` +
+      `the exception; --set-raw rejects those at column-resolution time.`,
     {
       details: {
         column_id: columnId,
         type,
         deferred_to: 'future',
         hint:
-          'this column type is not in the v0.1 allowlist or the v0.2 ' +
-          'writer-expansion roadmap; track cli-design.md §5.3 writer-' +
-          'expansion roadmap for future-version coverage. Some types ' +
-          '(time_tracking, files) have dedicated verbs planned; others ' +
-          '(battery, item_assignees) are not yet scoped.',
+          'use --set-raw <col>=<json> with the Monday wire shape if the ' +
+          'type accepts change_column_value. Some types (time_tracking, ' +
+          'file) have dedicated verbs planned; others (battery, ' +
+          'item_assignees) are not yet scoped. See cli-design.md §5.3 ' +
+          'writer-expansion roadmap.',
       },
     },
   );
