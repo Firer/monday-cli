@@ -149,7 +149,20 @@ const inputSchema = z
     board: BoardIdSchema,
     group: GroupIdSchema.optional(),
     where: z.array(z.string()).optional(),
-    filterJson: z.string().optional(),
+    // Parity with `item update --filter-json` — see that file's note.
+    // Read-only here so not destructive, but `''` is never a valid
+    // `query_params` JSON object; reject at the schema boundary so
+    // the failure surfaces as `usage_error` rather than as a confusing
+    // "no filter applied" silent passthrough. `.refine(trim)` rather
+    // than `.min(1)` catches whitespace-only inputs too without
+    // burning a board-metadata network call first.
+    filterJson: z
+      .string()
+      .refine(
+        (s) => s.trim().length > 0,
+        '--filter-json must be a non-empty JSON object',
+      )
+      .optional(),
     all: z.boolean().optional(),
     limit: z.coerce.number().int().positive().max(10_000).optional(),
     pageSize: z.coerce.number().int().positive().max(500).optional(),

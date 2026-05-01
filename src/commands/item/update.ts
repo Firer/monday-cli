@@ -209,7 +209,27 @@ const inputSchema = z
     name: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
     where: z.array(z.string()).default([]),
-    filterJson: z.string().optional(),
+    // Empty `--filter-json ''` would slip through `buildQueryParams`
+    // as "no filter" (`hasFilterJson` is gated on `length > 0`) while
+    // still tripping `validateInputShape`'s "bulk mode" discriminator
+    // (`filterJson !== undefined`) — net effect, a whole-board mutation
+    // an agent likely thought was filtered. Reject at the schema
+    // boundary so no network call fires. Codex pass-3 of the §10.2
+    // backfill PR caught this — see v0.1-plan §3 M5b session 4.
+    //
+    // `.refine(trim)` rather than `.min(1)` so a whitespace-only
+    // `--filter-json '   '` is also caught at the schema boundary;
+    // pre-fix it slipped past `.min(1)` and only failed inside
+    // `parseFilterJson` AFTER board metadata loaded — same
+    // ultimate `usage_error`, but a wasted network call (Codex
+    // pass-1 of this fix).
+    filterJson: z
+      .string()
+      .refine(
+        (s) => s.trim().length > 0,
+        '--filter-json must be a non-empty JSON object',
+      )
+      .optional(),
     createLabelsIfMissing: z.boolean().optional(),
   })
   .strict()

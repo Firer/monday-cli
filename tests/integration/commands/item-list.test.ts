@@ -225,6 +225,52 @@ describe('monday item list (integration)', () => {
     expect(out.exitCode).toBe(0);
   });
 
+  it('rejects empty --filter-json as usage_error before any network call', async () => {
+    // Parity with `item update --filter-json ''`. Read-only here so
+    // not destructive, but `''` is not a valid query_params JSON
+    // object — reject at the schema boundary rather than silently
+    // pass through as "no filter".
+    const out = await drive(
+      [
+        'item',
+        'list',
+        '--board',
+        '111',
+        '--filter-json',
+        '',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/filter-json/);
+  });
+
+  it('rejects whitespace-only --filter-json as usage_error before any network call', async () => {
+    // `.refine(trim)` (pass-1 of the empty-string fix) catches
+    // whitespace-only inputs too without firing a board-metadata
+    // request first. Empty interactions array → transport error
+    // if the schema lets the input through.
+    const out = await drive(
+      [
+        'item',
+        'list',
+        '--board',
+        '111',
+        '--filter-json',
+        '   ',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/filter-json/);
+  });
+
   it('--where + --filter-json mutually exclusive — usage_error', async () => {
     const out = await drive(
       [

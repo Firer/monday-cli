@@ -847,6 +847,64 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('rejects empty --filter-json as usage_error before any network call (whole-board safety)', async () => {
+    // Codex pass-3 of the cli-design backfill PR: an explicit
+    // `--filter-json ''` was treated as "bulk mode" by the
+    // dispatch (`filterJson !== undefined`), but `buildQueryParams`
+    // short-circuits an empty string into "no filter" and returns
+    // `queryParams: undefined` — net effect, the bulk walker would
+    // visit every item on the board and the live path would mutate
+    // every one. The empty value is rejected at the schema boundary
+    // so no network call fires.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--board',
+        '111',
+        '--filter-json',
+        '',
+        '--yes',
+        '--set',
+        'status=Done',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/filter-json/);
+  });
+
+  it('rejects whitespace-only --filter-json as usage_error before any network call', async () => {
+    // Pass-1 of the fix tightened `.min(1)` to a `trim()` refinement
+    // so `--filter-json '   '` doesn't slip past the schema and
+    // burn a board-metadata network call before failing at
+    // `JSON.parse`. The empty-interactions array forces the test to
+    // explode with a transport error if the schema lets the input
+    // through.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--board',
+        '111',
+        '--filter-json',
+        '   ',
+        '--yes',
+        '--set',
+        'status=Done',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/filter-json/);
+  });
+
   it('rejects mixing positional <iid> AND --where as usage_error', async () => {
     const out = await drive(
       [
