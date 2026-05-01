@@ -68,6 +68,9 @@ import { itemSetCommand } from './item/set.js';
 import { itemClearCommand } from './item/clear.js';
 import { itemUpdateCommand } from './item/update.js';
 import { updateCreateCommand } from './update/create.js';
+// M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
+import { rawCommand } from './raw/index.js';
+import { boardDoctorCommand } from './board/doctor.js';
 
 let cached: readonly CommandModule[] | undefined;
 
@@ -107,6 +110,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemClearCommand,
     itemUpdateCommand,
     updateCreateCommand,
+    rawCommand,
+    boardDoctorCommand,
   ];
   return cached;
 };
