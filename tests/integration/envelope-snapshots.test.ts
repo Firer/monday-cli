@@ -1,0 +1,919 @@
+/**
+ * Envelope-shape snapshot suite (`v0.1-plan.md` §3 M7).
+ *
+ * One snapshot per shipped command on a representative happy-path
+ * fixture. The point is to catch v0.2 changes that drift the
+ * `data` / `meta` / `warnings` shape — `assertEnvelopeContract`
+ * only pins the §6.1 *meta* skeleton (key presence + types); a
+ * snapshot pins the full byte shape, so a renamed key, a dropped
+ * field, or a re-ordered `meta.complexity` slot fails loud here.
+ *
+ * Determinism: `helpers.ts baseOptions` injects `FIXED_CLOCK` +
+ * `fixed-req-id` + `cliVersion: '0.0.0-test'`, so `meta.retrieved_at`
+ * / `meta.request_id` / `meta.cli_version` are stable across
+ * runs. No per-test normalisation is needed.
+ *
+ * Per-command `data` checks already live in the per-command
+ * integration files — those guard *behaviour*. This file guards
+ * *contract*. The two layers are deliberately overlapping: a
+ * single snapshot pin lets a future renamer get caught even if
+ * they update the per-command tests in lockstep with the rename
+ * (because they'd have to update this snapshot too, which forces
+ * a deliberate choice).
+ *
+ * Pyramid placement: integration, not E2E — fixture cassettes
+ * via `FixtureTransport` exercise the full runner path. The
+ * overhead per-command is 5-15ms, so the whole suite finishes
+ * well under a second.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  drive,
+  parseEnvelope,
+  useCachedIntegrationEnv,
+} from './helpers.js';
+import {
+  boardMetadataInteraction,
+  sampleBoardMetadata,
+  sampleItem,
+  useItemTestEnv,
+} from './commands/_item-fixtures.js';
+
+// `useItemTestEnv` registers per-test mkdtemp/rm hooks for an
+// isolated XDG_CACHE_HOME — every item-* command and the metadata-
+// resolving paths (board describe / doctor) need it. Each helper
+// instance registers its own beforeEach/afterEach pair, so the
+// per-test tmpdir is fresh per file.
+const { drive: cachedDrive } = useItemTestEnv();
+const { drive: doctorDrive } = useCachedIntegrationEnv('monday-cli-snap-doctor-');
+const { drive: describeDrive } = useCachedIntegrationEnv('monday-cli-snap-describe-');
+const { drive: cacheDrive, xdgRoot: cacheXdgRoot } = useCachedIntegrationEnv(
+  'monday-cli-snap-cache-',
+);
+
+/**
+ * Replaces non-deterministic absolute paths with stable sentinels
+ * before snapshotting. The CLI surfaces three: the project cwd
+ * (`config path` reflects `process.cwd()`), the cache root
+ * (XDG_CACHE_HOME tmpdir created per-test), and the inline
+ * cache-root variant when no XDG override is set. Snapshots that
+ * pin literal paths can't run on a different machine — and don't
+ * need to. The contract being pinned is the *shape*, not the
+ * specific filesystem layout.
+ */
+const normalisePaths = (value: unknown, xdg?: string): unknown => {
+  const cwd = process.cwd();
+  let json = JSON.stringify(value);
+  if (xdg !== undefined && xdg.length > 0) {
+    json = json.split(xdg).join('<tmpdir>');
+  }
+  json = json.split(cwd).join('<cwd>');
+  return JSON.parse(json) as unknown;
+};
+
+describe('envelope snapshot — config', () => {
+  it('config show', async () => {
+    const out = await drive(['config', 'show', '--json'], { interactions: [] });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('config path', async () => {
+    const out = await drive(['config', 'path', '--json'], { interactions: [] });
+    expect(out.exitCode).toBe(0);
+    // `data.cwd` and `data.searched[].path` reflect the cwd at run
+    // time. Snapshot the rest by collapsing the cwd to a sentinel.
+    expect(normalisePaths(parseEnvelope(out.stdout))).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — schema', () => {
+  it('schema --json full registry envelope shape', async () => {
+    // Snapshot the meta + the *count* of commands rather than the
+    // entire commands map (~10KB of JSON Schema per command). The
+    // snapshot's job is to pin the envelope contract; the per-command
+    // schemas are pinned by `tests/e2e/schema.test.ts` (ajv compile).
+    const out = await drive(['schema', '--json'], { interactions: [] });
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as {
+      ok: boolean;
+      data: { schema_version: string; commands: Record<string, unknown> };
+      meta: Readonly<Record<string, unknown>>;
+    };
+    const { commands, ...dataRest } = env.data;
+    const trimmed = {
+      ok: env.ok,
+      data: { ...dataRest, command_count: Object.keys(commands).length },
+      meta: env.meta,
+    };
+    expect(trimmed).toMatchSnapshot();
+  });
+
+  it('schema config.show — single-command narrowing', async () => {
+    const out = await drive(['schema', 'config.show', '--json'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — account', () => {
+  it('account whoami', async () => {
+    const out = await drive(['account', 'whoami', '--json'], {
+      interactions: [
+        {
+          operation_name: 'Whoami',
+          response: {
+            data: {
+              me: {
+                id: '1',
+                name: 'Alice',
+                email: 'alice@example.test',
+                account: { id: '99', name: 'Org', slug: 'org' },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('account info', async () => {
+    const out = await drive(['account', 'info', '--json'], {
+      interactions: [
+        {
+          operation_name: 'AccountInfo',
+          response: {
+            data: {
+              account: {
+                id: '99',
+                name: 'Org',
+                slug: 'org',
+                country_code: 'GB',
+                first_day_of_the_week: 'monday',
+                active_members_count: 7,
+                logo: null,
+                plan: { version: 1, tier: 'pro', max_users: 100, period: 'annual' },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('account version', async () => {
+    const out = await drive(['account', 'version', '--json'], {
+      interactions: [
+        {
+          operation_name: 'Versions',
+          response: {
+            data: {
+              versions: [
+                { display_name: '2026-01', kind: 'current', value: '2026-01' },
+                { display_name: '2025-10', kind: 'maintenance', value: '2025-10' },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('account complexity', async () => {
+    const out = await drive(['account', 'complexity', '--json'], {
+      interactions: [
+        {
+          operation_name: 'ComplexityProbe',
+          response: {
+            data: {
+              complexity: {
+                before: 5_000_000,
+                after: 4_999_999,
+                query: 1,
+                reset_in_x_seconds: 30,
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — workspace', () => {
+  const sampleWorkspace = {
+    id: '5',
+    name: 'Engineering',
+    description: 'Platform team',
+    kind: 'open',
+    state: 'active',
+    is_default_workspace: false,
+    created_at: '2026-04-01T00:00:00Z',
+  };
+
+  it('workspace list', async () => {
+    const out = await drive(['workspace', 'list', '--json'], {
+      interactions: [
+        {
+          operation_name: 'WorkspaceList',
+          response: { data: { workspaces: [sampleWorkspace] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace get', async () => {
+    const out = await drive(['workspace', 'get', '5', '--json'], {
+      interactions: [
+        {
+          operation_name: 'WorkspaceGet',
+          response: {
+            data: {
+              workspaces: [
+                {
+                  ...sampleWorkspace,
+                  settings: { icon: { color: '#0000FF', image: null } },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace folders', async () => {
+    const out = await drive(['workspace', 'folders', '5', '--json'], {
+      interactions: [
+        {
+          operation_name: 'WorkspaceFolders',
+          response: {
+            data: {
+              folders: [
+                {
+                  id: '101',
+                  name: 'Roadmap',
+                  color: 'aquamarine',
+                  created_at: '2026-04-01T00:00:00Z',
+                  owner_id: '1',
+                  parent: null,
+                  children: [{ id: '500', name: 'Q2 plan' }],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — board', () => {
+  const sampleBoard = {
+    id: '111',
+    name: 'Tasks',
+    description: null,
+    state: 'active',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/111',
+    items_count: 7,
+    updated_at: '2026-04-30T10:00:00Z',
+  };
+
+  it('board list', async () => {
+    const out = await drive(['board', 'list', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardList',
+          response: { data: { boards: [sampleBoard] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board get', async () => {
+    const out = await drive(['board', 'get', '111', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardGet',
+          match_variables: { ids: ['111'] },
+          response: {
+            data: { boards: [{ ...sampleBoard, permissions: 'collaborators' }] },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board find', async () => {
+    const out = await drive(['board', 'find', 'Tasks', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardFind',
+          match_variables: { page: 1 },
+          response: {
+            data: {
+              boards: [
+                {
+                  id: '111',
+                  name: 'Tasks',
+                  description: null,
+                  state: 'active',
+                  board_kind: 'public',
+                  workspace_id: '5',
+                  url: null,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board describe', async () => {
+    const out = await describeDrive(['board', 'describe', '111', '--json'], {
+      interactions: [boardMetadataInteraction],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board columns', async () => {
+    const out = await describeDrive(['board', 'columns', '111', '--json'], {
+      interactions: [boardMetadataInteraction],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board groups', async () => {
+    const out = await describeDrive(['board', 'groups', '111', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardMetadata',
+          response: {
+            data: {
+              boards: [
+                {
+                  ...sampleBoardMetadata,
+                  groups: [
+                    {
+                      id: 'topics',
+                      title: 'Topics',
+                      color: 'red',
+                      position: '1.000',
+                      archived: false,
+                      deleted: false,
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board subscribers', async () => {
+    const out = await drive(['board', 'subscribers', '111', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardSubscribers',
+          response: {
+            data: {
+              boards: [
+                {
+                  id: '111',
+                  subscribers: [
+                    {
+                      id: '1',
+                      name: 'Alice',
+                      email: 'alice@example.test',
+                      is_guest: false,
+                      enabled: true,
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board doctor (healthy)', async () => {
+    const out = await doctorDrive(['board', 'doctor', '111', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardMetadata',
+          response: {
+            data: {
+              boards: [
+                {
+                  ...sampleBoardMetadata,
+                  // Ensure exactly one writable column (status) so
+                  // the diagnostic count is 0.
+                  columns: [sampleBoardMetadata.columns[0]],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — user', () => {
+  const sampleUser = {
+    id: '1',
+    name: 'Alice',
+    email: 'alice@example.test',
+    enabled: true,
+    is_guest: false,
+    is_admin: false,
+    is_view_only: false,
+    is_pending: false,
+    is_verified: true,
+    title: null,
+    time_zone_identifier: 'Europe/London',
+    join_date: '2026-01-01',
+    last_activity: '2026-04-30T09:00:00Z',
+  };
+
+  it('user list', async () => {
+    const out = await drive(['user', 'list', '--json'], {
+      interactions: [
+        {
+          operation_name: 'UserList',
+          response: { data: { users: [sampleUser] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('user get', async () => {
+    const out = await drive(['user', 'get', '1', '--json'], {
+      interactions: [
+        {
+          operation_name: 'UserGet',
+          response: {
+            data: {
+              users: [
+                { ...sampleUser, url: 'https://x.monday.com/u/1', country_code: 'GB' },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('user me', async () => {
+    const out = await drive(['user', 'me', '--json'], {
+      interactions: [
+        {
+          operation_name: 'Whoami',
+          response: {
+            data: {
+              me: {
+                id: '1',
+                name: 'Alice',
+                email: 'alice@example.test',
+                account: { id: '99', name: 'Org', slug: 'org' },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — update', () => {
+  const sampleUpdate = {
+    id: '77',
+    body: '<p>Looks good</p>',
+    text_body: 'Looks good',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T09:01:00Z',
+    edited_at: '2026-04-30T09:01:00Z',
+    replies: [],
+  };
+
+  it('update list', async () => {
+    const out = await drive(['update', 'list', '5001', '--json'], {
+      interactions: [
+        {
+          operation_name: 'UpdateList',
+          response: {
+            data: { items: [{ id: '5001', updates: [sampleUpdate] }] },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update get', async () => {
+    const out = await drive(['update', 'get', '77', '--json'], {
+      interactions: [
+        {
+          operation_name: 'UpdateGet',
+          response: {
+            data: { updates: [{ ...sampleUpdate, item_id: '5001' }] },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update create', async () => {
+    const out = await drive(
+      ['update', 'create', '12345', '--body', 'Done — moved to QA.', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateCreate',
+            response: {
+              data: {
+                create_update: {
+                  id: '88',
+                  body: '<p>Done — moved to QA.</p>',
+                  text_body: 'Done — moved to QA.',
+                  creator_id: '1',
+                  creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+                  item_id: '12345',
+                  created_at: '2026-04-30T11:00:00Z',
+                  updated_at: '2026-04-30T11:00:00Z',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — item reads', () => {
+  it('item list', async () => {
+    const out = await cachedDrive(
+      ['item', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  { items_page: { cursor: null, items: [sampleItem] } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item get', async () => {
+    const out = await cachedDrive(['item', 'get', '12345', '--json'], {
+      interactions: [
+        {
+          operation_name: 'ItemGet',
+          response: { data: { items: [sampleItem] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item find', async () => {
+    const out = await cachedDrive(
+      ['item', 'find', 'Refactor login', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemFind',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: { cursor: null, items: [sampleItem] },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item search', async () => {
+    const out = await cachedDrive(
+      ['item', 'search', '--board', '111', '--where', 'status=Done', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsByColumnValues',
+            response: {
+              data: {
+                items_page_by_column_values: {
+                  cursor: null,
+                  items: [sampleItem],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item subitems', async () => {
+    const out = await cachedDrive(['item', 'subitems', '12345', '--json'], {
+      interactions: [
+        {
+          operation_name: 'ItemSubitems',
+          response: {
+            data: {
+              items: [
+                { id: '12345', subitems: [{ ...sampleItem, id: '99' }] },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — item mutations', () => {
+  const updatedItem = {
+    ...sampleItem,
+    column_values: [
+      {
+        id: 'status_4',
+        type: 'status',
+        text: 'Done',
+        value: '{"label":"Done","index":1}',
+        column: { title: 'Status' },
+      },
+      sampleItem.column_values[1],
+    ],
+  };
+
+  it('item set (single, rich)', async () => {
+    const out = await cachedDrive(
+      ['item', 'set', '12345', 'status=Done', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: updatedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item set --dry-run (planned_changes envelope)', async () => {
+    const out = await cachedDrive(
+      [
+        'item',
+        'set',
+        '12345',
+        'status=Done',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item clear (single, rich)', async () => {
+    const clearedItem = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: '',
+          value: null,
+          column: { title: 'Status' },
+        },
+        sampleItem.column_values[1],
+      ],
+    };
+    const out = await cachedDrive(
+      ['item', 'clear', '12345', 'status', '--board', '111', '--json'],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: clearedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item update (single, multi --set)', async () => {
+    const updatedMultiItem = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: 'Done',
+          value: '{"label":"Done","index":1}',
+          column: { title: 'Status' },
+        },
+        {
+          id: 'date4',
+          type: 'date',
+          text: '2026-05-15',
+          value: '{"date":"2026-05-15","time":null}',
+          column: { title: 'Due date' },
+        },
+      ],
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set',
+        'date4=2026-05-15',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpdateMulti',
+            response: {
+              data: { change_multiple_column_values: updatedMultiItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — raw', () => {
+  it('raw inline query', async () => {
+    const out = await drive(['raw', '{ me { id name email } }', '--json'], {
+      interactions: [
+        {
+          response: {
+            data: {
+              me: { id: '7', name: 'Alice', email: 'alice@example.test' },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — cache', () => {
+  it('cache list (empty cache)', async () => {
+    const out = await cacheDrive(['cache', 'list', '--json'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(
+      normalisePaths(parseEnvelope(out.stdout), cacheXdgRoot()),
+    ).toMatchSnapshot();
+  });
+
+  it('cache stats (empty cache)', async () => {
+    const out = await cacheDrive(['cache', 'stats', '--json'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(
+      normalisePaths(parseEnvelope(out.stdout), cacheXdgRoot()),
+    ).toMatchSnapshot();
+  });
+
+  it('cache clear (empty cache)', async () => {
+    const out = await cacheDrive(['cache', 'clear', '--json'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(
+      normalisePaths(parseEnvelope(out.stdout), cacheXdgRoot()),
+    ).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — error envelope', () => {
+  // One representative error path so the §6.1 error-envelope shape is
+  // pinned alongside the success shape. Other error codes are pinned
+  // by the per-command tests (every code has at least one).
+  it('not_found on board get', async () => {
+    const out = await drive(['board', 'get', '999', '--json'], {
+      interactions: [
+        { operation_name: 'BoardGet', response: { data: { boards: [] } } },
+      ],
+    });
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('config_error when MONDAY_API_TOKEN is missing', async () => {
+    const out = await drive(['account', 'whoami', '--json'], {
+      interactions: [],
+    }, { env: {} });
+    expect(out.exitCode).toBe(3);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});

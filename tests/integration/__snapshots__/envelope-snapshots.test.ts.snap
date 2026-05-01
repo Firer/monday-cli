@@ -1,0 +1,2017 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`envelope snapshot — account > account complexity 1`] = `
+{
+  "data": {
+    "before": 5000000,
+    "remaining": 4999999,
+    "reset_in_seconds": 30,
+    "used": 1,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — account > account info 1`] = `
+{
+  "data": {
+    "active_members_count": 7,
+    "country_code": "GB",
+    "first_day_of_the_week": "monday",
+    "id": "99",
+    "logo": null,
+    "name": "Org",
+    "plan": {
+      "max_users": 100,
+      "period": "annual",
+      "tier": "pro",
+      "version": 1,
+    },
+    "slug": "org",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — account > account version 1`] = `
+{
+  "data": {
+    "available": [
+      {
+        "display_name": "2026-01",
+        "kind": "current",
+        "value": "2026-01",
+      },
+      {
+        "display_name": "2025-10",
+        "kind": "maintenance",
+        "value": "2025-10",
+      },
+    ],
+    "pinned": {
+      "sdk_default": "2026-01",
+      "source": "sdk_default",
+      "value": "2026-01",
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — account > account whoami 1`] = `
+{
+  "data": {
+    "me": {
+      "account": {
+        "id": "99",
+        "name": "Org",
+        "slug": "org",
+      },
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board columns 1`] = `
+{
+  "data": [
+    {
+      "archived": null,
+      "description": null,
+      "id": "status_4",
+      "settings_str": "{}",
+      "title": "Status",
+      "type": "status",
+      "width": null,
+    },
+    {
+      "archived": null,
+      "description": null,
+      "id": "date4",
+      "settings_str": null,
+      "title": "Due date",
+      "type": "date",
+      "width": null,
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 2,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board describe 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "columns": [
+      {
+        "archived": null,
+        "description": null,
+        "example_set": [
+          "--set status_4=Done",
+          "--set status_4=1   # by index",
+        ],
+        "id": "status_4",
+        "settings": {},
+        "title": "Status",
+        "type": "status",
+        "width": null,
+        "writable": true,
+      },
+      {
+        "archived": null,
+        "description": null,
+        "example_set": [
+          "--set date4=2026-05-01",
+          "--set date4=tomorrow",
+          "--set date4=+3d",
+        ],
+        "id": "date4",
+        "settings": null,
+        "title": "Due date",
+        "type": "date",
+        "width": null,
+        "writable": true,
+      },
+    ],
+    "description": null,
+    "groups": [],
+    "hierarchy_type": null,
+    "id": "111",
+    "is_leaf": true,
+    "name": "Tasks",
+    "state": "active",
+    "updated_at": null,
+    "url": null,
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board doctor (healthy) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "board_name": "Tasks",
+    "diagnostics": [],
+    "total": 0,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board find 1`] = `
+{
+  "data": {
+    "board_kind": "public",
+    "description": null,
+    "id": "111",
+    "name": "Tasks",
+    "state": "active",
+    "url": null,
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board get 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "description": null,
+    "id": "111",
+    "items_count": 7,
+    "name": "Tasks",
+    "permissions": "collaborators",
+    "state": "active",
+    "updated_at": "2026-04-30T10:00:00Z",
+    "url": "https://x.monday.com/boards/111",
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board groups 1`] = `
+{
+  "data": [
+    {
+      "archived": false,
+      "color": "red",
+      "deleted": false,
+      "id": "topics",
+      "position": "1.000",
+      "title": "Topics",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board list 1`] = `
+{
+  "data": [
+    {
+      "board_folder_id": null,
+      "board_kind": "public",
+      "description": null,
+      "id": "111",
+      "items_count": 7,
+      "name": "Tasks",
+      "state": "active",
+      "updated_at": "2026-04-30T10:00:00Z",
+      "url": "https://x.monday.com/boards/111",
+      "workspace_id": "5",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board subscribers 1`] = `
+{
+  "data": [
+    {
+      "email": "alice@example.test",
+      "enabled": true,
+      "id": "1",
+      "is_guest": false,
+      "name": "Alice",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — cache > cache clear (empty cache) 1`] = `
+{
+  "data": {
+    "board_id": null,
+    "bytes_freed": 0,
+    "removed": 0,
+    "root": "<tmpdir>/monday-cli",
+    "scope": "all",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — cache > cache list (empty cache) 1`] = `
+{
+  "data": {
+    "entries": [],
+    "root": "<tmpdir>/monday-cli",
+    "total_bytes": 0,
+    "total_entries": 0,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — cache > cache stats (empty cache) 1`] = `
+{
+  "data": {
+    "bytes": 0,
+    "entries": 0,
+    "exists": false,
+    "newest_age_seconds": null,
+    "oldest_age_seconds": null,
+    "root": "<tmpdir>/monday-cli",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — config > config path 1`] = `
+{
+  "data": {
+    "cwd": "<cwd>",
+    "searched": [
+      {
+        "description": ".env file in the working directory (loaded with override:false)",
+        "exists": false,
+        "kind": "dotenv",
+        "path": "<cwd>/.env",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — config > config show 1`] = `
+{
+  "data": {
+    "api_url": {
+      "state": "explicit",
+      "value": "https://api.monday.com/v2",
+    },
+    "api_version": {
+      "state": "default",
+      "value": "2026-01",
+    },
+    "auth": "set",
+    "profile": {
+      "state": "default",
+    },
+    "request_timeout_ms": {
+      "state": "default",
+      "value": 30000,
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — error envelope > config_error when MONDAY_API_TOKEN is missing 1`] = `
+{
+  "error": {
+    "code": "config_error",
+    "details": {
+      "hint": "set MONDAY_API_TOKEN in your shell or .env",
+      "issues": [
+        {
+          "code": "invalid_type",
+          "message": "Invalid input: expected string, received undefined",
+          "path": "MONDAY_API_TOKEN",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid Monday CLI config: MONDAY_API_TOKEN: Invalid input: expected string, received undefined",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — error envelope > not_found on board get 1`] = `
+{
+  "error": {
+    "code": "not_found",
+    "details": {
+      "board_id": "999",
+    },
+    "http_status": null,
+    "message": "Monday returned no board for id 999",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — item mutations > item clear (single, rich) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-01",
+        "id": "date4",
+        "text": "2026-05-01",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-01",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": null,
+        "label": null,
+        "text": "",
+        "title": "Status",
+        "type": "status",
+        "value": null,
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item set (single, rich) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-01",
+        "id": "date4",
+        "text": "2026-05-01",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-01",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item set --dry-run (planned_changes envelope) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "board_id": "111",
+      "diff": {
+        "status_4": {
+          "from": {
+            "index": 1,
+            "label": "Done",
+          },
+          "to": {
+            "label": "Done",
+          },
+        },
+      },
+      "item_id": "12345",
+      "operation": "change_column_value",
+      "resolved_ids": {
+        "status": "status_4",
+      },
+    },
+  ],
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item update (single, multi --set) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-15",
+        "id": "date4",
+        "text": "2026-05-15",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-15",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": 0,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "mixed",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "date4": "date4",
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item reads > item find 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-01",
+        "id": "date4",
+        "text": "2026-05-01",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-01",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item reads > item get 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-01",
+        "id": "date4",
+        "text": "2026-05-01",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-01",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "active",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item reads > item list 1`] = `
+{
+  "data": [
+    {
+      "board_id": "111",
+      "columns": {
+        "date4": {
+          "date": "2026-05-01",
+          "id": "date4",
+          "text": "2026-05-01",
+          "time": null,
+          "type": "date",
+          "value": {
+            "date": "2026-05-01",
+            "time": null,
+          },
+        },
+        "status_4": {
+          "id": "status_4",
+          "index": 1,
+          "label": "Done",
+          "text": "Done",
+          "type": "status",
+          "value": {
+            "index": 1,
+            "label": "Done",
+          },
+        },
+      },
+      "created_at": "2026-04-29T10:00:00Z",
+      "group_id": "topics",
+      "id": "12345",
+      "name": "Refactor login",
+      "parent_item_id": null,
+      "state": "active",
+      "updated_at": "2026-04-29T11:00:00Z",
+      "url": "https://example.monday.com/items/12345",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "columns": {
+      "date4": {
+        "id": "date4",
+        "title": "Due date",
+        "type": "date",
+      },
+      "status_4": {
+        "id": "status_4",
+        "title": "Status",
+        "type": "status",
+      },
+    },
+    "complexity": null,
+    "has_more": false,
+    "next_cursor": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item reads > item search 1`] = `
+{
+  "data": [
+    {
+      "board_id": "111",
+      "columns": {
+        "date4": {
+          "date": "2026-05-01",
+          "id": "date4",
+          "text": "2026-05-01",
+          "time": null,
+          "type": "date",
+          "value": {
+            "date": "2026-05-01",
+            "time": null,
+          },
+        },
+        "status_4": {
+          "id": "status_4",
+          "index": 1,
+          "label": "Done",
+          "text": "Done",
+          "type": "status",
+          "value": {
+            "index": 1,
+            "label": "Done",
+          },
+        },
+      },
+      "created_at": "2026-04-29T10:00:00Z",
+      "group_id": "topics",
+      "id": "12345",
+      "name": "Refactor login",
+      "parent_item_id": null,
+      "state": "active",
+      "updated_at": "2026-04-29T11:00:00Z",
+      "url": "https://example.monday.com/items/12345",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "columns": {
+      "date4": {
+        "id": "date4",
+        "title": "Due date",
+        "type": "date",
+      },
+      "status_4": {
+        "id": "status_4",
+        "title": "Status",
+        "type": "status",
+      },
+    },
+    "complexity": null,
+    "has_more": false,
+    "next_cursor": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item reads > item subitems 1`] = `
+{
+  "data": [
+    {
+      "board_id": "111",
+      "columns": {
+        "date4": {
+          "date": "2026-05-01",
+          "id": "date4",
+          "text": "2026-05-01",
+          "time": null,
+          "title": "Due date",
+          "type": "date",
+          "value": {
+            "date": "2026-05-01",
+            "time": null,
+          },
+        },
+        "status_4": {
+          "id": "status_4",
+          "index": 1,
+          "label": "Done",
+          "text": "Done",
+          "title": "Status",
+          "type": "status",
+          "value": {
+            "index": 1,
+            "label": "Done",
+          },
+        },
+      },
+      "created_at": "2026-04-29T10:00:00Z",
+      "group_id": "topics",
+      "id": "99",
+      "name": "Refactor login",
+      "parent_item_id": null,
+      "state": "active",
+      "updated_at": "2026-04-29T11:00:00Z",
+      "url": "https://example.monday.com/items/12345",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "next_cursor": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — raw > raw inline query 1`] = `
+{
+  "data": {
+    "me": {
+      "email": "alice@example.test",
+      "id": "7",
+      "name": "Alice",
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — schema > schema --json full registry envelope shape 1`] = `
+{
+  "data": {
+    "api_version": "2026-01",
+    "cli_version": "0.0.0-test",
+    "command_count": 36,
+    "error_codes": [
+      {
+        "code": "usage_error",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "confirmation_required",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "ambiguous_name",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "ambiguous_column",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "column_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "user_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "unsupported_column_type",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "column_archived",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "unauthorized",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 401,
+      },
+      {
+        "code": "forbidden",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 403,
+      },
+      {
+        "code": "rate_limited",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "complexity_exceeded",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "daily_limit_exceeded",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "concurrency_exceeded",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "ip_rate_limited",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "resource_locked",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 423,
+      },
+      {
+        "code": "validation_failed",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "stale_cursor",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "config_error",
+        "exit_code": 3,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "cache_error",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "network_error",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "timeout",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "dev_not_configured",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "dev_board_misconfigured",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "internal_error",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+    ],
+    "exit_codes": [
+      {
+        "code": 0,
+        "meaning": "success",
+      },
+      {
+        "code": 1,
+        "meaning": "usage error (bad flags, missing required args)",
+      },
+      {
+        "code": 2,
+        "meaning": "API or local-resource error (network, cache, validation)",
+      },
+      {
+        "code": 3,
+        "meaning": "config error (missing/invalid token)",
+      },
+      {
+        "code": 130,
+        "meaning": "aborted by SIGINT",
+      },
+    ],
+    "schema_version": "1",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+}
+`;
+
+exports[`envelope snapshot — schema > schema config.show — single-command narrowing 1`] = `
+{
+  "data": {
+    "api_version": "2026-01",
+    "cli_version": "0.0.0-test",
+    "commands": {
+      "config.show": {
+        "examples": [
+          "monday config show",
+          "monday config show --json",
+        ],
+        "idempotent": true,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "config.show",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "api_url": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "explicit",
+                      "type": "string",
+                    },
+                    "value": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "default",
+                      "type": "string",
+                    },
+                    "value": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "api_version": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "explicit",
+                      "type": "string",
+                    },
+                    "value": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "default",
+                      "type": "string",
+                    },
+                    "value": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "auth": {
+              "enum": [
+                "set",
+                "unset",
+              ],
+              "type": "string",
+            },
+            "profile": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "default",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "explicit",
+                      "type": "string",
+                    },
+                    "value": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "request_timeout_ms": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "explicit",
+                      "type": "string",
+                    },
+                    "value": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "default",
+                      "type": "string",
+                    },
+                    "value": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "state",
+                    "value",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+          },
+          "required": [
+            "auth",
+            "api_version",
+            "api_url",
+            "request_timeout_ms",
+            "profile",
+          ],
+          "type": "object",
+        },
+        "summary": "Show the resolved CLI configuration (token redacted)",
+      },
+    },
+    "error_codes": [
+      {
+        "code": "usage_error",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "confirmation_required",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "ambiguous_name",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "ambiguous_column",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "column_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "user_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "unsupported_column_type",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "column_archived",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "unauthorized",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 401,
+      },
+      {
+        "code": "forbidden",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 403,
+      },
+      {
+        "code": "rate_limited",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "complexity_exceeded",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "daily_limit_exceeded",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "concurrency_exceeded",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "ip_rate_limited",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "resource_locked",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": 423,
+      },
+      {
+        "code": "validation_failed",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "stale_cursor",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": 200,
+      },
+      {
+        "code": "config_error",
+        "exit_code": 3,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "cache_error",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "network_error",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "timeout",
+        "exit_code": 2,
+        "retryable": true,
+        "typical_http_status": null,
+      },
+      {
+        "code": "dev_not_configured",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "dev_board_misconfigured",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "internal_error",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+    ],
+    "exit_codes": [
+      {
+        "code": 0,
+        "meaning": "success",
+      },
+      {
+        "code": 1,
+        "meaning": "usage error (bad flags, missing required args)",
+      },
+      {
+        "code": 2,
+        "meaning": "API or local-resource error (network, cache, validation)",
+      },
+      {
+        "code": 3,
+        "meaning": "config error (missing/invalid token)",
+      },
+      {
+        "code": 130,
+        "meaning": "aborted by SIGINT",
+      },
+    ],
+    "schema_version": "1",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update create 1`] = `
+{
+  "data": {
+    "body": "<p>Done — moved to QA.</p>",
+    "created_at": "2026-04-30T11:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "88",
+    "item_id": "12345",
+    "text_body": "Done — moved to QA.",
+    "updated_at": "2026-04-30T11:00:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update get 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "edited_at": "2026-04-30T09:01:00Z",
+    "id": "77",
+    "item_id": "5001",
+    "replies": [],
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update list 1`] = `
+{
+  "data": [
+    {
+      "body": "<p>Looks good</p>",
+      "created_at": "2026-04-30T09:00:00Z",
+      "creator": {
+        "email": "alice@example.test",
+        "id": "1",
+        "name": "Alice",
+      },
+      "creator_id": "1",
+      "edited_at": "2026-04-30T09:01:00Z",
+      "id": "77",
+      "replies": [],
+      "text_body": "Looks good",
+      "updated_at": "2026-04-30T09:01:00Z",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — user > user get 1`] = `
+{
+  "data": {
+    "country_code": "GB",
+    "email": "alice@example.test",
+    "enabled": true,
+    "id": "1",
+    "is_admin": false,
+    "is_guest": false,
+    "is_pending": false,
+    "is_verified": true,
+    "is_view_only": false,
+    "join_date": "2026-01-01",
+    "last_activity": "2026-04-30T09:00:00Z",
+    "name": "Alice",
+    "time_zone_identifier": "Europe/London",
+    "title": null,
+    "url": "https://x.monday.com/u/1",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — user > user list 1`] = `
+{
+  "data": [
+    {
+      "email": "alice@example.test",
+      "enabled": true,
+      "id": "1",
+      "is_admin": false,
+      "is_guest": false,
+      "is_pending": false,
+      "is_verified": true,
+      "is_view_only": false,
+      "join_date": "2026-01-01",
+      "last_activity": "2026-04-30T09:00:00Z",
+      "name": "Alice",
+      "time_zone_identifier": "Europe/London",
+      "title": null,
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — user > user me 1`] = `
+{
+  "data": {
+    "me": {
+      "account": {
+        "id": "99",
+        "name": "Org",
+        "slug": "org",
+      },
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace folders 1`] = `
+{
+  "data": [
+    {
+      "children": [
+        {
+          "id": "500",
+          "name": "Q2 plan",
+        },
+      ],
+      "color": "aquamarine",
+      "created_at": "2026-04-01T00:00:00Z",
+      "id": "101",
+      "name": "Roadmap",
+      "owner_id": "1",
+      "parent": null,
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace get 1`] = `
+{
+  "data": {
+    "created_at": "2026-04-01T00:00:00Z",
+    "description": "Platform team",
+    "id": "5",
+    "is_default_workspace": false,
+    "kind": "open",
+    "name": "Engineering",
+    "settings": {
+      "icon": {
+        "color": "#0000FF",
+        "image": null,
+      },
+    },
+    "state": "active",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace list 1`] = `
+{
+  "data": [
+    {
+      "created_at": "2026-04-01T00:00:00Z",
+      "description": "Platform team",
+      "id": "5",
+      "is_default_workspace": false,
+      "kind": "open",
+      "name": "Engineering",
+      "state": "active",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
