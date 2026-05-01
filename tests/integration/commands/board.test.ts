@@ -12,51 +12,20 @@
  * Each board describe / columns / groups test uses an isolated
  * tmp XDG cache so cache-write side effects don't bleed across tests.
  */
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Cassette, Interaction } from '../../fixtures/load.js';
+import { describe, expect, it } from 'vitest';
+import type { Interaction } from '../../fixtures/load.js';
 import {
   assertEnvelopeContract,
-  drive as driveBase,
   parseEnvelope,
-  FIXTURE_API_URL,
-  LEAK_CANARY,
-  type DriveResult,
+  useCachedIntegrationEnv,
   type EnvelopeShape,
 } from '../helpers.js';
-import type { RunOptions } from '../../../src/cli/run.js';
 
-let xdgRoot: string;
-
-beforeEach(async () => {
-  xdgRoot = await mkdtemp(join(tmpdir(), 'monday-cli-board-int-'));
-});
-
-afterEach(async () => {
-  await rm(xdgRoot, { recursive: true, force: true });
-});
-
-/**
- * `board.test.ts` exercises cache-aware reads (`board describe` /
- * `columns` / `groups`) so each `drive` call needs a per-test
- * isolated `XDG_CACHE_HOME`. The wrapper reads `xdgRoot` from the
- * `beforeEach` closure so the helper signature stays the same as
- * `tests/integration/helpers.ts` `drive(...)`.
- */
-const drive = async (
-  argv: readonly string[],
-  cassette: Cassette,
-  overrides: Partial<RunOptions> = {},
-): Promise<DriveResult> => {
-  const env = {
-    MONDAY_API_TOKEN: LEAK_CANARY,
-    MONDAY_API_URL: FIXTURE_API_URL,
-    XDG_CACHE_HOME: xdgRoot,
-  };
-  return driveBase(argv, cassette, { env, ...overrides });
-};
+// `board.test.ts` exercises cache-aware reads (`board describe` /
+// `columns` / `groups`); each `drive` call needs a per-test isolated
+// `XDG_CACHE_HOME`. R11 lifted the wrapper into helpers.ts during
+// the M5b cleanup so this file no longer carries its own copy.
+const { drive } = useCachedIntegrationEnv('monday-cli-board-int-');
 
 const sampleBoard = {
   id: '111',

@@ -15,15 +15,10 @@
  * to that root. The function is called once at module top-level in
  * each per-verb file, mirroring what the monolith did inline.
  */
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach } from 'vitest';
 import type { Cassette } from '../../fixtures/load.js';
 import {
-  drive as driveBase,
-  FIXTURE_API_URL,
-  LEAK_CANARY,
+  useCachedIntegrationEnv,
+  type CachedIntegrationEnv,
   type DriveResult,
 } from '../helpers.js';
 import type { RunOptions } from '../../../src/cli/run.js';
@@ -107,48 +102,28 @@ export const item = (id: string, name = `Item ${id}`): typeof sampleItem => ({
   board: { id: '111' },
 });
 
-export interface ItemTestEnv {
-  readonly drive: (
-    argv: readonly string[],
-    cassette: Cassette,
-    overrides?: Partial<RunOptions>,
-  ) => Promise<DriveResult>;
-  /**
-   * Accessor for the per-test `XDG_CACHE_HOME` root. Tests that need
-   * to compose extra env vars (e.g. `MONDAY_TIMEZONE`) replace the
-   * whole `env` override and read this getter to keep the cache root
-   * pointed at the right tmp dir. Mirrors the pre-R14 module-level
-   * `let xdgRoot: string` access pattern.
-   */
-  readonly xdgRoot: () => string;
-}
+/**
+ * Re-export of `helpers.ts CachedIntegrationEnv` under the legacy
+ * `ItemTestEnv` name so existing per-verb test files that import
+ * the type continue to compile after R11. Keep this alias even if
+ * the type itself stops drifting — every per-verb test file imports
+ * it.
+ */
+export type ItemTestEnv = CachedIntegrationEnv;
 
 /**
  * Registers per-test setup/teardown for an isolated `XDG_CACHE_HOME`
  * and returns a `drive(argv, cassette, overrides?)` bound to that
- * root. Mirrors the inline `xdgRoot` + `drive` shape the monolithic
- * `item.test.ts` shipped pre-R14 — each per-verb file calls this
- * once at module top-level.
+ * root. R11 lifted the inline `mkdtemp` + closure into
+ * `helpers.ts useCachedIntegrationEnv` during the M5b cleanup; this
+ * function now delegates rather than carrying its own copy. The
+ * tmpdir prefix stays `monday-cli-item-int-` so leaked tmp dirs
+ * remain searchable by the historical name.
  */
-export const useItemTestEnv = (): ItemTestEnv => {
-  let xdgRoot: string;
-  beforeEach(async () => {
-    xdgRoot = await mkdtemp(join(tmpdir(), 'monday-cli-item-int-'));
-  });
-  afterEach(async () => {
-    await rm(xdgRoot, { recursive: true, force: true });
-  });
-  const drive = async (
-    argv: readonly string[],
-    cassette: Cassette,
-    overrides: Partial<RunOptions> = {},
-  ): Promise<DriveResult> => {
-    const env = {
-      MONDAY_API_TOKEN: LEAK_CANARY,
-      MONDAY_API_URL: FIXTURE_API_URL,
-      XDG_CACHE_HOME: xdgRoot,
-    };
-    return driveBase(argv, cassette, { env, ...overrides });
-  };
-  return { drive, xdgRoot: () => xdgRoot };
-};
+export const useItemTestEnv = (): ItemTestEnv =>
+  useCachedIntegrationEnv('monday-cli-item-int-');
+
+// Re-export the result type so per-verb tests that import the
+// nominal shape continue to compile. R14 dropped this nominally;
+// kept as a passthrough for downstream test compilation.
+export type { Cassette, DriveResult, RunOptions };

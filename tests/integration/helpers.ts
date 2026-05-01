@@ -20,8 +20,11 @@
  * the same shape `account.test.ts` already used for its
  * config-error and env-API-version regression tests.
  */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { expect } from 'vitest';
+import { afterEach, beforeEach, expect } from 'vitest';
 import { run, type RunOptions } from '../../src/cli/run.js';
 import { fixedRequestIdGenerator } from '../../src/utils/request-id.js';
 import {
@@ -168,4 +171,63 @@ export const drive = async (
     remaining: transport.remaining(),
     requests: transport.requests.length,
   };
+};
+
+/**
+ * The shape returned by `useCachedIntegrationEnv` — a `drive` bound
+ * to a per-test isolated `XDG_CACHE_HOME` plus an accessor for the
+ * tmp root (used by tests that want to inspect cache files directly).
+ */
+export interface CachedIntegrationEnv {
+  readonly drive: (
+    argv: readonly string[],
+    cassette: Cassette,
+    overrides?: Partial<RunOptions>,
+  ) => Promise<DriveResult>;
+  /**
+   * The current per-test tmp dir. Re-evaluated each call because
+   * `beforeEach` swaps it. Mirrors the pre-R11 pattern board.test.ts
+   * + _item-fixtures.ts shipped (a function rather than a value
+   * because the closure is registered at module-load time).
+   */
+  readonly xdgRoot: () => string;
+}
+
+/**
+ * Registers per-test `mkdtemp` + `rm` hooks for an isolated
+ * `XDG_CACHE_HOME` and returns a `drive(argv, cassette, overrides?)`
+ * bound to that root. The `prefix` parameter names the tmpdir
+ * directory ("monday-cli-board-int-", "monday-cli-item-int-", …)
+ * so a leaked tmp dir is searchable.
+ *
+ * R11 lift (M5b cleanup, deferred from M3 / R14). Pre-fix the same
+ * 8-line `mkdtemp` + closure pattern lived in `board.test.ts` and
+ * `_item-fixtures.ts useItemTestEnv()`. The trigger fired in M5b
+ * (third XDG-needing surface — item set / clear / update); R14 added
+ * the item-specific helper but didn't fold board's copy into it.
+ * Codex M5b finding #5 surfaced the leftover duplication.
+ */
+export const useCachedIntegrationEnv = (
+  prefix: string,
+): CachedIntegrationEnv => {
+  let xdgRoot: string;
+  beforeEach(async () => {
+    xdgRoot = await mkdtemp(join(tmpdir(), prefix));
+  });
+  afterEach(async () => {
+    await rm(xdgRoot, { recursive: true, force: true });
+  });
+  const cachedDrive = async (
+    argv: readonly string[],
+    cassette: Cassette,
+    overrides: Partial<RunOptions> = {},
+  ): Promise<DriveResult> => {
+    const env = {
+      MONDAY_API_TOKEN: LEAK_CANARY,
+      MONDAY_API_URL: FIXTURE_API_URL,
+      XDG_CACHE_HOME: xdgRoot,
+    };
+    return drive(argv, cassette, { env, ...overrides });
+  };
+  return { drive: cachedDrive, xdgRoot: () => xdgRoot };
 };
