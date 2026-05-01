@@ -75,6 +75,7 @@ import {
   type SelectedMutation,
   type TranslatedColumnValue,
 } from './column-values.js';
+import { translateRawColumnValue, type ParsedSetRawExpression } from './raw-write.js';
 import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
 
 /**
@@ -96,6 +97,20 @@ export interface PlanChangesInputs {
   readonly itemId: string;
   /** The full list of `--set` pairs the command layer parsed. */
   readonly setEntries: readonly SetEntry[];
+  /**
+   * The list of `--set-raw` pairs the command layer parsed (M8
+   * escape-hatch surface). Each entry is the result of
+   * `parseSetRawExpression` from `api/raw-write.ts` — token + parsed
+   * `JsonObject` payload + the original `<json>` string. Resolution
+   * runs through the same `resolveColumnWithRefresh` path as
+   * `setEntries`; the post-resolution gate (`translateRawColumnValue`)
+   * applies the read-only-forever / files-shaped reject lists per
+   * cli-design §5.3 escape-hatch contract. The diff `to` side echoes
+   * the parsed JsonObject verbatim (whitespace + key ordering from
+   * the original argv string aren't preserved — equivalent payloads
+   * may render differently per cli-design §5.3 line 973-978).
+   */
+  readonly rawEntries?: readonly ParsedSetRawExpression[];
   /**
    * Optional rename — the new value for the item's `name` field.
    * Plumbed through `monday item update --name <n>`. The engine
@@ -200,16 +215,21 @@ export interface PlanChangesResult {
 export const planChanges = async (
   inputs: PlanChangesInputs,
 ): Promise<PlanChangesResult> => {
-  if (inputs.setEntries.length === 0 && inputs.nameChange === undefined) {
+  const rawEntries: readonly ParsedSetRawExpression[] = inputs.rawEntries ?? [];
+  if (
+    inputs.setEntries.length === 0 &&
+    rawEntries.length === 0 &&
+    inputs.nameChange === undefined
+  ) {
     // Defensive — the command layer is supposed to reject the
-    // no-`--set`-and-no-`--name` case before reaching the engine.
-    // Surfacing as internal_error rather than usage_error because
-    // reaching this path is a wiring bug, not a user fault.
+    // no-`--set`-and-no-`--set-raw`-and-no-`--name` case before reaching
+    // the engine. Surfacing as internal_error rather than usage_error
+    // because reaching this path is a wiring bug, not a user fault.
     throw new ApiError(
       'internal_error',
-      'planChanges called with zero --set entries and no --name change; ' +
-        'the command layer should reject the empty case before invoking ' +
-        'the dry-run engine.',
+      'planChanges called with zero --set entries, zero --set-raw entries, ' +
+        'and no --name change; the command layer should reject the empty ' +
+        'case before invoking the dry-run engine.',
       { details: { board_id: inputs.boardId, item_id: inputs.itemId } },
     );
   }
@@ -313,23 +333,117 @@ export const planChanges = async (
     resolvedIds[entry.token] = resolution.match.column.id;
   }
 
+  // 1b) Resolve every --set-raw token (M8 escape hatch). Same
+  //     cache-miss-refresh + warnings/source aggregation as the
+  //     friendly loop above; per-entry uses `translateRawColumnValue`
+  //     post-resolution so the read-only-forever / files-shaped
+  //     reject lists fire.
+  const rawTranslatedByToken = new Map<string, TranslatedColumnValue>();
+  for (const entry of rawEntries) {
+    const resolution = await resolveColumnWithRefresh({
+      client: inputs.client,
+      boardId: inputs.boardId,
+      token: entry.token,
+      includeArchived: true,
+      ...(inputs.env === undefined ? {} : { env: inputs.env }),
+      ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+    });
+    warnings.push(...resolution.warnings);
+    aggregateSource = mergeSource(aggregateSource, resolution.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
+
+    if (isArchivedColumn(resolution.match.column)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${inputs.boardId} is archived. Monday rejects mutations against ` +
+            `archived columns; un-archive the column in Monday or pick a ` +
+            `different target.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: inputs.boardId,
+            },
+          },
+        ),
+        resolution.warnings,
+      );
+    }
+
+    // The raw-write helper applies the read-only-forever / files-
+    // shaped reject lists post-resolution — these throw
+    // ApiError(unsupported_column_type) before any wire payload
+    // assembles. Resolver warnings (collision, stale_cache_refreshed)
+    // fold into the thrown error's details.resolver_warnings so the
+    // refresh signal isn't dropped.
+    let translated;
+    try {
+      translated = translateRawColumnValue(
+        { id: resolution.match.column.id, type: resolution.match.column.type },
+        entry.value,
+        entry.rawJson,
+      );
+    } catch (err) {
+      if (err instanceof ApiError) {
+        throw foldResolverWarningsIntoError(err, resolution.warnings);
+      }
+      throw err;
+    }
+
+    if (
+      resolvedIds[entry.token] !== undefined ||
+      rawTranslatedByToken.has(entry.token)
+    ) {
+      // Duplicate raw token, OR token shared with a friendly --set
+      // entry. The latter is the cli-design §5.3 line 961-972 mutual-
+      // exclusion case; either way, agents have no way to know which
+      // payload won, so surface as usage_error before the diff is
+      // built.
+      throw new ApiError(
+        'usage_error',
+        `Multiple --set / --set-raw entries target column token ` +
+          `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
+          `if two tokens resolve to the same column ID after NFC + ` +
+          `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
+          `disambiguate.`,
+        {
+          details: {
+            token: entry.token,
+            resolved_id: resolution.match.column.id,
+          },
+        },
+      );
+    }
+    rawTranslatedByToken.set(entry.token, translated);
+    resolvedIds[entry.token] = resolution.match.column.id;
+  }
+
   // Aggregate cross-column duplicate detection: two distinct tokens
   // (e.g. `status` and `id:status_4`) may resolve to the same column.
   // selectMutation owns this check for the multi case but it's
   // correct to surface the failure pre-translation so the engine
-  // never produces a half-built diff.
+  // never produces a half-built diff. M8: the union of friendly +
+  // raw translations is checked together — two distinct tokens that
+  // resolve to the same column ID via different flag kinds (--set vs
+  // --set-raw) trigger the same usage_error per cli-design §5.3 line
+  // 961-972 (mutual-exclusion contract).
   const seenColumnIds = new Set<string>();
-  for (const [token, value] of resolvedByToken) {
+  const allResolvedByToken: ReadonlyMap<string, TranslatedColumnValue> =
+    new Map([...resolvedByToken, ...rawTranslatedByToken]);
+  for (const [token, value] of allResolvedByToken) {
     if (seenColumnIds.has(value.columnId)) {
       throw new ApiError(
         'usage_error',
-        `Multiple --set entries resolve to the same column ID ` +
+        `Multiple --set / --set-raw entries resolve to the same column ID ` +
           `${JSON.stringify(value.columnId)} (last token: ` +
-          `${JSON.stringify(token)}). Pass at most one --set per column.`,
+          `${JSON.stringify(token)}). Pass at most one per column.`,
         {
           details: {
             column_id: value.columnId,
-            tokens: [...resolvedByToken.entries()]
+            tokens: [...allResolvedByToken.entries()]
               .filter(([, v]) => v.columnId === value.columnId)
               .map(([t]) => t),
           },
@@ -373,9 +487,12 @@ export const planChanges = async (
   //    string in single) per cli-design §5.3 step 5; the dry-run
   //    diff `to` should reflect the *actual* wire shape that would
   //    be sent. Building diff cells before selectMutation would
-  //    mis-render long_text in multi as a bare string.
-  const orderedTranslated: TranslatedColumnValue[] = inputs.setEntries.map(
-    (entry) => {
+  //    mis-render long_text in multi as a bare string. Order:
+  //    friendly --set entries first (preserving argv order), then
+  //    --set-raw entries (preserving argv order). The contract
+  //    pinned by both single-mutation and multi-mutation snapshots.
+  const orderedTranslated: TranslatedColumnValue[] = [
+    ...inputs.setEntries.map((entry) => {
       const translated = resolvedByToken.get(entry.token);
       /* c8 ignore next 3 — defensive: every token landed in
          resolvedByToken in the loop above. */
@@ -383,8 +500,17 @@ export const planChanges = async (
         throw new ApiError('internal_error', 'planChanges: lost translated entry');
       }
       return translated;
-    },
-  );
+    }),
+    ...rawEntries.map((entry) => {
+      const translated = rawTranslatedByToken.get(entry.token);
+      /* c8 ignore next 3 — defensive: every raw token landed in
+         rawTranslatedByToken in the loop above. */
+      if (translated === undefined) {
+        throw new ApiError('internal_error', 'planChanges: lost raw translated entry');
+      }
+      return translated;
+    }),
+  ];
   // When `--name <n>` is present, prepend a synthetic translated
   // value so `selectMutation` handles bundling uniformly: name-only
   // → `change_simple_column_value(column_id: "name", ...)`; name +
