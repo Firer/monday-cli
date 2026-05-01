@@ -121,6 +121,9 @@ The full envelope contract is locked in `docs/cli-design.md` §6.
 - **[docs/cli-design.md](./docs/cli-design.md)** — canonical CLI contract.
   **Start here** if you want to understand what the CLI does, what's in
   v0.1 vs deferred, or what the JSON envelope shape is.
+- [docs/output-shapes.md](./docs/output-shapes.md) — per-command output
+  reference. What `data` looks like for every shipped command, with
+  concrete examples.
 - [docs/architecture.md](./docs/architecture.md) — module boundaries
   (commands → api → SDK).
 - [docs/api-reference.md](./docs/api-reference.md) — Monday concepts cheat

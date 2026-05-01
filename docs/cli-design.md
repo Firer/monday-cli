@@ -1185,6 +1185,10 @@ The output contract is part of the CLI's public surface. Breaking it
 requires a major version bump. The rules below are normative;
 per-command JSON shapes are pinned by integration-test fixtures and
 described inline in §6.1–§6.5 alongside the universal envelope.
+A per-command reference (every shipped command's `data` shape, with
+concrete examples) lives in
+[`output-shapes.md`](./output-shapes.md) — read that first if you
+just want to know what `monday <noun> <verb> --json` returns.
 
 **Schema version.** Every JSON output carries
 `meta.schema_version: "1"`. Adding a field is non-breaking (no bump);
