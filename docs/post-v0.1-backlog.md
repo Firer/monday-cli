@@ -130,10 +130,12 @@ might otherwise expect:
   invocation reads from env/argv only; no persistent state
   beyond the cache, which is a derived read).~~ → now in
   cli-design §13.5 Permanent non-goals.
-- **`monday undo`** — replay-based reversal of recent
+- ~~**`monday undo`** — replay-based reversal of recent
   mutations. Requires a local mutation log; conflicts with the
   stateless principle and with Monday's authoritative state
-  model (the user can also undo via the UI).
+  model (the user can also undo via the UI).~~ → now in
+  cli-design §13.5 Permanent non-goals (with the concurrency-CAS
+  argument added).
 - **Activity logs / audit trail** as a top-level read verb.
   *(Tension with `item history` above — `item history` is a
   per-item view of the same underlying data; the org-wide audit

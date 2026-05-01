@@ -2008,6 +2008,18 @@ So an agent reading the contract knows what's *not* there yet:
   hosted-service shape. Shell aliases / shell functions are the
   established UNIX answer — the CLI doesn't need to compete with
   `bash`.
+- `monday undo` (replay-based reversal of recent mutations). Two
+  reasons: (1) requires a local mutation log, breaking the
+  statelessness above; (2) Monday's state model is authoritative
+  and concurrent — between the original mutation and the undo,
+  another writer (user, agent, automation) may have changed the
+  same column, and "undo" would silently overwrite their work.
+  Real undo needs CAS semantics Monday's API doesn't expose.
+  Honest substitutes: `--dry-run` for "preview before writing"
+  (v0.1) and reading the prior value from `item history` for
+  "restore manually" (v0.3). An agent that needs reversibility
+  branches on dry-run output rather than betting on undo working
+  under concurrency.
 
 ## 14. Open questions
 
