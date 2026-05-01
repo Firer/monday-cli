@@ -82,17 +82,20 @@ unreachable / mixed).
 
 **Stable error codes (26).** `usage_error`,
 `confirmation_required`, `not_found`, `ambiguous_name`,
-`ambiguous_column`, `column_not_found`, `column_archived`,
-`column_token_collision`, `unsupported_column_type`,
-`user_not_found`, `validation_failed`, `unauthorized`,
+`ambiguous_column`, `column_not_found`, `user_not_found`,
+`unsupported_column_type`, `column_archived`, `unauthorized`,
 `forbidden`, `rate_limited`, `complexity_exceeded`,
 `daily_limit_exceeded`, `concurrency_exceeded`,
-`ip_rate_limited`, `resource_locked`, `stale_cursor`,
-`pagination_cap_reached`, `network_error`, `timeout`,
-`config_error`, `cache_error`, `internal_error`. Two `dev_*`
-codes reserved for v0.3 are listed but inactive in v0.1.
-Agents key off `error.code`; `error.message` is human-readable
-and **not** part of the contract.
+`ip_rate_limited`, `resource_locked`, `validation_failed`,
+`stale_cursor`, `config_error`, `cache_error`, `network_error`,
+`timeout`, `dev_not_configured`, `dev_board_misconfigured`,
+`internal_error`. The two `dev_*` codes are reserved for the
+v0.3 `monday dev` namespace — listed in the registry but
+inactive on the v0.1 surface. Warning codes
+(`stale_cache_refreshed`, `pagination_cap_reached`,
+`column_token_collision`, etc.) live in `warnings[]`, not
+`error`. Agents key off `error.code`; `error.message` is
+human-readable and **not** part of the contract.
 
 **Exit codes.**
 

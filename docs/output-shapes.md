@@ -698,18 +698,22 @@ Every error envelope has the same shape (cli-design §6.5):
 }
 ```
 
-The 26 stable v0.1 error codes — `usage_error`, `not_found`,
-`ambiguous_name`, `ambiguous_column`, `column_not_found`,
-`column_archived`, `column_token_collision`,
-`unsupported_column_type`, `user_not_found`,
-`confirmation_required`, `validation_failed`, `unauthorized`,
+The 26 stable v0.1 error codes — `usage_error`,
+`confirmation_required`, `not_found`, `ambiguous_name`,
+`ambiguous_column`, `column_not_found`, `user_not_found`,
+`unsupported_column_type`, `column_archived`, `unauthorized`,
 `forbidden`, `rate_limited`, `complexity_exceeded`,
-`network_error`, `timeout`, `stale_cursor`, `pagination_cap_reached`,
-`config_error`, `cache_error`, `internal_error`, `not_implemented`,
-`stale_cache_refreshed`, `version_mismatch`, `cache_stale`. See
-[cli-design.md §6.5](./cli-design.md#65-error) for the per-code
-contract (when it fires, retryable status, what `details` carries,
-etc.).
+`daily_limit_exceeded`, `concurrency_exceeded`, `ip_rate_limited`,
+`resource_locked`, `validation_failed`, `stale_cursor`,
+`config_error`, `cache_error`, `network_error`, `timeout`,
+`dev_not_configured`, `dev_board_misconfigured`, `internal_error`.
+The two `dev_*` codes are reserved for the v0.3 `monday dev`
+namespace — listed but inactive on the v0.1 surface. Warning
+codes (`stale_cache_refreshed`, `pagination_cap_reached`,
+`column_token_collision`, etc.) live in `warnings[]`, not
+`error`. See [cli-design.md §6.5](./cli-design.md#65-error) for
+the per-code contract (when it fires, retryable status, what
+`details` carries, etc.).
 
 Two representative error-envelope shapes pinned by snapshot:
 
