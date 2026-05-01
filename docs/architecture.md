@@ -422,7 +422,39 @@
   primitive surface as `usage_error`. Result wrapped in
   the §6 envelope; raw GraphQL/HTTP errors map via the
   existing `api/errors.ts` chain so error codes are stable
-  even on raw queries.
+  even on raw queries. **M6 close-arc additions:**
+  delegates to `api/raw-document.ts analyzeRawDocument`
+  for the AST walk that drives the mutation gate
+  (`--allow-mutation` required for any `mutation` op in
+  the doc; subscriptions rejected unconditionally) and
+  `operationName` selection (1 anon → omit; 1 named →
+  pass; N → require `--operation-name <name>`). Honours
+  cli-design §9.2's universal `--dry-run` binding when
+  the *selected* op is a mutation — emits the §6.4
+  raw-GraphQL planned-change shape (`operation:
+  'raw_graphql'`, `operation_kind`, `operation_name`,
+  `query`, `variables`) and skips the wire call;
+  read-only selections ignore `--dry-run`. `resolveClient`
+  is deferred until after the analyser succeeds so a
+  pre-network `usage_error` reports `meta.source: 'none'`
+  per §6.1.
+
+- `api/raw-document.ts` (M6 close) —
+  `analyzeRawDocument({query, explicitOperationName,
+  allowMutation})` walks the parsed GraphQL AST via the
+  `graphql` reference parser (a direct dep at 16.8.2 —
+  was already a transitive via `@mondaydotcomorg/api`'s
+  `graphql-request`). Returns `{operationName,
+  selectedOperationKind, hasMutation, hasSubscription,
+  operations[]}`. Two predicates ship side-by-side and
+  must stay distinct: `hasMutation` (document-wide;
+  drives the `--allow-mutation` opt-in gate) vs
+  `selectedOperationKind === 'mutation'` (the op Monday
+  will actually execute; drives the `--dry-run`
+  short-circuit). The split is load-bearing — Codex M6
+  pass-5 P2 caught a bug where dry-run was keyed off the
+  document-wide check and mis-fired on mixed docs whose
+  `--operation-name` selected a query.
 
 - `commands/board/doctor.ts` (M6) — three diagnostic kinds:
   `duplicate_column_title` (NFC + case-fold + whitespace-

@@ -1450,7 +1450,7 @@ a one-element array. Bulk mutations (via `--where` /
 
 **Per-mutation-kind `planned_changes` shapes.** Different
 mutation verbs produce different planned-change shapes; the
-`operation` slot is the discriminator. Two shapes ship in v0.1:
+`operation` slot is the discriminator. Three shapes ship in v0.1:
 
 - **Column-mutation shape** (`item set` / `item clear` /
   `item update`). The shape shown above:
@@ -1477,6 +1477,37 @@ mutation verbs produce different planned-change shapes; the
         "item_id": "12345",
         "body": "Tagging @ops — please review the staging deploy.",
         "body_length": 48
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+- **Raw-GraphQL shape** (`monday raw` with a `mutation`
+  selected; M6 close). The CLI can't introspect arbitrary
+  GraphQL — there's no per-column diff and no resolved-ids
+  echo because the writer didn't run any token resolution.
+  Carries `operation: "raw_graphql"`, `operation_kind:
+  "mutation"`, the selected `operation_name` (or `null` for
+  anonymous), the verbatim `query`, and the `variables` JSON
+  the wire call would have carried. `meta.source: "none"` (no
+  API call fired). Honoured per §9.2's universal mutation +
+  `--dry-run` binding; for read-only documents (or mixed docs
+  whose `--operation-name` selects a query) `--dry-run` is a
+  no-op and the query executes normally:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "raw_graphql",
+        "operation_kind": "mutation",
+        "operation_name": "Bump",
+        "query": "mutation Bump { create_workspace(name: \"X\", kind: open) { id } }",
+        "variables": {}
       }
     ],
     "warnings": []
