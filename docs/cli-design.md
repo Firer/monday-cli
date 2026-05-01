@@ -783,13 +783,26 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `users(emails: [...])` call. Unknown email →
      `error.code = "user_not_found"` with the unmatched email in
      `details`.
-4. **All other column types in v0.1 → `unsupported_column_type`.**
-   The error includes `column_id`, `type`, and `deferred_to: "v0.2"`
-   plus a hint pointing at the v0.2 writer-expansion milestone. v0.1
-   ships no escape hatch — the contract here is "we know how to
-   translate the seven allowlisted types, and every other type is
-   not writable via the CLI until v0.2." No silent partial support;
-   no dead `--set-raw` suggestion in v0.1 (see "Escape hatch" below).
+4. **All other column types in v0.1 → `unsupported_column_type`,
+   keyed by roadmap category.** The error always includes `column_id`
+   and `type`; the rest of the details depend on which row of the
+   writer-expansion roadmap the type sits on:
+   - **v0.2 writer-expansion** types (`link`, `email`, `phone`,
+     `tags`, `board_relation`, `dependency`) carry `deferred_to:
+     "v0.2"`. v0.2 will land both the friendly translator and
+     `--set-raw` for these.
+   - **read-only-forever** types (`mirror`, `formula`, `auto_number`,
+     `creation_log`, `last_updated`, `item_id`) carry `read_only:
+     true` (no `deferred_to`). Monday computes these server-side;
+     the API never makes them writable, regardless of CLI version.
+     The hint points at the underlying source column.
+   - **future** types (anything else — e.g. `battery`,
+     `item_assignees`, `time_tracking`, `files`, `rating`) carry
+     `deferred_to: "future"` with a generic message that doesn't
+     commit to a specific version.
+   v0.1 ships no escape hatch in any branch — no dead `--set-raw`
+   suggestion in v0.1 (see "Escape hatch" below). No silent partial
+   support.
 5. **Picks the right mutation.** Of the v0.1 allowlist:
    - `change_simple_column_value` (plain string) — for `text`,
      `long_text`, `numbers`. These types accept a bare string.
@@ -831,10 +844,12 @@ literal Monday-shape JSON. The flag is **not implemented in v0.1**;
 it lands in v0.2's writer-expansion milestone alongside the next
 batch of friendly types (link / email / phone / tags /
 board_relation / dependency). v0.1 agents hitting an unsupported
-type get `unsupported_column_type` with `deferred_to: "v0.2"` and
-no escape — the friendly translator covers the seven types
-(`text`, `long_text`, `numbers`, `status`, `dropdown`, `date`,
-`people`) the v0.1 contract commits to.
+type get `unsupported_column_type` keyed by roadmap category (per
+step 4 above) — `deferred_to: "v0.2"` for the v0.2 row,
+`read_only: true` for read-only-forever types, `deferred_to:
+"future"` for everything else. The friendly translator covers
+the seven types (`text`, `long_text`, `numbers`, `status`,
+`dropdown`, `date`, `people`) the v0.1 contract commits to.
 
 **Writer-expansion roadmap.** Per-type slots for the friendly
 translator (`--set <col>=<val>`). Until a type lands in the
@@ -1882,9 +1897,13 @@ scoped idempotent changes, and post comments narrating its work.**
 - `item set`, `item clear`, and `item update --set` with **only** the
   v0.1 column allowlist (`status`, `text`, `long_text`, `numbers`,
   `dropdown`, `date`, `people`). Other types are not writable in
-  v0.1 — they surface `unsupported_column_type` with
-  `deferred_to: "v0.2"`; the `--set-raw` escape hatch lands in
-  v0.2 with the writer-expansion milestone.
+  v0.1 — they surface `unsupported_column_type` keyed by roadmap
+  category per §5.3 step 4: `deferred_to: "v0.2"` for the v0.2
+  writer-expansion row, `read_only: true` for read-only-forever
+  types (mirror / formula / auto_number / creation_log /
+  last_updated / item_id), `deferred_to: "future"` for everything
+  else. The `--set-raw` escape hatch lands in v0.2 with the
+  writer-expansion milestone.
 - `update list/get/create` — read AND post comments. (`update create`
   is in v0.1 because the agent workflow narrative — start a task,
   do the work, post a result comment — is meaningfully degraded

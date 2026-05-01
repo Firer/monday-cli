@@ -83,9 +83,13 @@
  *
  * **No `--set-raw` escape hatch in v0.1.** The cli-design `--set-raw
  * <col>=<json>` flag is deferred to v0.2's writer-expansion milestone.
- * Non-allowlisted column types surface `unsupported_column_type` with
- * `deferred_to: "v0.2"` and no escape; the v0.1 contract is "we
- * translate the seven allowlisted types and reject everything else."
+ * Non-allowlisted column types surface `unsupported_column_type`
+ * keyed by roadmap category per `column-types.ts
+ * getColumnRoadmapCategory`: v0.2 writer-expansion types get
+ * `deferred_to: "v0.2"`, read-only-forever types get
+ * `read_only: true`, anything else gets `deferred_to: "future"`.
+ * The v0.1 contract is "we translate the seven allowlisted types
+ * and reject everything else with category-accurate guidance."
  */
 
 import { ApiError, UsageError } from '../utils/errors.js';
@@ -233,10 +237,13 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
  *
  * **Throws** `ApiError`:
  *   - `unsupported_column_type` — type not in the v0.1 friendly
- *     allowlist. Carries `column_id`, `type`, and
- *     `deferred_to: "v0.2"` pointing at the v0.2 writer-expansion
- *     milestone (which will land `--set-raw` plus broader friendly
- *     types). v0.1 has no escape hatch.
+ *     allowlist. Carries `column_id` + `type` plus per-category
+ *     details: `deferred_to: "v0.2"` for v0.2-roadmap types
+ *     (link / email / phone / tags / board_relation / dependency),
+ *     `read_only: true` for read-only-forever types (mirror /
+ *     formula / auto_number / creation_log / last_updated /
+ *     item_id), `deferred_to: "future"` for anything else.
+ *     v0.1 has no escape hatch.
  *   - `internal_error` — sync entry was called on a `people`
  *     column. Programmer error: M5b's write surface always uses
  *     `translateColumnValueAsync`. The check exists so a future
@@ -339,10 +346,12 @@ export const translateColumnValue = (
  *     official "clear all column values" pattern.
  *
  * **Throws** `unsupported_column_type` for types outside the v0.1
- * writable allowlist — same code path the value translator uses.
- * Agents that hit it on `item clear` get the same v0.2-deferral
- * hint as `item set` / `item update` so the error surface is
- * predictable across the mutation surfaces.
+ * writable allowlist — same code path the value translator uses,
+ * keyed by roadmap category (`deferred_to: "v0.2"` /
+ * `read_only: true` / `deferred_to: "future"`). Agents see the
+ * same per-category surface across `item set` / `item update` /
+ * `item clear`, so a wrapper that triages on the error details
+ * doesn't need a per-verb branch.
  *
  * Sync entry — `people` clear doesn't need email resolution (the
  * payload is `{}` regardless of who's currently assigned). Reused
