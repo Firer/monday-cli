@@ -88,9 +88,7 @@ export const buildProgram = (
     .option('--retry <n>', 'max retries on transient errors')
     .option('--dry-run', 'mutations: print planned change, do not execute')
     .option('-y, --yes', 'skip confirmation gate on destructive ops')
-    .option('--body-file <path>', 'read --body content from a file (or - for stdin)')
-    .option('--query-file <path>', 'monday raw: read GraphQL query from a file (or -)')
-    .option('--vars-file <path>', 'monday raw: read GraphQL variables from a file (or -)');
+    .option('--body-file <path>', 'read --body content from a file (or - for stdin)');
 
   // Wire the static registry first, then any test-supplied extras /
   // raw hooks. Tests can swap out the registry entirely by passing

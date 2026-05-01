@@ -35,9 +35,7 @@ const buildProgram = (): Command => {
     .option('--retry <n>')
     .option('--dry-run')
     .option('-y, --yes')
-    .option('--body-file <path>')
-    .option('--query-file <path>')
-    .option('--vars-file <path>');
+    .option('--body-file <path>');
   return program;
 };
 
@@ -70,8 +68,6 @@ describe('parseGlobalFlags — defaults from a bare argv', () => {
     expect(flags.apiVersion).toBeUndefined();
     expect(flags.timeout).toBeUndefined();
     expect(flags.bodyFile).toBeUndefined();
-    expect(flags.queryFile).toBeUndefined();
-    expect(flags.varsFile).toBeUndefined();
   });
 });
 
@@ -264,30 +260,8 @@ describe('parseGlobalFlags — file inputs (§4.4)', () => {
     );
   });
 
-  it('--query-file', () => {
-    expect(runArgv(['--query-file', '/tmp/q.gql']).queryFile).toBe(
-      '/tmp/q.gql',
-    );
-  });
-
-  it('--vars-file', () => {
-    expect(runArgv(['--vars-file', '/tmp/v.json']).varsFile).toBe(
-      '/tmp/v.json',
-    );
-  });
-
-  it('all three accept the - sentinel for stdin', () => {
-    const flags = runArgv([
-      '--body-file',
-      '-',
-      '--query-file',
-      '-',
-      '--vars-file',
-      '-',
-    ]);
-    expect(flags.bodyFile).toBe('-');
-    expect(flags.queryFile).toBe('-');
-    expect(flags.varsFile).toBe('-');
+  it('--body-file accepts the - sentinel for stdin', () => {
+    expect(runArgv(['--body-file', '-']).bodyFile).toBe('-');
   });
 });
 

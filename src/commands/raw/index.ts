@@ -35,6 +35,31 @@
  * they're mutually exclusive (only one source can read from stdin
  * per invocation; we surface a `usage_error` if both are `-`).
  *
+ * **Mutation gate.** The document is parsed via `analyzeRawDocument`
+ * (M6 close P1 fix) and any `mutation` operation is rejected with
+ * `usage_error` unless `--allow-mutation` is passed. `subscription`
+ * operations are unconditionally rejected (HTTP transport can't
+ * carry them). Read paths stay safe-by-default — an agent that
+ * means to mutate has to opt in.
+ *
+ * **`operationName` selection.** GraphQL servers use `operationName`
+ * to pick which operation to execute when a document has multiple.
+ * The pre-fix M6 hardcoded `'MondayRaw'`, which broke any document
+ * whose only operation didn't happen to be named `MondayRaw`. The
+ * fixed behaviour walks the AST and picks correctly:
+ *   - 1 anonymous op → omit `operationName` (Monday picks the only one).
+ *   - 1 named op → pass that name.
+ *   - N ops → require `--operation-name <name>` (validated against
+ *     the document's operations).
+ *
+ * **No auto-pagination.** `raw` sends exactly one GraphQL request
+ * per invocation. If the agent's query uses cursor pagination
+ * (Monday's `items_page(...) { cursor, items { ... } }`), the
+ * caller is responsible for re-running `raw` with the next cursor —
+ * the CLI doesn't walk the cursor for you. The friendly `item list
+ * --all` / `item search --all` verbs handle the walk; `raw` doesn't,
+ * because it can't tell which selection set is the cursor source.
+ *
  * **Idempotency** depends on the query — `query { … }` operations
  * are idempotent reads; `mutation { … }` operations may or may not
  * be. The `idempotent` slot on the `CommandModule` is `false`
@@ -55,13 +80,17 @@ import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError } from '../../utils/errors.js';
+import { analyzeRawDocument } from '../../api/raw-document.js';
 import type { RunContext } from '../../cli/run.js';
-import type { GlobalFlags } from '../../types/global-flags.js';
 
 const inputSchema = z
   .object({
     query: z.string().optional(),
     vars: z.string().optional(),
+    queryFile: z.string().min(1).optional(),
+    varsFile: z.string().min(1).optional(),
+    operationName: z.string().min(1).optional(),
+    allowMutation: z.boolean().default(false),
   })
   .strict();
 
@@ -316,17 +345,6 @@ const readVars = async (
   return parsed as Readonly<Record<string, unknown>>;
 };
 
-/**
- * The CLI shouldn't try to be clever about raw queries — Monday is
- * the authority on the GraphQL document. We don't validate
- * operation-name uniqueness, fragment definitions, etc.; we just
- * thread it to `client.raw`. The `operationName` we pass to the
- * client is `'MondayRaw'` for telemetry distinction; agents who
- * want a specific operation name in the document control that
- * themselves.
- */
-const RAW_OPERATION_NAME = 'MondayRaw';
-
 export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
   name: 'raw',
   summary: 'Send a raw GraphQL document to Monday',
@@ -334,6 +352,7 @@ export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
     "monday raw '{ me { id name email } }'",
     'monday raw --query-file ./query.gql --vars-file ./vars.json',
     "cat query.gql | monday raw --query-file -",
+    "monday raw 'mutation { create_workspace(name: \"X\", kind: open) { id } }' --allow-mutation",
   ],
   idempotent: false,
   inputSchema,
@@ -343,27 +362,54 @@ export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
       .command('raw [query]')
       .description(rawCommand.summary)
       .option('--vars <json>', 'GraphQL variables as inline JSON')
+      .option('--query-file <path>', 'read the GraphQL document from a file (or - for stdin)')
+      .option('--vars-file <path>', 'read --vars JSON from a file (or - for stdin)')
+      .option('--operation-name <name>', 'select an operation when the document defines more than one')
+      .option('--allow-mutation', 'allow `mutation` operations (default: rejected)')
       .addHelpText(
         'after',
-        ['', 'Examples:', ...rawCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
+        [
+          '',
+          'Examples:',
+          ...rawCommand.examples.map((e) => `  ${e}`),
+          '',
+          'Notes:',
+          '  - The document is parsed; mutations are rejected unless --allow-mutation.',
+          '  - Subscriptions are not supported (HTTP transport).',
+          '  - No auto-pagination: pass cursors yourself for items_page-style queries.',
+          '',
+        ].join('\n'),
       )
       .action(async (query: unknown, opts: unknown) => {
         const parsed = parseArgv(rawCommand.inputSchema, {
           ...(query === undefined ? {} : { query: query as string }),
           ...(opts as Readonly<Record<string, unknown>>),
         });
-        const { client, globalFlags, toEmit } = resolveClient(
-          ctx,
-          program.opts(),
-        );
 
+        // Read + validate before resolving the client. This keeps the
+        // pre-network failure path's error envelope honest:
+        // `meta.source` stays at the runner's default (no
+        // `setSource('live')` commit) so a `usage_error` from the
+        // analyser surfaces with `source: 'none'` per cli-design §6.1
+        // (`"none"` is for errors that fail before any read). Codex
+        // M6 pass-2 — pre-fix, `resolveClient` ran first and committed
+        // `live` even when no wire call followed, which lied about
+        // provenance on the failure envelope.
         const queryDoc = await readQuery(
           parsed.query,
-          globalFlags.queryFile,
+          parsed.queryFile,
           ctx.stdin,
-          globalFlags.varsFile,
+          parsed.varsFile,
         );
-        const vars = await readVars(parsed.vars, globalFlags.varsFile, ctx.stdin);
+        const vars = await readVars(parsed.vars, parsed.varsFile, ctx.stdin);
+
+        const analysis = analyzeRawDocument({
+          query: queryDoc,
+          explicitOperationName: parsed.operationName,
+          allowMutation: parsed.allowMutation,
+        });
+
+        const { client, toEmit } = resolveClient(ctx, program.opts());
 
         await sendRawQuery({
           client,
@@ -372,7 +418,7 @@ export const rawCommand: CommandModule<z.infer<typeof inputSchema>> = {
           toEmit,
           query: queryDoc,
           vars,
-          globalFlags,
+          operationName: analysis.operationName,
         });
       });
   },
@@ -385,14 +431,16 @@ interface SendRawInputs {
   readonly toEmit: ReturnType<typeof resolveClient>['toEmit'];
   readonly query: string;
   readonly vars: Readonly<Record<string, unknown>>;
-  readonly globalFlags: GlobalFlags;
+  readonly operationName: string | undefined;
 }
 
 const sendRawQuery = async (inputs: SendRawInputs): Promise<void> => {
   const response = await inputs.client.raw<unknown>(
     inputs.query,
     inputs.vars,
-    { operationName: RAW_OPERATION_NAME },
+    inputs.operationName === undefined
+      ? {}
+      : { operationName: inputs.operationName },
   );
   emitSuccess({
     ctx: inputs.ctx,

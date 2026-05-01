@@ -21,8 +21,11 @@ import {
 } from '../helpers.js';
 import type { Interaction } from '../../fixtures/load.js';
 
+// Anonymous shorthand queries have no operationName on the wire — the
+// server picks the only operation. Fixture cassettes therefore omit
+// `operation_name`. Named operations (`query Get(...)`) DO carry the
+// name on the wire and pin against `operation_name: 'Get'` below.
 const meQueryInteraction: Interaction = {
-  operation_name: 'MondayRaw',
   response: {
     data: {
       me: {
@@ -70,7 +73,7 @@ describe('monday raw (integration)', () => {
       {
         interactions: [
           {
-            operation_name: 'MondayRaw',
+            operation_name: 'Get',
             response: {
               data: { items: [{ id: '12345', name: 'Refactor login' }] },
             },
@@ -123,7 +126,7 @@ describe('monday raw (integration)', () => {
       {
         interactions: [
           {
-            operation_name: 'MondayRaw',
+            operation_name: 'Get',
             response: {
               data: { items: [{ id: '12345', name: 'Refactor login' }] },
             },
@@ -259,7 +262,6 @@ describe('monday raw (integration)', () => {
       {
         interactions: [
           {
-            operation_name: 'MondayRaw',
             http_status: 401,
             response: {
               errors: [
@@ -290,7 +292,7 @@ describe('monday raw (integration)', () => {
       {
         interactions: [
           {
-            operation_name: 'MondayRaw',
+            operation_name: 'Get',
             response: {
               data: { items: [{ id: '12345', name: 'Refactor login' }] },
             },
@@ -361,6 +363,165 @@ describe('monday raw (integration)', () => {
     await writeFile(queryPath, '   \n', 'utf8');
     const out = await drive(
       ['raw', '--query-file', queryPath, '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  // ── Mutation gate (M6 close P1 fix) ────────────────────────────────
+  it('mutation rejected by default (no --allow-mutation) — usage_error', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'mutation { create_workspace(name: "X", kind: open) { id } }',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message ?? '').toMatch(/mutation/iu);
+    // Pre-network failure: cli-design §6.1 says `source: 'none'`
+    // is for "errors that fail before any read". The analyser
+    // fires before resolveClient commits `live`, so the error
+    // envelope must report 'none' (Codex M6 pass-2 P2).
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('mutation accepted with --allow-mutation', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'mutation Bump { create_workspace(name: "X", kind: open) { id } }',
+        '--allow-mutation',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'Bump',
+            response: { data: { create_workspace: { id: '999' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data?: { create_workspace?: { id: string } };
+    };
+    expect(env.data?.create_workspace?.id).toBe('999');
+  });
+
+  it('subscription always rejected (HTTP transport can\'t carry it)', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'subscription { itemUpdated { id } }',
+        '--allow-mutation',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message ?? '').toMatch(/subscription/iu);
+  });
+
+  it('GraphQL syntax error surfaces as usage_error (parse-time)', async () => {
+    const out = await drive(
+      ['raw', '{ me { id', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message ?? '').toMatch(/parse|syntax/iu);
+  });
+
+  // ── operationName selection (M6 close P1 fix) ──────────────────────
+  it('multi-op without --operation-name fails with usage_error', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'query A { me { id } } query B { me { name } }',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message ?? '').toMatch(/operation-name/iu);
+  });
+
+  it('multi-op with --operation-name picks the named op', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'query A { me { id } } query B { me { name } }',
+        '--operation-name',
+        'B',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'B',
+            response: { data: { me: { name: 'Alice' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data?: { me?: { name?: string } };
+    };
+    expect(env.data?.me?.name).toBe('Alice');
+  });
+
+  it('multi-op with unmatched --operation-name fails', async () => {
+    const out = await drive(
+      [
+        'raw',
+        'query A { me { id } } query B { me { name } }',
+        '--operation-name',
+        'C',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--operation-name on a single-op doc whose name disagrees fails', async () => {
+    const out = await drive(
+      ['raw', 'query Foo { me { id } }', '--operation-name', 'Bar', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--operation-name on a single anonymous-op doc fails', async () => {
+    const out = await drive(
+      ['raw', '{ me { id } }', '--operation-name', 'Foo', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('document with no operations (fragment-only) fails', async () => {
+    const out = await drive(
+      ['raw', 'fragment X on Me { id }', '--json'],
       { interactions: [] },
     );
     expect(out.exitCode).toBe(1);

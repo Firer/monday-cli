@@ -78,10 +78,6 @@ export const globalFlagsRawSchema = z
 
     /** Long-form text body source (per-command, but global flag in §4.4). */
     bodyFile: z.string().min(1).optional(),
-    /** `monday raw` query source. */
-    queryFile: z.string().min(1).optional(),
-    /** `monday raw` variables source. */
-    varsFile: z.string().min(1).optional(),
   })
   .strict()
   .refine((v) => !(v.json && v.table), {
@@ -128,8 +124,6 @@ export interface GlobalFlags {
   readonly yes: boolean;
 
   readonly bodyFile: string | undefined;
-  readonly queryFile: string | undefined;
-  readonly varsFile: string | undefined;
 }
 
 const splitColumns = (raw: string | undefined): readonly string[] | undefined => {
@@ -235,7 +229,5 @@ export const parseGlobalFlags = (
     dryRun: raw.dryRun,
     yes: raw.yes,
     bodyFile: raw.bodyFile,
-    queryFile: raw.queryFile,
-    varsFile: raw.varsFile,
   };
 };
