@@ -104,23 +104,16 @@
 
 ## Doc-only gaps (no behavior change, just clearer contract)
 
-- **Writer-expansion roadmap table.** cli-design.md:1625 lists
+- ~~**Writer-expansion roadmap table.** cli-design.md:1625 lists
   *"Broad column-type write support (allowlist grows in v0.2+)"*
   as a single line. A per-type table mapping each Monday column
   type to its target v0.x would help agents know what's coming
-  when. Sketch:
-
-  | Type | Target version | Notes |
-  |------|----------------|-------|
-  | `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** | Current allowlist |
-  | `link`, `email`, `phone` | v0.2 | Trivial — simple-form translators |
-  | `tags` | v0.2 | Needs account-tag list lookup |
-  | `board_relation`, `dependency` | v0.2 | Cross-board ID resolution |
-  | `time-tracking` | v0.3 | Start/stop semantics (verbs, not value writes) |
-  | `files` | v0.4 | Already pinned via `add_file_to_column` (§13 v0.4) |
-  | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API |
-
-  *Suggested home: cli-design.md §5.3 sub-section.*
+  when.~~ → now in cli-design §5.3 "Writer-expansion roadmap"
+  sub-section, with a "tentative" caveat on `tags` /
+  `board_relation` / `dependency` (may slip v0.2→v0.3 after
+  fixture work) and a "read-only forever" row for
+  Monday-computed types. §13 v0.1-deferral list now points at
+  the table instead of the prior single-line bullet.
 
 ## Permanent non-goals candidates
 

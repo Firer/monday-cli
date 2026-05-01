@@ -828,6 +828,30 @@ translation and writes the literal Monday-shape JSON. Required for
 column types not in the v0.1 allowlist; available always for power
 users / agents that already know the shape.
 
+**Writer-expansion roadmap.** Per-type slots for the friendly
+translator (`--set <col>=<val>`). Until a type lands in the
+allowlist for a given version, agents use `--set-raw` (or wait).
+Slots are the *current best plan* — the v0.2 writer-expansion
+milestone may re-slot the harder types (`tags`,
+`board_relation`, `dependency`) to v0.3 after fixture work surfaces
+the design cost; this table is a planning anchor, not a binding
+schedule beyond v0.1.
+
+| Type | Target version | Notes |
+|------|----------------|-------|
+| `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** | Current allowlist (M5a). |
+| `link`, `email`, `phone` | v0.2 | Trivial — simple-form translators. |
+| `tags` | v0.2 (tentative) | Needs account-tag list lookup; may slip to v0.3. |
+| `board_relation`, `dependency` | v0.2 (tentative) | Cross-board ID resolution; may slip to v0.3. |
+| `time-tracking` | v0.3 | Start/stop semantics — verbs, not value writes. |
+| `files` | v0.4 | Already pinned via `add_file_to_column` (§13 v0.4). |
+| `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. |
+
+The "read-only forever" row matters for agents: trying `--set` on a
+mirror/formula/etc. surfaces `unsupported_column_type` and will
+*always* surface that, regardless of version. The hint should point
+at the underlying source column, not at `--set-raw`.
+
 **Clearing column values.** `monday item clear <iid> <col>` is the
 dedicated, type-portable verb for resetting a column to empty.
 Per-type payload sent to `change_simple_column_value` /
@@ -1957,7 +1981,8 @@ So an agent reading the contract knows what's *not* there yet:
 - `item watch` (v0.4).
 - `--concurrency` bulk parallelism (v0.4).
 - Boolean filter DSL (v0.2).
-- Broad column-type write support (allowlist grows in v0.2+).
+- Broad column-type write support — allowlist grows in v0.2+; per-type
+  target slots in §5.3 "Writer-expansion roadmap".
 - `item recreate-from-archive` — undecided; explicitly *not*
   shipping a misleading `restore` (see §5.4).
 
