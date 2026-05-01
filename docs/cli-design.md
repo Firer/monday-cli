@@ -501,6 +501,7 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # bulk update — at least one of --name / --set required
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
+                                          # --continue-on-error (partial-success envelope): v0.3
 monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
 monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
@@ -1894,6 +1895,16 @@ scoped idempotent changes, and post comments narrating its work.**
   v0.3 cross-board `item search` as a natural scoping lever
   (`item search --favorites`); shipping it in isolation buys little
   agent value, so the two land together
+- `item update --continue-on-error` — partial-success bulk path.
+  Today's bulk `item update --where` fails fast on the first
+  per-item error (matched items before the failure surface in
+  `details.applied_to` per §6.5). The flag would attempt every
+  matched item regardless and emit a new partial-success envelope
+  with per-item `{ok, error?}` records — that's a §6.4 sub-section,
+  not just a flag. Deferred to v0.3 so the v0.2 bulk-clear (above)
+  fixture-pins the existing failure-decoration shape first; the
+  partial-success envelope design pass benefits from one milestone
+  of operational signal on the fail-fast variant
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`

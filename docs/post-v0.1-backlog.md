@@ -74,13 +74,14 @@
   now in cli-design §13 v0.2 + §4.3 `item clear --board ...
   --where` entry.
 
-- **`monday item update --continue-on-error`** — partial-progress
+- ~~**`monday item update --continue-on-error`** — partial-progress
   bulk recovery. Today bulk `item update --where` fails fast on
   the first error; mutated items before the failure surface in
   `details.applied_to`. cli-design.md §9.2 explicitly rejects
   rollback. A `--continue-on-error` flag would attempt every
   matched item regardless and emit a partial-success envelope
-  with per-item status. *Suggested slot: v0.2 / v0.3.*
+  with per-item status. *Suggested slot: v0.2 / v0.3.*~~ → now in
+  cli-design §13 v0.3 + §4.3 `item update --where` comment.
 
 ### Diagnostics
 
