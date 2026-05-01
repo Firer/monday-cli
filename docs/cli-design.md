@@ -510,6 +510,7 @@ monday item subitems <iid>                # list children                    v0.
 
 # === UPDATE (comments) ===
 monday update list <iid>                  # comments on an item              v0.1
+monday update list --board <bid>          # all updates across the board     v0.2
 monday update get <uid>                                                      v0.1
 monday update create <iid> --body <md> | --body-file <path>                  v0.1
                                           # markdown rendered to HTML;
@@ -1837,6 +1838,9 @@ scoped idempotent changes, and post comments narrating its work.**
 - `item upsert` (idempotency via `--match-by`; see §5.8)
 - `update reply/edit/delete/like/pin` (with `--body-file` where
   applicable; `update create` already in v0.1)
+- `update list --board <bid>` — board-wide updates feed (companion to
+  the per-item `update list <iid>` already in v0.1; pairs with the
+  v0.2 update mutations above)
 - `board create/archive/delete/duplicate`
 - `board column-create/column-update/column-delete`
 - `board group-create/group-update/group-archive/group-duplicate/group-delete`

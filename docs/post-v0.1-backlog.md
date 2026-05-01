@@ -26,10 +26,11 @@
 
 ### Read-side symmetry
 
-- **`monday update list --board <bid>`** — board-wide updates list
+- ~~**`monday update list --board <bid>`** — board-wide updates list
   (all comments across all items on the board). Today
   `update list <iid>` is per-item only. Agent use case: "what was
-  discussed on this board today?" *Suggested slot: v0.2.*
+  discussed on this board today?" *Suggested slot: v0.2.*~~ → now in
+  cli-design §13 v0.2 + §4.3 `update list --board <bid>` entry.
 
 - **`monday update list <iid> --with-replies`** — comment-thread
   expansion. Today only top-level updates surface; replies are a
