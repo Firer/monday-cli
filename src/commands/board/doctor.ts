@@ -193,15 +193,17 @@ const messageForCategory = (
   }
   if (category === 'v0_2_writer_expansion') {
     return (
-      `Column type "${type}" is not in the v0.1 friendly translator ` +
-      `allowlist. The v0.2 writer-expansion milestone will add it ` +
-      `(plus --set-raw).`
+      `Column type "${type}" is not yet in the friendly --set ` +
+      `translator allowlist. Friendly support remains deferred to a ` +
+      `later v0.2 milestone; use --set-raw <col>=<json> in the ` +
+      `meantime.`
     );
   }
   return (
-    `Column type "${type}" is not in the v0.1 allowlist or the v0.2 ` +
-    `writer-expansion roadmap. Track cli-design.md §5.3 for future ` +
-    `coverage.`
+    `Column type "${type}" is not in the friendly --set allowlist or ` +
+    `the v0.2 writer-expansion roadmap. Track cli-design.md §5.3 for ` +
+    `future coverage; --set-raw works for any type Monday writes via ` +
+    `change_column_value.`
   );
 };
 

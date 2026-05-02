@@ -82,15 +82,21 @@
  * per type as a fixture so M5b and v0.2's bulk surface inherit the
  * rule unchanged.
  *
- * **No `--set-raw` escape hatch in v0.1.** The cli-design `--set-raw
- * <col>=<json>` flag is deferred to v0.2's writer-expansion milestone.
- * Non-allowlisted column types surface `unsupported_column_type`
- * keyed by roadmap category per `column-types.ts
- * getColumnRoadmapCategory`: v0.2 writer-expansion types get
- * `deferred_to: "v0.2"`, read-only-forever types get
- * `read_only: true`, anything else gets `deferred_to: "future"`.
- * The v0.1 contract is "we translate the seven allowlisted types
- * and reject everything else with category-accurate guidance."
+ * **`--set-raw` escape hatch (M8).** v0.1 had no escape hatch;
+ * v0.2's M8 milestone added `--set-raw <col>=<json>` (see
+ * `src/api/raw-write.ts`) for column types that don't have a
+ * friendly translator yet. Non-allowlisted column types still
+ * surface `unsupported_column_type` keyed by roadmap category per
+ * `column-types.ts getColumnRoadmapCategory`: v0.2-tentative
+ * writer-expansion types (`tags` / `board_relation` / `dependency`
+ * — promotion or v0.3 slip pending) get `deferred_to: "v0.2"` plus
+ * a `--set-raw` hint, read-only-forever types get
+ * `read_only: true`, anything else gets `deferred_to: "future"`
+ * with a `--set-raw` hint when the underlying mutation is shaped
+ * like `change_column_value`. The M8 contract is "we translate the
+ * ten allowlisted types and reject everything else with
+ * category-accurate guidance, pointing tentative + future-shaped
+ * targets at `--set-raw`."
  */
 
 import { ApiError, UsageError } from '../utils/errors.js';
@@ -155,7 +161,7 @@ export type ColumnValuePayload =
 export interface TranslatedColumnValue {
   /** The resolved column ID — echoed in M5b's mutation envelope. */
   readonly columnId: string;
-  /** The resolved column's type — narrowed to the v0.1 allowlist. */
+  /** The resolved column's type — narrowed to `WRITABLE_COLUMN_TYPES`. */
   readonly columnType: WritableColumnType;
   /** The wire payload + format discriminator. */
   readonly payload: ColumnValuePayload;
@@ -362,9 +368,9 @@ export const translateColumnValue = (
 };
 
 /**
- * Async entry point — handles all seven v0.1 types. Delegates to
- * `translateColumnValue` (sync) for non-people columns; dispatches
- * to `parsePeopleInput` for `people`.
+ * Async entry point — handles every type in `WRITABLE_COLUMN_TYPES`.
+ * Delegates to `translateColumnValue` (sync) for non-people columns;
+ * dispatches to `parsePeopleInput` for `people`.
  *
  * The `peopleResolution` slot is required when `column.type ===
  * 'people'`. Omitting it for a people column raises `internal_error`
