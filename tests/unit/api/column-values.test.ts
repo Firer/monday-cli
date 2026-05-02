@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, UsageError } from '../../../src/utils/errors.js';
 import {
+  bundleColumnValues,
   selectMutation,
   translateColumnClear,
   translateColumnValue,
@@ -10,6 +11,7 @@ import {
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../../src/api/column-values.js';
+import { translateRawColumnValue } from '../../../src/api/raw-write.js';
 
 const translate = (
   type: string,
@@ -1315,5 +1317,132 @@ describe('translateColumnClear', () => {
       expect(err.code).toBe('unsupported_column_type');
       expect(err.details?.column_id).toBe('formula_1');
     }
+  });
+});
+
+describe('bundleColumnValues — create_item.column_values shape pin (M9)', () => {
+  // M9 pre-flight (cli-design §5.3 carve-in line ~921-940): the
+  // `column_values: JSON!` parameter to Monday's `create_item` and
+  // `create_subitem` accepts the same map shape as the existing
+  // `change_multiple_column_values.column_values` input. The
+  // `long_text` re-wrap rule (`{text: <value>}` inside the map vs.
+  // bare-string in `change_simple_column_value`) is expected to
+  // apply identically across both wire surfaces. This block pins
+  // the rule via `bundleColumnValues` (the shared helper both
+  // `selectMutation` multi-update and M9's create command call), so
+  // a future Monday API change that diverges between update and
+  // create surfaces would fail this test loud and we'd revisit the
+  // contract before the next M9-shaped milestone ships.
+  //
+  // The M9 spec gap will close in cli-design's M9 docs sweep once
+  // a real fixture against Monday's create_item.column_values
+  // confirms the shape; until then these unit tests are the binding
+  // pin.
+
+  it('text + long_text → simple bare string for text, {text:...} re-wrap for long_text', () => {
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const longText = translateColumnValue({
+      column: { id: 'description', type: 'long_text' },
+      value: 'paragraph\nwith\nnewlines',
+    });
+    const bundled = bundleColumnValues([text, longText]);
+    expect(bundled).toEqual({
+      notes: 'hi',
+      description: { text: 'paragraph\nwith\nnewlines' },
+    });
+  });
+
+  it('mixed simple + rich → bare strings + objects in caller order', () => {
+    const text = translateColumnValue({
+      column: { id: 'notes', type: 'text' },
+      value: 'hi',
+    });
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const date = translateColumnValue({
+      column: { id: 'due', type: 'date' },
+      value: '2026-05-01',
+    });
+    const bundled = bundleColumnValues([text, status, date]);
+    expect(bundled).toEqual({
+      notes: 'hi',
+      status_4: { label: 'Done' },
+      due: { date: '2026-05-01' },
+    });
+    expect(Object.keys(bundled)).toEqual(['notes', 'status_4', 'due']);
+  });
+
+  it('rich-only → identical map to selectMutation multi-form output', () => {
+    // The shape contract: `bundleColumnValues` and `selectMutation`
+    // multi must agree byte-for-byte on the column_values map. M9's
+    // create command should produce the exact same wire bytes
+    // bulk update would for the same translated values.
+    const status = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const dropdown = translateColumnValue({
+      column: { id: 'tags', type: 'dropdown' },
+      value: '1,2',
+    });
+    const bundled = bundleColumnValues([status, dropdown]);
+    const multi = selectMutation([status, dropdown]);
+    if (multi.kind !== 'change_multiple_column_values') {
+      throw new Error('expected multi');
+    }
+    expect(bundled).toEqual(multi.columnValues);
+  });
+
+  it('--set-raw payloads pass through unchanged (no long_text re-wrap on rich)', () => {
+    // M9 supports --set-raw alongside --set on create. A raw
+    // payload's `payload.format` is always 'rich' (raw-write.ts
+    // contract), so projectForMulti's long_text branch never fires
+    // for raw — the payload object passes through verbatim.
+    const raw = translateRawColumnValue(
+      { id: 'long_desc', type: 'long_text' },
+      { text: 'paragraph', someExtra: 'agent supplied' },
+      '{"text":"paragraph","someExtra":"agent supplied"}',
+    );
+    const bundled = bundleColumnValues([raw]);
+    expect(bundled).toEqual({
+      long_desc: { text: 'paragraph', someExtra: 'agent supplied' },
+    });
+  });
+
+  it('duplicate column ID throws usage_error', () => {
+    const a = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Done',
+    });
+    const b = translateColumnValue({
+      column: { id: 'status_4', type: 'status' },
+      value: 'Doing',
+    });
+    expect(() => bundleColumnValues([a, b])).toThrow(UsageError);
+    try {
+      bundleColumnValues([a, b]);
+    } catch (e) {
+      const err = e as UsageError;
+      expect(err.code).toBe('usage_error');
+      expect(err.details).toMatchObject({
+        column_id: 'status_4',
+        duplicate_count: 2,
+      });
+    }
+  });
+
+  it('empty list → empty map (caller is responsible for the no-op gate)', () => {
+    // Unlike `selectMutation`, `bundleColumnValues` does not throw
+    // on the empty case — M9's create-without-`--set` path is a
+    // legitimate caller (`create_item(item_name: ..., column_values:
+    // null)` semantically equals "no values"). The command layer
+    // decides whether to send `column_values` at all; the helper
+    // just shapes whatever's passed.
+    expect(bundleColumnValues([])).toEqual({});
   });
 });

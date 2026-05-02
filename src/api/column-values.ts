@@ -827,29 +827,13 @@ export const selectMutation = (
       value: only.payload.value,
     };
   }
-  // Multi: project each translated value to its multi-form blob,
-  // detecting duplicate column IDs along the way.
-  const columnValues: Record<string, MultiColumnValue> = {};
-  const seenIds = new Set<string>();
-  for (const t of translated) {
-    if (seenIds.has(t.columnId)) {
-      throw new UsageError(
-        `Multiple --set values target column "${t.columnId}". ` +
-          `change_multiple_column_values is a map keyed by column ID; ` +
-          `bundling two values for the same column would silently keep ` +
-          `only one. Pass at most one --set per column.`,
-        {
-          details: {
-            column_id: t.columnId,
-            duplicate_count:
-              translated.filter((other) => other.columnId === t.columnId).length,
-          },
-        },
-      );
-    }
-    seenIds.add(t.columnId);
-    columnValues[t.columnId] = projectForMulti(t);
-  }
+  // Multi: bundle every translated value into the column_values map.
+  // Delegates to `bundleColumnValues` so the long_text re-wrap rule
+  // and the duplicate-id gate stay shared with M9's create_item /
+  // create_subitem bundling — one source of truth for the
+  // `column_values: JSON!` wire shape across every Monday mutation
+  // that accepts it.
+  const columnValues = bundleColumnValues(translated);
   return { kind: 'change_multiple_column_values', columnValues };
 };
 
@@ -871,6 +855,63 @@ const projectForMulti = (t: TranslatedColumnValue): MultiColumnValue => {
     return { text: t.payload.value };
   }
   return t.payload.value;
+};
+
+/**
+ * Bundles a list of translated column values into Monday's
+ * `column_values: JSON!` map shape — the input parameter
+ * `change_multiple_column_values`, `create_item`, and `create_subitem`
+ * all accept. Per-column projection routes through `projectForMulti`,
+ * so the `long_text` re-wrap (`{ text: <value> }` inside the map)
+ * applies uniformly across every wire surface that takes a
+ * `column_values` map.
+ *
+ * **Why a shared helper.** `selectMutation` builds this map for the
+ * multi-update case (M5b); M9's `item create` needs the same shape
+ * to bundle `--set` values into `create_item.column_values` /
+ * `create_subitem.column_values`. The single-round-trip exit gate
+ * (cli-design §5.8) requires the create payload bundles every
+ * translated value into one map — and the shape rule should not
+ * drift between update and create. The fixture pin in
+ * `tests/unit/api/column-values.test.ts` covers both consumers.
+ *
+ * **Duplicate-column-ID throws `usage_error`.** Same rule as
+ * `selectMutation`'s multi case — bundling two values for the same
+ * column would silently keep one. The cli-design §5.3 step 2
+ * mutual-exclusion contract enforces this resolution-time; the
+ * helper duplicates the gate so misuse from a non-command caller
+ * still surfaces a typed error.
+ */
+export const bundleColumnValues = (
+  translated: readonly TranslatedColumnValue[],
+): Readonly<Record<string, MultiColumnValue>> => {
+  const out: Record<string, MultiColumnValue> = {};
+  const seen = new Set<string>();
+  for (const t of translated) {
+    if (seen.has(t.columnId)) {
+      // Wording matches the historical `selectMutation` message
+      // because existing tests assert on the `Multiple --set values
+      // target column` regex; keeping it stable preserves those
+      // assertions across both consumers (multi-update + create).
+      throw new UsageError(
+        `Multiple --set values target column "${t.columnId}". ` +
+          `change_multiple_column_values is a map keyed by column ID; ` +
+          `bundling two values for the same column would silently keep ` +
+          `only one. Pass at most one --set per column.`,
+        {
+          details: {
+            column_id: t.columnId,
+            duplicate_count: translated.filter(
+              (other) => other.columnId === t.columnId,
+            ).length,
+          },
+        },
+      );
+    }
+    seen.add(t.columnId);
+    out[t.columnId] = projectForMulti(t);
+  }
+  return out;
 };
 
 /**
