@@ -47,11 +47,12 @@ v0.1 contract across four binary spawns — `item list` → `item set`
   register, exit checklist, and per-milestone post-mortems
   (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b,
   §20 M6, §21 M7).
-- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,250 lines) —
+- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,600 lines) —
   the active v0.2 plan: eleven sequenced milestones M8–M18, per-
   milestone deliverables, exit criteria, decisions log, §10 M8 +
   §11 M9 + §13 M10 post-mortems (§12 is the post-M9 R20–R26
-  refactor backlog, all shipped).
+  refactor backlog, all shipped; §14 is the post-M10 R27–R29
+  refactor backlog, scheduled for the M10→M11 cleanup window).
 
 **Milestones:**
 
