@@ -60,6 +60,7 @@ import {
 } from '../../api/resolver-error-fold.js';
 import { planClear } from '../../api/dry-run.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
+import { buildColumnArchivedError } from '../../api/resolution-pass.js';
 import {
   ITEM_FIELDS_FRAGMENT,
   parseRawItem,
@@ -208,21 +209,12 @@ export const itemClearCommand: CommandModule<
 
         if (resolution.match.column.archived === true) {
           throw foldResolverWarningsIntoError(
-            new ApiError(
-              'column_archived',
-              `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-                `${boardId} is archived. Monday rejects mutations against ` +
-                `archived columns; un-archive the column in Monday or pick a ` +
-                `different target.`,
-              {
-                details: {
-                  column_id: resolution.match.column.id,
-                  column_title: resolution.match.column.title,
-                  column_type: resolution.match.column.type,
-                  board_id: boardId,
-                },
-              },
-            ),
+            buildColumnArchivedError({
+              columnId: resolution.match.column.id,
+              columnTitle: resolution.match.column.title,
+              columnType: resolution.match.column.type,
+              boardId,
+            }),
             resolverWarnings,
           );
         }

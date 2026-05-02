@@ -410,8 +410,9 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   aggregation across pre-planner legs** (Codex round-1 P2): parent
   lookup is always live, parent-board metadata may be cache or
   live, column resolution may be cache / live / mixed, mutation is
-  always live — `mergeSourceWithPreflight` + `mergeSourceLeg` fold
-  every leg into the final envelope source. **Idempotent: false**
+  always live — `mergeSourceWithPreflight` + `mergeSource` (both
+  from `api/source-aggregator.ts` post-R21) fold every leg into the
+  final envelope source. **Idempotent: false**
   — re-running creates a duplicate item; `monday item upsert`
   (M12) is the idempotent variant.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating

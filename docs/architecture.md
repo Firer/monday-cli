@@ -379,9 +379,10 @@
 - `api/source-aggregator.ts` (M9.5 R21) — the §6.1 `meta.source` +
   `meta.cache_age_seconds` merge rules as three exports:
   `mergeSource(current, next)` (3-state aggregator: first leg seeds,
-  `mixed` is contagious, `cache + live → mixed`), `mergeSourceWith
-  Preflight(planner, preflight)` (4-state variant collapsing `'none'`
-  to the preflight when any preflight leg fired — used by
+  `mixed` is contagious, `cache + live → mixed`),
+  `mergeSourceWithPreflight(planner, preflight)` (4-state variant
+  collapsing `'none'` to the preflight when any preflight leg fired
+  — used by
   `item create` for parent-lookup + parent-board metadata + relative-
   to legs that fire pre-planner), `mergeCacheAge(current, next)`
   (null-aware `Math.max` for worst-case staleness). Lifted from four

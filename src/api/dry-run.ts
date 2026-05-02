@@ -79,7 +79,10 @@ import {
 import type { ParsedSetRawExpression } from './raw-write.js';
 import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
 import { mergeSource } from './source-aggregator.js';
-import { resolveAndTranslate } from './resolution-pass.js';
+import {
+  buildColumnArchivedError,
+  resolveAndTranslate,
+} from './resolution-pass.js';
 
 /**
  * One agent-supplied `--set <token>=<value>` pair, pre-split by the
@@ -438,21 +441,12 @@ export const planClear = async (
 
   if (isArchivedColumn(resolution.match.column)) {
     throw foldResolverWarningsIntoError(
-      new ApiError(
-        'column_archived',
-        `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-          `${inputs.boardId} is archived. Monday rejects mutations against ` +
-          `archived columns; un-archive the column in Monday or pick a ` +
-          `different target.`,
-        {
-          details: {
-            column_id: resolution.match.column.id,
-            column_title: resolution.match.column.title,
-            column_type: resolution.match.column.type,
-            board_id: inputs.boardId,
-          },
-        },
-      ),
+      buildColumnArchivedError({
+        columnId: resolution.match.column.id,
+        columnTitle: resolution.match.column.title,
+        columnType: resolution.match.column.type,
+        boardId: inputs.boardId,
+      }),
       resolution.warnings,
     );
   }

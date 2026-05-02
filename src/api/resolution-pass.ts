@@ -175,6 +175,35 @@ const ARCHIVED_MESSAGE = (columnId: string, boardId: string): string =>
   `${boardId} is archived. Monday rejects writes against ` +
   `archived columns; un-archive the column or pick a different target.`;
 
+/**
+ * Builds a `column_archived` ApiError with the unified §6.5 wording
+ * + the canonical `details` slot (column_id / column_title /
+ * column_type / board_id). Single source of truth for the
+ * pre-mutation archived-column check; the three single-token
+ * surfaces (`item set`, `item clear`, `planClear`) call this so the
+ * message matches the helper-backed multi-token surfaces (`item
+ * update` single + bulk, `item create`, `planChanges`,
+ * `planCreate`). Mirrors the M5b R19 message convention; the
+ * `column_archived` error from the post-mutation F4 remap in
+ * `resolver-error-fold.ts` keeps its remap-specific message because
+ * the remap context is observably distinct (forced refresh +
+ * `details.remapped_from`).
+ */
+export const buildColumnArchivedError = (inputs: {
+  readonly columnId: string;
+  readonly columnTitle: string;
+  readonly columnType: string;
+  readonly boardId: string;
+}): ApiError =>
+  new ApiError('column_archived', ARCHIVED_MESSAGE(inputs.columnId, inputs.boardId), {
+    details: {
+      column_id: inputs.columnId,
+      column_title: inputs.columnTitle,
+      column_type: inputs.columnType,
+      board_id: inputs.boardId,
+    },
+  });
+
 export const resolveAndTranslate = async (
   inputs: ResolveAndTranslateInputs,
 ): Promise<ResolveAndTranslateResult> => {
@@ -214,18 +243,12 @@ export const resolveAndTranslate = async (
 
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
-        new ApiError(
-          'column_archived',
-          ARCHIVED_MESSAGE(resolution.match.column.id, inputs.boardId),
-          {
-            details: {
-              column_id: resolution.match.column.id,
-              column_title: resolution.match.column.title,
-              column_type: resolution.match.column.type,
-              board_id: inputs.boardId,
-            },
-          },
-        ),
+        buildColumnArchivedError({
+          columnId: resolution.match.column.id,
+          columnTitle: resolution.match.column.title,
+          columnType: resolution.match.column.type,
+          boardId: inputs.boardId,
+        }),
         warnings,
       );
     }
@@ -269,18 +292,12 @@ export const resolveAndTranslate = async (
 
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
-        new ApiError(
-          'column_archived',
-          ARCHIVED_MESSAGE(resolution.match.column.id, inputs.boardId),
-          {
-            details: {
-              column_id: resolution.match.column.id,
-              column_title: resolution.match.column.title,
-              column_type: resolution.match.column.type,
-              board_id: inputs.boardId,
-            },
-          },
-        ),
+        buildColumnArchivedError({
+          columnId: resolution.match.column.id,
+          columnTitle: resolution.match.column.title,
+          columnType: resolution.match.column.type,
+          boardId: inputs.boardId,
+        }),
         warnings,
       );
     }
