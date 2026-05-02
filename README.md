@@ -223,25 +223,44 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.1.0 ships:** read-only core (account, workspace, board, user,
-update, item) + safe mutations (`item set` / `item clear` /
-`item update` single + bulk, `update create`) + diagnostics
-(`board doctor`) + GraphQL escape hatch (`raw`) + filter DSL
-(`--where` + `--filter-json`) + cursor pagination with
+**v0.1.0 (published) ships:** read-only core (account, workspace,
+board, user, update, item) + safe mutations (`item set` /
+`item clear` / `item update` single + bulk, `update create`) +
+diagnostics (`board doctor`) + GraphQL escape hatch (`raw`) +
+filter DSL (`--where` + `--filter-json`) + cursor pagination with
 stale-cursor fail-fast + NDJSON streaming + local cache.
+
+**v0.2 in development on `main`** (not yet published as a
+tarball — `package.json` still pinned to `0.1.0`):
+
+- **M8** added the `--set-raw <col>=<json>` escape hatch (bypasses
+  the friendly translator; gated against read-only-forever and
+  files-shaped types) and the `link` / `email` / `phone` firm-row
+  friendly translators.
+- **M9** added `monday item create` — top-level + classic-only
+  subitem creation with single round-trip semantics, optional
+  positional placement (`--position before|after --relative-to
+  <iid>`), and the same `--set` / `--set-raw` surface as
+  `item update`.
 
 **Writer allowlist** (other types return `unsupported_column_type`
 with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
-`people`.
+`people`, plus M8 firm row `link`, `email`, `phone`.
 
-**Deferred:** `item create/move/archive/delete`, `update reply/edit`,
-broader column writes (`link`, `email`, `phone`, `tags`,
-`board_relation`, `dependency`), boolean filter DSL → **v0.2**.
-`monday dev` workflow shortcuts → **v0.3**. `monday item watch`,
-`--concurrency`, asset uploads → **v0.4**. See
-[`docs/cli-design.md`](./docs/cli-design.md) §13 for the full
-roadmap.
+**Remaining v0.2 milestones (M10–M18) on `main`:** `item archive` /
+`delete` / `duplicate` / `move` (group + cross-board) / `upsert`,
+full update mutation surface (`reply` / `edit` / `delete` / `like`
+/ `pin` / `clear-all`), workspace + board lifecycle, NDJSON
+streaming, 0.2.0 release prep.
+
+**Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
+friendly translators (still tentative; usable today via
+`--set-raw`), `monday dev` workflow shortcuts, multi-level subitem
+creation. **v0.4:** `monday item watch`, `--concurrency`, asset
+uploads. See [`docs/cli-design.md`](./docs/cli-design.md) §13 for
+the full roadmap and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md)
+for the active milestone plan.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 

@@ -162,47 +162,87 @@
   types; other types surface `text + value`. `idFromRawItem`
   exposes the defensive id-reader the cursor walker needs for the
   per-page sort.
-- `api/column-types.ts` (M5a R8) — single source of truth for
-  the v0.1 writable allowlist. Exports `WRITABLE_COLUMN_TYPES`
-  (frozen `as const` array — order is part of the contract;
-  tests iterate it), `isWritableColumnType` (type guard
-  narrowing to the `WritableColumnType` union), and
-  `parseColumnSettings` (defensive `settings_str` JSON parser
-  that returns `null` on null/empty/malformed input). Two
-  consumers: `commands/board/describe.ts` (writable +
-  example_set) and `api/column-values.ts` (the writer). Adding
-  a v0.2 type is one entry's worth of edit.
-- `api/column-values.ts` (M5a) — write half of
+- `api/column-types.ts` (M5a R8 + M8) — single source of truth
+  for the writable allowlist + roadmap-category gates.
+  `WRITABLE_COLUMN_TYPES` (frozen `as const` array — 10 entries
+  post-M8; order is part of the contract; tests iterate it),
+  `isWritableColumnType` (type guard narrowing to the
+  `WritableColumnType` union), `parseColumnSettings` (defensive
+  `settings_str` JSON parser that returns `null` on null/empty/
+  malformed input). M8 additions: `isReadOnlyForeverType` /
+  `isFilesShapedType` (gate `--set-raw`'s post-resolution reject
+  lists per cli-design §5.3 escape-hatch contract);
+  `getColumnRoadmapCategory` (drives the category-accurate
+  `unsupported_column_type` hint — v0.2-tentative writer-expansion
+  / read-only-forever / future). Three consumers:
+  `commands/board/describe.ts` (writable + example_set),
+  `api/column-values.ts` (friendly writer), `api/raw-write.ts`
+  (M8 escape hatch).
+- `api/column-values.ts` (M5a + M8 + M9) — write half of
   §5.3. **Two entry points**: the sync `translateColumnValue({
   column, value, dateResolution? }) → TranslatedColumnValue`
-  covers the six locally-resolvable types; the async
+  covers the locally-resolvable types; the async
   `translateColumnValueAsync({ column, value, dateResolution?,
   peopleResolution? }) → Promise<TranslatedColumnValue>` is the
-  unified wrapper M5b's command layer always calls (delegates
-  to sync for non-people; dispatches `parsePeopleInput` for
-  `people`, which needs network/cache lookup for email→ID
-  resolution). The result type returns `columnId`, `columnType`,
-  `rawInput`, a discriminated `payload`, and parallel echo slots
-  (`resolvedFrom: DateResolution | null` for relative dates;
-  `peopleResolution: PeopleResolution | null` for people inputs).
-  Payload variants: `{ format: 'simple', value: string }` for the
-  bare-string form (`change_simple_column_value`) or `{ format:
-  'rich', value: JsonObject }` for the JSON-object form
-  (`change_column_value` / per-column entry of
-  `change_multiple_column_values`). **All seven v0.1 types
-  translate**: `text` / `long_text` / `numbers` (simple) and
-  `status` / `dropdown` / `date` / `people` (rich).
+  unified wrapper the command layer always calls (delegates to
+  sync for non-people; dispatches `parsePeopleInput` for `people`,
+  which needs network/cache lookup for email→ID resolution). The
+  result type returns `columnId`, `columnType`, `rawInput`, a
+  discriminated `payload`, and parallel echo slots (`resolvedFrom`
+  for relative dates; `peopleResolution` for people inputs).
+  Payload variants: `{format:'simple', value:string}` for the
+  bare-string form (`change_simple_column_value`) or
+  `{format:'rich', value:JsonObject}` for the JSON-object form
+  (`change_column_value` / per-column entry of `column_values`
+  maps). **Ten types translate** (7 v0.1 + 3 M8 firm-row): `text`
+  / `long_text` / `numbers` (simple) and `status` / `dropdown` /
+  `date` / `people` / `link` / `email` / `phone` (rich).
   **`selectMutation`** dispatches per cli-design §5.3 step 5:
   1 simple → `change_simple_column_value`; 1 rich →
   `change_column_value`; N → `change_multiple_column_values`
-  (atomic, with `long_text` re-wrapped to `{text:<value>}` for
-  the multi mutation's per-column blob).
+  (atomic). **`bundleColumnValues` (M9 lift)** — projects a
+  list of `TranslatedColumnValue`s into the `column_values: JSON!`
+  map shape every Monday mutation that takes one accepts
+  (`change_multiple_column_values`, `create_item`,
+  `create_subitem`). The `long_text` re-wrap (`{text:<value>}`
+  inside the map vs. bare-string in `change_simple_column_value`)
+  applies uniformly across every wire surface; `selectMutation`
+  delegates for its multi case so the rule can't drift between
+  update and create.
   **Monday `JSON` scalar discipline:** every payload is a plain
-  JS value typed as `JsonObject` (R-JsonValue refactor —
-  catches non-JSON shapes like `undefined` / symbols at compile
-  time); the SDK / fetch layer stringifies at the wire
-  boundary. The translator never `JSON.stringify`s — pinned by
-  regression tests per (count × type) cell.
+  JS value typed as `JsonObject` (R-JsonValue refactor — catches
+  non-JSON shapes like `undefined` / symbols at compile time);
+  the SDK / fetch layer stringifies at the wire boundary. The
+  translator never `JSON.stringify`s — pinned by regression tests
+  per (count × type) cell, including the create_item.column_values
+  shape pin (M9).
+- `api/raw-write.ts` (M8) — `--set-raw <col>=<json>` escape-hatch
+  helpers. **`parseSetRawExpression(raw)`** is argv-parse-time:
+  splits `<col>=<json>` on first `=`, validates the JSON parses
+  to a `JsonObject` (string / number / array / null at top level
+  rejected with `usage_error` + the parse error in `details`).
+  **`translateRawColumnValue(column, value, rawJson)`** is
+  post-resolution: rejects read-only-forever types
+  (`unsupported_column_type` with `read_only: true`) and files-
+  shaped types (`unsupported_column_type` with
+  `deferred_to: "v0.4"` — `add_file_to_column` is multipart, not
+  `change_column_value`); otherwise builds a `TranslatedColumnValue`
+  with `payload: {format: 'rich', value: <parsed>}` so
+  `selectMutation` / `bundleColumnValues` handle it uniformly.
+  Per cli-design §5.3 line 949–960: no per-type schema validation
+  — Monday's server-side rejection surfaces as
+  `validation_failed` with Monday's message. Mutual exclusion with
+  `--set` is the caller's concern (resolution-time enforcement
+  per §5.3 step 2; the cross-token duplicate-resolved-id check
+  in `dry-run.ts` / each mutation command catches it).
+- `api/links.ts` / `api/emails.ts` / `api/phones.ts` (M8) —
+  the firm-row friendly translators. `parseLinkInput("url|text")`
+  → `{url, text}` (pipe-form; no auto-extraction of hostnames as
+  text). `parseEmailInput` (pipe-form `email|text` or bare
+  email — bare emails set `text` to the email). `parsePhoneInput`
+  + `iso-country-codes.ts` — E.164 input with explicit
+  `phone:countryCode` payload; the country-code allowlist comes
+  from a frozen ISO 3166-1 alpha-2 list.
 
 - `api/dates.ts` (M5a) — pure date helpers powering the date
   translator. `parseDateInput` accepts ISO date / ISO date+time
@@ -258,33 +298,49 @@
   Codex passes. v0.2 grammar extensions (`i` / `@me`) land by
   adding to the array.
 
-- `api/dry-run.ts` (M5a) — orchestrator the M5b mutation
-  surfaces (`item set` / `item clear` / `item update`) call
-  when `--dry-run` is set. Single export `planChanges({client,
-  boardId, itemId, setEntries, dateResolution?,
-  peopleResolution?, env?, noCache?})` ties together the M3
-  cache-aware column resolver (with `includeArchived: true` so
-  archived targets surface as `column_archived`, not
+- `api/dry-run.ts` (M5a + M9) — two orchestrators behind a
+  shared resolution discipline. **`planChanges({client,
+  boardId, itemId, setEntries, rawEntries?, nameChange?,
+  dateResolution?, peopleResolution?, env?, noCache?})`**
+  (M5a) powers M5b's mutation surfaces (`item set` / `item
+  clear` / `item update`) when `--dry-run` is set. Ties together
+  the M3 cache-aware column resolver (with `includeArchived:
+  true` so archived targets surface as `column_archived`, not
   `column_not_found`), `translateColumnValueAsync` +
-  `selectMutation` for the wire shape, and a fresh item-state
-  read for the diff `from` side. **Output matches cli-design
-  §6.4's `planned_changes[]` shape byte-for-byte**, pinned via
-  a `JSON.stringify(result.plannedChanges[0])` literal-byte
-  snapshot test (the load-bearing M5a exit gate). **All-or-
-  nothing**: any resolution failure (`column_not_found`,
-  `ambiguous_column`, `column_archived`,
-  `unsupported_column_type`, `user_not_found`, item `not_found`,
-  item-on-wrong-board, duplicate token, duplicate resolved id)
-  aborts the batch BEFORE the item read fires. The diff `to`
-  side projects through `selectMutation`'s `columnValues` map
-  for multi paths so the `long_text` re-wrap (`{text: <value>}`
-  inside multi) surfaces verbatim. Resolver warnings on a
-  `column_archived` throw fold into
-  `error.details.resolver_warnings` so a stale-cache-then-
+  `translateRawColumnValue` + `selectMutation` for the wire
+  shape, and a fresh item-state read for the diff `from` side.
+  **`planCreate({client, mode, name, setEntries, rawEntries?,
+  dateResolution?, peopleResolution?, env?, noCache?})`** (M9)
+  powers `monday item create`'s `--dry-run` path. Same three-
+  pass resolution + same all-or-nothing semantics, but **no
+  item-state read** (the item doesn't exist; `from` is always
+  `null`) and the diff `to` side projects through
+  `bundleColumnValues` (the shared map shape, not single-column
+  variants) so the long_text re-wrap surfaces in the diff
+  exactly as it would on the wire. The `CreateMode` discriminator
+  (`{kind: 'item', boardId, groupId?, position?}` vs `{kind:
+  'subitem', parentItemId, subitemsBoardId}`) drives the
+  `CreatePlannedChange` shape, which hoists `name` / `group_id`
+  / `position` / `parent_item_id` to top-level slots per
+  cli-design §6.4 item-create variant. Subitem variant **omits
+  `board_id`** because Monday derives the subitems board
+  server-side. **Output matches cli-design §6.4's
+  `planned_changes[]` shape byte-for-byte** for both
+  orchestrators, pinned via envelope-snapshot tests (the
+  load-bearing exit gate). **All-or-nothing**: any resolution
+  failure (`column_not_found`, `ambiguous_column`,
+  `column_archived`, `unsupported_column_type`, `user_not_found`,
+  item `not_found` (planChanges only), item-on-wrong-board
+  (planChanges only), duplicate token, duplicate resolved id)
+  aborts the batch before any further work. Resolver warnings on
+  a `column_archived` throw fold into
+  `error.details.resolver_warnings` via
+  `foldResolverWarningsIntoError` so a stale-cache-then-
   archived flow keeps both signals. The engine's own
-  `rawItemSchema.parse` boundary uses safeParse +
-  `ApiError(internal_error)` per validation.md (mirrors R17 +
-  the userByEmail wrap).
+  `rawItemSchema.parse` boundary (planChanges) uses
+  safeParse + `ApiError(internal_error)` per validation.md
+  (mirrors R17 + the userByEmail wrap + R18 across every later
+  parse boundary).
 
 - `types/json.ts` (M5a R-JsonValue) — `JsonValue` /
   `JsonObject` types narrowing the rich-payload slot to
@@ -336,15 +392,20 @@
   surrounding cache-miss try/catch swallows them as
   misses (corrupt cache → re-fetch live).
 
-- `commands/item/set.ts` (M5b) — first M5b mutation
-  surface. `monday item set <iid> <col>=<val> [--board
-  <bid>]`. Two paths share resolution + translation: live
-  goes through `resolveColumnWithRefresh` +
-  `translateColumnValueAsync` + `selectMutation` + the
-  Monday `change_*_column_value` mutation; `--dry-run`
-  delegates to `api/dry-run.ts planChanges`. Live mutation
-  envelope echoes `resolved_ids: { token: column_id }` per
-  cli-design §5.3 step 2. Resolver-warning preservation via
+- `commands/item/set.ts` (M5b + M8) — first M5b mutation
+  surface. `monday item set <iid> (<col>=<val> | --set-raw
+  <col>=<json>) [--board <bid>]`. Two argv shapes (mutually
+  exclusive at the schema boundary): friendly positional
+  `<col>=<val>` runs through `translateColumnValueAsync`;
+  `--set-raw <col>=<json>` (M8) runs through
+  `translateRawColumnValue` (read-only-forever / files-shaped
+  reject lists). Both shapes share `resolveColumnWithRefresh`
+  + `selectMutation` + the Monday `change_*_column_value`
+  mutation. `--dry-run` delegates to `api/dry-run.ts
+  planChanges` (engine handles both `setEntries` + `rawEntries`
+  uniformly). Live mutation envelope echoes
+  `resolved_ids: { token: column_id }` per cli-design §5.3
+  step 2. Resolver-warning preservation via
   `foldResolverWarningsIntoError` covers every typed
   post-resolution failure (UsageError translators, ApiError
   `unsupported_column_type` / `user_not_found`, mutation-
@@ -364,26 +425,70 @@
   clear" mapping and lives alongside the writer's
   set-payload table.
 
-- `commands/item/update.ts` (M5b session 2) — multi-column
+- `commands/item/update.ts` (M5b + M8) — multi-column
   atomic update + bulk path. `monday item update <iid>
-  --set <col>=<val> [--set ...] [--name <n>]` for
-  single-item; `monday item update --where <expr> --set
-  ... --board <bid> --yes` for bulk. Single-item uses
-  `selectMutation` to pick simple / rich / multi mutation;
-  `--name` synthesises a `name` translated value that
-  bundles into `change_multiple_column_values` alongside
+  --set <col>=<val> [--set ...] [--set-raw ...] [--name <n>]`
+  for single-item; `monday item update --where <expr> --set
+  ... [--set-raw ...] --board <bid> --yes` for bulk. Single-
+  item uses `selectMutation` to pick simple / rich / multi
+  mutation; `--name` synthesises a `name` translated value
+  that bundles into `change_multiple_column_values` alongside
   real columns (Monday's multi mutation accepts `name` as
-  a key). Bulk walks `items_page` / `next_items_page`
-  cursor pagination, fail-fast on `stale_cursor`. Bulk
-  without `--yes` / `--dry-run` → `confirmation_required`
-  with `matched_count` + filter shape. Bulk live: per-item
-  sequential mutation; per-item failure decorates error
-  with `applied_count` / `applied_to` / `failed_at_item`
-  / `matched_count`. Bulk dry-run: aggregates per-item
-  `planChanges` results into one N-element
-  `planned_changes`; deduplicates resolver warnings by
-  `code+message+token`. Cache-source aggregation across
-  metadata + page walk + mutation legs (cli-design §6.1).
+  a key). M8 widened both single + bulk paths to accept
+  `--set-raw` interleaved with `--set`; the resolution-time
+  cross-token duplicate-resolved-id check (§5.3 step 2)
+  catches a `--set X=...` + `--set-raw X={...}` collision
+  pre-translation. Three-pass resolution discipline (resolve
+  every token first, then dedupe + cross-token check, then
+  translate) — pinned post-M8 so a malformed `--set` value
+  doesn't pre-empt the mutual-exclusion error. Bulk walks
+  `items_page` / `next_items_page` cursor pagination, fail-
+  fast on `stale_cursor`. Bulk without `--yes` / `--dry-run`
+  → `confirmation_required` with `matched_count` + filter
+  shape. Bulk live: per-item sequential mutation; per-item
+  failure decorates error with `applied_count` /
+  `applied_to` / `failed_at_item` / `matched_count`. Bulk
+  dry-run: aggregates per-item `planChanges` results into
+  one N-element `planned_changes`; deduplicates resolver
+  warnings by `code+message+token`. Cache-source aggregation
+  across metadata + page walk + mutation legs (cli-design
+  §6.1).
+
+- `commands/item/create.ts` (M9) — first item-lifecycle
+  verb. `monday item create --board <bid> --name <n>
+  [--group <gid>] [--set <col>=<val>]... [--set-raw
+  <col>=<json>]... [--parent <iid>] [--position before|after
+  --relative-to <iid>] [--dry-run]`. Two argv shapes the
+  dispatch picks between: top-level (calls `create_item`
+  against `--board`) and subitem (`--parent` triggers
+  `create_subitem`; classic boards only —
+  `hierarchy_type: "multi_level"` rejected pre-mutation
+  with `usage_error` + `details.deferred_to: "v0.3"`).
+  **Single round-trip is the hard exit gate** (cli-design
+  §5.8): every translated `--set` / `--set-raw` value
+  bundles into the single `create_item.column_values`
+  (or `create_subitem.column_values`) parameter via
+  `bundleColumnValues`. The CLI does NOT fall back to
+  `create_item` + `change_multiple_column_values` on
+  partial failure — partial-state risk by design.
+  Resolution mirrors `item update`'s three-pass pattern
+  (resolve all tokens → cross-token dup check → translate);
+  `resolveCreateMode` returns the dispatch-ready
+  `CreateMode` plus pre-planner source aggregation for
+  the parent-lookup + parent-board metadata + relative-to
+  legs that fire before `planCreate` / live mutation
+  (Codex round-1 P2 — `meta.source` reflects every wire
+  leg). For subitem with `--set` / `--set-raw`, the
+  subitems-board ID derives from the parent's `subtasks`
+  column's `settings_str.boardIds[0]`; column resolution
+  targets that board, not the parent's. F4 remap wired:
+  cache-sourced resolution + Monday `validation_failed`
+  → forced refresh → if archived, `column_archived` with
+  `details.remapped_from`. Mutation envelope: `data: {id,
+  name, board_id, group_id, parent_id?}` + top-level
+  `resolved_ids` echo. **Idempotent: false** — re-running
+  creates a duplicate item; `monday item upsert` (M12) is
+  the idempotent variant.
 
 - `commands/update/create.ts` (M5b session 2) — posts a
   Monday update (comment) on an item via `create_update`.

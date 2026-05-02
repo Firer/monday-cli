@@ -43,29 +43,61 @@ Items are the primary object an agent will create / read / update.
 - **Read many (paginated):** `boards(ids: [ID!]) { items_page(limit: 500) {
   cursor items { ... } } }` — then `next_items_page(cursor: ...)` to
   paginate. The flat `items` query without `ids` is deprecated.
-- **Create:** `create_item(board_id, group_id, item_name, column_values)`.
-  `column_values` is a JSON-stringified object keyed by column ID.
+- **Create:** `create_item(board_id, item_name, group_id?,
+  column_values?, position_relative_method?, relative_to?,
+  create_labels_if_missing?)`. `column_values` is a JSON object
+  keyed by column ID (the SDK's `JSON` scalar handles wire
+  stringification — the CLI never `JSON.stringify`s). The CLI
+  surfaces this as `monday item create --board <bid> --name <n>`
+  with optional `--set` / `--set-raw` / `--group` / `--position
+  before|after --relative-to <iid>`. M9 ships single-round-trip
+  (every `--set` value bundles into `column_values` — no
+  fallback two-call pattern; partial-state risk by design per
+  cli-design §5.8).
+- **Create subitem:** `create_subitem(parent_item_id, item_name,
+  column_values?, create_labels_if_missing?)`. Surfaced as
+  `monday item create --parent <iid> --name <n>` (M9, classic
+  boards only — `hierarchy_type: "multi_level"` rejected
+  pre-mutation; deferred to v0.3). The auto-generated subitems
+  board's ID is derived server-side from the parent; the CLI
+  also derives it client-side (parent's `subtasks` column's
+  `settings_str.boardIds[0]`) for column-token resolution.
 - **Update column value:** `change_column_value` (single column, typed
   per column kind) or `change_multiple_column_values` (bulk).
-- **Move:** `move_item_to_group`, `move_item_to_board`.
-- **Reorder within group:** `change_item_position` (relative to another
-  item).
-- **Archive / delete:** `archive_item`, `delete_item`.
+- **Move:** `move_item_to_group`, `move_item_to_board`. Neither
+  accepts a position — Monday's 2026-01 API does NOT expose a
+  way to reorder existing items via the public GraphQL surface
+  (`position_relative_method` is only on `create_item` and
+  `create_group`). Post-create reordering is deferred until
+  Monday adds the mutation.
+- **Archive / delete:** `archive_item`, `delete_item` (M10).
 
 ## Column values
 
-Each column type has its own JSON shape. Common ones:
+Each column type has its own JSON shape. The 10 types the CLI's
+friendly translator surfaces (writable allowlist post-M8):
 
-| Type | Example value (JSON-stringified) |
-|------|----------------------------------|
-| `text` | `"some text"` |
-| `long_text` | `{"text": "..."}` |
-| `status` | `{"label": "Done"}` or `{"index": 1}` |
-| `people` | `{"personsAndTeams": [{"id": 12345, "kind": "person"}]}` |
-| `date` | `{"date": "2026-04-29", "time": "14:30:00"}` |
-| `dropdown` | `{"labels": ["Backend", "Frontend"]}` |
-| `link` | `{"url": "...", "text": "..."}` |
-| `numbers` | `"42"` |
+| Type | Example wire value | CLI translator |
+|------|--------------------|----------------|
+| `text` | `"some text"` | bare string |
+| `long_text` | `{"text": "..."}` (multi) / `"..."` (simple) | bare string + multi re-wrap |
+| `numbers` | `"42"` | bare string |
+| `status` | `{"label": "Done"}` or `{"index": 1}` | label-first / `{index:N}` for non-negative integer |
+| `dropdown` | `{"labels": ["Backend"]}` or `{"ids": [1,2]}` | comma-split, all-numeric → ids, else labels |
+| `date` | `{"date": "2026-04-29", "time": "14:30:00"}` | ISO + relative tokens (`+1w` / `today` / `tomorrow`) resolved against `MONDAY_TIMEZONE` |
+| `people` | `{"personsAndTeams": [{"id": 12345, "kind": "person"}]}` | comma-split emails / `me` token, resolved via `userByEmail` |
+| `link` (M8) | `{"url": "https://example.com", "text": "Example"}` | pipe-form `url|text` |
+| `email` (M8) | `{"email": "alice@example.test", "text": "Alice"}` | pipe-form `email|text` or bare email |
+| `phone` (M8) | `{"phone": "+14155550100", "countryShortName": "US"}` | E.164 with explicit `phone:countryCode` |
+
+Other types (`tags`, `board_relation`, `dependency`,
+`creation_log`, `mirror`, `formula`, `auto_number`, `last_updated`,
+`item_id`, `files`, `battery`, etc.) surface
+`unsupported_column_type` from the friendly path. The M8
+`--set-raw <col>=<json>` escape hatch accepts the wire JSON
+verbatim; it's gated against read-only-forever and files-shaped
+types (`add_file_to_column` is a separate multipart mutation
+deferred to v0.4).
 
 > The `person` column type is deprecated in Monday's schema — use
 > `people` (plural) for both single-assignee and multi-assignee
