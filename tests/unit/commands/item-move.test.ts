@@ -201,6 +201,39 @@ describe('planColumnMappings', () => {
     }
   });
 
+  it('invalid_mappings error fires before unmatched when both would apply', () => {
+    // When the agent supplies a mapping that BOTH points at a
+    // non-existent target AND leaves another source column
+    // unmatched, the invalid-target error wins. Reasoning: the
+    // mapping is wrong as written; agents should fix the typo
+    // first, and on retry they may discover they ALSO need to add
+    // an entry for the unmatched column. Surfacing both errors at
+    // once would conflate two distinct mistakes.
+    try {
+      planColumnMappings({
+        sourceColumnIds: ['a', 'b'],
+        sourceColumnsById: new Map([
+          ['a', sourceCol('a')],
+          ['b', sourceCol('b')],
+        ]),
+        targetColumnIds: new Set(['real']),
+        // a → typo (invalid); b not in mapping, no verbatim match → unmatched.
+        mapping: { a: 'typo' },
+      });
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UsageError);
+      const details = (err as UsageError).details as {
+        invalid_mappings?: readonly { source_col_id: string }[];
+        unmatched?: readonly { source_col_id: string }[];
+      };
+      // Only invalid_mappings — unmatched isn't surfaced this round.
+      expect(details.invalid_mappings?.length).toBe(1);
+      expect(details.invalid_mappings?.[0]?.source_col_id).toBe('a');
+      expect(details.unmatched).toBeUndefined();
+    }
+  });
+
   it('aggregates multiple invalid mapping targets into one usage_error', () => {
     try {
       planColumnMappings({
@@ -305,6 +338,15 @@ describe('cellHasData / collectSourceColumnIds — Codex round-1 P1 (F1) regress
     expect(cellHasData({ value: null, text: '' })).toBe(false);
     expect(cellHasData({ value: undefined, text: undefined })).toBe(false);
     expect(cellHasData({ value: '', text: null })).toBe(false);
+  });
+
+  it('cellHasData: top-level non-empty string in value counts as data', () => {
+    // Monday's wire shape for some types (e.g. numbers) returns
+    // value as a JSON-encoded string that parses to a top-level
+    // string primitive, e.g. `'42'`. Non-empty strings have content;
+    // empty strings don't.
+    expect(cellHasData({ value: '42', text: null })).toBe(true);
+    expect(cellHasData({ value: 'arbitrary text', text: null })).toBe(true);
   });
 
   it('cellHasData: text wins over empty value (read-only-shape cells)', () => {

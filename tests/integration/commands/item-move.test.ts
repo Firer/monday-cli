@@ -534,6 +534,55 @@ describe('monday item move (integration, M11)', () => {
     expect(out.exitCode).toBe(0);
   });
 
+  it('cross-board live: empty source item sends empty columns_mapping array', async () => {
+    // A source item with no populated cells (every column_value is
+    // either absent from the wire response or carries no data) hits
+    // `cellHasData` returning false for every cell. The planner
+    // emits `[]`, and the live wire mirrors that — Monday receives
+    // an empty `columns_mapping` (which is the same effect as
+    // Monday's permissive default since there's nothing to carry).
+    // Agents previewing via dry-run see `column_mappings: []` and
+    // the live call matches.
+    const sourceItemNoData = {
+      ...sampleItem,
+      column_values: [],
+    };
+    const movedCrossBoard = { ...sourceItemNoData, board: { id: '222' } };
+    const out = await drive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sourceItemNoData] } },
+          },
+          sourceBoardMetadataInteraction,
+          targetBoardMetadataInteraction,
+          {
+            operation_name: 'ItemMoveToBoard',
+            match_variables: {
+              itemId: '12345',
+              boardId: '222',
+              groupId: 'topics',
+              columnsMapping: [],
+            },
+            response: { data: { move_item_to_board: movedCrossBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
   it('cross-board: usage_error when --columns-mapping target ID does not exist on target board (Codex round-2 F2)', async () => {
     // Round-2 F2 regression: `--columns-mapping '{"status_4":"typo"}'`
     // pre-fix bypassed the strict-default check and reached Monday
