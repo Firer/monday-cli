@@ -64,7 +64,22 @@ Items are the primary object an agent will create / read / update.
   `settings_str.boardIds[0]`) for column-token resolution.
 - **Update column value:** `change_column_value` (single column, typed
   per column kind) or `change_multiple_column_values` (bulk).
-- **Move:** `move_item_to_group`, `move_item_to_board`. Neither
+- **Move:** `move_item_to_group(item_id, group_id)`,
+  `move_item_to_board(item_id, board_id: ID!, group_id: ID!,
+  columns_mapping?: [ColumnMappingInput!])` (M11). Both return
+  the post-mutation `Item`. `move_item_to_board` requires
+  `group_id` — Monday picks no default destination group on the
+  target board, so the CLI's `monday item move` requires
+  `--to-group` for both same-board AND cross-board forms.
+  `columns_mapping` is `[{source: ID!, target?: ID}]` —
+  strictly source-to-target ID mapping with no value slot, so
+  the CLI ships only the simple `--columns-mapping
+  '{<src>: <target>}'` form; value-overrides are deferred to
+  v0.3. Same-board `move_item_to_group` is wire-level no-op
+  when the item is already in the target group (idempotent);
+  cross-board `move_item_to_board` re-running on the target
+  board is undefined SDK behaviour, so the verb-level
+  `idempotent: false` is the conservative bound. Neither
   accepts a position — Monday's 2026-01 API does NOT expose a
   way to reorder existing items via the public GraphQL surface
   (`position_relative_method` is only on `create_item` and

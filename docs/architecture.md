@@ -644,6 +644,73 @@
   commander's `undefined` leaked through would surface as a
   cassette mismatch.
 
+- `commands/item/move.ts` (M11) — `monday item move <iid>
+  --to-group <gid> [--to-board <bid>] [--columns-mapping <json>]
+  [--dry-run]`. Fourth and final lifecycle verb closing the
+  four-verb set Monday's API exposes (`archive` / `delete` /
+  `duplicate` here; `move_item_to_*` is the M11 closer). Two
+  transports under one verb: **same-board** (`--to-group <gid>`
+  alone) calls `move_item_to_group` — single-leg live, single-
+  leg dry-run via `readSourceItemForDryRun(operationName:
+  'ItemMoveRead')` (R27 helper). **Cross-board**
+  (`--to-group <gid> --to-board <bid>`) calls
+  `move_item_to_board(item_id, board_id, group_id,
+  columns_mapping)` — four-leg live (source-item read + source
+  `BoardMetadata` + target `BoardMetadata` parallel + the
+  mutation), three-leg dry-run (no mutation). `--to-group` is
+  required for both forms because Monday's
+  `move_item_to_board(group_id: ID!)` is mandatory (verifiable
+  in SDK 14.0.0 at `index.d.ts:2156`); `--to-board` alone (no
+  `--to-group`) → `usage_error`. The mutex now lives between
+  `--columns-mapping` and `--to-board`'s absence (passing the
+  mapping without the cross-board flag is a user mistake).
+  **`--columns-mapping <json>`** parses through
+  `src/api/column-mapping.ts parseColumnMappingJson` — the simple
+  `{<source_col_id>: <target_col_id>}` form (string-to-string),
+  matching Monday's `ColumnMappingInput = { source: ID!, target?:
+  ID }` exactly. The richer `{id, value?}` value-translation form
+  is deferred to v0.3 (the wire shape carries no value slot;
+  supporting it requires a non-atomic post-move
+  `change_multiple_column_values` mutation; v0.2-plan §15
+  captures the SDK-shape discovery that drove the deferral).
+  **Strict default per cli-design §8 decision 5.** The planner
+  (`planColumnMappings`) enumerates every source column **with
+  actual content** (the `cellHasData` predicate — recursive
+  semantic-empty check on `value` + non-empty `text`; Codex
+  round-1 F1 + round-2 F1 escalation pinned the populated-cells
+  filter so cleared rich shapes like `{}` /
+  `{personsAndTeams: []}` / `{label: null, index: null}` drop
+  out). Each populated source column needs (a) a verbatim ID
+  match on target OR (b) an agent-supplied mapping entry; both
+  branches validate against `targetColumnIds` (Codex round-2 F2
+  added the typo-target check — `--columns-mapping
+  '{"status_4":"typo"}'` raises `usage_error` with
+  `details.invalid_mappings` rather than reaching Monday and
+  silently dropping). Unmatched → `usage_error` carrying
+  `details.unmatched: [{source_col_id, source_title,
+  source_type}]` + `details.example_mapping` so agents
+  copy-paste the seed into their retry. `--columns-mapping {}`
+  (empty object) is the explicit "drop everything (Monday's
+  permissive default)" opt-in that bypasses the unmatched check.
+  **Live wire mirrors dry-run echo** (Codex round-2 F3) — the
+  live mutation always sends `plan.columnsMapping` (the same
+  array dry-run echoes), so the preview describes what Monday
+  will receive byte-for-byte. **`meta.source` aggregation** for
+  cross-board mixes `mergeSource` + `mergeCacheAge` (R21) across
+  the source-item read (always live), source + target metadata
+  loads (cache or live), and the mutation (always live); same-
+  board paths are pure-live single-leg so the source aggregator
+  doesn't fire. **`idempotent: false`** at the verb level —
+  same-board (`move_item_to_group`) is wire-level no-op when
+  already in target group per cli-design §9.1, but cross-board
+  (`move_item_to_board`) re-running on the target board is
+  undefined SDK behaviour; conservative bound across all paths
+  mirrors `monday item create`. Inherited helpers: R23
+  (`lookupItemBoard` for the projection-board-id-null fallback —
+  defensive, deliberately uncovered per v0.2-plan §15), R27
+  (`readSourceItemForDryRun(operationName: 'ItemMoveRead')`),
+  R28 (`projectMutationItem(errorCode: 'not_found')`).
+
 - `commands/update/create.ts` (M5b session 2) — posts a
   Monday update (comment) on an item via `create_update`.
   Body sources: `--body <md>` inline, `--body-file <path>`,

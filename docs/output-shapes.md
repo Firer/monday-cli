@@ -956,6 +956,34 @@ everything (Monday's permissive default)" opt-in that bypasses
 the unmatched check — Monday silently drops unmatched source
 column values.
 
+**Invalid mapping targets are also rejected pre-mutation.** When
+an explicit `--columns-mapping` entry points at a target column
+ID that doesn't exist on the destination board (e.g. typo'd
+column ID), the planner raises `usage_error` (exit 1) with
+`details.invalid_mappings: [{source_col_id, target_col_id}]` so
+the agent's retry can correct the typo. Strict-default's
+"reject before silent drop" guarantee covers typo'd mappings
+too — pre-fix the wrong target ID would have reached Monday's
+`columns_mapping` parameter and been silently dropped server-
+side:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "Cross-board move's --columns-mapping points at 1 target column(s) that don't exist on the target board.",
+    "details": {
+      "invalid_mappings": [
+        { "source_col_id": "status_4", "target_col_id": "typo_does_not_exist" }
+      ],
+      "hint": "verify the target column IDs against `monday board describe <target_bid>`; the source IDs map to target IDs that must already exist (move does not create columns)."
+    }
+  },
+  "meta": { ... }
+}
+```
+
 `idempotent: false` at the verb level. Same-board
 (`move_item_to_group`) is wire-level no-op when already in target
 group per cli-design §9.1, but cross-board (`move_item_to_board`)

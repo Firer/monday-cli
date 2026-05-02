@@ -252,14 +252,31 @@ tarball — `package.json` still pinned to `0.1.0`):
   Monday requires `board_id`), takes `--with-updates` to copy the
   source's comments, and extends the live envelope's `data` with
   `duplicated_from_id` so an agent has the source-ID echo handy.
+- **M11** closed the four-verb lifecycle set with `monday item
+  move` — same-board (`--to-group <gid>`) via `move_item_to_group`
+  or cross-board (`--to-group <gid> --to-board <bid>`) via
+  `move_item_to_board`. Cross-board moves use
+  `--columns-mapping '{<src>: <target>}'` to bridge columns whose
+  IDs differ between source and target; the strict default
+  rejects unmatched columns pre-mutation with
+  `details.unmatched` + `details.example_mapping` (agents
+  copy-paste the seed into their retry) rather than letting
+  Monday silently drop them. `--columns-mapping {}` is the
+  explicit "drop everything (Monday's permissive default)"
+  opt-in. `--to-group` is required for both forms because
+  Monday's `move_item_to_board(group_id: ID!)` is mandatory.
+  Value-overrides on cross-board mappings deferred to v0.3
+  (Monday's `ColumnMappingInput` carries no value slot —
+  agents fire `monday item set` post-move when they need
+  overrides).
 
 **Writer allowlist** (other types return `unsupported_column_type`
 with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
 `people`, plus M8 firm row `link`, `email`, `phone`.
 
-**Remaining v0.2 milestones (M11–M18) on `main`:** `item move`
-(group + cross-board) / `upsert`, full update mutation surface
+**Remaining v0.2 milestones (M12–M18) on `main`:** `item upsert`
++ bulk `item clear --where`, full update mutation surface
 (`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
 workspace + board lifecycle, NDJSON streaming, 0.2.0 release prep.
 
