@@ -62,8 +62,6 @@ import type { MondayClient, MondayResponse } from '../../api/client.js';
 import {
   selectMutation,
   translateColumnValueAsync,
-  type DateResolutionContext,
-  type PeopleResolutionContext,
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
@@ -72,7 +70,7 @@ import {
   translateRawColumnValue,
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
-import { userByEmail } from '../../api/resolvers.js';
+import { buildResolutionContexts } from '../../api/resolution-context.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
@@ -82,7 +80,6 @@ import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
   parseRawItem,
-  resolveMeFactory,
 } from '../../api/item-helpers.js';
 import {
   projectItem,
@@ -324,24 +321,9 @@ export const itemSetCommand: CommandModule<
         // to date.parseDateInput per cli-design §5.3 line 765;
         // `resolveMe` + `resolveEmail` cover the people branch's
         // `me` token and email-lookup paths per §5.3 line 728-734.
-        const dateResolution: DateResolutionContext = {
-          now: ctx.clock,
-          ...(ctx.env.MONDAY_TIMEZONE === undefined
-            ? {}
-            : { timezone: ctx.env.MONDAY_TIMEZONE }),
-        };
-        const peopleResolution: PeopleResolutionContext = {
-          resolveMe: resolveMeFactory(client),
-          resolveEmail: async (email) => {
-            const result = await userByEmail({
-              client,
-              email,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-            });
-            return result.user.id;
-          },
-        };
+        const { dateResolution, peopleResolution } = buildResolutionContexts(
+          { client, ctx, globalFlags },
+        );
 
         if (globalFlags.dryRun) {
           const result = await planChanges({

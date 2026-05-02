@@ -62,8 +62,6 @@ import type { MondayClient, MondayResponse } from '../../api/client.js';
 import {
   bundleColumnValues,
   translateColumnValueAsync,
-  type DateResolutionContext,
-  type PeopleResolutionContext,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
 import {
@@ -72,7 +70,7 @@ import {
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
-import { userByEmail } from '../../api/resolvers.js';
+import { buildResolutionContexts } from '../../api/resolution-context.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
@@ -80,7 +78,6 @@ import {
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { resolveMeFactory } from '../../api/item-helpers.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 // ============================================================
@@ -890,24 +887,9 @@ export const itemCreateCommand: CommandModule<
             ? createMode.subitemsBoardId
             : createMode.boardId;
 
-        const dateResolution: DateResolutionContext = {
-          now: ctx.clock,
-          ...(ctx.env.MONDAY_TIMEZONE === undefined
-            ? {}
-            : { timezone: ctx.env.MONDAY_TIMEZONE }),
-        };
-        const peopleResolution: PeopleResolutionContext = {
-          resolveMe: resolveMeFactory(client),
-          resolveEmail: async (email) => {
-            const result = await userByEmail({
-              client,
-              email,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-            });
-            return result.user.id;
-          },
-        };
+        const { dateResolution, peopleResolution } = buildResolutionContexts(
+          { client, ctx, globalFlags },
+        );
 
         if (globalFlags.dryRun) {
           const result = await planCreate({

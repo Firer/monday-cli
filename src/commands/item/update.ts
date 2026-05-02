@@ -58,8 +58,6 @@ import type { MondayClient, MondayResponse } from '../../api/client.js';
 import {
   selectMutation,
   translateColumnValueAsync,
-  type DateResolutionContext,
-  type PeopleResolutionContext,
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
@@ -69,7 +67,7 @@ import {
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
-import { userByEmail } from '../../api/resolvers.js';
+import { buildResolutionContexts } from '../../api/resolution-context.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
@@ -447,24 +445,9 @@ export const itemUpdateCommand: CommandModule<
           parsed.board,
         );
 
-        const dateResolution: DateResolutionContext = {
-          now: ctx.clock,
-          ...(ctx.env.MONDAY_TIMEZONE === undefined
-            ? {}
-            : { timezone: ctx.env.MONDAY_TIMEZONE }),
-        };
-        const peopleResolution: PeopleResolutionContext = {
-          resolveMe: resolveMeFactory(client),
-          resolveEmail: async (email) => {
-            const result = await userByEmail({
-              client,
-              email,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-            });
-            return result.user.id;
-          },
-        };
+        const { dateResolution, peopleResolution } = buildResolutionContexts(
+          { client, ctx, globalFlags },
+        );
 
         if (globalFlags.dryRun) {
           const result = await planChanges({
@@ -1272,24 +1255,9 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // means a malformed --set / --set-raw doesn't pay for the metadata
   // load + items_page walk first.)
 
-  const dateResolution: DateResolutionContext = {
-    now: ctx.clock,
-    ...(ctx.env.MONDAY_TIMEZONE === undefined
-      ? {}
-      : { timezone: ctx.env.MONDAY_TIMEZONE }),
-  };
-  const peopleResolution: PeopleResolutionContext = {
-    resolveMe: resolveMeFactory(client),
-    resolveEmail: async (email) => {
-      const result = await userByEmail({
-        client,
-        email,
-        env: ctx.env,
-        noCache: globalFlags.noCache,
-      });
-      return result.user.id;
-    },
-  };
+  const { dateResolution, peopleResolution } = buildResolutionContexts(
+    { client, ctx, globalFlags },
+  );
 
   // 5) Dry-run path: per-item planChanges. Column resolution is
   //    cached after the first call; per-item state read fires per
