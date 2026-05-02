@@ -449,7 +449,10 @@ interface LookupInputs {
  * decision needs no second round-trip.
  *
  * Column-token rules go through `buildQueryParams` — the same path
- * `item search` / `item update --where` use — so per-column-type
+ * `item list --where` and bulk `item update --where` use (note: `item
+ * search` parses identical syntax via `buildColumnQueries` but hits
+ * Monday's `items_page_by_column_values` endpoint, a different filter
+ * shape) — so per-column-type
  * value resolution (the `me` token for people columns, the same
  * cache-miss-refresh + collision-warning collection) inherits
  * automatically. `name` pseudo-tokens skip the column resolver
@@ -843,9 +846,10 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
           '      pass verbatim in lookup (duplicate); raw numeric user',
           '      IDs are rejected by the --set grammar (cli-design §5.3).',
           '  Not v0.2-safe:',
-          '    - date: Monday items_page requires `["EXACT", "YYYY-MM-',
-          '      DD"]` for date-equals; the lookup leg sends bare ISO,',
-          '      so an upsert against a date column duplicates on rerun.',
+          '    - date: Monday items_page requires an EXACT marker plus',
+          '      YYYY-MM-DD for date-equals comparisons; the lookup leg',
+          '      sends bare ISO, so an upsert against a date column',
+          '      duplicates on rerun.',
           '    - link / email / phone: the rich `scalar|text` write',
           '      grammar produces a `{url,text}` / `{email,text}` /',
           '      `{phone,country}` payload that the bare-string filter',

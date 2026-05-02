@@ -1487,11 +1487,15 @@ the first call deterministically lands in the create branch and
 subsequent calls land in the update branch.
 
 **Match-value resolution caveats (per column kind).** The upsert
-lookup routes column-token entries through the same shared filter
-pipeline `item search` and `item update --where` use
-(`buildQueryParams`), which resolves the `me` token to the current
-user's ID for people columns and passes everything else verbatim
-to Monday's `items_page` filter. The mutation translator on the
+lookup routes column-token entries through `buildQueryParams` —
+the same path `item list --where` and bulk `item update --where`
+use against Monday's `items_page(query_params)` endpoint. (`item
+search` parses identical syntax via `buildColumnQueries` but
+targets `items_page_by_column_values`, a different filter shape;
+the v0.2 cross-surface lifts below would also touch that path.)
+The lookup pipeline resolves the `me` token to the current user's
+ID for people columns and passes everything else verbatim to
+Monday's filter. The mutation translator on the
 create / update legs has its own grammar — defined by §5.3 — and
 the two grammars only overlap cleanly on a subset of column
 kinds. The v0.2 contract for `--match-by` is:
