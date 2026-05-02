@@ -52,7 +52,8 @@ v0.1 contract across four binary spawns — `item list` → `item set`
   milestone deliverables, exit criteria, decisions log, §10 M8 +
   §11 M9 + §13 M10 post-mortems (§12 is the post-M9 R20–R26
   refactor backlog, all shipped; §14 is the post-M10 R27–R29
-  refactor backlog, scheduled for the M10→M11 cleanup window).
+  refactor backlog — R27 + R28 shipped in the M10→M11 cleanup
+  window, R29 deferred to M15).
 
 **Milestones:**
 
