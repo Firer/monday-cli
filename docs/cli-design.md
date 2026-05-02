@@ -529,8 +529,29 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
 monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
 monday item duplicate <iid> [--with-updates]                                 v0.2
-monday item archive <iid>                                                    v0.2
+monday item archive <iid> --yes                                              v0.2
+                                          # --yes mandatory for live archive
+                                          # (destructive — Monday's 30-day
+                                          # recovery window is the only way
+                                          # back; no `unarchive` mutation
+                                          # exists, see §5.4). Without --yes
+                                          # → confirmation_required (exit 1).
+                                          # --dry-run previews the would-
+                                          # archive item without --yes.
+                                          # Idempotent: re-archiving an
+                                          # already-archived item is a no-op
+                                          # on Monday's side (§9.1 table).
 monday item delete <iid> --yes                                               v0.2
+                                          # --yes mandatory for live delete.
+                                          # Re-deleting an already-deleted
+                                          # item surfaces `not_found` — the
+                                          # mutation itself is idempotent
+                                          # past the first call, but the
+                                          # CLI marks `idempotent: false`
+                                          # because re-running with the
+                                          # same args after an interim
+                                          # `monday item create` would
+                                          # delete the *new* item.
                                           # No `restore` — see §5.4
 monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.4
                                           # polls; emits NDJSON change events
