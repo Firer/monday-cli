@@ -423,6 +423,48 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   final envelope source. **Idempotent: false**
   — re-running creates a duplicate item; `monday item upsert`
   (M12) is the idempotent variant.
+- **`item archive` / `delete` / `duplicate` (M10).** Three
+  lifecycle siblings closing the four-verb set Monday's API
+  exposes (`move_item_to_*` lands in M11). Every verb shares the
+  v0.1 R9 + R18 boundary (`ITEM_FIELDS_FRAGMENT` + `parseRawItem`
+  + `projectItem`) so each envelope's `data` (live) or
+  `planned_changes[0].item` (dry-run) matches `monday item get`
+  byte-for-byte. **`item archive` / `delete`** (Session A —
+  `commands/item/archive.ts` + `commands/item/delete.ts`):
+  destructive verbs sharing the cli-design §3.1 #7 `--yes`
+  confirmation gate (`--dry-run` exempts per §10.2). Single-leg
+  per path (live calls the mutation directly; dry-run reads via
+  `Item{Archive,Delete}Read`). archive `idempotent: true`
+  (re-archive is wire-level no-op per §9.1); delete
+  `idempotent: false` (re-running after an interim `create`
+  would target the new item; the mutation itself returns
+  `not_found` past the first call). **Confirmation gate must
+  fire before `resolveClient()`** (Session A round-1 P2): the
+  gate is unconditional per §3.1 #7, so missing-token must not
+  mask `confirmation_required` (exit 1) as `config_error`
+  (exit 3). Pattern documented + pinned via a regression test
+  per verb that drops `MONDAY_API_TOKEN` from the env.
+  **`item duplicate`** (Session B — `commands/item/duplicate.ts`):
+  creative verb (no `--yes` gate per §3.1 #7 — gate is for
+  destructive ops only). Two-leg live (`ItemBoardLookup` +
+  `duplicate_item` — Monday's `duplicate_item(item_id, board_id:
+  ID!, with_updates)` requires `board_id`, derived via
+  `lookupItemBoard`); single-leg dry-run (`ItemDuplicateRead`).
+  `--with-updates` plumbs through to the mutation variable
+  (pinned via fixture `match_variables` for both true and false).
+  Output schema =
+  `projectedItemSchema.extend({ duplicated_from_id: ItemIdSchema })`
+  — the lineage echo lands in `data` per cli-design §6.4 line
+  1827-1831's upsert-`data.created` precedent (verb-specific
+  business signals extend `data`; top-level slots stay
+  cross-verb). Dry-run shape carries `with_updates` echo so
+  agents preview-aware. `idempotent: false` mirroring `create_
+  item`'s "every call creates a new item" semantics.
+  **`meta.source: "live"`** for every M10 path: archive + delete
+  live single-leg wire calls, duplicate live two-leg both wire,
+  duplicate dry-run single-leg wire. No leg consults the cache,
+  so `mergeSource` doesn't appear and `cache_age_seconds: null`
+  on every M10 envelope.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
   misleading "restore" command — see §5.4 for what a future explicit

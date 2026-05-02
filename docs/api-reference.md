@@ -70,7 +70,21 @@ Items are the primary object an agent will create / read / update.
   (`position_relative_method` is only on `create_item` and
   `create_group`). Post-create reordering is deferred until
   Monday adds the mutation.
-- **Archive / delete:** `archive_item`, `delete_item` (M10).
+- **Archive / delete:** `archive_item(item_id)`,
+  `delete_item(item_id)` (M10). Both return the post-mutation
+  `Item`; `archive_item` is wire-level idempotent (re-archive is a
+  no-op), `delete_item` returns `not_found` past the first call
+  (the CLI marks `idempotent: false` because re-running with the
+  same `<iid>` after an interim `create` would delete the new
+  item).
+- **Duplicate:** `duplicate_item(item_id, board_id: ID!,
+  with_updates?: Boolean)` (M10). Note the required `board_id`
+  parameter — the CLI looks it up via a separate
+  `ItemBoardLookup` round-trip before firing the mutation, so
+  duplicate's live path is two-leg unlike archive + delete's
+  single-leg paths. `with_updates: true` copies the source item's
+  updates (Monday "comments") onto the duplicate. Not idempotent
+  — every call creates a new item.
 
 ## Column values
 

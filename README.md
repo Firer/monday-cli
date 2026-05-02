@@ -242,17 +242,26 @@ tarball — `package.json` still pinned to `0.1.0`):
   positional placement (`--position before|after --relative-to
   <iid>`), and the same `--set` / `--set-raw` surface as
   `item update`.
+- **M10** closed the item-lifecycle cluster — `monday item archive`
+  / `delete` / `duplicate`. The two destructive verbs share the
+  `--yes` confirmation gate (`--dry-run` exempts) and read the
+  source item for the dry-run preview; `archive` is wire-level
+  idempotent, `delete` non-idempotent (re-running after an interim
+  `create` would target the new item). `duplicate` is creative
+  (no `--yes`), runs two-leg live (board lookup + mutation —
+  Monday requires `board_id`), takes `--with-updates` to copy the
+  source's comments, and extends the live envelope's `data` with
+  `duplicated_from_id` so an agent has the source-ID echo handy.
 
 **Writer allowlist** (other types return `unsupported_column_type`
 with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
 `people`, plus M8 firm row `link`, `email`, `phone`.
 
-**Remaining v0.2 milestones (M10–M18) on `main`:** `item archive` /
-`delete` / `duplicate` / `move` (group + cross-board) / `upsert`,
-full update mutation surface (`reply` / `edit` / `delete` / `like`
-/ `pin` / `clear-all`), workspace + board lifecycle, NDJSON
-streaming, 0.2.0 release prep.
+**Remaining v0.2 milestones (M11–M18) on `main`:** `item move`
+(group + cross-board) / `upsert`, full update mutation surface
+(`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
+workspace + board lifecycle, NDJSON streaming, 0.2.0 release prep.
 
 **Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
 friendly translators (still tentative; usable today via
