@@ -56,6 +56,28 @@ describe('redact — defaults', () => {
       active: true,
     });
   });
+
+  it('does not redact plural container keys (tokens / secrets / passwords / api_keys)', () => {
+    // The `tokens` plural is the people-resolution echo slot and
+    // the cross-token duplicate-resolved-id `details.tokens` array
+    // — both are non-secret container fields agents need to read.
+    // Pre-M9.5 the regex `(token|secret|password|api[-_]?key)`
+    // matched these plurals as substring hits. The `(?!s)` lookahead
+    // excludes them; singular forms (`accessToken`, `clientSecret`,
+    // `apiKey`) still match.
+    const out = redact({
+      tokens: ['alice@example.com', 'bob@example.com'],
+      secrets: ['s1', 's2'],
+      passwords: ['p1'],
+      api_keys: ['k1'],
+    });
+    expect(out).toEqual({
+      tokens: ['alice@example.com', 'bob@example.com'],
+      secrets: ['s1', 's2'],
+      passwords: ['p1'],
+      api_keys: ['k1'],
+    });
+  });
 });
 
 describe('redact — recursion', () => {

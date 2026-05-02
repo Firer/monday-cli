@@ -32,7 +32,18 @@ const DEFAULT_SENSITIVE_KEYS: readonly string[] = [
   'MONDAY_API_TOKEN',
 ];
 
-const DEFAULT_SENSITIVE_PATTERN = /(token|secret|password|api[-_]?key)/iu;
+// Negative lookahead `(?!s)` excludes plural forms (`tokens`,
+// `secrets`, `passwords`, `api_keys`) — those are container key
+// names commonly used in `details.tokens` (cross-token duplicate
+// resolved-id error) and `details.resolved_from.tokens` (people-
+// resolution echo on dry-run diff cells), neither of which is a
+// secret. The DEFAULT_SENSITIVE_KEYS list still catches the exact
+// secret-bearing forms (`apiToken`, `Authorization`,
+// `MONDAY_API_TOKEN`); the value-scanning filter catches the
+// literal token bytes anywhere they leak. Singular forms still
+// redact: `token`, `accessToken`, `bearerToken`, `RefreshToken`,
+// `clientSecret`, `password`, `apiKey`, `api_key`.
+const DEFAULT_SENSITIVE_PATTERN = /(token|secret|password|api[-_]?key)(?!s)/iu;
 
 const REDACTED = '[REDACTED]';
 const CIRCULAR = '[Circular]';

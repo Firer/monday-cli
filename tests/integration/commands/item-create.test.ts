@@ -25,6 +25,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertEnvelopeContract,
+  FIXTURE_API_URL,
+  LEAK_CANARY,
   parseEnvelope,
   type EnvelopeShape,
 } from '../helpers.js';
@@ -2008,5 +2010,127 @@ describe('monday item create — dry-run', () => {
     // logic inside bundleColumnValues only fires for `payload.format
     // === 'simple'`, which raw never produces.
     expect(diff.long_desc!.to).toEqual({ text: 'hi', extra: 'agent' });
+  });
+
+  it('top-level dry-run: relative date emits resolved_from echo on the diff cell', async () => {
+    // Pins dry-run.ts:810 — buildCreateDiffCell's resolvedFrom echo
+    // path for relative-date inputs. planChanges (item update / set)
+    // has the equivalent test; planCreate's sibling slot was
+    // unpinned until this test landed. Mirrors item-update.test.ts's
+    // "--dry-run: relative date in single-path with MONDAY_TIMEZONE
+    // override resolves correctly" pattern.
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'date4=tomorrow',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+      {
+        env: {
+          MONDAY_API_TOKEN: LEAK_CANARY,
+          MONDAY_API_URL: FIXTURE_API_URL,
+          XDG_CACHE_HOME: xdgRoot(),
+          MONDAY_TIMEZONE: 'Europe/London',
+        },
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        diff: Readonly<
+          Record<
+            string,
+            { details?: { resolved_from?: { input: string; timezone: string } } }
+          >
+        >;
+      }[];
+    };
+    const cell = env.planned_changes[0]?.diff.date4;
+    expect(cell?.details?.resolved_from?.input).toBe('tomorrow');
+    expect(cell?.details?.resolved_from?.timezone).toBe('Europe/London');
+  });
+
+  it('top-level dry-run: people email emits resolved_from echo with token mapping', async () => {
+    // Pins dry-run.ts:823-828 — buildCreateDiffCell's
+    // peopleResolution echo path. Email→ID resolution fires through
+    // userByEmail (mocked here via the UsersByEmail cassette
+    // interaction); the planCreate engine projects the
+    // PeopleResolution onto the diff cell's
+    // details.resolved_from.tokens slot.
+    const peopleBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'owner_p',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'owner_p=alice@example.com',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [peopleBoard] } },
+          },
+          {
+            operation_name: 'UsersByEmail',
+            response: {
+              data: {
+                users: [
+                  { id: '555', name: 'Alice', email: 'alice@example.com' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        diff: Readonly<
+          Record<
+            string,
+            {
+              details?: {
+                resolved_from?: {
+                  tokens: readonly { input: string; resolved_id: string }[];
+                };
+              };
+            }
+          >
+        >;
+      }[];
+    };
+    const cell = env.planned_changes[0]?.diff.owner_p;
+    expect(cell?.details?.resolved_from?.tokens).toEqual([
+      { input: 'alice@example.com', resolved_id: '555' },
+    ]);
   });
 });

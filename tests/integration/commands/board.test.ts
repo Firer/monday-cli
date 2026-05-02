@@ -472,6 +472,31 @@ describe('monday board describe', () => {
     expect(out2.requests).toBe(0);
   });
 
+  it('default (no --include-archived) excludes archived AND deleted groups', async () => {
+    // Pins describe.ts:227 — the default-path groups filter callback.
+    // Existing default-path tests use only live groups, so the
+    // `g.archived !== true && g.deleted !== true` predicate's truthy
+    // arm fires but its falsy arms (filter-it-out for archived OR
+    // deleted) didn't until this test landed. Mirror of the
+    // `--include-archived` test directly below.
+    const cols = [{ ...baseColumn, id: 'live', title: 'Live' }];
+    const groups = [
+      { id: 'g1', title: 'G1', color: null, position: '1', archived: false, deleted: false },
+      { id: 'g2', title: 'G2', color: null, position: '2', archived: true, deleted: false },
+      { id: 'g3', title: 'G3', color: null, position: '3', archived: false, deleted: true },
+    ];
+    const out = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse(cols, groups)] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string }[] };
+    };
+    // Only the live group survives; archived + deleted both filtered.
+    expect(env.data.groups.map((g) => g.id)).toEqual(['g1']);
+  });
+
   it('--include-archived shows archived columns and deleted groups', async () => {
     const cols = [
       { ...baseColumn, id: 'live', title: 'Live' },

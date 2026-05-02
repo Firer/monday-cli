@@ -1287,10 +1287,13 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
     };
     expect(env.error?.code).toBe('usage_error');
     expect(env.error?.message).toMatch(/resolve to the same column ID/);
-    // `details.tokens` is redacted by the secrets-scrubber (the
-    // `tokens` key matches the default sensitive-key regex so the
-    // value emerges as `[REDACTED]`); the message text is the
-    // observable contract.
+    // M9.5 redactor fix: `details.tokens` (plural) now surfaces
+    // verbatim — pre-fix the secrets-scrubber's
+    // `(token|secret|password|api[-_]?key)` regex caught the plural
+    // and emitted `[REDACTED]`. The `(?!s)` lookahead now excludes
+    // plural container keys; singular `apiToken` / `accessToken` /
+    // etc. still redact via DEFAULT_SENSITIVE_KEYS + the regex.
+    expect(env.error?.details?.tokens).toEqual(['status', 'id:status_4']);
   });
 
   it('mutual-exclusion fires before translation when friendly value would error (Codex M8 finding #2)', async () => {
