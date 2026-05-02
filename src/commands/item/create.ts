@@ -77,7 +77,7 @@ import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
-import { planCreate } from '../../api/dry-run.js';
+import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { resolveMeFactory } from '../../api/item-helpers.js';
@@ -642,7 +642,7 @@ interface ResolveCreateModeInputs {
  * metadata fetch that already fired (Codex M9 P2 #1).
  */
 interface ResolveCreateModeResult {
-  readonly mode: CreateModeFromCommand;
+  readonly mode: CreateMode;
   /**
    * Source contribution from the pre-planner legs:
    *   - subitem path: parent lookup is always live; parent-board
@@ -783,27 +783,6 @@ const resolveCreateMode = async (
     preflightCacheAgeSeconds: null,
   };
 };
-
-/**
- * The local CreateMode shape passed downstream — same discriminated
- * union as the dry-run engine's `CreateMode` (`api/dry-run.ts`),
- * locally typed so the helper signature doesn't need an import dance.
- */
-type CreateModeFromCommand =
-  | {
-      readonly kind: 'item';
-      readonly boardId: string;
-      readonly groupId?: string;
-      readonly position?: {
-        readonly method: 'before' | 'after';
-        readonly relativeTo: string;
-      };
-    }
-  | {
-      readonly kind: 'subitem';
-      readonly parentItemId: string;
-      readonly subitemsBoardId: string;
-    };
 
 // ============================================================
 // Main command export.
