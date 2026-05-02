@@ -936,6 +936,141 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item create (top-level, single --set)', async () => {
+    const newItem = {
+      id: '99001',
+      name: 'Refactor login',
+      board: { id: '111' },
+      group: { id: 'topics' },
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'status=Done',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item create --dry-run (top-level planned_changes envelope)', async () => {
+    const out = await cachedDrive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--group',
+        'topics',
+        '--set',
+        'status=Done',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [boardMetadataInteraction],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item create subitem (--parent, no --set)', async () => {
+    const newSubitem = {
+      id: '99100',
+      name: 'Subtask 1',
+      board: { id: '333' },
+      group: { id: 'subitems_topic' },
+      parent_item: { id: '12345' },
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Subtask 1',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: { id: '111', hierarchy_type: 'classic' },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemCreateSubitem',
+            response: { data: { create_subitem: newSubitem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item create subitem --dry-run (subitem planned_changes envelope — no board_id)', async () => {
+    const out = await cachedDrive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Subtask 1',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: { id: '111', hierarchy_type: 'classic' },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {

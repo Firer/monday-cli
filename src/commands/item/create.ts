@@ -1,0 +1,1344 @@
+/**
+ * `monday item create` — create a new item or subitem
+ * (`cli-design.md` §4.3 + §5.3 + §5.8 + §6.4 "Item-create shape",
+ * `v0.2-plan.md` §3 M9).
+ *
+ * Two argv shapes the dispatch picks between:
+ *
+ *   1. **Top-level** — `--board <bid> --name <n>` mandatory; optional
+ *      `--group`, `--position before|after --relative-to <iid>`,
+ *      `--set`, `--set-raw`. Calls `create_item`. Resolves columns
+ *      against `--board`'s metadata.
+ *
+ *   2. **Subitem** — `--parent <iid> --name <n>` mandatory; `--set` /
+ *      `--set-raw` optional. `--board`, `--group`, and
+ *      `--position` / `--relative-to` are **rejected** here — subitems
+ *      live on Monday's auto-generated subitems board (not in groups,
+ *      not relative to arbitrary items, not on a caller-named board).
+ *      Calls `create_subitem`. Resolves columns against the
+ *      subitems-board's metadata (derived from the parent's
+ *      `subtasks` column's `settings_str.boardIds[0]`). Multi-level
+ *      boards (`hierarchy_type: "multi_level"`) are rejected with
+ *      `usage_error` — multi-level subitem support is deferred to
+ *      v0.3 because the column-resolution path here assumes the
+ *      classic auto-generated-subitems-board model.
+ *
+ * **Single round-trip** (cli-design §5.8 — hard exit gate). Every
+ * translated `--set` / `--set-raw` value bundles into one
+ * `create_item.column_values` (or `create_subitem.column_values`)
+ * parameter via `bundleColumnValues`; the CLI does **not** fall back
+ * to `create_item` + `change_multiple_column_values` on partial
+ * failure. Monday's server-side rejection of any value fails the
+ * whole mutation, and no item is created — agents retry with the
+ * value fixed.
+ *
+ * **`--position` / `--relative-to` cross-validation.** Both flags
+ * are required together (one without the other → `usage_error`).
+ * `--relative-to` must reference an item on the same board (mirrors
+ * the M5b wrong-board check).
+ *
+ * **Mutation envelope** (cli-design §6.4 + §5.3 step 2). `data: {id,
+ * name, board_id, group_id, parent_id?}` with the top-level
+ * `resolved_ids` echo (token → resolved column ID) for every `--set`
+ * / `--set-raw` token the agent supplied. `parent_id` is present
+ * only on the subitem path.
+ *
+ * **Idempotent: false.** Re-running with the same args creates a
+ * second item. Agents needing idempotent create-or-update use
+ * `monday item upsert` (M12).
+ */
+import { z } from 'zod';
+import { ensureSubcommand, type CommandModule } from '../types.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
+import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
+import { parseArgv } from '../parse-argv.js';
+import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
+import {
+  resolveColumnWithRefresh,
+  type ResolverWarning,
+} from '../../api/columns.js';
+import type { MondayClient, MondayResponse } from '../../api/client.js';
+import {
+  bundleColumnValues,
+  translateColumnValueAsync,
+  type DateResolutionContext,
+  type PeopleResolutionContext,
+  type TranslatedColumnValue,
+} from '../../api/column-values.js';
+import {
+  parseSetRawExpression,
+  translateRawColumnValue,
+  type ParsedSetRawExpression,
+} from '../../api/raw-write.js';
+import { userByEmail } from '../../api/resolvers.js';
+import {
+  foldResolverWarningsIntoError,
+} from '../../api/resolver-error-fold.js';
+import { planCreate } from '../../api/dry-run.js';
+import { loadBoardMetadata } from '../../api/board-metadata.js';
+import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { resolveMeFactory } from '../../api/item-helpers.js';
+import type { Warning } from '../../utils/output/envelope.js';
+
+// ============================================================
+// GraphQL queries + mutations.
+// ============================================================
+
+/**
+ * Parent lookup for the subitem path. Fetches the parent's board id
+ * + `hierarchy_type` so the multi-level gate fires before any column
+ * resolution / value translation runs (cli-design §5.8).
+ *
+ * `hierarchy_type` lives on Monday's `Board` type but the SDK 14.0.0
+ * `boards` typed query doesn't surface it (cli-design §2.8); the
+ * raw escape hatch is the v0.2 work-around.
+ */
+const ITEM_PARENT_LOOKUP_QUERY = `
+  query ItemParentLookup($ids: [ID!]!) {
+    items(ids: $ids) {
+      id
+      board {
+        id
+        hierarchy_type
+      }
+    }
+  }
+`;
+
+/**
+ * Same lookup as the M5b `item set` / `item update` board-resolver
+ * uses, kept verbatim so the wrong-board check on `--relative-to`
+ * shares the same wire shape.
+ */
+const ITEM_BOARD_LOOKUP_QUERY = `
+  query ItemBoardLookup($ids: [ID!]!) {
+    items(ids: $ids) {
+      id
+      board { id }
+    }
+  }
+`;
+
+const CREATE_ITEM_MUTATION = `
+  mutation ItemCreateTopLevel(
+    $boardId: ID!
+    $itemName: String!
+    $groupId: String
+    $columnValues: JSON
+    $createLabelsIfMissing: Boolean
+    $positionRelativeMethod: PositionRelative
+    $relativeTo: ID
+  ) {
+    create_item(
+      board_id: $boardId
+      item_name: $itemName
+      group_id: $groupId
+      column_values: $columnValues
+      create_labels_if_missing: $createLabelsIfMissing
+      position_relative_method: $positionRelativeMethod
+      relative_to: $relativeTo
+    ) {
+      id
+      name
+      board { id }
+      group { id }
+    }
+  }
+`;
+
+const CREATE_SUBITEM_MUTATION = `
+  mutation ItemCreateSubitem(
+    $parentItemId: ID!
+    $itemName: String!
+    $columnValues: JSON
+    $createLabelsIfMissing: Boolean
+  ) {
+    create_subitem(
+      parent_item_id: $parentItemId
+      item_name: $itemName
+      column_values: $columnValues
+      create_labels_if_missing: $createLabelsIfMissing
+    ) {
+      id
+      name
+      board { id }
+      group { id }
+      parent_item { id }
+    }
+  }
+`;
+
+// ============================================================
+// Wire response zod schemas (parse-boundary discipline, R18).
+// ============================================================
+
+const itemParentLookupResponseSchema = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          id: ItemIdSchema,
+          board: z
+            .object({
+              id: BoardIdSchema,
+              hierarchy_type: z.string().nullable(),
+            })
+            .nullable(),
+        }),
+      )
+      .nullable(),
+  })
+  .loose();
+
+const itemBoardLookupResponseSchema = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          id: ItemIdSchema,
+          board: z.object({ id: BoardIdSchema }).nullable(),
+        }),
+      )
+      .nullable(),
+  })
+  .loose();
+
+// Per cli-design §6.4: data shape carries id, name, board_id,
+// group_id (nullable when Monday returns no group — defensive,
+// shouldn't happen in practice), parent_id (subitems only). The
+// projector below maps Monday's nested response into this flat shape.
+const itemCreateOutputSchema = z.object({
+  id: ItemIdSchema,
+  name: z.string(),
+  board_id: BoardIdSchema,
+  group_id: z.string().nullable(),
+  parent_id: ItemIdSchema.optional(),
+});
+export type ItemCreateOutput = z.infer<typeof itemCreateOutputSchema>;
+
+const createItemResponseSchema = z
+  .object({
+    id: ItemIdSchema,
+    name: z.string(),
+    board: z.object({ id: BoardIdSchema }).nullable(),
+    group: z.object({ id: z.string() }).nullable(),
+  })
+  .loose();
+
+const createSubitemResponseSchema = createItemResponseSchema.extend({
+  parent_item: z.object({ id: ItemIdSchema }).nullable(),
+});
+
+interface CreateItemResponse {
+  readonly create_item: unknown;
+}
+interface CreateSubitemResponse {
+  readonly create_subitem: unknown;
+}
+
+// ============================================================
+// Input zod schema + dispatch.
+// ============================================================
+
+const positionEnum = z.enum(['before', 'after']);
+
+const inputSchema = z
+  .object({
+    name: z.string().refine((s) => s.trim().length > 0, {
+      message: '--name must be non-empty (whitespace-only is rejected)',
+    }),
+    board: BoardIdSchema.optional(),
+    group: z.string().min(1).optional(),
+    set: z.array(z.string()).default([]),
+    setRaw: z.array(z.string()).default([]),
+    parent: ItemIdSchema.optional(),
+    position: positionEnum.optional(),
+    relativeTo: ItemIdSchema.optional(),
+    createLabelsIfMissing: z.boolean().optional(),
+  })
+  .strict();
+
+type ParsedInput = z.infer<typeof inputSchema>;
+
+type DispatchShape =
+  | {
+      readonly kind: 'item';
+      readonly boardId: string;
+      readonly groupId: string | undefined;
+      readonly position:
+        | { readonly method: 'before' | 'after'; readonly relativeTo: string }
+        | undefined;
+    }
+  | {
+      readonly kind: 'subitem';
+      readonly parentItemId: string;
+    };
+
+/**
+ * Validates the cross-flag mutex / required-together rules per
+ * cli-design §4.3 line 519-528 and the §6.4 subitem variant. Throws
+ * `usage_error` with structured details so an agent can correct
+ * either flag without re-reading help text.
+ */
+const validateInputShape = (parsed: ParsedInput): DispatchShape => {
+  const hasParent = parsed.parent !== undefined;
+  const hasGroup = parsed.group !== undefined;
+  const hasPosition = parsed.position !== undefined;
+  const hasRelativeTo = parsed.relativeTo !== undefined;
+
+  // --position and --relative-to are required together (one without
+  // the other → usage_error). Catch BEFORE the parent / position
+  // mutex so an agent passing `--parent --position` sees the
+  // pairing-incomplete error rather than the parent-mutex one.
+  if (hasPosition !== hasRelativeTo) {
+    throw new UsageError(
+      '--position and --relative-to are required together. ' +
+        'Pass both (e.g. `--position before --relative-to 99999`) ' +
+        'or neither.',
+      {
+        details: {
+          ...(parsed.position === undefined ? {} : { position: parsed.position }),
+          ...(parsed.relativeTo === undefined
+            ? {}
+            : { relative_to: parsed.relativeTo }),
+        },
+      },
+    );
+  }
+
+  if (hasParent) {
+    // --parent is mutex with --group, --position/--relative-to, and
+    // --board. Subitems live on Monday's auto-generated subitems
+    // board (not in groups, not relative to arbitrary items, not on
+    // a caller-named board) — accepting any of these would silently
+    // drop the value and create the subitem in the default location.
+    // Failing fast keeps the mental model clean.
+    if (hasGroup) {
+      throw new UsageError(
+        '--parent is mutually exclusive with --group. Subitems live ' +
+          'on Monday\'s auto-generated subitems board, not in groups; ' +
+          'drop --group or remove --parent.',
+        { details: { parent: parsed.parent, group: parsed.group } },
+      );
+    }
+    if (hasPosition) {
+      throw new UsageError(
+        '--parent is mutually exclusive with --position / --relative-to. ' +
+          'Subitem position is parent-scoped, not relative to an arbitrary ' +
+          'item; drop --position / --relative-to or remove --parent.',
+        {
+          details: {
+            parent: parsed.parent,
+            position: parsed.position,
+            relative_to: parsed.relativeTo,
+          },
+        },
+      );
+    }
+    if (parsed.board !== undefined) {
+      throw new UsageError(
+        '--parent is mutually exclusive with --board. The subitems board ' +
+          'is derived server-side from the parent; passing --board would ' +
+          'be ignored. Drop --board or remove --parent.',
+        { details: { parent: parsed.parent, board: parsed.board } },
+      );
+    }
+    // hasParent === true ⇒ parsed.parent !== undefined (the
+    // discriminator at the top of validateInputShape). TypeScript
+    // doesn't narrow across the let-check pattern, so we capture
+    // a non-undefined local for the dispatch payload.
+    /* c8 ignore next 3 — defensive: hasParent fires only when the
+       parent slot is set; the throw is unreachable. */
+    if (parsed.parent === undefined) {
+      throw new UsageError('item create: parent narrowing failed');
+    }
+    return { kind: 'subitem', parentItemId: parsed.parent };
+  }
+
+  // Top-level path — --board is required.
+  if (parsed.board === undefined) {
+    throw new UsageError(
+      '--board <bid> is required for top-level item create. (Pass ' +
+        '--parent <iid> instead to create a subitem.)',
+      { details: {} },
+    );
+  }
+
+  // Pre-flight: same-token duplicate in --set entries (resolution-
+  // free, fail-fast before any wire call). Cross-token duplicates
+  // and same-column-after-resolution dups surface in planCreate /
+  // the live three-pass resolver per cli-design §5.3 step 2.
+  // Same check is mirrored in subitem path (no early return).
+  // Implementation note: deferred the same-token check to a shared
+  // helper after dispatch returned to keep validateInputShape
+  // dispatch-only.
+  // Position narrowing: hasPosition && hasRelativeTo means both are
+  // defined (the `!==` undefined guards above) — capture into locals
+  // so TypeScript narrows away the `| undefined` slot rather than
+  // needing non-null assertions.
+  const position =
+    parsed.position !== undefined && parsed.relativeTo !== undefined
+      ? { method: parsed.position, relativeTo: parsed.relativeTo }
+      : undefined;
+  return {
+    kind: 'item',
+    boardId: parsed.board,
+    groupId: parsed.group,
+    position,
+  };
+};
+
+const splitSetExpression = (
+  raw: string,
+): { readonly token: string; readonly value: string } => {
+  const idx = raw.indexOf('=');
+  if (idx <= 0) {
+    throw new UsageError(
+      `--set: expected <col>=<val> (got ${JSON.stringify(raw)}); ` +
+        `use shell quoting and the id:/title: prefix when the column ` +
+        `token contains "="`,
+      { details: { input: raw } },
+    );
+  }
+  return {
+    token: raw.slice(0, idx),
+    value: raw.slice(idx + 1),
+  };
+};
+
+/**
+ * Pre-flight same-token check for `--set` and `--set-raw`. Catches
+ * the obvious case (`--set status=Done --set status=Doing`) without
+ * needing column resolution, so a malformed multi-`--set` fails
+ * before the network. The cross-token duplicate-resolved-id check
+ * still runs in planCreate / the live path (per cli-design §5.3 step
+ * 2 — the contract is resolution-time, but the pre-flight catches
+ * the easy half cheap).
+ */
+const checkDuplicateTokens = (
+  setEntries: readonly { readonly token: string }[],
+  rawEntries: readonly { readonly token: string }[],
+): void => {
+  const seen = new Set<string>();
+  for (const e of [...setEntries, ...rawEntries]) {
+    if (seen.has(e.token)) {
+      throw new UsageError(
+        `Multiple --set / --set-raw entries target column token ` +
+          `${JSON.stringify(e.token)}. Pass at most one per column; if two ` +
+          `tokens resolve to the same column ID after NFC + case-fold ` +
+          `normalisation, use the \`id:<column_id>\` prefix to disambiguate.`,
+        { details: { token: e.token } },
+      );
+    }
+    seen.add(e.token);
+  }
+};
+
+// ============================================================
+// Subitem-path helpers.
+// ============================================================
+
+/**
+ * Looks up the parent item's board id + `hierarchy_type` so the
+ * multi-level gate can fire pre-mutation. Returns `null` for the
+ * board / hierarchy_type slots when the parent is missing or the
+ * token can't read the parent's board (mapped to `not_found` /
+ * `usage_error` upstream).
+ */
+const lookupParent = async (
+  client: MondayClient,
+  parentItemId: string,
+): Promise<{ boardId: string; hierarchyType: string | null }> => {
+  const response = await client.raw<unknown>(
+    ITEM_PARENT_LOOKUP_QUERY,
+    { ids: [parentItemId] },
+    { operationName: 'ItemParentLookup' },
+  );
+  const data = unwrapOrThrow(
+    itemParentLookupResponseSchema.safeParse(response.data),
+    {
+      context: `Monday returned a malformed ItemParentLookup response for id ${parentItemId}`,
+      details: { parent_item_id: parentItemId },
+    },
+  );
+  const first = data.items?.[0];
+  if (first === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Parent item ${parentItemId} does not exist or the token has no read access.`,
+      { details: { parent_item_id: parentItemId } },
+    );
+  }
+  if (first.board === null) {
+    throw new ApiError(
+      'not_found',
+      `Parent item ${parentItemId} has no readable board; the token may ` +
+        `not have permission on the parent's board, or the board is deleted.`,
+      { details: { parent_item_id: parentItemId } },
+    );
+  }
+  return {
+    boardId: first.board.id,
+    hierarchyType: first.board.hierarchy_type,
+  };
+};
+
+/**
+ * Derives the auto-generated subitems board ID from the parent
+ * board's `subtasks` column. Monday's classic-board model exposes
+ * the subitems board through the `subtasks` column's
+ * `settings_str.boardIds[0]`. When the column is missing or the
+ * settings are empty / malformed, the CLI surfaces `usage_error` —
+ * the parent's board doesn't have a subitems lane provisioned, so
+ * Monday's server-side `create_subitem` would either fail or auto-
+ * provision in a way the CLI can't predict for column resolution.
+ *
+ * The agent's recovery path: drop `--set` / `--set-raw` (subitem
+ * still creates without column resolution) or use `--set-raw` on
+ * a `id:<col_id>` token (still requires resolution; the same gate
+ * fires).
+ */
+const deriveSubitemsBoardId = (
+  parentMetadata: {
+    readonly columns: readonly {
+      readonly id: string;
+      readonly type: string;
+      readonly settings_str: string | null;
+    }[];
+  },
+  parentItemId: string,
+  parentBoardId: string,
+): string => {
+  const subtasksColumn = parentMetadata.columns.find(
+    (c) => c.type === 'subtasks',
+  );
+  if (subtasksColumn === undefined) {
+    throw new UsageError(
+      `Parent board ${parentBoardId} has no subtasks column; the subitems ` +
+        `board for column resolution can't be derived. Either remove --set ` +
+        `/ --set-raw (subitem still creates without column resolution), or ` +
+        `add a subitems column to the parent's board first.`,
+      {
+        details: {
+          parent_item_id: parentItemId,
+          parent_board_id: parentBoardId,
+        },
+      },
+    );
+  }
+  if (subtasksColumn.settings_str === null) {
+    throw new UsageError(
+      `Parent board ${parentBoardId}'s subtasks column has no settings; ` +
+        `the subitems board ID can't be derived. Either remove --set / ` +
+        `--set-raw (subitem still creates without column resolution), or ` +
+        `re-run after the parent has at least one existing subitem so ` +
+        `Monday provisions the subitems board.`,
+      {
+        details: {
+          parent_item_id: parentItemId,
+          parent_board_id: parentBoardId,
+          subtasks_column_id: subtasksColumn.id,
+        },
+      },
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(subtasksColumn.settings_str);
+  } catch {
+    parsed = null;
+  }
+  const boardIds =
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Array.isArray((parsed as { boardIds?: unknown }).boardIds)
+      ? ((parsed as { boardIds: unknown[] }).boardIds.filter(
+          (id): id is string => typeof id === 'string',
+        ) as readonly string[])
+      : ([] as readonly string[]);
+  const subitemsBoardId = boardIds[0];
+  if (subitemsBoardId === undefined) {
+    throw new UsageError(
+      `Parent board ${parentBoardId}'s subtasks column has no linked ` +
+        `subitems board yet; create one subitem on the parent first (which ` +
+        `provisions the subitems board) and re-run, or drop --set / ` +
+        `--set-raw on this call.`,
+      {
+        details: {
+          parent_item_id: parentItemId,
+          parent_board_id: parentBoardId,
+          subtasks_column_id: subtasksColumn.id,
+        },
+      },
+    );
+  }
+  return subitemsBoardId;
+};
+
+/**
+ * Verifies a `--relative-to` item lives on the same board as the
+ * top-level create's `--board <bid>`. Mirrors the M5b wrong-board
+ * check (`item set` / `item update`) shape — surfaces `usage_error`
+ * with `requested_board_id` + `item_board_id` in details so the
+ * agent can self-correct.
+ */
+const verifyRelativeToOnBoard = async (
+  client: MondayClient,
+  relativeToId: string,
+  boardId: string,
+): Promise<void> => {
+  const response = await client.raw<unknown>(
+    ITEM_BOARD_LOOKUP_QUERY,
+    { ids: [relativeToId] },
+    { operationName: 'ItemBoardLookup' },
+  );
+  const data = unwrapOrThrow(
+    itemBoardLookupResponseSchema.safeParse(response.data),
+    {
+      context: `Monday returned a malformed ItemBoardLookup response for id ${relativeToId}`,
+      details: { relative_to_id: relativeToId },
+    },
+  );
+  const first = data.items?.[0];
+  if (first === undefined) {
+    throw new ApiError(
+      'not_found',
+      `--relative-to item ${relativeToId} does not exist or the token has no read access.`,
+      { details: { relative_to_id: relativeToId } },
+    );
+  }
+  if (first.board === null) {
+    throw new ApiError(
+      'not_found',
+      `--relative-to item ${relativeToId} has no readable board; the ` +
+        `token may not have permission, or the board is deleted.`,
+      { details: { relative_to_id: relativeToId } },
+    );
+  }
+  if (first.board.id !== boardId) {
+    throw new UsageError(
+      `--relative-to item ${relativeToId} lives on board ${first.board.id}, ` +
+        `but --board is ${boardId}. Pass a --relative-to item on the same ` +
+        `board, or drop --position / --relative-to.`,
+      {
+        details: {
+          relative_to_id: relativeToId,
+          item_board_id: first.board.id,
+          requested_board_id: boardId,
+        },
+      },
+    );
+  }
+};
+
+// ============================================================
+// Create-mode resolver — the orchestrator's single entry point
+// into "given a parsed argv + dispatch, what's the CreateMode for
+// the dry-run engine and the live mutation?"
+// ============================================================
+
+interface ResolveCreateModeInputs {
+  readonly client: MondayClient;
+  readonly dispatch: DispatchShape;
+  readonly setEntries: readonly { readonly token: string }[];
+  readonly rawEntries: readonly { readonly token: string }[];
+  readonly env: NodeJS.ProcessEnv;
+  readonly noCache: boolean;
+}
+
+/**
+ * Builds the `CreateMode` (dry-run engine + live path consume the
+ * same shape) from the dispatch result. Three orchestration steps
+ * for the subitem path:
+ *
+ *   1. Look up parent item → get parent's board id + `hierarchy_type`.
+ *   2. Reject `multi_level` boards (M9 supports classic only).
+ *   3. If `--set` / `--set-raw` is present, load parent's BoardMetadata
+ *      → find `subtasks` column → derive subitems-board id from
+ *      `settings_str.boardIds[0]`.
+ *
+ * For top-level: verifies the `--relative-to` item lives on `--board`
+ * when `--position` is set (mirrors M5b's wrong-board check).
+ *
+ * Pure orchestrator — no side-effects beyond the network calls and
+ * the cache writes inside `loadBoardMetadata`. Throws typed errors
+ * (`usage_error` / `not_found`) per the cli-design §6.5 surface.
+ */
+const resolveCreateMode = async (
+  inputs: ResolveCreateModeInputs,
+): Promise<CreateModeFromCommand> => {
+  const { client, dispatch, setEntries, rawEntries, env, noCache } = inputs;
+  if (dispatch.kind === 'subitem') {
+    const parent = await lookupParent(client, dispatch.parentItemId);
+    if (parent.hierarchyType === 'multi_level') {
+      throw new UsageError(
+        `Parent item ${dispatch.parentItemId} lives on a multi-level ` +
+          `board (hierarchy_type "multi_level"); subitem creation on ` +
+          `multi-level boards is deferred to v0.3. Use a classic ` +
+          `board (hierarchy_type null/"classic") or wait for v0.3.`,
+        {
+          details: {
+            parent_item_id: dispatch.parentItemId,
+            parent_board_id: parent.boardId,
+            hierarchy_type: parent.hierarchyType,
+            deferred_to: 'v0.3',
+          },
+        },
+      );
+    }
+    if (setEntries.length > 0 || rawEntries.length > 0) {
+      const parentMetadata = await loadBoardMetadata({
+        client,
+        boardId: parent.boardId,
+        env,
+        noCache,
+      });
+      const subitemsBoardId = deriveSubitemsBoardId(
+        parentMetadata.metadata,
+        dispatch.parentItemId,
+        parent.boardId,
+      );
+      return {
+        kind: 'subitem',
+        parentItemId: dispatch.parentItemId,
+        subitemsBoardId,
+      };
+    }
+    // No --set / --set-raw → no column resolution needed. Reuse
+    // parent's board id as the placeholder (subitemsBoardId is
+    // unused when both arrays are empty per planCreate's no-set
+    // short-circuit and the live path's resolution loop).
+    return {
+      kind: 'subitem',
+      parentItemId: dispatch.parentItemId,
+      subitemsBoardId: parent.boardId,
+    };
+  }
+  // top-level
+  if (dispatch.position !== undefined) {
+    await verifyRelativeToOnBoard(
+      client,
+      dispatch.position.relativeTo,
+      dispatch.boardId,
+    );
+  }
+  return {
+    kind: 'item',
+    boardId: dispatch.boardId,
+    ...(dispatch.groupId === undefined ? {} : { groupId: dispatch.groupId }),
+    ...(dispatch.position === undefined
+      ? {}
+      : { position: dispatch.position }),
+  };
+};
+
+/**
+ * The local CreateMode shape passed downstream — same discriminated
+ * union as the dry-run engine's `CreateMode` (`api/dry-run.ts`),
+ * locally typed so the helper signature doesn't need an import dance.
+ */
+type CreateModeFromCommand =
+  | {
+      readonly kind: 'item';
+      readonly boardId: string;
+      readonly groupId?: string;
+      readonly position?: {
+        readonly method: 'before' | 'after';
+        readonly relativeTo: string;
+      };
+    }
+  | {
+      readonly kind: 'subitem';
+      readonly parentItemId: string;
+      readonly subitemsBoardId: string;
+    };
+
+// ============================================================
+// Main command export.
+// ============================================================
+
+export const itemCreateCommand: CommandModule<
+  ParsedInput,
+  ItemCreateOutput
+> = {
+  name: 'item.create',
+  summary: 'Create a new item or subitem',
+  examples: [
+    'monday item create --board 67890 --name "Refactor login"',
+    'monday item create --board 67890 --name "Refactor login" --group topics',
+    'monday item create --board 67890 --name "Refactor login" --set status=Done',
+    'monday item create --board 67890 --name "Refactor login" --set status=Done --set due=+1w',
+    'monday item create --board 67890 --name "Refactor login" --position before --relative-to 99999',
+    'monday item create --parent 12345 --name "Subtask 1"',
+    'monday item create --parent 12345 --name "Subtask 1" --set status=Working',
+    'monday item create --board 67890 --name "Refactor login" --dry-run --json',
+  ],
+  // Re-running creates a duplicate item; agents needing idempotent
+  // create-or-update use `monday item upsert` (M12).
+  idempotent: false,
+  inputSchema,
+  outputSchema: itemCreateOutputSchema,
+  attach: (program, ctx) => {
+    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    noun
+      .command('create')
+      .description(itemCreateCommand.summary)
+      .requiredOption('--name <n>', 'item name (required, non-empty)')
+      .option('--board <bid>', 'board ID (required for top-level; rejected with --parent)')
+      .option('--group <gid>', 'group ID (top-level only; default = board\'s default group)')
+      .option(
+        '--set <expr>',
+        'repeatable <col>=<val> column write (bundled into create_item.column_values)',
+        (value: string, prev: readonly string[]) => [...prev, value],
+        [] as readonly string[],
+      )
+      .option(
+        '--set-raw <expr>',
+        'repeatable <col>=<json> raw write (escape hatch — bypasses friendly translator)',
+        (value: string, prev: readonly string[]) => [...prev, value],
+        [] as readonly string[],
+      )
+      .option('--parent <iid>', 'create as subitem of this parent item ID')
+      .option('--position <method>', 'item placement: "before" | "after" (requires --relative-to)')
+      .option('--relative-to <iid>', 'item ID for --position; must be on the same board')
+      .option(
+        '--create-labels-if-missing',
+        'auto-create unknown status / dropdown labels (Monday flag)',
+      )
+      .addHelpText(
+        'after',
+        ['', 'Examples:', ...itemCreateCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
+      )
+      .action(async (opts: unknown) => {
+        const parsed = parseArgv(itemCreateCommand.inputSchema, {
+          ...(opts as Readonly<Record<string, unknown>>),
+        });
+        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
+          ctx,
+          program.opts(),
+        );
+
+        const dispatch = validateInputShape(parsed);
+
+        // Argv-parse-time failures fire BEFORE any network call —
+        // splits run on pure strings, JSON parse on `--set-raw` runs
+        // on pure strings. Mirrors the M8 `item update` finding (#4):
+        // a malformed `--set-raw` shouldn't pay for a parent / board
+        // / metadata round-trip first.
+        const setEntries = parsed.set.map(splitSetExpression);
+        const rawEntries: readonly ParsedSetRawExpression[] = parsed.setRaw.map(
+          parseSetRawExpression,
+        );
+        checkDuplicateTokens(setEntries, rawEntries);
+
+        // Resolve the create context: a single `createMode` that
+        // both the dry-run engine and the live mutation consume. For
+        // top-level, it's the verified `--board` plus optional
+        // group / position. For subitem, it's the parent item id +
+        // the derived subitems-board id (used for column resolution).
+        // Building it once avoids a let-assignment pattern that
+        // forced non-null assertions later. Mirrors the dispatch
+        // shape from validateInputShape but specialises with the
+        // resolved subitems-board id where needed.
+        const createMode = await resolveCreateMode({
+          client,
+          dispatch,
+          setEntries,
+          rawEntries,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
+        const resolveBoardId =
+          createMode.kind === 'subitem'
+            ? createMode.subitemsBoardId
+            : createMode.boardId;
+
+        const dateResolution: DateResolutionContext = {
+          now: ctx.clock,
+          ...(ctx.env.MONDAY_TIMEZONE === undefined
+            ? {}
+            : { timezone: ctx.env.MONDAY_TIMEZONE }),
+        };
+        const peopleResolution: PeopleResolutionContext = {
+          resolveMe: resolveMeFactory(client),
+          resolveEmail: async (email) => {
+            const result = await userByEmail({
+              client,
+              email,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+            });
+            return result.user.id;
+          },
+        };
+
+        if (globalFlags.dryRun) {
+          const result = await planCreate({
+            client,
+            mode: createMode,
+            name: parsed.name,
+            setEntries,
+            ...(rawEntries.length === 0 ? {} : { rawEntries }),
+            dateResolution,
+            peopleResolution,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges:
+              result.plannedChanges as unknown as readonly Readonly<
+                Record<string, unknown>
+              >[],
+            // planCreate never reads the item state (item doesn't
+            // exist), so source is purely the column-resolution leg.
+            // 'none' when no --set / --set-raw fired any wire calls.
+            source: result.source,
+            cacheAgeSeconds: result.cacheAgeSeconds,
+            warnings: result.warnings,
+            apiVersion,
+          });
+          return;
+        }
+
+        // Live create path. Resolve all tokens against `resolveBoardId`
+        // (top-level board OR subitems board), translate values,
+        // bundle into one column_values map, fire the single-round-
+        // trip mutation per cli-design §5.8.
+        const collectedWarnings: ResolverWarning[] = [];
+        const resolvedIds: Record<string, string> = {};
+        let aggregateSource: 'live' | 'cache' | 'mixed' | undefined = undefined;
+        let aggregateCacheAge: number | null = null;
+
+        interface ResolvedSet {
+          readonly kind: 'set';
+          readonly token: string;
+          readonly value: string;
+          readonly columnId: string;
+          readonly columnType: string;
+        }
+        interface ResolvedRaw {
+          readonly kind: 'raw';
+          readonly token: string;
+          readonly entry: ParsedSetRawExpression;
+          readonly columnId: string;
+          readonly columnType: string;
+        }
+        const resolved: (ResolvedSet | ResolvedRaw)[] = [];
+
+        // Pass (a-set): resolve every --set token. Same three-pass
+        // pattern as M5b's item update — resolve all first, then the
+        // cross-token duplicate-resolved-id check, then translate.
+        for (const entry of setEntries) {
+          if (resolvedIds[entry.token] !== undefined) {
+            // Caught at parse-time by checkDuplicateTokens; this is
+            // defence-in-depth for direct callers.
+            /* c8 ignore next 11 — argv-parse-time check fires first. */
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set entries target column token ` +
+                  `${JSON.stringify(entry.token)}.`,
+                { details: { token: entry.token } },
+              ),
+              collectedWarnings,
+            );
+          }
+          const resolution = await resolveColumnWithRefresh({
+            client,
+            boardId: resolveBoardId,
+            token: entry.token,
+            includeArchived: true,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          collectedWarnings.push(...resolution.warnings);
+          aggregateSource = mergeSourceLeg(aggregateSource, resolution.source);
+          if (
+            resolution.cacheAgeSeconds !== null &&
+            (aggregateCacheAge === null ||
+              resolution.cacheAgeSeconds > aggregateCacheAge)
+          ) {
+            aggregateCacheAge = resolution.cacheAgeSeconds;
+          }
+          if (resolution.match.column.archived === true) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'column_archived',
+                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+                  `${resolveBoardId} is archived. Monday rejects writes against ` +
+                  `archived columns; un-archive the column or pick a different target.`,
+                {
+                  details: {
+                    column_id: resolution.match.column.id,
+                    column_title: resolution.match.column.title,
+                    column_type: resolution.match.column.type,
+                    board_id: resolveBoardId,
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
+          resolved.push({
+            kind: 'set',
+            token: entry.token,
+            value: entry.value,
+            columnId: resolution.match.column.id,
+            columnType: resolution.match.column.type,
+          });
+          resolvedIds[entry.token] = resolution.match.column.id;
+        }
+
+        // Pass (a-raw): resolve every --set-raw token.
+        for (const entry of rawEntries) {
+          if (resolvedIds[entry.token] !== undefined) {
+            /* c8 ignore next 11 — argv-parse-time check fires first. */
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set / --set-raw entries target column token ` +
+                  `${JSON.stringify(entry.token)}.`,
+                { details: { token: entry.token } },
+              ),
+              collectedWarnings,
+            );
+          }
+          const resolution = await resolveColumnWithRefresh({
+            client,
+            boardId: resolveBoardId,
+            token: entry.token,
+            includeArchived: true,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          collectedWarnings.push(...resolution.warnings);
+          aggregateSource = mergeSourceLeg(aggregateSource, resolution.source);
+          if (
+            resolution.cacheAgeSeconds !== null &&
+            (aggregateCacheAge === null ||
+              resolution.cacheAgeSeconds > aggregateCacheAge)
+          ) {
+            aggregateCacheAge = resolution.cacheAgeSeconds;
+          }
+          if (resolution.match.column.archived === true) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'column_archived',
+                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+                  `${resolveBoardId} is archived. Monday rejects writes against ` +
+                  `archived columns; un-archive the column or pick a different target.`,
+                {
+                  details: {
+                    column_id: resolution.match.column.id,
+                    column_title: resolution.match.column.title,
+                    column_type: resolution.match.column.type,
+                    board_id: resolveBoardId,
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
+          resolved.push({
+            kind: 'raw',
+            token: entry.token,
+            entry,
+            columnId: resolution.match.column.id,
+            columnType: resolution.match.column.type,
+          });
+          resolvedIds[entry.token] = resolution.match.column.id;
+        }
+
+        // Pass (b): cross-token duplicate-resolved-ID check. Two
+        // distinct tokens (e.g. `status` and `id:status_4`) resolving
+        // to the same column ID surface as usage_error.
+        const seenColumnIds = new Set<string>();
+        for (const r of resolved) {
+          if (seenColumnIds.has(r.columnId)) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set / --set-raw entries resolve to the same ` +
+                  `column ID ${JSON.stringify(r.columnId)} (last token: ` +
+                  `${JSON.stringify(r.token)}). Pass at most one per column.`,
+                {
+                  details: {
+                    column_id: r.columnId,
+                    tokens: resolved
+                      .filter((x) => x.columnId === r.columnId)
+                      .map((x) => x.token),
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
+          seenColumnIds.add(r.columnId);
+        }
+
+        // Pass (c): translate. Each catch folds CUMULATIVE warnings.
+        const translated: TranslatedColumnValue[] = [];
+        for (const r of resolved) {
+          if (r.kind === 'set') {
+            try {
+              const t = await translateColumnValueAsync({
+                column: { id: r.columnId, type: r.columnType },
+                value: r.value,
+                dateResolution,
+                peopleResolution,
+              });
+              translated.push(t);
+            } catch (err) {
+              if (err instanceof MondayCliError) {
+                throw foldResolverWarningsIntoError(err, collectedWarnings);
+              }
+              throw err;
+            }
+          } else {
+            try {
+              const t = translateRawColumnValue(
+                { id: r.columnId, type: r.columnType },
+                r.entry.value,
+                r.entry.rawJson,
+              );
+              translated.push(t);
+            } catch (err) {
+              if (err instanceof MondayCliError) {
+                throw foldResolverWarningsIntoError(err, collectedWarnings);
+              }
+              throw err;
+            }
+          }
+        }
+
+        // Bundle into the column_values map (single-round-trip per
+        // cli-design §5.8). When zero translated values, send `null`
+        // so Monday's create accepts "no column values" rather than
+        // an empty map (semantically distinct on Monday's wire).
+        const columnValues =
+          translated.length === 0 ? null : bundleColumnValues(translated);
+
+        let mutationResult;
+        try {
+          if (createMode.kind === 'subitem') {
+            mutationResult = await executeCreateSubitem(client, {
+              parentItemId: createMode.parentItemId,
+              itemName: parsed.name,
+              columnValues,
+              createLabelsIfMissing: parsed.createLabelsIfMissing,
+            });
+          } else {
+            mutationResult = await executeCreateItem(client, {
+              boardId: createMode.boardId,
+              itemName: parsed.name,
+              groupId: createMode.groupId,
+              position: createMode.position,
+              columnValues,
+              createLabelsIfMissing: parsed.createLabelsIfMissing,
+            });
+          }
+        } catch (err) {
+          if (err instanceof MondayCliError) {
+            // No `validation_failed` → `column_archived` remap on
+            // create — the resolver already gated on archived (with
+            // `includeArchived: true` and the explicit throw above).
+            // Monday's `validation_failed` here would be a true
+            // value-shape failure (label typo, schema mismatch, etc.),
+            // not a stale-cache archived-column miss.
+            throw foldResolverWarningsIntoError(err, collectedWarnings);
+          }
+          throw err;
+        }
+
+        const warnings: readonly Warning[] = collectedWarnings;
+        // The mutation leg is always live, so the final source merges
+        // the resolution aggregate with `live`. Mirrors item set's
+        // pattern: pure-cache resolution → mixed (cache metadata +
+        // live mutation); live resolution → live.
+        const finalSource: 'live' | 'cache' | 'mixed' = mergeSourceLeg(
+          aggregateSource,
+          'live',
+        );
+        emitMutation({
+          ctx,
+          data: mutationResult.projected,
+          schema: itemCreateCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings,
+          ...toEmit(mutationResult.response),
+          source: finalSource,
+          cacheAgeSeconds: aggregateCacheAge,
+          // cli-design §5.3 step 2 / §6.4: echo the resolved column
+          // IDs so an agent's "create then re-read" loop can use the
+          // resolved IDs without consulting metadata twice. Empty map
+          // when no `--set` / `--set-raw` was passed (mirrors item
+          // update with no resolved columns).
+          resolvedIds,
+        });
+      });
+  },
+};
+
+// ============================================================
+// Mutation execution helpers.
+// ============================================================
+
+interface CreateItemMutationResult {
+  readonly projected: ItemCreateOutput;
+  readonly response: MondayResponse<unknown>;
+}
+
+interface CreateItemInputs {
+  readonly boardId: string;
+  readonly itemName: string;
+  readonly groupId: string | undefined;
+  readonly position:
+    | { readonly method: 'before' | 'after'; readonly relativeTo: string }
+    | undefined;
+  readonly columnValues: Readonly<Record<string, unknown>> | null;
+  readonly createLabelsIfMissing: boolean | undefined;
+}
+
+const executeCreateItem = async (
+  client: MondayClient,
+  inputs: CreateItemInputs,
+): Promise<CreateItemMutationResult> => {
+  const variables: Record<string, unknown> = {
+    boardId: inputs.boardId,
+    itemName: inputs.itemName,
+    groupId: inputs.groupId ?? null,
+    columnValues: inputs.columnValues,
+    createLabelsIfMissing: inputs.createLabelsIfMissing ?? false,
+  };
+  if (inputs.position !== undefined) {
+    // Monday's PositionRelative enum string values are `before_at` /
+    // `after_at`; the CLI surfaces friendlier `before` / `after` per
+    // cli-design §4.3, mapped here at the wire boundary.
+    variables.positionRelativeMethod =
+      inputs.position.method === 'before' ? 'before_at' : 'after_at';
+    variables.relativeTo = inputs.position.relativeTo;
+  } else {
+    variables.positionRelativeMethod = null;
+    variables.relativeTo = null;
+  }
+  const response = await client.raw<CreateItemResponse>(
+    CREATE_ITEM_MUTATION,
+    variables,
+    { operationName: 'ItemCreateTopLevel' },
+  );
+  if (response.data.create_item === null || response.data.create_item === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no item payload from create_item.`,
+      { details: { board_id: inputs.boardId, item_name: inputs.itemName } },
+    );
+  }
+  const parsed = unwrapOrThrow(
+    createItemResponseSchema.safeParse(response.data.create_item),
+    {
+      context: 'Monday returned a malformed create_item response',
+      details: { board_id: inputs.boardId },
+    },
+  );
+  // Defensive: Monday's create_item always returns a board { id } per
+  // its schema, but the response schema admits null to keep the parse
+  // boundary tolerant of API drift. Fall back to the requested board
+  // id (re-parsed through BoardIdSchema to satisfy the brand) so the
+  // projected envelope keeps a non-null board_id even on the rare
+  // null-board response path.
+  return {
+    projected: {
+      id: parsed.id,
+      name: parsed.name,
+      board_id: parsed.board?.id ?? BoardIdSchema.parse(inputs.boardId),
+      group_id: parsed.group?.id ?? null,
+    },
+    response,
+  };
+};
+
+interface CreateSubitemInputs {
+  readonly parentItemId: string;
+  readonly itemName: string;
+  readonly columnValues: Readonly<Record<string, unknown>> | null;
+  readonly createLabelsIfMissing: boolean | undefined;
+}
+
+const executeCreateSubitem = async (
+  client: MondayClient,
+  inputs: CreateSubitemInputs,
+): Promise<CreateItemMutationResult> => {
+  const response = await client.raw<CreateSubitemResponse>(
+    CREATE_SUBITEM_MUTATION,
+    {
+      parentItemId: inputs.parentItemId,
+      itemName: inputs.itemName,
+      columnValues: inputs.columnValues,
+      createLabelsIfMissing: inputs.createLabelsIfMissing ?? false,
+    },
+    { operationName: 'ItemCreateSubitem' },
+  );
+  if (
+    response.data.create_subitem === null ||
+    response.data.create_subitem === undefined
+  ) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no item payload from create_subitem.`,
+      {
+        details: {
+          parent_item_id: inputs.parentItemId,
+          item_name: inputs.itemName,
+        },
+      },
+    );
+  }
+  const parsed = unwrapOrThrow(
+    createSubitemResponseSchema.safeParse(response.data.create_subitem),
+    {
+      context: 'Monday returned a malformed create_subitem response',
+      details: { parent_item_id: inputs.parentItemId },
+    },
+  );
+  if (parsed.board === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no board for the new subitem.`,
+      { details: { parent_item_id: inputs.parentItemId } },
+    );
+  }
+  return {
+    projected: {
+      id: parsed.id,
+      name: parsed.name,
+      board_id: parsed.board.id,
+      group_id: parsed.group?.id ?? null,
+      ...(parsed.parent_item === null
+        ? {}
+        : { parent_id: parsed.parent_item.id }),
+    },
+    response,
+  };
+};
+
+/**
+ * Same merge rule the dry-run engine + every M5b mutation surface
+ * use: first leg seeds (`undefined → next`); any `mixed` is
+ * contagious; otherwise `cache + live → mixed`; otherwise the
+ * unanimous value. Local copy because the dry-run engine's
+ * `mergeSource` is a private helper there; lifting once a fourth
+ * consumer arrives.
+ */
+const mergeSourceLeg = (
+  current: 'live' | 'cache' | 'mixed' | undefined,
+  next: 'live' | 'cache' | 'mixed',
+): 'live' | 'cache' | 'mixed' => {
+  if (current === undefined) return next;
+  if (current === 'mixed' || next === 'mixed') return 'mixed';
+  if (current === next) return current;
+  return 'mixed';
+};

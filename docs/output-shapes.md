@@ -592,6 +592,71 @@ column-resolution failures fail-fast before the items_page walk
 fires (no metadata round-trip wasted on a malformed JSON or a
 typo'd column token).
 
+### `item create --board <bid> --name <n> [--set ...] [--set-raw ...] [--group ...] [--position ... --relative-to ...]`
+
+Top-level item create (M9). All `--set` / `--set-raw` values bundle
+into the single `create_item.column_values` parameter — single
+round-trip per cli-design §5.8; partial-success fallback is
+intentionally absent.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "99001",
+    "name": "Refactor login",
+    "board_id": "67890",
+    "group_id": "topics"
+  },
+  "meta": { ..., "source": "mixed", ... },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4", "due": "date_4" }
+}
+```
+
+`group_id` is `null` if Monday returned no group on the response
+(rare; the projector tolerates the shape). `--position before|after
+--relative-to <iid>` requires both flags; CLI verifies `--relative-to`
+is on the same `--board` before the mutation fires (mirrors M5b's
+wrong-board check).
+
+### `item create --parent <iid> --name <n> [--set ...] [--set-raw ...]`
+
+Subitem create (M9, classic boards only). The CLI looks up the parent
+item to verify `hierarchy_type` and (when `--set` / `--set-raw` is
+present) derive the auto-generated subitems board from the parent's
+`subtasks` column's `settings_str.boardIds[0]`.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "99100",
+    "name": "Subtask 1",
+    "board_id": "333",
+    "group_id": "subitems_topic",
+    "parent_id": "12345"
+  },
+  "meta": { ..., "source": "live", ... },
+  "warnings": [],
+  "resolved_ids": { "status": "sub_status_1" }
+}
+```
+
+Multi-level boards (`hierarchy_type: "multi_level"`) are rejected
+pre-mutation with `usage_error` carrying `details.hierarchy_type` +
+`details.deferred_to: "v0.3"`. `--parent` is mutually exclusive with
+`--board`, `--group`, and `--position` / `--relative-to`. `--set` /
+`--set-raw` columns resolve against the **subitems board**, not the
+parent's board.
+
+`--dry-run` for both branches per cli-design §6.4 "Item-create shape".
+Top-level emits `operation: "create_item"` with hoisted `board_id` /
+`name` / `group_id` / `position` slots; subitem emits `operation:
+"create_subitem"` with hoisted `parent_item_id` and **omits**
+`board_id` (subitems-board derivation is server-side). `diff[<col>].
+from` is always `null` (item doesn't exist yet).
+
 ---
 
 ## raw

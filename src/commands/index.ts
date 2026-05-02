@@ -68,6 +68,8 @@ import { itemSetCommand } from './item/set.js';
 import { itemClearCommand } from './item/clear.js';
 import { itemUpdateCommand } from './item/update.js';
 import { updateCreateCommand } from './update/create.js';
+// M9 (v0.2) — item create + subitem create.
+import { itemCreateCommand } from './item/create.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -109,6 +111,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemSetCommand,
     itemClearCommand,
     itemUpdateCommand,
+    itemCreateCommand,
     updateCreateCommand,
     rawCommand,
     boardDoctorCommand,
