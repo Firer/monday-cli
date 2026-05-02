@@ -55,8 +55,8 @@ import {
   type SelectedMutation,
 } from '../../api/column-values.js';
 import {
+  foldAndRemap,
   foldResolverWarningsIntoError,
-  maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planClear } from '../../api/dry-run.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
@@ -241,17 +241,16 @@ export const itemClearCommand: CommandModule<
           });
         } catch (err) {
           if (err instanceof MondayCliError) {
-            throw await maybeRemapValidationFailedToArchived(
-              foldResolverWarningsIntoError(err, resolverWarnings),
-              {
-                client,
-                boardId,
-                columnIds: [resolution.match.column.id],
-                env: ctx.env,
-                noCache: globalFlags.noCache,
-                resolutionSource: resolution.source,
-              },
-            );
+            throw await foldAndRemap({
+              err,
+              warnings: resolverWarnings,
+              client,
+              boardId,
+              columnIds: [resolution.match.column.id],
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+              resolutionSource: resolution.source,
+            });
           }
           throw err;
         }

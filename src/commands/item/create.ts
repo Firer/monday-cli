@@ -81,8 +81,8 @@ import {
   mergeCacheAge,
 } from '../../api/source-aggregator.js';
 import {
+  foldAndRemap,
   foldResolverWarningsIntoError,
-  maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
@@ -1071,30 +1071,20 @@ export const itemCreateCommand: CommandModule<
           if (err instanceof MondayCliError) {
             // F4 remap: cache-sourced resolution + Monday rejecting
             // as validation_failed → check live archived state.
-            // Codex M9 P1: pre-fix the create path skipped the remap
-            // on the assumption that the explicit archived gate above
-            // (`includeArchived: true` + throw) covered every case.
-            // It doesn't — cache can say "active" after Monday
-            // archived the column post-cache-write, the resolver
-            // passes the cache's stale view, and the create mutation
-            // surfaces `validation_failed` instead of the stable
-            // `column_archived` agents key off (cli-design §6.5).
-            // Mirrors item set's catch arm verbatim — see set.ts
-            // line ~484. Pass every translated column ID (M5b
-            // finding #3) so multi-`--set` cases where a later
-            // target is archived still remap.
-            const folded = foldResolverWarningsIntoError(
+            // Codex M9 P1: pre-fix the create path skipped this
+            // catch arm on the assumption that the explicit archived
+            // gate above (`includeArchived: true` + throw) covered
+            // every case. It doesn't — cache can say "active" after
+            // Monday archived the column post-cache-write. Pass
+            // every translated column ID (M5b finding #3) so
+            // multi-`--set` cases where a later target is archived
+            // still remap.
+            throw await foldAndRemap({
               err,
-              collectedWarnings,
-            );
-            const columnIds = translated.map((t) => t.columnId);
-            if (columnIds.length === 0) {
-              throw folded;
-            }
-            throw await maybeRemapValidationFailedToArchived(folded, {
+              warnings: collectedWarnings,
               client,
               boardId: resolveBoardId,
-              columnIds,
+              columnIds: translated.map((t) => t.columnId),
               env: ctx.env,
               noCache: globalFlags.noCache,
               resolutionSource: aggregateSource ?? 'live',

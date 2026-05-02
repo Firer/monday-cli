@@ -71,8 +71,8 @@ import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
 import { mergeSource, mergeCacheAge } from '../../api/source-aggregator.js';
 import {
+  foldAndRemap,
   foldResolverWarningsIntoError,
-  maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
 import { buildQueryParams } from '../../api/filters.js';
@@ -678,24 +678,17 @@ export const itemUpdateCommand: CommandModule<
             // as validation_failed → check live archived state.
             // Codex M5b finding #3: pass every translated column ID so
             // a multi-column update where a LATER target was archived
-            // (post stale-cache read) still remaps. Pre-fix this only
-            // probed `translated[0]` and missed multi-column cases
-            // where the first target stayed active.
-            const folded = foldResolverWarningsIntoError(err, collectedWarnings);
-            const columnIds = translated.map((t) => t.columnId);
-            if (columnIds.length === 0) {
-              throw folded;
-            }
+            // (post stale-cache read) still remaps.
             // Codex pass-1 F2: pass the actual aggregated resolution
             // source (live / cache / mixed) so plain cache hits
             // without `stale_cache_refreshed` warnings still trigger
-            // the remap. Pre-fix this looked at warnings only and
-            // would skip the remap for the most common stale-cache
-            // case.
-            throw await maybeRemapValidationFailedToArchived(folded, {
+            // the remap.
+            throw await foldAndRemap({
+              err,
+              warnings: collectedWarnings,
               client,
               boardId,
-              columnIds,
+              columnIds: translated.map((t) => t.columnId),
               env: ctx.env,
               noCache: globalFlags.noCache,
               resolutionSource: aggregateSource ?? 'live',
@@ -1496,24 +1489,22 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       appliedItems.push(result.projected);
     } catch (err) {
       if (err instanceof MondayCliError) {
-        const folded = foldResolverWarningsIntoError(err, resolverWarnings);
-        // Apply the F4 remap before bulk-progress decoration. The
+        // Apply fold + F4 remap before bulk-progress decoration. The
         // remap returns the original error unchanged when its
         // preconditions aren't met (non-validation_failed, live
         // source, refresh failure, post-refresh column still
         // active). When it DOES fire, the remapped error keeps the
         // resolver_warnings slot we just folded in.
-        let remapped: MondayCliError = folded;
-        if (remapColumnIds.length > 0) {
-          remapped = await maybeRemapValidationFailedToArchived(folded, {
-            client,
-            boardId,
-            columnIds: remapColumnIds,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-            resolutionSource: remapSource,
-          });
-        }
+        const remapped = await foldAndRemap({
+          err,
+          warnings: resolverWarnings,
+          client,
+          boardId,
+          columnIds: remapColumnIds,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+          resolutionSource: remapSource,
+        });
         // Decorate with bulk-progress details so agents can see how
         // many items mutated successfully before the failure.
         const existing = remapped.details ?? {};

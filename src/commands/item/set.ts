@@ -73,8 +73,8 @@ import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
 import {
+  foldAndRemap,
   foldResolverWarningsIntoError,
-  maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
 import {
@@ -351,17 +351,16 @@ export const itemSetCommand: CommandModule<
           });
         } catch (err) {
           if (err instanceof MondayCliError) {
-            throw await maybeRemapValidationFailedToArchived(
-              foldResolverWarningsIntoError(err, resolverWarnings),
-              {
-                client,
-                boardId,
-                columnIds: [resolution.match.column.id],
-                env: ctx.env,
-                noCache: globalFlags.noCache,
-                resolutionSource: resolution.source,
-              },
-            );
+            throw await foldAndRemap({
+              err,
+              warnings: resolverWarnings,
+              client,
+              boardId,
+              columnIds: [resolution.match.column.id],
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+              resolutionSource: resolution.source,
+            });
           }
           throw err;
         }

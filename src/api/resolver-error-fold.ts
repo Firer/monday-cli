@@ -249,3 +249,60 @@ export const maybeRemapValidationFailedToArchived = async (
     },
   );
 };
+
+export interface FoldAndRemapInputs {
+  readonly err: MondayCliError;
+  readonly warnings: readonly ResolverWarning[];
+  readonly client: MondayClient;
+  readonly boardId: string;
+  /**
+   * Real column IDs translated for the failing mutation. Empty
+   * array → fold-only path (no remap probe). Single-column callers
+   * pass a one-element array; multi-column callers pass every
+   * column they tried to write.
+   */
+  readonly columnIds: readonly string[];
+  readonly env: NodeJS.ProcessEnv;
+  readonly noCache: boolean;
+  readonly resolutionSource: 'live' | 'cache' | 'mixed';
+}
+
+/**
+ * The post-mutation catch-arm pattern lifted from five sites
+ * (`set.ts`, `clear.ts`, `update.ts` single + bulk, `create.ts`)
+ * — see v0.2-plan §12 R26.
+ *
+ * Each site did the same two steps in order:
+ *   1. Fold resolver warnings into the thrown error so a
+ *      stale-cache-then-failure flow keeps the refresh signal.
+ *   2. Probe the F4 cache-sourced-archived remap so a
+ *      `validation_failed` after stale-cache resolution surfaces
+ *      as `column_archived` (the stable code agents key off per
+ *      cli-design §6.5).
+ *
+ * Bulk's per-item-progress decoration stays a bulk-specific
+ * concern: callers do `foldAndRemap` first, then attach the
+ * `applied_count` / `applied_to` / `failed_at_item` /
+ * `matched_count` slot before re-throwing.
+ *
+ * The Codex M9 P1 finding (cache-stale archived columns surfacing
+ * as `validation_failed` from `item create`) was caused by the
+ * create path skipping this exact catch arm. Lifting reduces the
+ * surface where a future command can forget to wire it — M10's
+ * three new mutation commands inherit `foldAndRemap` rather than
+ * copy the pattern a 6th-7th-8th time.
+ */
+export const foldAndRemap = async (
+  inputs: FoldAndRemapInputs,
+): Promise<MondayCliError> => {
+  const folded = foldResolverWarningsIntoError(inputs.err, inputs.warnings);
+  if (inputs.columnIds.length === 0) return folded;
+  return maybeRemapValidationFailedToArchived(folded, {
+    client: inputs.client,
+    boardId: inputs.boardId,
+    columnIds: inputs.columnIds,
+    env: inputs.env,
+    noCache: inputs.noCache,
+    resolutionSource: inputs.resolutionSource,
+  });
+};
