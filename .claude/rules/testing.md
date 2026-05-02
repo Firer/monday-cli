@@ -20,6 +20,49 @@ The numeric thresholds in `vitest.config.ts` (90% / 90% / 90% / 90%) are a
 **floor**, not a target. The target is "every branch I can name". Raise
 the floor as the codebase grows; never lower it.
 
+### `c8 ignore` syntax gotcha (vitest v8 provider)
+
+When marking a genuinely defensive branch as ignored, the `/* c8 ignore
+next N */` directive **must be a single-line comment immediately above
+the line(s) being ignored.** Multi-line block comments break it:
+
+```ts
+// ❌ Doesn't work — the directive spans two lines so v8 doesn't honor it
+/* c8 ignore next 4 — defensive: schema's `.min(1)` rejects empty
+   arrays. */
+const board = data.boards[0];
+if (board === undefined) {
+  throw new ApiError('internal_error', '...');
+}
+
+// ✅ Works — directive is a single-line comment
+// Defensive: schema's `.min(1)` rejects empty arrays.
+const board = data.boards[0];
+/* c8 ignore next 3 */
+if (board === undefined) {
+  throw new ApiError('internal_error', '...');
+}
+```
+
+Two-line variant — directive on its own line, explanation either above
+or below — also works:
+
+```ts
+/* c8 ignore next 3 */
+// Defensive: caller passes non-empty matches.
+if (resolved.length === 0) {
+  throw new ApiError('internal_error', '...');
+}
+```
+
+If you need a longer explanation, write the comment on a separate line
+from the directive. The line-counting starts AFTER the directive's
+closing `*/`, so embedding prose inside the directive comment confuses
+the parser. Symptom: a defensively-guarded branch shows up as uncovered
+even though the directive looks correct. M12's upsert.ts lift recovered
+8 branches across 4 sites by converting multi-line directives to the
+single-line form.
+
 ## Test layers
 
 | Layer | Path | Allowed | Forbidden |

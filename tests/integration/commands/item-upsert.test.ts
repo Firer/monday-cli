@@ -377,6 +377,57 @@ describe('monday item upsert — update branch (1 match)', () => {
     expect(env.resolved_ids).toEqual({ status: 'status_4' });
   });
 
+  it('lookup returns 0 with --name only → create_item with null column_values', async () => {
+    // Symmetric to the `--name only → update_item` test above but for
+    // the create branch. Empty `--set` means resolveAndTranslate
+    // returns no translated columns, `bundleColumnValues` skips, and
+    // the create call fires with `column_values: null`. Pins the
+    // empty-translation path through runCreateBranch (otherwise
+    // exercised only via the multi-`--set` tests).
+    const out = await drive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--json',
+      ],
+      {
+        interactions: [
+          // Single metadata leg shared across the lookup + create
+          // legs; no column resolution needed (--match-by name is a
+          // pseudo-token, no --set columns).
+          boardMetadataInteraction,
+          lookupInteraction([]),
+          {
+            operation_name: 'ItemUpsertCreate',
+            response: {
+              data: {
+                create_item: { ...sampleItem, id: '99001', name: 'Refactor login' },
+              },
+              // The mutation's match_variables would echo
+              // `columnValues: null` because there are no --set legs
+              // to translate. Cassette transport doesn't pin
+              // variables here; the contract is `data.operation:
+              // create_item` + the new id.
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; operation: string; name: string };
+    };
+    expect(env.data.id).toBe('99001');
+    expect(env.data.operation).toBe('create_item');
+    expect(env.data.name).toBe('Refactor login');
+  });
+
   it('lookup returns 1 with --name only → change_simple_column_value name path', async () => {
     const out = await drive(
       [

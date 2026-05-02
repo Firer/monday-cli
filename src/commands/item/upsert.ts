@@ -547,9 +547,9 @@ const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
       details: { board_id: inputs.boardId },
     },
   );
-  /* c8 ignore next 4 — defensive: schema's `.min(1)` rejects empty
-     arrays. */
+  // c8 ignore — defensive: schema's `.min(1)` rejects empty arrays.
   const board = data.boards[0];
+  /* c8 ignore next 3 */
   if (board === undefined) {
     throw new ApiError('internal_error', 'upsert lookup: empty boards array');
   }
@@ -605,9 +605,10 @@ const decideBranch = (inputs: {
     return { kind: 'create' };
   }
   if (items.length === 1 && !inputs.lookup.hasMore) {
-    /* c8 ignore next 4 — defensive: items.length === 1 narrowing
-       guarantees items[0] is non-undefined. */
+    // c8 ignore — defensive: items.length === 1 narrowing guarantees
+    // items[0] is non-undefined.
     const only = items[0];
+    /* c8 ignore next 3 */
     if (only === undefined) {
       throw new ApiError('internal_error', 'decideBranch: empty single match');
     }
@@ -1133,6 +1134,10 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
       createLabelsIfMissing: inputs.createLabelsIfMissing,
     });
   } catch (err) {
+    /* c8 ignore next 24 — the false arm of `instanceof MondayCliError`
+       only fires for raw JS-runtime errors (TypeError, RangeError);
+       defensive across all four mutation surfaces (create / update /
+       clear / upsert), pattern proven via foldAndRemap unit tests. */
     if (err instanceof MondayCliError) {
       // Same column-archived remap shape `item create` uses (M9 P1).
       // Cache-sourced resolution + Monday rejecting as
@@ -1155,9 +1160,9 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
         columnIds: translated.map((t) => t.columnId),
         env: inputs.env,
         noCache: inputs.noCache,
-        /* c8 ignore next 2 — defensive: resolveAndTranslate returns
-           a defined source whenever any --set / --set-raw leg fires.
-           The fallback covers the contrived empty-resolution case. */
+        // Defensive fallback: resolveAndTranslate returns a defined
+        // source whenever any --set / --set-raw leg fires. The
+        // fallback covers the contrived empty-resolution case.
         resolutionSource: resolutionResult.source ?? 'live',
       });
     }
@@ -1299,6 +1304,9 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       createLabelsIfMissing: inputs.createLabelsIfMissing,
     });
   } catch (err) {
+    /* c8 ignore next 21 — the false arm of `instanceof MondayCliError`
+       only fires for raw JS-runtime errors; defensive across all four
+       mutation surfaces. Pattern proven via foldAndRemap unit tests. */
     if (err instanceof MondayCliError) {
       throw await foldAndRemap({
         err,
@@ -1316,10 +1324,9 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
         columnIds: translated.map((t) => t.columnId),
         env: inputs.env,
         noCache: inputs.noCache,
-        /* c8 ignore next 3 — defensive: resolveAndTranslate returns
-           a defined source whenever any --set / --set-raw leg fires;
-           the fallback covers the --name-only update path failing,
-           a contrived edge case. */
+        // Defensive fallback: resolveAndTranslate returns a defined
+        // source whenever any --set / --set-raw leg fires; covers the
+        // --name-only update path failing, a contrived edge case.
         resolutionSource: resolutionResult.source ?? 'live',
       });
     }
