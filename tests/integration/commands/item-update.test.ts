@@ -1451,6 +1451,30 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('--set-raw with malformed JSON fails fast even without --board (Codex M8 finding #4)', async () => {
+    // Pre-fix, the single-item path ran `resolveBoardId` BEFORE
+    // parsing `--set-raw`, so omitting `--board` paid an
+    // `ItemBoardLookup` GraphQL round-trip even when the JSON was
+    // obviously malformed. Argv-parse-time failures should fire
+    // pre-network — same contract as `item set` and the bulk path.
+    // Empty cassette: any GraphQL request would surface as a
+    // distinct error; `usage_error` proves the parse fired first.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set-raw',
+        'status={broken',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
   it('empty call (no --set / --set-raw / --name) → usage_error', async () => {
     const out = await drive(
       ['item', 'update', '12345', '--board', '111', '--json'],

@@ -445,18 +445,22 @@ export const itemUpdateCommand: CommandModule<
           return;
         }
 
+        // Argv-parse-time failures fire BEFORE board lookup / metadata
+        // fetch. Splits + JSON parse run on pure strings; surfacing here
+        // means a malformed --set or --set-raw fails fast without
+        // burning an `ItemBoardLookup` round-trip when `--board` was
+        // omitted (Codex M8 finding #4 — pre-fix this parse ran AFTER
+        // resolveBoardId, contradicting the argv-boundary contract used
+        // by `item set` and the bulk path).
+        const setEntries = parsed.set.map(splitSetExpression);
+        const rawEntries: readonly ParsedSetRawExpression[] =
+          parsed.setRaw.map(parseSetRawExpression);
+
         const boardId = await resolveBoardId(
           client,
           dispatch.itemId,
           parsed.board,
         );
-
-        const setEntries = parsed.set.map(splitSetExpression);
-        // M8: parse all --set-raw expressions at argv-time so a
-        // malformed JSON input fails fast (no network round-trip
-        // to Monday for board metadata or item state).
-        const rawEntries: readonly ParsedSetRawExpression[] =
-          parsed.setRaw.map(parseSetRawExpression);
 
         const dateResolution: DateResolutionContext = {
           now: ctx.clock,
