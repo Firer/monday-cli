@@ -115,6 +115,40 @@ describe('run — usage errors', () => {
     expect(envelope.meta.schema_version).toBe('1');
     expect(envelope.meta.request_id).toBe('fixed-id');
   });
+
+  it('falls back to defaultRequestIdGenerator + system clock when neither is injected', async () => {
+    // Production callers omit `requestIdGenerator` and `clock`. The
+    // run() defaults must produce a UUIDv4 request_id and an
+    // ISO-8601 retrieved_at; tests that always inject these would
+    // never exercise the production code path.
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+    const result = await run({
+      argv: ['node', 'monday', '--bogus'],
+      env: { MONDAY_API_TOKEN: 'tok' },
+      stdout,
+      stderr,
+      isTTY: false,
+      cliVersion: '0.0.0-test',
+      cliDescription: 'CLI under test',
+    });
+    expect(result.exitCode).toBe(1);
+    const envelope = JSON.parse(Buffer.concat(stderrChunks).toString('utf8')) as {
+      meta: { request_id: string; retrieved_at: string };
+    };
+    // UUIDv4 — eight-four-four-four-twelve hex blocks. `randomUUID()`
+    // is the documented production source, so any change to the
+    // default generator would surface here.
+    expect(envelope.meta.request_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+    );
+    // System clock produces an ISO-8601 timestamp parseable by Date.
+    expect(Number.isNaN(Date.parse(envelope.meta.retrieved_at))).toBe(false);
+  });
 });
 
 describe('run — error envelope from command actions', () => {

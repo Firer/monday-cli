@@ -72,6 +72,25 @@ describe('injectComplexity', () => {
     const q = '{ me { id }';
     expect(injectComplexity(q)).toEqual({ query: q, injected: false });
   });
+
+  it('honours backslash escapes inside string literals', () => {
+    // The escape branch in the brace-scanner: a `\"` inside a "-string
+    // must not close the string. Without the branch, `"\""` would
+    // close after the `"` and then the trailing `}` would prematurely
+    // exit the body scan.
+    const q = 'query E { account { name(suffix: "\\"end") } }';
+    const out = injectComplexity(q);
+    expect(out.injected).toBe(true);
+    expect(out.query).toContain('complexity {');
+  });
+
+  it('returns input unchanged when braces close below depth zero', () => {
+    // Stray `}` ahead of any open brace — the depth-negative branch
+    // bails out via `return undefined` rather than scanning forever or
+    // reporting a bogus end position.
+    const q = '} query Bad { me { id } }';
+    expect(injectComplexity(q)).toEqual({ query: q, injected: false });
+  });
 });
 
 describe('parseComplexity', () => {

@@ -271,6 +271,67 @@ describe('mapResponse', () => {
       if (result.ok) throw new Error('expected error');
       expect(result.error.retryAfterSeconds).toBeUndefined();
     });
+
+    it('404 without body.error_code → not_found', () => {
+      const result = mapResponse({
+        status: 404,
+        headers: okHeaders(),
+        body: {},
+      });
+      if (result.ok) throw new Error('expected error');
+      expect(result.error.code).toBe('not_found');
+    });
+  });
+
+  // Top-level `body.error_code` mapping (mapMondayErrorCode). Every
+  // entry below corresponds to a §6.5 stable code agents key off; a
+  // typo regression here would silently fall back to validation_failed
+  // (the mapHttpStatus default for 4xx) and break the contract.
+  describe('body.error_code → CLI codes (top-level non-200 path)', () => {
+    const cases = [
+      { status: 429, errorCode: 'RATE_LIMIT_EXCEEDED', expected: 'rate_limited' },
+      { status: 429, errorCode: 'MINUTE_LIMIT_EXCEEDED', expected: 'rate_limited' },
+      { status: 429, errorCode: 'DAILY_LIMIT_EXCEEDED', expected: 'daily_limit_exceeded' },
+      { status: 429, errorCode: 'CONCURRENCY_LIMIT_EXCEEDED', expected: 'concurrency_exceeded' },
+      { status: 400, errorCode: 'COMPLEXITYEXCEPTION', expected: 'complexity_exceeded' },
+      { status: 401, errorCode: 'UNAUTHORIZED', expected: 'unauthorized' },
+      { status: 401, errorCode: 'AUTHENTICATION_ERROR', expected: 'unauthorized' },
+      { status: 403, errorCode: 'FORBIDDEN', expected: 'forbidden' },
+      { status: 403, errorCode: 'PERMISSION_DENIED', expected: 'forbidden' },
+    ] as const;
+    for (const c of cases) {
+      it(`${String(c.status)} body.error_code=${c.errorCode} → ${c.expected}`, () => {
+        const result = mapResponse({
+          status: c.status,
+          headers: okHeaders(),
+          body: { error_code: c.errorCode, error_message: 'msg' },
+        });
+        if (result.ok) throw new Error('expected error');
+        expect(result.error.code).toBe(c.expected);
+        expect(result.error.mondayCode).toBe(c.errorCode);
+      });
+    }
+
+    it('lowercase body.error_code is upper-cased before lookup', () => {
+      const result = mapResponse({
+        status: 429,
+        headers: okHeaders(),
+        body: { error_code: 'rate_limit_exceeded' },
+      });
+      if (result.ok) throw new Error('expected error');
+      expect(result.error.code).toBe('rate_limited');
+    });
+
+    it('unknown body.error_code falls back to mapHttpStatus', () => {
+      const result = mapResponse({
+        status: 503,
+        headers: okHeaders(),
+        body: { error_code: 'NEVER_HEARD_OF' },
+      });
+      if (result.ok) throw new Error('expected error');
+      expect(result.error.code).toBe('network_error');
+      expect(result.error.mondayCode).toBe('NEVER_HEARD_OF');
+    });
   });
 });
 
