@@ -457,15 +457,34 @@ interface LookupInputs {
  * as a built-in filter against the item's `name` field, no metadata
  * lookup needed) and are prepended to the rules array post-build.
  *
- * **Known limitation (Codex round-1 F1).** Email-as-people-token and
- * relative-date sugar (e.g. `tomorrow`, `+1w`) are passed verbatim to
- * Monday — the same limitation `item search` and `item update --where`
- * ship today. Agents should pass already-resolved IDs (numeric user
- * IDs, ISO dates) when match-by targets people / date columns. The
- * `me` token IS resolved via the shared `resolveMe` factory.
- * Email→ID and relative-date resolution for filter rules is a
- * cross-surface v0.3 candidate; lifting it here without lifting it
- * for `item search` would create inconsistent filter semantics.
+ * **Known v0.2 round-trip limits (cli-design §5.8 caveat).** The
+ * lookup leg and the `--set` translator have asymmetric grammars,
+ * so only a subset of column kinds round-trip cleanly when the same
+ * column appears in both `--match-by` and `--set`:
+ *
+ *   - **People:** only `me` (resolved on both legs). Emails resolve
+ *     in `--set` but pass verbatim in lookup; raw numeric user IDs
+ *     are rejected by the people `--set` grammar (cli-design §5.3
+ *     step 3, M5b deferral).
+ *   - **Date:** NOT v0.2-safe — Monday's items_page filter requires
+ *     `compare_value: ["EXACT", "YYYY-MM-DD"]` for date-equals,
+ *     but `buildQueryParams` emits a bare-ISO `["YYYY-MM-DD"]` (the
+ *     same shape `item search` / `item update --where` ship). The
+ *     EXACT-marker lift is a cross-surface v0.3 candidate.
+ *   - **Status / dropdown:** label text (e.g. `Backlog`) round-trips
+ *     because Monday's filter compares against the stored label.
+ *   - **Text / long_text / numbers / item name / external_id-shaped
+ *     hidden text:** verbatim pass-through on both legs.
+ *   - **Link / email / phone (rich pipe grammar):** the friendly
+ *     `<scalar>|<text>` write parses to `{url, text}` / `{email,
+ *     text}` / `{phone, country}` but the lookup leg sends the
+ *     literal pipe string — best-effort only.
+ *
+ * The recommended canonical pattern is a stable hidden text /
+ * external_id column as the synthetic key. Email→ID, numeric-user-
+ * ID acceptance, relative-date resolution, and the date EXACT-
+ * marker lift are v0.3 cross-surface follow-ups (would lift `item
+ * search` and `item update --where` simultaneously).
  */
 const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
   // Split into name + column tokens. Column tokens go through the
@@ -756,7 +775,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
     'monday item upsert --board 67890 --name "Refactor login" --match-by name --set status=Backlog',
     'monday item upsert --board 67890 --name "Refactor login" --match-by external_id --set external_id=ABC-123 --set status=Backlog',
     'monday item upsert --board 67890 --name "Refactor login" --match-by name,owner --set owner=me --set status=Backlog',
-    'monday item upsert --board 67890 --name "Refactor login" --match-by name,due_date --set due_date=2026-05-15 --set status=Backlog',
+    'monday item upsert --board 67890 --name "Refactor login" --match-by name,priority --set priority=High --set status=Backlog',
     'monday item upsert --board 67890 --name "Refactor login" --match-by name --set status=Backlog --dry-run --json',
   ],
   // Sequential-retry idempotent — see file header + cli-design §5.8.
@@ -807,23 +826,36 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
           'ambiguous_match. Pick a stable hidden-key column for --match-by',
           'so race-induced duplicates are recoverable.',
           '',
-          'Match-value caveat (people / date columns): the lookup pipeline',
-          'and the --set translator have asymmetric grammars in v0.2.',
-          'For people columns: only `me` round-trips — the lookup leg',
-          'resolves it to the current user-ID and the mutation leg does',
-          'the same. Emails (`alice@example.com`) work in --set on the',
-          'mutation leg but pass verbatim to the items_page filter on',
-          'the lookup leg → 0 matches → duplicate. Numeric user IDs',
-          '(`--set owner=12345678`) are rejected by the people --set',
-          'grammar (cli-design §5.3 step 3) so the create/update leg',
-          'fails outright. **For v0.2: people columns participating in',
-          '--match-by are restricted to `me`.** For date columns: ISO',
-          'dates (`YYYY-MM-DD`) round-trip — both translators accept',
-          'them. Relative tokens (`+1w`, `tomorrow`) resolve in --set',
-          'but pass verbatim in lookup → also broken. Email→ID, numeric',
-          '-user-ID acceptance, and relative-date filter resolution',
-          'are v0.3 cross-surface follow-ups (would also lift',
-          '`item search` and `item update --where`).',
+          'Match-value caveats (per column kind). The lookup leg and the',
+          '--set translator have asymmetric grammars in v0.2, so only a',
+          'subset of column kinds round-trip cleanly when used in both',
+          '--match-by and --set:',
+          '',
+          '  Always safe (verbatim pass-through on both legs):',
+          '    - name (the item-name pseudo-token)',
+          '    - text / long_text',
+          '    - numbers',
+          '    - external_id-shaped hidden text',
+          '  Safe via label-text:',
+          '    - status / dropdown (pass the label name, not the index)',
+          '  Restricted to one value:',
+          '    - people: only `me` round-trips. Emails work in --set but',
+          '      pass verbatim in lookup (duplicate); raw numeric user',
+          '      IDs are rejected by the --set grammar (cli-design §5.3).',
+          '  Not v0.2-safe:',
+          '    - date: Monday items_page requires `["EXACT", "YYYY-MM-',
+          '      DD"]` for date-equals; the lookup leg sends bare ISO,',
+          '      so an upsert against a date column duplicates on rerun.',
+          '    - link / email / phone: the rich `scalar|text` write',
+          '      grammar produces a `{url,text}` / `{email,text}` /',
+          '      `{phone,country}` payload that the bare-string filter',
+          '      compare cannot match against.',
+          '',
+          'Recommended canonical pattern: stable hidden text /',
+          'external_id column as the synthetic key. Email->ID,',
+          'numeric-user-ID acceptance, relative-date resolution, and',
+          'the date EXACT-marker lift are v0.3 cross-surface follow-ups',
+          '(would also lift `item search` and `item update --where`).',
           '',
         ].join('\n'),
       )

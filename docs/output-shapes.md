@@ -815,26 +815,31 @@ observing zero matches at the same instant both branch to
 `create_item`; the next call surfaces the duplicate as
 `ambiguous_match`. Concurrent-write protection is a v0.4 candidate.
 
-**Match-value caveat (people / date columns).** The lookup
-pipeline and the `--set` translator have asymmetric grammars in
-v0.2 — they only overlap cleanly on a small subset, so
-`--match-by` against people / date columns is restricted:
+**Match-value caveats (per column kind).** The lookup pipeline
+and the `--set` translator have asymmetric grammars in v0.2, so
+`--match-by` only round-trips cleanly on a subset of column kinds:
 
-- **People columns: only `me` round-trips.** Emails resolve in
-  `--set` but pass verbatim in lookup (→ duplicate); raw numeric
-  user IDs are rejected by the people `--set` grammar outright
-  (cli-design §5.3 step 3, M5b).
-- **Date columns: only ISO dates round-trip.** Relative tokens
-  (`+1w`, `tomorrow`) resolve in `--set` but pass verbatim in
-  lookup (→ duplicate).
-- **Other column kinds (text / numbers / status / dropdown /
-  link / email / phone / external_id-shaped text)** round-trip
-  cleanly — values pass verbatim on both legs.
+- **Always safe:** `name` (item-name pseudo-token), `text` /
+  `long_text`, `numbers`, external_id-shaped hidden text.
+- **Safe via label-text:** `status` / `dropdown` (pass the label
+  name).
+- **Restricted to one value:** `people` — only `me` round-trips.
+  Emails resolve in `--set` but pass verbatim in lookup (→
+  duplicate); raw numeric user IDs are rejected by the people
+  `--set` grammar (cli-design §5.3, M5b).
+- **Not v0.2-safe:**
+  - `date` — Monday's items_page filter requires `["EXACT",
+    "YYYY-MM-DD"]` for date-equals; the lookup leg sends bare
+    ISO, so upserts duplicate on rerun.
+  - `link` / `email` / `phone` — the rich `scalar|text` write
+    grammar produces a structured payload, but the lookup leg
+    sends the literal pipe string, which doesn't match Monday's
+    stored shape.
 
-Email→ID, numeric-user-ID acceptance, and relative-date filter
-resolution are v0.3 follow-ups that would lift `item search` /
-`item update --where` simultaneously. cli-design §5.8 covers the
-same note in long form.
+**Recommended canonical pattern.** Stable hidden text /
+external_id-shaped column as the synthetic key. cli-design §5.8
+covers the per-kind breakdown + v0.3 cross-surface follow-up
+roadmap in long form.
 
 ### `item archive <iid> --yes [--dry-run]`
 

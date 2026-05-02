@@ -1486,42 +1486,79 @@ column as a synthetic key (or compose multiple match-by tokens) so
 the first call deterministically lands in the create branch and
 subsequent calls land in the update branch.
 
-**Match-value resolution caveat (people / date columns).** The
-upsert lookup routes column-token entries through the same shared
-filter pipeline `item search` and `item update --where` use
+**Match-value resolution caveats (per column kind).** The upsert
+lookup routes column-token entries through the same shared filter
+pipeline `item search` and `item update --where` use
 (`buildQueryParams`), which resolves the `me` token to the current
 user's ID for people columns and passes everything else verbatim
 to Monday's `items_page` filter. The mutation translator on the
-create / update legs has a different grammar — defined by §5.3
-step 3 — that resolves `me` *and* emails for people columns and
-*and* relative-date tokens for date columns, but **rejects raw
-numeric user IDs** in the people grammar (`numericPeopleTokenError`,
-v0.2-deferred per the M5b note). The two grammars only overlap
-cleanly on a small subset:
+create / update legs has its own grammar — defined by §5.3 — and
+the two grammars only overlap cleanly on a subset of column
+kinds. The v0.2 contract for `--match-by` is:
 
-- **People:** only `me` round-trips. `--match-by owner --set
-  owner=me` works on both legs. `--set owner=alice@example.com`
-  resolves to a user ID on mutation but the next lookup queries
-  for the email string → 0 matches → duplicate. `--set
-  owner=12345678` (raw user ID) fails outright on the create /
-  update leg with `usage_error`.
-- **Date:** ISO dates (`YYYY-MM-DD`) round-trip — both
-  translators accept the literal string. Relative tokens (`+1w`,
-  `tomorrow`) resolve to ISO on mutation but pass verbatim on
-  lookup → 0 matches → duplicate.
-- **Other column kinds (text / numbers / status / dropdown /
-  link / email / phone / external_id-shaped text):** values
-  pass verbatim on both legs and round-trip cleanly.
+- **Always safe (verbatim pass-through on both legs):**
+  - `name` (the item-name pseudo-token; Monday's `query_params.
+    rules` accepts `column_id: "name"` as a built-in filter
+    against the item's name field).
+  - `text` / `long_text` — values pass through both legs as raw
+    strings.
+  - `numbers` — Monday's items_page filter accepts both string
+    and number forms when the value parses as a number.
+  - External_id-shaped hidden text columns (the recommended
+    canonical pattern — see end of this section).
+- **Safe via label-text:**
+  - `status` / `dropdown` — pass the label name (e.g. `Backlog`,
+    not the index). Both translators map label-to-stored-value
+    consistently — the `--set` translator resolves `status=Backlog`
+    to `{label: "Backlog", index: N}` for the mutation, and the
+    lookup leg sends `compare_value: ["Backlog"]` which Monday
+    matches against the stored label.
+- **Restricted to one value:**
+  - `people` — only `me` round-trips. `--match-by owner --set
+    owner=me` works on both legs because `me` resolves to the
+    current user-ID symmetrically. `--set owner=alice@example.com`
+    resolves to a user ID on the mutation leg but the next lookup
+    queries for the email string → 0 matches → duplicate. `--set
+    owner=12345678` (raw numeric user ID) is rejected by the
+    people `--set` grammar (`numericPeopleTokenError`, M5b
+    deferral) so the create / update leg fails outright with
+    `usage_error`.
+- **Not v0.2-safe:**
+  - `date` — Monday's items_page filter requires the
+    `compare_value: ["EXACT", "YYYY-MM-DD"]` shape for
+    date-equals comparisons (per Monday's date-filter changelog),
+    but `buildQueryParams` emits a bare `["YYYY-MM-DD"]` (the
+    same shape `item search` and `item update --where` ship
+    today). Bare ISO does not match Monday's stored date, so an
+    upsert with `--match-by due_date` will duplicate on rerun.
+    Relative tokens (`+1w`, `tomorrow`) compound the problem —
+    they resolve to ISO on the mutation leg but pass verbatim
+    on the lookup leg, breaking the round-trip even with the
+    EXACT-marker.
+  - `link` / `email` / `phone` — the friendly `scalar|text`
+    write grammar produces a `{url, text}` / `{email, text}` /
+    `{phone, country}` payload, but the lookup leg sends the
+    literal pipe string. Monday's filter compares against the
+    stored rich shape, not the pipe string, so the round-trip
+    breaks. The bare-scalar form (no pipe) might work for some
+    operators (e.g. `contains_text`) but is not pinned by tests
+    and not part of the v0.2 contract.
 
-**v0.2 contract:** people columns participating in `--match-by`
-are restricted to `me`; date columns are restricted to ISO. The
-help text reproduces this caveat so an agent reading
-`monday item upsert --help` sees the limitation without having
-to check this section first. Email→ID, numeric-user-ID acceptance,
-and relative-date filter resolution are v0.3 cross-surface
-follow-ups that would lift `item search` and `item update
---where` simultaneously; lifting any in upsert alone would create
-inconsistent filter semantics across the three surfaces.
+**Recommended canonical pattern.** Use a stable hidden text /
+`external_id`-shaped column as the synthetic key. Two-token
+match-by (`--match-by external_id,name`) lets the agent use the
+hidden key for idempotency and `name` for human-readable
+disambiguation. The help text reproduces this caveat so an agent
+reading `monday item upsert --help` sees the limitations without
+having to check this section first.
+
+**v0.3 cross-surface follow-ups.** Email→ID resolution, numeric-
+user-ID acceptance in the people `--set` grammar, relative-date
+resolution in filters, and the date EXACT-marker lift are all
+cross-surface candidates — each would lift `item search`, `item
+update --where`, and `item upsert` simultaneously so the three
+surfaces stay in lockstep. Lifting any of them in upsert alone
+would create inconsistent filter semantics across the surfaces.
 
 ### 5.9 The `dev` namespace
 
