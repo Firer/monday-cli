@@ -68,6 +68,7 @@ import {
   translateRawColumnValue,
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
+import { splitSetExpression } from '../../api/set-expression.js';
 import { userByEmail } from '../../api/resolvers.js';
 import {
   foldResolverWarningsIntoError,
@@ -303,22 +304,6 @@ const validateInputShape = (parsed: ParsedInput): DispatchShape => {
     return { kind: 'single', itemId: parsed.itemId };
   }
   return { kind: 'bulk' };
-};
-
-const splitSetExpression = (raw: string): { readonly token: string; readonly value: string } => {
-  const idx = raw.indexOf('=');
-  if (idx <= 0) {
-    throw new UsageError(
-      `--set: expected <col>=<val> (got ${JSON.stringify(raw)}); ` +
-        `use shell quoting and the id:/title: prefix when the column ` +
-        `token contains "="`,
-      { details: { input: raw } },
-    );
-  }
-  return {
-    token: raw.slice(0, idx),
-    value: raw.slice(idx + 1),
-  };
 };
 
 const resolveBoardId = async (

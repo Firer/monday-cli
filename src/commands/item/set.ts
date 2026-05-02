@@ -71,6 +71,7 @@ import {
   parseSetRawExpression,
   translateRawColumnValue,
 } from '../../api/raw-write.js';
+import { splitSetExpression } from '../../api/set-expression.js';
 import { userByEmail } from '../../api/resolvers.js';
 import {
   foldResolverWarningsIntoError,
@@ -190,32 +191,6 @@ const inputSchema = z
       path: ['setExpr'],
     },
   );
-
-/**
- * Splits `<col>=<val>` on the FIRST `=` per cli-design §5.3 lines
- * 712-715. Tokens with `=` in the title need shell quoting plus the
- * explicit `id:` / `title:` prefix or `--filter-json`-style escape.
- * An empty token raises `usage_error`; an empty value (`status=`) is
- * accepted at this layer and propagated to the per-type translator
- * which decides whether to accept (e.g. `status= ` becomes
- * `{label: ""}`) or reject (dropdown empty-input rejects per
- * column-values.ts).
- */
-const splitSetExpression = (raw: string): { readonly token: string; readonly value: string } => {
-  const idx = raw.indexOf('=');
-  if (idx <= 0) {
-    throw new UsageError(
-      `--set: expected <col>=<val> (got ${JSON.stringify(raw)}); ` +
-        `use shell quoting and the id:/title: prefix when the column ` +
-        `token contains "="`,
-      { details: { input: raw } },
-    );
-  }
-  return {
-    token: raw.slice(0, idx),
-    value: raw.slice(idx + 1),
-  };
-};
 
 /**
  * Resolves the board id for the target item. `--board` is
