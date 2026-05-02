@@ -404,6 +404,69 @@ describe('monday item create — top-level (live)', () => {
     expect(out.exitCode).toBe(0);
   });
 
+  it('long_text re-wrap pinned: live --set <long_text>=value bundles as {text:value} inside create_item.column_values', async () => {
+    // Codex round-2 P2 #2 close-out: dry-run --set-raw didn't pin
+    // the friendly long_text wire shape (raw payloads bypass the
+    // re-wrap). Live friendly --set on a long_text column MUST
+    // wrap as {text: "<value>"} inside create_item.column_values
+    // — the same rule change_multiple_column_values requires.
+    // Without this fixture pin, a regression that drops the
+    // re-wrap (sending `description: "hi"` instead of
+    // `description: {text: "hi"}`) would slip through unnoticed.
+    const longTextBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'description_1',
+          title: 'Description',
+          type: 'long_text',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Test',
+        '--set',
+        'description_1=hi',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [longTextBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            match_variables: {
+              boardId: '111',
+              itemName: 'Test',
+              columnValues: {
+                // The long_text re-wrap rule: bare-string in
+                // change_simple_column_value, but {text: <value>}
+                // inside the column_values map per cli-design §5.3
+                // step 5 + the M9 carve-in. M9 inherits the rule
+                // from bundleColumnValues.
+                description_1: { text: 'hi' },
+              },
+            },
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
   it('--group passes through to create_item.group_id wire variable', async () => {
     const out = await drive(
       [
@@ -744,13 +807,21 @@ describe('monday item create — top-level (live)', () => {
     expect(env.error?.code).toBe('column_archived');
   });
 
-  it('F4 remap: cache-sourced resolution + Monday validation_failed → remapped to column_archived', async () => {
-    // Codex M9 P1: cache says column is active but Monday has since
-    // archived it. The create_item mutation surfaces validation_failed.
-    // The F4 remap forces a metadata refresh, sees the archived flag,
-    // and remaps to column_archived with details.remapped_from. M5b's
-    // contract — the create path now mirrors it.
-    const cachedActiveBoard = {
+  it('F4 remap: cache-sourced resolution + Monday validation_failed → remapped to column_archived (Codex M9 P1, real regression pin)', async () => {
+    // Codex round-2 P3 close-out: this was previously a weak test
+    // that ran live resolution and accepted either error code. The
+    // proper regression pin — same shape item-set's F4 test uses —
+    // pre-warms the cache with an active column, then the create
+    // mutation fails as validation_failed, then the helper forces
+    // a refresh that sees the archived flag and remaps.
+    //
+    // Setup:
+    //   1. Seed cache with active column (via a separate read).
+    //   2. item create — cache hit on resolution.
+    //   3. Live mutation returns validation_failed.
+    //   4. Refresh fetches board with column now archived.
+    //   5. Helper remaps to column_archived with details.remapped_from.
+    const cachedActive = {
       ...sampleBoardMetadata,
       columns: [
         {
@@ -758,23 +829,39 @@ describe('monday item create — top-level (live)', () => {
           title: 'Status',
           type: 'status',
           description: null,
-          // Cache says active.
           archived: false,
           settings_str: '{}',
           width: null,
         },
       ],
     };
-    const liveArchivedBoard = {
-      ...cachedActiveBoard,
+    const refreshedArchived = {
+      ...cachedActive,
       columns: [
-        { ...cachedActiveBoard.columns[0]!, archived: true },
+        { ...cachedActive.columns[0]!, archived: true },
       ],
     };
-    // Pre-populate the cache by running a separate metadata-loading
-    // command first; the cassette here interleaves the cache write
-    // (first BoardMetadata response) with the create attempt + the
-    // refresh that confirms the live archived state.
+    // Step 1: seed cache via a separate read.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    // Step 2-5: item create with cached resolution.
     const out = await drive(
       [
         'item',
@@ -789,35 +876,25 @@ describe('monday item create — top-level (live)', () => {
       ],
       {
         interactions: [
-          // Initial metadata fetch — agent uses fresh cache (live
-          // first time). The next run with the same XDG would serve
-          // from cache; we simulate that pre-warming here by serving
-          // the cached-active version, then the create fails as
-          // validation_failed, then the refresh serves the live
-          // archived version.
-          {
-            operation_name: 'BoardMetadata',
-            response: { data: { boards: [cachedActiveBoard] } },
-          },
+          // No BoardMetadata call here — cache hit. The create
+          // mutation fires immediately based on cached metadata.
           {
             operation_name: 'ItemCreateTopLevel',
+            http_status: 400,
             response: {
               errors: [
                 {
-                  message: 'invalid value',
-                  extensions: {
-                    code: 'INVALID_COLUMN_VALUE',
-                    status_code: 400,
-                  },
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
                 },
               ],
             },
           },
-          // Refresh fires after validation_failed; this is the live
-          // archived view that triggers the remap.
+          // F4 forces a metadata refresh post-failure; live board
+          // now reports the column archived.
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [liveArchivedBoard] } },
+            response: { data: { boards: [refreshedArchived] } },
           },
         ],
       },
@@ -826,20 +903,8 @@ describe('monday item create — top-level (live)', () => {
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: { code: string; details?: { remapped_from?: string } };
     };
-    // The remap fires only when resolution was cache-sourced. In this
-    // cassette the metadata fetch ran live (first interaction), so
-    // the remap won't fire and the error stays validation_failed.
-    // The point of this test is that the create path now invokes the
-    // F4 helper (which is a no-op for live resolution), proving the
-    // P1 fix is wired in. The cache-sourced variant is harder to set
-    // up via the cassette runner — covered by item set / item update
-    // tests where the cache plumbing is already pinned.
-    //
-    // Verify the catch arm wired through MondayCliError without
-    // crashing on the new remap call.
-    expect(['validation_failed', 'column_archived']).toContain(
-      env.error?.code,
-    );
+    expect(env.error?.code).toBe('column_archived');
+    expect(env.error?.details?.remapped_from).toBe('validation_failed');
   });
 
   it('Monday returns validation_failed (label typo) → bubbles up as validation_failed', async () => {
