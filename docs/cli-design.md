@@ -505,7 +505,27 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
                                           # --continue-on-error (partial-success envelope): v0.3
-monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
+                                          # --name empty after trim → usage_error
+                                          # duplicate resolved column IDs across --set / --set-raw
+                                          # entries → usage_error (covers --set + --set, --set-raw
+                                          # + --set-raw, and --set + --set-raw permutations;
+                                          # resolution-time enforced — see §5.3)
+                                          # --set / --set-raw values bundle into the single
+                                          # create_item / create_subitem mutation — single
+                                          # round-trip, no post-create fallback (see §5.8)
+                                          # --parent <iid> → create_subitem; column resolution
+                                          # targets the subitems board, not the parent's board.
+                                          # Classic boards only — multi-level boards rejected
+                                          # with usage_error carrying details.hierarchy_type;
+                                          # multi-level subitem support deferred to v0.3
+                                          # --parent is mutually exclusive with --group and
+                                          # --position/--relative-to (subitems don't live in
+                                          # groups; their position is parent-scoped, not
+                                          # relative-to-arbitrary-item)
+                                          # --position and --relative-to are required together;
+                                          # one without the other → usage_error
+                                          # --relative-to must reference an item on the same board
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
 monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
 monday item duplicate <iid> [--with-updates]                                 v0.2
@@ -900,6 +920,24 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    bundled case — the simple variant is an optimisation that
    doesn't apply to user-supplied raw payloads.
 
+   **`item create` (M9) carve-in.** Both `--set` and `--set-raw`
+   translated values bundle into the single `create_item` /
+   `create_subitem` mutation's `column_values` parameter — *not*
+   `change_column_value` / `change_multiple_column_values`. The
+   wire mutation is different but the per-column-blob shape
+   inside `column_values` is **expected** to mirror the multi-
+   mutation contract below — the v0.1 fixture pass against
+   `change_multiple_column_values` covers all seven v0.1 types
+   on writes-to-existing-items, but the create path's wire
+   acceptance for the per-blob edge cases (`long_text` bare-
+   string vs. `{"text": ...}` re-wrap most notably) needs an
+   M9 fixture pin before the rule is contractually frozen. The
+   item's name is the separate `item_name` wire parameter
+   (Monday's flag, not a synthetic `name` key inside
+   `column_values`). No post-create fallback to a follow-up
+   `change_multiple_column_values` call is permitted — see §5.8
+   for the state-safety rationale.
+
    **Per-column-blob shapes inside `change_multiple_column_values`.**
    The multi mutation accepts a `column_values` JSON object keyed
    by column ID. Most types use the same blob the single mutation
@@ -939,8 +977,12 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
     write path is `add_file_to_column` rather than
     `change_column_value`) → surfaces `unsupported_column_type`
     with `deferred_to: "v0.4"`. The friendly translator and
-    `--set-raw` both go through `change_column_value` /
-    `change_multiple_column_values`, so a `--set-raw` raw
+    `--set-raw` both go through column-value mutations
+    (`change_column_value` / `change_multiple_column_values`
+    on `item set` / `item update`; `create_item` /
+    `create_subitem.column_values` on `item create` per the
+    M9 carve-in above) — none of these wire surfaces accept
+    `add_file_to_column`-style payloads, so a `--set-raw` raw
     payload can't reach the right wire surface for these
     types. Asset upload is pinned to v0.4 (§13).
   Every other type (writable + tentative-slipped + future where
@@ -968,8 +1010,11 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
   resolve, a duplicate-ID check fires before mutation; collision
   → `usage_error` with `details.column_id` and the conflicting
   tokens. Different columns in the same call are fine
-  (`--set status=Done --set-raw weird_col='{...}'` bundles into
-  one `change_multiple_column_values`).
+  (`--set status=Done --set-raw weird_col='{...}'` on
+  `item set` / `item update` bundles into one
+  `change_multiple_column_values`; on `item create` both
+  bundle into `create_item` / `create_subitem.column_values`
+  per the M9 carve-in above).
 - **`--dry-run` supported.** The dry-run echoes the **parsed**
   JSON object in `planned_changes[].diff[<col>].to` (no
   translator round-trip; the parsed object is what would be
@@ -995,9 +1040,11 @@ translator (`--set <col>=<val>`). v0.1 had no escape hatch — types
 outside the allowlist waited on the next version. v0.2 ships
 `--set-raw <col>=<json>` alongside the friendly-type batch
 (M8 — see "Escape hatch" above), so v0.2+ agents have a write
-path for any type that accepts `change_column_value` /
-`change_multiple_column_values` even when the friendly translator
-hasn't landed for it yet. Read-only-forever types and
+path for any type the API accepts via column-value mutations
+(`change_column_value` / `change_multiple_column_values` for
+`item set` / `item update`; `create_item` /
+`create_subitem.column_values` for `item create`) even when
+the friendly translator hasn't landed for it yet. Read-only-forever types and
 `files`-shaped types (which use `add_file_to_column`) remain
 unreachable through `--set-raw`; file upload waits for v0.4.
 Slots in the table below
@@ -1264,10 +1311,35 @@ top-level `resolved_ids` slot (§6.4). An agent doing a `find`
 followed by an action captures the stable IDs once and reuses
 them.
 
-### 5.8 Idempotency for `create_item`
+### 5.8 `create_item` — atomicity, state safety, and idempotency
 
 `create_item` is not idempotent — calling it twice creates two items.
-Pattern:
+
+**Single round-trip with bundled column values.** When `monday item
+create` carries `--set <col>=<val>` / `--set-raw <col>=<json>`
+flags, every translated column value bundles into the
+`create_item.column_values` (or `create_subitem.column_values`)
+parameter and ships in **one** GraphQL mutation. The CLI does
+**not** fall back to a two-call pattern (`create_item` followed by
+`change_multiple_column_values`) on failure: a partial-state failure
+between the two calls would leave an item with the requested name
+but missing column values, and the API surfaces no post-hoc
+discriminator between a half-applied create and a deliberate
+name-only create. If `create_item.column_values` rejects any value
+(server-side `validation_failed`, archived column not caught by
+the cache-refresh path, etc.), the whole mutation fails and **no
+item is created**. Agents who see the failure should fix the
+offending value and retry — the create is still safe to retry
+because no item exists. The same rule applies to `create_subitem`.
+
+This is a state-safety contract, not just an implementation choice.
+A future v0.3+ `--continue-on-error` style flag (mirroring the
+deferred bulk-mutation flag in §4.3) would be the place to relax
+it, by either (a) accepting the partial-state risk explicitly with
+a typed warning in the success envelope, or (b) implementing
+compensating-delete semantics. v0.2 ships neither.
+
+**Idempotent variant via `item upsert`.** Pattern:
 
 ```
 monday item upsert <bid> --name "Refactor login" --match-by name --set status=Backlog
@@ -1663,6 +1735,69 @@ mutation verbs produce different planned-change shapes; the
     "warnings": []
   }
   ```
+
+- **Item-create shape** (`item create`; v0.2 M9). The new
+  item doesn't exist yet, so there's no prior state to diff
+  against — every `diff[<col>].from` is `null`. The item's
+  `name` and any optional placement (`group_id`, `position`)
+  are hoisted to top-level slots rather than buried inside
+  `diff`, mirroring the comment-create shape's preference for
+  agent-scannable surface fields. `resolved_ids` echoes the
+  same `<token> → <column_id>` map column-mutation shapes
+  carry, since `--set` and `--set-raw` resolve against the
+  target board's metadata exactly as for `item set/update`.
+  Top-level `create_item` form:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, ... },
+    "planned_changes": [
+      {
+        "operation": "create_item",
+        "board_id": "67890",
+        "name": "Refactor login",
+        "group_id": "topics",
+        "resolved_ids": { "status": "status_4", "due": "date_4" },
+        "diff": {
+          "status_4": { "from": null, "to": { "label": "Working on it", "index": 1 } },
+          "date_4":   { "from": null, "to": { "date": "2026-05-02" } }
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--position before|after --relative-to <iid>` is set,
+  the planned change carries an additional `position: { method:
+  "before" | "after", relative_to: "<iid>" }` slot. When
+  `--group` is omitted, `group_id` is omitted (Monday assigns
+  the board's default group server-side; dry-run can't
+  predict the resolved ID without firing the mutation).
+
+  **Subitem variant** (`--parent <iid>` set; `operation:
+  "create_subitem"`). Identical shape to `create_item` with
+  three deltas: `operation` flips to `"create_subitem"`,
+  `board_id` is **omitted** (Monday derives the subitems
+  board from the parent at server-side; the CLI doesn't echo
+  it because column resolution targets the subitems board's
+  own metadata and surfacing it as `board_id` would falsely
+  imply the agent's `--board` value), and a new
+  `parent_item_id: "<iid>"` slot carries the parent. `--group`
+  / `--position` are not valid with `--parent` (subitems live
+  on the auto-generated subitems board, not in groups; their
+  position is parent-scoped, not relative-to-arbitrary-item)
+  — argv-parse rejects with `usage_error`, so neither slot
+  appears in the subitem dry-run shape. `resolved_ids` and
+  `diff` keep the same per-column shape. **Classic boards
+  only:** subitem creation against multi-level boards
+  (`hierarchy_type: "multi_level"` per §2.8 — where subitems
+  live on the parent's board rather than an auto-generated
+  subitems board) is rejected with `usage_error` carrying
+  `details.hierarchy_type`. Multi-level subitem support is
+  deferred to v0.3.
 
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
