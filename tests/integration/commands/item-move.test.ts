@@ -363,6 +363,90 @@ describe('monday item move (integration, M11)', () => {
     expect(out.exitCode).toBe(0);
   });
 
+  it("cross-board: empty source cells don't trigger the unmatched check (Codex round-1 P1 — F1 regression)", async () => {
+    // The projection includes every `column_values` entry Monday
+    // returned — even empty cells (`text: null` / `value: null`).
+    // Pre-fix, `collectSourceColumnIds` returned every projection key
+    // and the strict-default check fired for unmatched source columns
+    // even when there was nothing to move; agents reading the
+    // unmatched envelope had to bridge or `--columns-mapping {}`
+    // empty cells they never touched. Post-fix, only populated cells
+    // count.
+    const sourceItemWithEmptyExtras = {
+      ...sampleItem,
+      column_values: [
+        // Has data — survives filter.
+        {
+          id: 'date4',
+          type: 'date',
+          text: '2026-05-01',
+          value: '{"date":"2026-05-01","time":null}',
+          column: { title: 'Due date' },
+        },
+        // Empty — drops out of filter.
+        {
+          id: 'status_4',
+          type: 'status',
+          text: null,
+          value: null,
+          column: { title: 'Status' },
+        },
+        // Empty (empty-string text + null value) — drops out.
+        {
+          id: 'notes',
+          type: 'long_text',
+          text: '',
+          value: null,
+          column: { title: 'Notes' },
+        },
+      ],
+    };
+    const movedCrossBoard = {
+      ...sourceItemWithEmptyExtras,
+      board: { id: '222' },
+    };
+    const out = await drive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sourceItemWithEmptyExtras] } },
+          },
+          sourceBoardMetadataInteraction,
+          targetBoardMetadataInteraction,
+          {
+            operation_name: 'ItemMoveToBoard',
+            match_variables: {
+              itemId: '12345',
+              boardId: '222',
+              groupId: 'topics',
+              // No `--columns-mapping` flag was passed, so the wire
+              // variable is null (Monday's permissive default — the
+              // verbatim ID matches happen server-side). The point of
+              // this test is that the unmatched check pre-mutation
+              // doesn't raise on the empty status_4 / notes cells; once
+              // it passes, the verb sends null to Monday because the
+              // agent didn't request an explicit override.
+              columnsMapping: null,
+            },
+            response: { data: { move_item_to_board: movedCrossBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
   it('cross-board: usage_error when source columns are unmatched and no mapping is supplied', async () => {
     // Source has `status_4`; target only has `status_42` + `date4`.
     // Without --columns-mapping, the strict default rejects.

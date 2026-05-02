@@ -9,8 +9,13 @@
  * opt-in) gets a focused assertion.
  */
 import { describe, expect, it } from 'vitest';
-import { planColumnMappings } from '../../../src/commands/item/move.js';
+import {
+  cellHasData,
+  collectSourceColumnIds,
+  planColumnMappings,
+} from '../../../src/commands/item/move.js';
 import { UsageError } from '../../../src/utils/errors.js';
+import type { ProjectedItem } from '../../../src/api/item-projection.js';
 
 const sourceCol = (id: string, title = id, type = 'text') => ({
   id,
@@ -192,5 +197,95 @@ describe('planColumnMappings', () => {
         'b',
       ]);
     }
+  });
+});
+
+describe('cellHasData / collectSourceColumnIds — Codex round-1 P1 (F1) regression', () => {
+  // Pre-fix `collectSourceColumnIds` returned every key in
+  // `source.columns` regardless of value emptiness, and the
+  // strict-default check fired for unmatched empty source columns
+  // even though Monday wouldn't carry their values across the move
+  // anyway. Post-fix, only populated cells (non-null `value` OR
+  // non-empty `text`) count toward the unmatched check.
+
+  it('cellHasData: true when value is non-null', () => {
+    expect(cellHasData({ value: { label: 'Done' }, text: null })).toBe(true);
+    expect(cellHasData({ value: 0, text: null })).toBe(true);
+    expect(cellHasData({ value: '', text: null })).toBe(true);
+    expect(cellHasData({ value: false, text: null })).toBe(true);
+  });
+
+  it('cellHasData: true when text is a non-empty string', () => {
+    expect(cellHasData({ value: null, text: 'Alice 5 mins ago' })).toBe(true);
+  });
+
+  it('cellHasData: false when both value and text are empty', () => {
+    expect(cellHasData({ value: null, text: null })).toBe(false);
+    expect(cellHasData({ value: null, text: '' })).toBe(false);
+    expect(cellHasData({ value: undefined, text: undefined })).toBe(false);
+  });
+
+  it('collectSourceColumnIds: drops empty cells', () => {
+    const item: ProjectedItem = {
+      id: '12345',
+      name: 'Refactor login',
+      board_id: '111',
+      group_id: 'topics',
+      parent_item_id: null,
+      state: 'active',
+      url: null,
+      created_at: null,
+      updated_at: null,
+      columns: {
+        // populated — value present.
+        date4: {
+          id: 'date4',
+          type: 'date',
+          text: '2026-05-01',
+          value: { date: '2026-05-01', time: null },
+        },
+        // populated — only text.
+        creation_log: {
+          id: 'creation_log',
+          type: 'creation_log',
+          text: 'Alice 5 minutes ago',
+          value: null,
+        },
+        // empty — both null.
+        status_4: {
+          id: 'status_4',
+          type: 'status',
+          text: null,
+          value: null,
+        },
+        // empty — empty string text.
+        notes: {
+          id: 'notes',
+          type: 'long_text',
+          text: '',
+          value: null,
+        },
+      },
+    };
+    expect(collectSourceColumnIds(item)).toEqual(['date4', 'creation_log']);
+  });
+
+  it('collectSourceColumnIds: returns empty array when every cell is empty', () => {
+    const item: ProjectedItem = {
+      id: '12345',
+      name: 'Empty item',
+      board_id: '111',
+      group_id: 'topics',
+      parent_item_id: null,
+      state: 'active',
+      url: null,
+      created_at: null,
+      updated_at: null,
+      columns: {
+        status_4: { id: 'status_4', type: 'status', text: null, value: null },
+        date4: { id: 'date4', type: 'date', text: null, value: null },
+      },
+    };
+    expect(collectSourceColumnIds(item)).toEqual([]);
   });
 });

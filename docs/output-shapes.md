@@ -832,10 +832,12 @@ Live envelope `data` is the §6.2 single-resource projection of the
 moved item — same shape as `item get` / archive / delete. For
 same-board moves the projection's `board_id` is unchanged
 (Monday's group move doesn't cross boards); for cross-board moves
-`board_id` reflects the target. Cross-board's `meta.source` may
-be `'live'` / `'cache'` / `'mixed'` because the source + target
-metadata loads can hit cache; same-board is unconditionally
-`'live'` (no metadata loads, no cache leg):
+`board_id` reflects the target. Cross-board's `meta.source` is
+`'live'` or `'mixed'` — the source-item read leg + the mutation
+leg are always live, so `'cache'` is impossible; the source +
+target board metadata loads can hit cache, which collapses the
+aggregate to `'mixed'` per §6.1 source-merge rules. Same-board is
+unconditionally `'live'` (no metadata loads, no cache leg):
 
 ```json
 {

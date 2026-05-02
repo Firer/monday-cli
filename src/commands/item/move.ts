@@ -267,18 +267,46 @@ const planColumnMappings = ({
 };
 
 /**
+ * Returns true when the projected column carries actual data — i.e.,
+ * a non-empty wire value or a non-empty human-readable `text`. Empty
+ * cells (no value, no text, or text === "") aren't worth mapping
+ * because Monday wouldn't carry a value across the move anyway.
+ *
+ * Why both `value` and `text`. `parseColumnValue` returns `null` for
+ * null/empty/malformed wire strings (Monday encodes column values as
+ * JSON strings; `value: null` and `value: ""` both project to a null
+ * `value`). But `text` can still be populated for read-only-shaped
+ * cells where the structured `value` is null but Monday computed a
+ * human form (e.g. `creation_log` rendering "Alice 5 minutes ago").
+ * Either signal counts as "has data" for the unmatched check —
+ * agents reading the strict-default error want a precise list of
+ * what would be dropped, not noise from empty cells they never
+ * touched.
+ */
+const cellHasData = (col: { readonly value?: unknown; readonly text?: string | null }): boolean => {
+  if (col.value !== null && col.value !== undefined) return true;
+  if (typeof col.text === 'string' && col.text.length > 0) return true;
+  return false;
+};
+
+/**
  * Builds the de-duplicated set of source column IDs the item has a
  * value in (i.e., the columns whose values would be lost without a
- * mapping). Empty values (Monday represents these as `null` or empty
- * objects depending on type) are excluded — there's nothing to map.
- *
- * Pulls from the projected item: `columns` is keyed by column ID, and
- * the projection drops cells whose `value` is null/empty. So the keys
- * of `columns` are exactly the columns with data the move could lose.
+ * mapping). The projection includes every wire `column_values` entry
+ * — even empty ones — so we filter here per `cellHasData`. Codex
+ * round-1 P1 (F1): pre-fix the function returned `Object.keys(source.
+ * columns)` and the strict-default check fired for empty unmatched
+ * source columns, blocking moves on otherwise-valid boards.
  */
 const collectSourceColumnIds = (
   source: ProjectedItem,
-): readonly string[] => Object.keys(source.columns);
+): readonly string[] => {
+  const ids: string[] = [];
+  for (const [id, col] of Object.entries(source.columns)) {
+    if (cellHasData(col)) ids.push(id);
+  }
+  return ids;
+};
 
 export const itemMoveCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -620,4 +648,4 @@ const runCrossBoardMove = async ({
 };
 
 // Re-export for unit tests.
-export { planColumnMappings };
+export { cellHasData, collectSourceColumnIds, planColumnMappings };
