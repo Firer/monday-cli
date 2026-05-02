@@ -54,19 +54,14 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
-import {
-  resolveColumnWithRefresh,
-  type ResolverWarning,
-} from '../../api/columns.js';
+import type { ResolverWarning } from '../../api/columns.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 import {
   bundleColumnValues,
-  translateColumnValueAsync,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
 import {
   parseSetRawExpression,
-  translateRawColumnValue,
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
@@ -80,10 +75,8 @@ import {
   mergeSourceWithPreflight,
   mergeCacheAge,
 } from '../../api/source-aggregator.js';
-import {
-  foldAndRemap,
-  foldResolverWarningsIntoError,
-} from '../../api/resolver-error-fold.js';
+import { resolveAndTranslate } from '../../api/resolution-pass.js';
+import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
@@ -830,216 +823,30 @@ export const itemCreateCommand: CommandModule<
           return;
         }
 
-        // Live create path. Resolve all tokens against `resolveBoardId`
-        // (top-level board OR subitems board), translate values,
-        // bundle into one column_values map, fire the single-round-
-        // trip mutation per cli-design §5.8.
-        const collectedWarnings: ResolverWarning[] = [];
-        const resolvedIds: Record<string, string> = {};
-        let aggregateSource: 'live' | 'cache' | 'mixed' | undefined = undefined;
-        let aggregateCacheAge: number | null = null;
-
-        interface ResolvedSet {
-          readonly kind: 'set';
-          readonly token: string;
-          readonly value: string;
-          readonly columnId: string;
-          readonly columnType: string;
-        }
-        interface ResolvedRaw {
-          readonly kind: 'raw';
-          readonly token: string;
-          readonly entry: ParsedSetRawExpression;
-          readonly columnId: string;
-          readonly columnType: string;
-        }
-        const resolved: (ResolvedSet | ResolvedRaw)[] = [];
-
-        // Pass (a-set): resolve every --set token. Same three-pass
-        // pattern as M5b's item update — resolve all first, then the
-        // cross-token duplicate-resolved-id check, then translate.
-        for (const entry of setEntries) {
-          if (resolvedIds[entry.token] !== undefined) {
-            // Caught at parse-time by checkDuplicateTokens; this is
-            // defence-in-depth for direct callers.
-            /* c8 ignore next 11 — argv-parse-time check fires first. */
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set entries target column token ` +
-                  `${JSON.stringify(entry.token)}.`,
-                { details: { token: entry.token } },
-              ),
-              collectedWarnings,
-            );
-          }
-          const resolution = await resolveColumnWithRefresh({
-            client,
-            boardId: resolveBoardId,
-            token: entry.token,
-            includeArchived: true,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
-          collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSource(aggregateSource, resolution.source);
-          if (
-            resolution.cacheAgeSeconds !== null &&
-            (aggregateCacheAge === null ||
-              resolution.cacheAgeSeconds > aggregateCacheAge)
-          ) {
-            aggregateCacheAge = resolution.cacheAgeSeconds;
-          }
-          if (resolution.match.column.archived === true) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'column_archived',
-                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-                  `${resolveBoardId} is archived. Monday rejects writes against ` +
-                  `archived columns; un-archive the column or pick a different target.`,
-                {
-                  details: {
-                    column_id: resolution.match.column.id,
-                    column_title: resolution.match.column.title,
-                    column_type: resolution.match.column.type,
-                    board_id: resolveBoardId,
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          resolved.push({
-            kind: 'set',
-            token: entry.token,
-            value: entry.value,
-            columnId: resolution.match.column.id,
-            columnType: resolution.match.column.type,
-          });
-          resolvedIds[entry.token] = resolution.match.column.id;
-        }
-
-        // Pass (a-raw): resolve every --set-raw token.
-        for (const entry of rawEntries) {
-          if (resolvedIds[entry.token] !== undefined) {
-            /* c8 ignore next 11 — argv-parse-time check fires first. */
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set / --set-raw entries target column token ` +
-                  `${JSON.stringify(entry.token)}.`,
-                { details: { token: entry.token } },
-              ),
-              collectedWarnings,
-            );
-          }
-          const resolution = await resolveColumnWithRefresh({
-            client,
-            boardId: resolveBoardId,
-            token: entry.token,
-            includeArchived: true,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
-          collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSource(aggregateSource, resolution.source);
-          if (
-            resolution.cacheAgeSeconds !== null &&
-            (aggregateCacheAge === null ||
-              resolution.cacheAgeSeconds > aggregateCacheAge)
-          ) {
-            aggregateCacheAge = resolution.cacheAgeSeconds;
-          }
-          if (resolution.match.column.archived === true) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'column_archived',
-                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-                  `${resolveBoardId} is archived. Monday rejects writes against ` +
-                  `archived columns; un-archive the column or pick a different target.`,
-                {
-                  details: {
-                    column_id: resolution.match.column.id,
-                    column_title: resolution.match.column.title,
-                    column_type: resolution.match.column.type,
-                    board_id: resolveBoardId,
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          resolved.push({
-            kind: 'raw',
-            token: entry.token,
-            entry,
-            columnId: resolution.match.column.id,
-            columnType: resolution.match.column.type,
-          });
-          resolvedIds[entry.token] = resolution.match.column.id;
-        }
-
-        // Pass (b): cross-token duplicate-resolved-ID check. Two
-        // distinct tokens (e.g. `status` and `id:status_4`) resolving
-        // to the same column ID surface as usage_error.
-        const seenColumnIds = new Set<string>();
-        for (const r of resolved) {
-          if (seenColumnIds.has(r.columnId)) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set / --set-raw entries resolve to the same ` +
-                  `column ID ${JSON.stringify(r.columnId)} (last token: ` +
-                  `${JSON.stringify(r.token)}). Pass at most one per column.`,
-                {
-                  details: {
-                    column_id: r.columnId,
-                    tokens: resolved
-                      .filter((x) => x.columnId === r.columnId)
-                      .map((x) => x.token),
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          seenColumnIds.add(r.columnId);
-        }
-
-        // Pass (c): translate. Each catch folds CUMULATIVE warnings.
-        const translated: TranslatedColumnValue[] = [];
-        for (const r of resolved) {
-          if (r.kind === 'set') {
-            try {
-              const t = await translateColumnValueAsync({
-                column: { id: r.columnId, type: r.columnType },
-                value: r.value,
-                dateResolution,
-                peopleResolution,
-              });
-              translated.push(t);
-            } catch (err) {
-              if (err instanceof MondayCliError) {
-                throw foldResolverWarningsIntoError(err, collectedWarnings);
-              }
-              throw err;
-            }
-          } else {
-            try {
-              const t = translateRawColumnValue(
-                { id: r.columnId, type: r.columnType },
-                r.entry.value,
-                r.entry.rawJson,
-              );
-              translated.push(t);
-            } catch (err) {
-              if (err instanceof MondayCliError) {
-                throw foldResolverWarningsIntoError(err, collectedWarnings);
-              }
-              throw err;
-            }
-          }
-        }
+        // Live create path. Three-pass resolution + translation
+        // through the shared helper (R20 lift), then bundle into one
+        // column_values map and fire the single-round-trip mutation
+        // per cli-design §5.8.
+        const resolutionResult = await resolveAndTranslate({
+          client,
+          boardId: resolveBoardId,
+          setEntries,
+          rawEntries,
+          dateResolution,
+          peopleResolution,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
+        const collectedWarnings: ResolverWarning[] = [
+          ...resolutionResult.warnings,
+        ];
+        const resolvedIds = resolutionResult.resolvedIds;
+        const aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
+          resolutionResult.source;
+        const aggregateCacheAge: number | null =
+          resolutionResult.cacheAgeSeconds;
+        const translated: readonly TranslatedColumnValue[] =
+          resolutionResult.translated;
 
         // Bundle into the column_values map (single-round-trip per
         // cli-design §5.8). When zero translated values, send `null`

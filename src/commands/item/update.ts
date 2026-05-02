@@ -50,30 +50,23 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
-import {
-  resolveColumnWithRefresh,
-  type ResolverWarning,
-} from '../../api/columns.js';
+import type { ResolverWarning } from '../../api/columns.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 import {
   selectMutation,
-  translateColumnValueAsync,
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
 import {
   parseSetRawExpression,
-  translateRawColumnValue,
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
 import { mergeSource, mergeCacheAge } from '../../api/source-aggregator.js';
-import {
-  foldAndRemap,
-  foldResolverWarningsIntoError,
-} from '../../api/resolver-error-fold.js';
+import { resolveAndTranslate } from '../../api/resolution-pass.js';
+import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
 import { buildQueryParams } from '../../api/filters.js';
 import {
@@ -412,236 +405,26 @@ export const itemUpdateCommand: CommandModule<
           return;
         }
 
-        // Live update path. Three-pass resolution (Codex M8 finding
-        // #2): resolve every token first, run the cross-token
-        // duplicate-resolved-ID check, then translate. Pre-fix,
-        // translation ran inline with resolution, so a `--set X=bad`
-        // alongside a `--set-raw X={...}` could surface the
-        // translation `usage_error` instead of the mutual-exclusion
-        // `usage_error` per cli-design §5.3 line 961-972.
-        //
-        // Codex pass-1 F2: track the per-leg resolution source so
-        // F4's `validation_failed` → `column_archived` remap fires
-        // correctly for cache-only legs (without warnings). A plain
-        // cache hit produces no warning but the `source` is `cache`
-        // — checking `collectedWarnings` for `stale_cache_refreshed`
-        // alone misses this branch.
-        const collectedWarnings: ResolverWarning[] = [];
-        const resolvedIds: Record<string, string> = {};
-        let aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
-          undefined;
-        // Track the max cache age across cache-served column-resolution
-        // legs so the success envelope's `meta.cache_age_seconds`
-        // reports worst-case staleness. Mirrors the bulk path's
-        // aggregator (~line 1095). Pre-fix this slot was hardcoded
-        // null, contradicting `meta.source: "mixed"` for cache-hit
-        // resolutions (Codex M5b finding #2).
-        let aggregateCacheAge: number | null = null;
-
-        interface ResolvedSetEntry {
-          readonly kind: 'set';
-          readonly token: string;
-          readonly value: string;
-          readonly columnId: string;
-          readonly columnType: string;
-        }
-        interface ResolvedRawEntry {
-          readonly kind: 'raw';
-          readonly token: string;
-          readonly entry: ParsedSetRawExpression;
-          readonly columnId: string;
-          readonly columnType: string;
-        }
-        const resolved: (ResolvedSetEntry | ResolvedRawEntry)[] = [];
-
-        // Pass (a-set): resolve every --set token.
-        for (const entry of setEntries) {
-          if (resolvedIds[entry.token] !== undefined) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set entries target column token ` +
-                  `${JSON.stringify(entry.token)}. Pass at most one --set ` +
-                  `per column; if two tokens resolve to the same column ID ` +
-                  `after NFC + case-fold normalisation, use the ` +
-                  `\`id:<column_id>\` prefix to disambiguate.`,
-                {
-                  details: {
-                    token: entry.token,
-                    resolved_id: resolvedIds[entry.token],
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          const resolution = await resolveColumnWithRefresh({
-            client,
-            boardId,
-            token: entry.token,
-            includeArchived: true,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
-          collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSource(aggregateSource, resolution.source);
-          aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
-
-          if (resolution.match.column.archived === true) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'column_archived',
-                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-                  `${boardId} is archived. Monday rejects mutations against ` +
-                  `archived columns; un-archive the column in Monday or pick ` +
-                  `a different target.`,
-                {
-                  details: {
-                    column_id: resolution.match.column.id,
-                    column_title: resolution.match.column.title,
-                    column_type: resolution.match.column.type,
-                    board_id: boardId,
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-
-          resolved.push({
-            kind: 'set',
-            token: entry.token,
-            value: entry.value,
-            columnId: resolution.match.column.id,
-            columnType: resolution.match.column.type,
-          });
-          resolvedIds[entry.token] = resolution.match.column.id;
-        }
-
-        // Pass (a-raw): resolve every --set-raw token. Same-token
-        // duplicates within raw OR shared with friendly --set surface
-        // as usage_error (cli-design §5.3 line 961-972).
-        for (const entry of rawEntries) {
-          if (resolvedIds[entry.token] !== undefined) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set / --set-raw entries target column token ` +
-                  `${JSON.stringify(entry.token)}. Pass at most one per ` +
-                  `column; if two tokens resolve to the same column ID ` +
-                  `after NFC + case-fold normalisation, use the ` +
-                  `\`id:<column_id>\` prefix to disambiguate.`,
-                {
-                  details: {
-                    token: entry.token,
-                    resolved_id: resolvedIds[entry.token],
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          const resolution = await resolveColumnWithRefresh({
-            client,
-            boardId,
-            token: entry.token,
-            includeArchived: true,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
-          collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSource(aggregateSource, resolution.source);
-          aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
-          if (resolution.match.column.archived === true) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'column_archived',
-                `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-                  `${boardId} is archived. Monday rejects mutations against ` +
-                  `archived columns; un-archive the column in Monday or pick ` +
-                  `a different target.`,
-                {
-                  details: {
-                    column_id: resolution.match.column.id,
-                    column_title: resolution.match.column.title,
-                    column_type: resolution.match.column.type,
-                    board_id: boardId,
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-
-          resolved.push({
-            kind: 'raw',
-            token: entry.token,
-            entry,
-            columnId: resolution.match.column.id,
-            columnType: resolution.match.column.type,
-          });
-          resolvedIds[entry.token] = resolution.match.column.id;
-        }
-
-        // Pass (b): cross-token duplicate-resolved-ID check.
-        const seenColumnIds = new Set<string>();
-        for (const r of resolved) {
-          if (seenColumnIds.has(r.columnId)) {
-            throw foldResolverWarningsIntoError(
-              new ApiError(
-                'usage_error',
-                `Multiple --set / --set-raw entries resolve to the same ` +
-                  `column ID ${JSON.stringify(r.columnId)} (last token: ` +
-                  `${JSON.stringify(r.token)}). Pass at most one per column.`,
-                {
-                  details: {
-                    column_id: r.columnId,
-                    tokens: resolved
-                      .filter((x) => x.columnId === r.columnId)
-                      .map((x) => x.token),
-                  },
-                },
-              ),
-              collectedWarnings,
-            );
-          }
-          seenColumnIds.add(r.columnId);
-        }
-
-        // Pass (c): translate. Each catch folds CUMULATIVE warnings.
-        const translated: TranslatedColumnValue[] = [];
-        for (const r of resolved) {
-          if (r.kind === 'set') {
-            try {
-              const t = await translateColumnValueAsync({
-                column: { id: r.columnId, type: r.columnType },
-                value: r.value,
-                dateResolution,
-                peopleResolution,
-              });
-              translated.push(t);
-            } catch (err) {
-              if (err instanceof MondayCliError) {
-                throw foldResolverWarningsIntoError(err, collectedWarnings);
-              }
-              throw err;
-            }
-          } else {
-            try {
-              const t = translateRawColumnValue(
-                { id: r.columnId, type: r.columnType },
-                r.entry.value,
-                r.entry.rawJson,
-              );
-              translated.push(t);
-            } catch (err) {
-              if (err instanceof MondayCliError) {
-                throw foldResolverWarningsIntoError(err, collectedWarnings);
-              }
-              throw err;
-            }
-          }
-        }
+        // Live update path — three-pass resolution + translation
+        // through the shared helper (R20 lift).
+        const resolutionResult = await resolveAndTranslate({
+          client,
+          boardId,
+          setEntries,
+          rawEntries,
+          dateResolution,
+          peopleResolution,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
+        const collectedWarnings: ResolverWarning[] = [
+          ...resolutionResult.warnings,
+        ];
+        const resolvedIds = resolutionResult.resolvedIds;
+        const aggregateSource = resolutionResult.source;
+        const aggregateCacheAge = resolutionResult.cacheAgeSeconds;
+        const translated: readonly TranslatedColumnValue[] =
+          resolutionResult.translated;
 
         // Build the final SelectedMutation. When `--name` is set,
         // a synthetic translated value (columnId: "name",
@@ -1224,229 +1007,42 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // `usage_error` instead of the mutual-exclusion `usage_error` per
   // cli-design §5.3 line 961-972.
   //
+  // Three-pass resolution + translation through the shared helper
+  // (R20 lift). The board-metadata leg's source / cacheAge seed the
+  // aggregator so a cache-served metadata fetch promotes the final
+  // envelope source to `mixed` when subsequent resolution legs hit
+  // live (Codex M8 finding #3).
+  //
   // `collectedWarnings` is the union of filter warnings + resolver
   // warnings, surfaced on the success envelope. `resolverWarnings`
   // is the narrowed subset used by foldResolverWarningsIntoError —
   // the helper's contract is to fold collision / stale_cache_refreshed
   // signals, not generic Warning types.
-  const collectedWarnings: Warning[] = [...filterResult.warnings];
-  const resolverWarnings: ResolverWarning[] = [];
-  const resolvedIds: Record<string, string> = {};
-  let aggregateSource: 'live' | 'cache' | 'mixed' =
-    meta.source === 'cache' ? 'cache' : 'live';
-  // Codex M8 finding #3: track max cacheAge across cache-served
-  // resolution legs. Pre-fix, the bulk envelope reported only
-  // `meta.cacheAgeSeconds`, which is null when metadata was loaded
-  // live. On a cold-cache run (live metadata fetch populates the
-  // cache, then per-token resolution hits cache), `meta.source`
-  // promotes to `mixed` correctly via `aggregateSource`, but
-  // `meta.cache_age_seconds: null` contradicted the `mixed` source.
-  // Mirrors the single-item aggregator at the top of the action.
-  let aggregateCacheAge: number | null = meta.cacheAgeSeconds;
-
-  interface ResolvedSetEntry {
-    readonly kind: 'set';
-    readonly token: string;
-    readonly value: string;
-    readonly columnId: string;
-    readonly columnType: string;
-  }
-  interface ResolvedRawEntry {
-    readonly kind: 'raw';
-    readonly token: string;
-    readonly entry: ParsedSetRawExpression;
-    readonly columnId: string;
-    readonly columnType: string;
-  }
-  const resolved: (ResolvedSetEntry | ResolvedRawEntry)[] = [];
-
-  // Pass (a-set): resolve every --set token.
-  for (const entry of setEntries) {
-    if (resolvedIds[entry.token] !== undefined) {
-      throw foldResolverWarningsIntoError(
-        new ApiError(
-          'usage_error',
-          `Multiple --set entries target column token ` +
-            `${JSON.stringify(entry.token)}. Pass at most one --set per ` +
-            `column; if two tokens resolve to the same column ID after NFC ` +
-            `+ case-fold normalisation, use the \`id:<column_id>\` prefix ` +
-            `to disambiguate.`,
-          {
-            details: {
-              token: entry.token,
-              resolved_id: resolvedIds[entry.token],
-            },
-          },
-        ),
-        resolverWarnings,
-      );
-    }
-    const resolution = await resolveColumnWithRefresh({
-      client,
-      boardId,
-      token: entry.token,
-      includeArchived: true,
-      env: ctx.env,
-      noCache: globalFlags.noCache,
-    });
-    collectedWarnings.push(...resolution.warnings);
-    resolverWarnings.push(...resolution.warnings);
-    aggregateSource = mergeSource(aggregateSource, resolution.source);
-    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
-    if (resolution.match.column.archived === true) {
-      throw foldResolverWarningsIntoError(
-        new ApiError(
-          'column_archived',
-          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-            `${boardId} is archived.`,
-          {
-            details: {
-              column_id: resolution.match.column.id,
-              column_title: resolution.match.column.title,
-              column_type: resolution.match.column.type,
-              board_id: boardId,
-            },
-          },
-        ),
-        resolverWarnings,
-      );
-    }
-    resolved.push({
-      kind: 'set',
-      token: entry.token,
-      value: entry.value,
-      columnId: resolution.match.column.id,
-      columnType: resolution.match.column.type,
-    });
-    resolvedIds[entry.token] = resolution.match.column.id;
-  }
-
-  // Pass (a-raw): resolve every --set-raw token. M8 escape hatch.
-  // Same-token duplicates within raw OR shared with a friendly --set
-  // entry surface as usage_error per cli-design §5.3 line 961-972.
-  for (const entry of rawEntries) {
-    if (resolvedIds[entry.token] !== undefined) {
-      throw foldResolverWarningsIntoError(
-        new ApiError(
-          'usage_error',
-          `Multiple --set / --set-raw entries target column token ` +
-            `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
-            `if two tokens resolve to the same column ID after NFC + ` +
-            `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
-            `disambiguate.`,
-          {
-            details: {
-              token: entry.token,
-              resolved_id: resolvedIds[entry.token],
-            },
-          },
-        ),
-        resolverWarnings,
-      );
-    }
-    const resolution = await resolveColumnWithRefresh({
-      client,
-      boardId,
-      token: entry.token,
-      includeArchived: true,
-      env: ctx.env,
-      noCache: globalFlags.noCache,
-    });
-    collectedWarnings.push(...resolution.warnings);
-    resolverWarnings.push(...resolution.warnings);
-    aggregateSource = mergeSource(aggregateSource, resolution.source);
-    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
-    if (resolution.match.column.archived === true) {
-      throw foldResolverWarningsIntoError(
-        new ApiError(
-          'column_archived',
-          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
-            `${boardId} is archived.`,
-          {
-            details: {
-              column_id: resolution.match.column.id,
-              column_title: resolution.match.column.title,
-              column_type: resolution.match.column.type,
-              board_id: boardId,
-            },
-          },
-        ),
-        resolverWarnings,
-      );
-    }
-    resolved.push({
-      kind: 'raw',
-      token: entry.token,
-      entry,
-      columnId: resolution.match.column.id,
-      columnType: resolution.match.column.type,
-    });
-    resolvedIds[entry.token] = resolution.match.column.id;
-  }
-
-  // Pass (b): cross-token duplicate-resolved-ID check. Distinct
-  // tokens (e.g. `status` and `id:status_4`) resolving to the same
-  // column ID, OR a friendly + raw pair targeting the same resolved
-  // column, surface as usage_error pre-translation.
-  const seenColumnIds = new Set<string>();
-  for (const r of resolved) {
-    if (seenColumnIds.has(r.columnId)) {
-      throw foldResolverWarningsIntoError(
-        new ApiError(
-          'usage_error',
-          `Multiple --set / --set-raw entries resolve to the same column ID ` +
-            `${JSON.stringify(r.columnId)} (last token: ` +
-            `${JSON.stringify(r.token)}). Pass at most one per column.`,
-          {
-            details: {
-              column_id: r.columnId,
-              tokens: resolved
-                .filter((x) => x.columnId === r.columnId)
-                .map((x) => x.token),
-            },
-          },
-        ),
-        resolverWarnings,
-      );
-    }
-    seenColumnIds.add(r.columnId);
-  }
-
-  // Pass (c): translate. Each catch folds CUMULATIVE
-  // resolverWarnings.
-  const translated: TranslatedColumnValue[] = [];
-  for (const r of resolved) {
-    if (r.kind === 'set') {
-      try {
-        const t = await translateColumnValueAsync({
-          column: { id: r.columnId, type: r.columnType },
-          value: r.value,
-          dateResolution,
-          peopleResolution,
-        });
-        translated.push(t);
-      } catch (err) {
-        if (err instanceof MondayCliError) {
-          throw foldResolverWarningsIntoError(err, resolverWarnings);
-        }
-        throw err;
-      }
-    } else {
-      try {
-        const t = translateRawColumnValue(
-          { id: r.columnId, type: r.columnType },
-          r.entry.value,
-          r.entry.rawJson,
-        );
-        translated.push(t);
-      } catch (err) {
-        if (err instanceof MondayCliError) {
-          throw foldResolverWarningsIntoError(err, resolverWarnings);
-        }
-        throw err;
-      }
-    }
-  }
+  const resolutionResult = await resolveAndTranslate({
+    client,
+    boardId,
+    setEntries,
+    rawEntries,
+    dateResolution,
+    peopleResolution,
+    env: ctx.env,
+    noCache: globalFlags.noCache,
+    initialSource: meta.source,
+    initialCacheAgeSeconds: meta.cacheAgeSeconds,
+  });
+  const collectedWarnings: Warning[] = [
+    ...filterResult.warnings,
+    ...resolutionResult.warnings,
+  ];
+  const resolverWarnings: ResolverWarning[] = [...resolutionResult.warnings];
+  const resolvedIds = resolutionResult.resolvedIds;
+  const aggregateSource: 'live' | 'cache' | 'mixed' =
+    /* c8 ignore next — defensive: initialSource seeded above so the
+       aggregate is always defined post-helper. */
+    resolutionResult.source ?? meta.source;
+  const aggregateCacheAge: number | null = resolutionResult.cacheAgeSeconds;
+  const translated: readonly TranslatedColumnValue[] =
+    resolutionResult.translated;
 
   const allTranslated: readonly TranslatedColumnValue[] =
     parsed.name === undefined
