@@ -518,6 +518,71 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.error?.details?.board_id).toBe('111');
   });
 
+  it('live: cold-cache metadata + live walk + cache-served column resolution → mixed source + non-null cache_age_seconds (Codex M8 finding #3)', async () => {
+    // Pre-fix, the bulk envelope reported `cache_age_seconds:
+    // meta.cacheAgeSeconds`, which is null when metadata loaded
+    // live. On a cold-cache run, the FIRST leg (metadata fetch) is
+    // live, but the per-token column resolution then hits the
+    // freshly-populated cache → resolution.source === 'cache'. The
+    // aggregate `meta.source` correctly promotes to `mixed`, but
+    // `cache_age_seconds: null` contradicted the `mixed` value.
+    // Post-fix, the bulk path tracks `aggregateCacheAge` across
+    // resolution legs (mirroring the single-item path) so the
+    // envelope reports a non-null cache age whenever any resolution
+    // leg served from cache.
+    //
+    // No cache pre-warm: BoardMetadata fires live; per-token
+    // resolution then hits the populated cache.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          // BoardMetadata fires live (cold cache).
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    // meta.source promotes to 'mixed' (column resolution served from
+    // the freshly-populated cache).
+    expect(env.meta.source).toBe('mixed');
+    // Cache age must be non-null to be coherent with `mixed` source.
+    // Pre-fix this was null (`meta.cacheAgeSeconds` for a live load).
+    expect(env.meta.cache_age_seconds).not.toBeNull();
+    expect(typeof env.meta.cache_age_seconds).toBe('number');
+  });
+
   it('live: cached metadata + live walk → source: "mixed" with cache_age_seconds', async () => {
     // Codex pass-2: bulk live envelope must aggregate source per
     // §6.1. Cache-served metadata + live items_page walk + live

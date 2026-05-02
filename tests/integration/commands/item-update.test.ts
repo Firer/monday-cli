@@ -1259,6 +1259,79 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('mutual-exclusion across distinct tokens (--set <title> + --set-raw <id:colid>) fires pre-translation', async () => {
+    // Different token strings, same resolved column ID — the
+    // cross-token duplicate-resolved-ID check (pass b) catches
+    // this even when the same-token check (pass a) doesn't.
+    // Validates the new resolution-before-translation pipeline
+    // covers the cli-design §5.3 line 961-972 mutual-exclusion
+    // contract for the title-vs-id-prefix alias case.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--set-raw',
+        'id:status_4={"label":"Doing"}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; message: string; details?: { tokens?: string[] } };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/resolve to the same column ID/);
+    // `details.tokens` is redacted by the secrets-scrubber (the
+    // `tokens` key matches the default sensitive-key regex so the
+    // value emerges as `[REDACTED]`); the message text is the
+    // observable contract.
+  });
+
+  it('mutual-exclusion fires before translation when friendly value would error (Codex M8 finding #2)', async () => {
+    // Pre-fix, translation ran inline with resolution: a `--set
+    // date4=not-a-real-date --set-raw date4='{...}'` surfaced the
+    // date translator's `usage_error` because the friendly entry
+    // translated FIRST, and the raw entry's same-token duplicate
+    // check never fired. Post-fix, all tokens resolve before any
+    // translation, so the same-token duplicate check on the raw
+    // pass surfaces the mutual-exclusion `usage_error` per
+    // cli-design §5.3 line 961-972 instead of the translator's
+    // bad-input error.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'date4=not-a-real-date',
+        '--set-raw',
+        'date4={"date":"2026-05-15"}',
+        '--board',
+        '111',
+        '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; message: string };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    // Mutual-exclusion message (not the date-translator's
+    // bad-input message). The token name "date4" appears in the
+    // mutual-exclusion message too, so the discriminating signal
+    // is the prefix and the absence of translator-specific phrases
+    // ("not a valid", "relative token", etc.).
+    expect(env.error?.message).toMatch(/Multiple --set/);
+    expect(env.error?.message).not.toMatch(/not a valid|relative token|ISO date/);
+  });
+
   it('--set-raw with --dry-run echoes parsed JsonObject in diff `to`', async () => {
     const out = await drive(
       [

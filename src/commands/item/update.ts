@@ -502,10 +502,13 @@ export const itemUpdateCommand: CommandModule<
           return;
         }
 
-        // Live update path. Resolve every column token in one batch
-        // before translating, so the agent sees one cumulative
-        // resolution-error envelope rather than partial-progress
-        // surprises across the array.
+        // Live update path. Three-pass resolution (Codex M8 finding
+        // #2): resolve every token first, run the cross-token
+        // duplicate-resolved-ID check, then translate. Pre-fix,
+        // translation ran inline with resolution, so a `--set X=bad`
+        // alongside a `--set-raw X={...}` could surface the
+        // translation `usage_error` instead of the mutual-exclusion
+        // `usage_error` per cli-design §5.3 line 961-972.
         //
         // Codex pass-1 F2: track the per-leg resolution source so
         // F4's `validation_failed` → `column_archived` remap fires
@@ -514,7 +517,6 @@ export const itemUpdateCommand: CommandModule<
         // — checking `collectedWarnings` for `stale_cache_refreshed`
         // alone misses this branch.
         const collectedWarnings: ResolverWarning[] = [];
-        const translated: TranslatedColumnValue[] = [];
         const resolvedIds: Record<string, string> = {};
         let aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
           undefined;
@@ -525,7 +527,44 @@ export const itemUpdateCommand: CommandModule<
         // null, contradicting `meta.source: "mixed"` for cache-hit
         // resolutions (Codex M5b finding #2).
         let aggregateCacheAge: number | null = null;
+
+        interface ResolvedSetEntry {
+          readonly kind: 'set';
+          readonly token: string;
+          readonly value: string;
+          readonly columnId: string;
+          readonly columnType: string;
+        }
+        interface ResolvedRawEntry {
+          readonly kind: 'raw';
+          readonly token: string;
+          readonly entry: ParsedSetRawExpression;
+          readonly columnId: string;
+          readonly columnType: string;
+        }
+        const resolved: (ResolvedSetEntry | ResolvedRawEntry)[] = [];
+
+        // Pass (a-set): resolve every --set token.
         for (const entry of setEntries) {
+          if (resolvedIds[entry.token] !== undefined) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set entries target column token ` +
+                  `${JSON.stringify(entry.token)}. Pass at most one --set ` +
+                  `per column; if two tokens resolve to the same column ID ` +
+                  `after NFC + case-fold normalisation, use the ` +
+                  `\`id:<column_id>\` prefix to disambiguate.`,
+                {
+                  details: {
+                    token: entry.token,
+                    resolved_id: resolvedIds[entry.token],
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
           const resolution = await resolveColumnWithRefresh({
             client,
             boardId,
@@ -565,35 +604,39 @@ export const itemUpdateCommand: CommandModule<
             );
           }
 
-          try {
-            const t = await translateColumnValueAsync({
-              column: {
-                id: resolution.match.column.id,
-                type: resolution.match.column.type,
-              },
-              value: entry.value,
-              dateResolution,
-              peopleResolution,
-            });
-            translated.push(t);
-            resolvedIds[entry.token] = resolution.match.column.id;
-          } catch (err) {
-            if (err instanceof MondayCliError) {
-              throw foldResolverWarningsIntoError(err, collectedWarnings);
-            }
-            throw err;
-          }
+          resolved.push({
+            kind: 'set',
+            token: entry.token,
+            value: entry.value,
+            columnId: resolution.match.column.id,
+            columnType: resolution.match.column.type,
+          });
+          resolvedIds[entry.token] = resolution.match.column.id;
         }
 
-        // M8 raw entries: same shape as the friendly loop above —
-        // resolve, archived-check, translate via the raw-write helper
-        // (which runs the read-only-forever / files-shaped reject
-        // lists), push into the same `translated` array. Order:
-        // friendly first (preserving argv order), then raw
-        // (preserving argv order). selectMutation handles both kinds
-        // uniformly; the duplicate-column-id check catches --set vs
-        // --set-raw collisions per cli-design §5.3 line 961-972.
+        // Pass (a-raw): resolve every --set-raw token. Same-token
+        // duplicates within raw OR shared with friendly --set surface
+        // as usage_error (cli-design §5.3 line 961-972).
         for (const entry of rawEntries) {
+          if (resolvedIds[entry.token] !== undefined) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set / --set-raw entries target column token ` +
+                  `${JSON.stringify(entry.token)}. Pass at most one per ` +
+                  `column; if two tokens resolve to the same column ID ` +
+                  `after NFC + case-fold normalisation, use the ` +
+                  `\`id:<column_id>\` prefix to disambiguate.`,
+                {
+                  details: {
+                    token: entry.token,
+                    resolved_id: resolvedIds[entry.token],
+                  },
+                },
+              ),
+              collectedWarnings,
+            );
+          }
           const resolution = await resolveColumnWithRefresh({
             client,
             boardId,
@@ -631,22 +674,74 @@ export const itemUpdateCommand: CommandModule<
               collectedWarnings,
             );
           }
-          try {
-            const t = translateRawColumnValue(
-              {
-                id: resolution.match.column.id,
-                type: resolution.match.column.type,
-              },
-              entry.value,
-              entry.rawJson,
+
+          resolved.push({
+            kind: 'raw',
+            token: entry.token,
+            entry,
+            columnId: resolution.match.column.id,
+            columnType: resolution.match.column.type,
+          });
+          resolvedIds[entry.token] = resolution.match.column.id;
+        }
+
+        // Pass (b): cross-token duplicate-resolved-ID check.
+        const seenColumnIds = new Set<string>();
+        for (const r of resolved) {
+          if (seenColumnIds.has(r.columnId)) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'usage_error',
+                `Multiple --set / --set-raw entries resolve to the same ` +
+                  `column ID ${JSON.stringify(r.columnId)} (last token: ` +
+                  `${JSON.stringify(r.token)}). Pass at most one per column.`,
+                {
+                  details: {
+                    column_id: r.columnId,
+                    tokens: resolved
+                      .filter((x) => x.columnId === r.columnId)
+                      .map((x) => x.token),
+                  },
+                },
+              ),
+              collectedWarnings,
             );
-            translated.push(t);
-            resolvedIds[entry.token] = resolution.match.column.id;
-          } catch (err) {
-            if (err instanceof MondayCliError) {
-              throw foldResolverWarningsIntoError(err, collectedWarnings);
+          }
+          seenColumnIds.add(r.columnId);
+        }
+
+        // Pass (c): translate. Each catch folds CUMULATIVE warnings.
+        const translated: TranslatedColumnValue[] = [];
+        for (const r of resolved) {
+          if (r.kind === 'set') {
+            try {
+              const t = await translateColumnValueAsync({
+                column: { id: r.columnId, type: r.columnType },
+                value: r.value,
+                dateResolution,
+                peopleResolution,
+              });
+              translated.push(t);
+            } catch (err) {
+              if (err instanceof MondayCliError) {
+                throw foldResolverWarningsIntoError(err, collectedWarnings);
+              }
+              throw err;
             }
-            throw err;
+          } else {
+            try {
+              const t = translateRawColumnValue(
+                { id: r.columnId, type: r.columnType },
+                r.entry.value,
+                r.entry.rawJson,
+              );
+              translated.push(t);
+            } catch (err) {
+              if (err instanceof MondayCliError) {
+                throw foldResolverWarningsIntoError(err, collectedWarnings);
+              }
+              throw err;
+            }
           }
         }
 
@@ -1270,6 +1365,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //    once, then fire the same SelectedMutation against every
   //    matched item.
   //
+  // Three-pass resolution (Codex M8 finding #2): resolve every token
+  // first, run the cross-token duplicate-resolved-ID check, then
+  // translate. Pre-fix, translation ran inline, so a `--set X=bad`
+  // alongside a `--set-raw X={...}` could surface the translation
+  // `usage_error` instead of the mutual-exclusion `usage_error` per
+  // cli-design §5.3 line 961-972.
+  //
   // `collectedWarnings` is the union of filter warnings + resolver
   // warnings, surfaced on the success envelope. `resolverWarnings`
   // is the narrowed subset used by foldResolverWarningsIntoError —
@@ -1277,11 +1379,56 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // signals, not generic Warning types.
   const collectedWarnings: Warning[] = [...filterResult.warnings];
   const resolverWarnings: ResolverWarning[] = [];
-  const translated: TranslatedColumnValue[] = [];
   const resolvedIds: Record<string, string> = {};
   let aggregateSource: 'live' | 'cache' | 'mixed' =
     meta.source === 'cache' ? 'cache' : 'live';
+  // Codex M8 finding #3: track max cacheAge across cache-served
+  // resolution legs. Pre-fix, the bulk envelope reported only
+  // `meta.cacheAgeSeconds`, which is null when metadata was loaded
+  // live. On a cold-cache run (live metadata fetch populates the
+  // cache, then per-token resolution hits cache), `meta.source`
+  // promotes to `mixed` correctly via `aggregateSource`, but
+  // `meta.cache_age_seconds: null` contradicted the `mixed` source.
+  // Mirrors the single-item aggregator at the top of the action.
+  let aggregateCacheAge: number | null = meta.cacheAgeSeconds;
+
+  interface ResolvedSetEntry {
+    readonly kind: 'set';
+    readonly token: string;
+    readonly value: string;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  interface ResolvedRawEntry {
+    readonly kind: 'raw';
+    readonly token: string;
+    readonly entry: ParsedSetRawExpression;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  const resolved: (ResolvedSetEntry | ResolvedRawEntry)[] = [];
+
+  // Pass (a-set): resolve every --set token.
   for (const entry of setEntries) {
+    if (resolvedIds[entry.token] !== undefined) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set entries target column token ` +
+            `${JSON.stringify(entry.token)}. Pass at most one --set per ` +
+            `column; if two tokens resolve to the same column ID after NFC ` +
+            `+ case-fold normalisation, use the \`id:<column_id>\` prefix ` +
+            `to disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        resolverWarnings,
+      );
+    }
     const resolution = await resolveColumnWithRefresh({
       client,
       boardId,
@@ -1293,6 +1440,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     collectedWarnings.push(...resolution.warnings);
     resolverWarnings.push(...resolution.warnings);
     aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
+    if (
+      resolution.cacheAgeSeconds !== null &&
+      (aggregateCacheAge === null ||
+        resolution.cacheAgeSeconds > aggregateCacheAge)
+    ) {
+      aggregateCacheAge = resolution.cacheAgeSeconds;
+    }
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
         new ApiError(
@@ -1311,33 +1465,39 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         resolverWarnings,
       );
     }
-    try {
-      const t = await translateColumnValueAsync({
-        column: {
-          id: resolution.match.column.id,
-          type: resolution.match.column.type,
-        },
-        value: entry.value,
-        dateResolution,
-        peopleResolution,
-      });
-      translated.push(t);
-      resolvedIds[entry.token] = resolution.match.column.id;
-    } catch (err) {
-      if (err instanceof MondayCliError) {
-        throw foldResolverWarningsIntoError(err, resolverWarnings);
-      }
-      throw err;
-    }
+    resolved.push({
+      kind: 'set',
+      token: entry.token,
+      value: entry.value,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
+    });
+    resolvedIds[entry.token] = resolution.match.column.id;
   }
 
-  // M8 raw entries: same shape as the friendly loop above. Resolved
-  // once across the whole bulk batch (column resolution doesn't vary
-  // per item); translateRawColumnValue runs the read-only-forever /
-  // files-shaped reject lists post-resolution. selectMutation handles
-  // both kinds uniformly; the duplicate-column-id check catches
-  // --set vs --set-raw collisions per cli-design §5.3 line 961-972.
+  // Pass (a-raw): resolve every --set-raw token. M8 escape hatch.
+  // Same-token duplicates within raw OR shared with a friendly --set
+  // entry surface as usage_error per cli-design §5.3 line 961-972.
   for (const entry of rawEntries) {
+    if (resolvedIds[entry.token] !== undefined) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries target column token ` +
+            `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
+            `if two tokens resolve to the same column ID after NFC + ` +
+            `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
+            `disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        resolverWarnings,
+      );
+    }
     const resolution = await resolveColumnWithRefresh({
       client,
       boardId,
@@ -1349,6 +1509,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     collectedWarnings.push(...resolution.warnings);
     resolverWarnings.push(...resolution.warnings);
     aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
+    if (
+      resolution.cacheAgeSeconds !== null &&
+      (aggregateCacheAge === null ||
+        resolution.cacheAgeSeconds > aggregateCacheAge)
+    ) {
+      aggregateCacheAge = resolution.cacheAgeSeconds;
+    }
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
         new ApiError(
@@ -1367,22 +1534,77 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         resolverWarnings,
       );
     }
-    try {
-      const t = translateRawColumnValue(
-        {
-          id: resolution.match.column.id,
-          type: resolution.match.column.type,
-        },
-        entry.value,
-        entry.rawJson,
+    resolved.push({
+      kind: 'raw',
+      token: entry.token,
+      entry,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
+    });
+    resolvedIds[entry.token] = resolution.match.column.id;
+  }
+
+  // Pass (b): cross-token duplicate-resolved-ID check. Distinct
+  // tokens (e.g. `status` and `id:status_4`) resolving to the same
+  // column ID, OR a friendly + raw pair targeting the same resolved
+  // column, surface as usage_error pre-translation.
+  const seenColumnIds = new Set<string>();
+  for (const r of resolved) {
+    if (seenColumnIds.has(r.columnId)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries resolve to the same column ID ` +
+            `${JSON.stringify(r.columnId)} (last token: ` +
+            `${JSON.stringify(r.token)}). Pass at most one per column.`,
+          {
+            details: {
+              column_id: r.columnId,
+              tokens: resolved
+                .filter((x) => x.columnId === r.columnId)
+                .map((x) => x.token),
+            },
+          },
+        ),
+        resolverWarnings,
       );
-      translated.push(t);
-      resolvedIds[entry.token] = resolution.match.column.id;
-    } catch (err) {
-      if (err instanceof MondayCliError) {
-        throw foldResolverWarningsIntoError(err, resolverWarnings);
+    }
+    seenColumnIds.add(r.columnId);
+  }
+
+  // Pass (c): translate. Each catch folds CUMULATIVE
+  // resolverWarnings.
+  const translated: TranslatedColumnValue[] = [];
+  for (const r of resolved) {
+    if (r.kind === 'set') {
+      try {
+        const t = await translateColumnValueAsync({
+          column: { id: r.columnId, type: r.columnType },
+          value: r.value,
+          dateResolution,
+          peopleResolution,
+        });
+        translated.push(t);
+      } catch (err) {
+        if (err instanceof MondayCliError) {
+          throw foldResolverWarningsIntoError(err, resolverWarnings);
+        }
+        throw err;
       }
-      throw err;
+    } else {
+      try {
+        const t = translateRawColumnValue(
+          { id: r.columnId, type: r.columnType },
+          r.entry.value,
+          r.entry.rawJson,
+        );
+        translated.push(t);
+      } catch (err) {
+        if (err instanceof MondayCliError) {
+          throw foldResolverWarningsIntoError(err, resolverWarnings);
+        }
+        throw err;
+      }
     }
   }
 
@@ -1507,7 +1729,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     programOpts,
     warnings: collectedWarnings,
     source: finalSource,
-    cacheAgeSeconds: meta.cacheAgeSeconds,
+    cacheAgeSeconds: aggregateCacheAge,
     apiVersion,
     resolvedIds,
   });

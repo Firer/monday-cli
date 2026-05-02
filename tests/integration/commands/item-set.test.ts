@@ -1481,3 +1481,343 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     });
   });
 });
+
+describe('monday item set — M8 firm row wire-shape pins (link / email / phone)', () => {
+  // Per Codex M8 finding #6: each new friendly translator gets a
+  // `match_variables`-pinned cassette through `item set` so a
+  // future translator regression (wrong key, missing field,
+  // double-encoded JSON) fails the integration suite. Mirrors the
+  // M5b pin pattern for status / dropdown / date / people.
+
+  it('link (pipe form): --set <col>=<url>|<text> wires {url, text}', async () => {
+    const linkBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'site_1',
+          title: 'Site',
+          type: 'link',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'site_1=https://example.com|Example',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [linkBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            // Wire-shape pin: link translator emits {url, text}
+            // verbatim under `value` (Monday's JSON scalar).
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'site_1',
+              value: { url: 'https://example.com', text: 'Example' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'site_1',
+                      type: 'link',
+                      text: 'Example',
+                      value: '{"url":"https://example.com","text":"Example"}',
+                      column: { title: 'Site' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ site_1: 'site_1' });
+  });
+
+  it('link (single-segment URL): --set <col>=<url> wires {url, text:<url>}', async () => {
+    // text defaults to the URL when no `|<text>` segment is given.
+    const linkBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'site_1',
+          title: 'Site',
+          type: 'link',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'site_1=https://example.com',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [linkBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'site_1',
+              value: { url: 'https://example.com', text: 'https://example.com' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'site_1',
+                      type: 'link',
+                      text: 'https://example.com',
+                      value: '{"url":"https://example.com","text":"https://example.com"}',
+                      column: { title: 'Site' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('email (single-segment): --set <col>=<addr> wires {email, text:<addr>}', async () => {
+    const emailBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'email_1',
+          title: 'Contact',
+          type: 'email',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'email_1=alice@example.test',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [emailBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'email_1',
+              value: { email: 'alice@example.test', text: 'alice@example.test' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'email_1',
+                      type: 'email',
+                      text: 'alice@example.test',
+                      value: '{"email":"alice@example.test","text":"alice@example.test"}',
+                      column: { title: 'Contact' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ email_1: 'email_1' });
+  });
+
+  it('email (pipe form): --set <col>=<addr>|<label> wires {email, text:<label>}', async () => {
+    const emailBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'email_1',
+          title: 'Contact',
+          type: 'email',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'email_1=alice@example.test|Alice',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [emailBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'email_1',
+              value: { email: 'alice@example.test', text: 'Alice' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'email_1',
+                      type: 'email',
+                      text: 'Alice',
+                      value: '{"email":"alice@example.test","text":"Alice"}',
+                      column: { title: 'Contact' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('phone (pipe form): --set <col>=<number>|<ISO> wires {phone, countryShortName}', async () => {
+    // The pipe form is mandatory for phone; single-segment is
+    // rejected by the translator with `usage_error`.
+    const phoneBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        ...sampleBoardMetadata.columns,
+        {
+          id: 'phone_1',
+          title: 'Mobile',
+          type: 'phone',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'phone_1=+14155550100|US',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [phoneBoard] } },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'phone_1',
+              value: { phone: '+14155550100', countryShortName: 'US' },
+            },
+            response: {
+              data: {
+                change_column_value: {
+                  ...sampleItem,
+                  column_values: [
+                    {
+                      id: 'phone_1',
+                      type: 'phone',
+                      text: '+14155550100',
+                      value: '{"phone":"+14155550100","countryShortName":"US"}',
+                      column: { title: 'Mobile' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.resolved_ids).toEqual({ phone_1: 'phone_1' });
+  });
+});

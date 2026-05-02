@@ -20,6 +20,7 @@ import {
 } from '../../../src/api/dry-run.js';
 import type { MondayClient, MondayResponse } from '../../../src/api/client.js';
 import { ApiError } from '../../../src/utils/errors.js';
+import { parseSetRawExpression } from '../../../src/api/raw-write.js';
 
 let tmpRoot: string;
 const xdgEnv = (): NodeJS.ProcessEnv => ({ XDG_CACHE_HOME: tmpRoot });
@@ -939,5 +940,91 @@ describe('planChanges — meta aggregation', () => {
     expect(result.source).toBe('mixed');
     expect(result.cacheAgeSeconds).not.toBeNull();
     expect(typeof result.cacheAgeSeconds).toBe('number');
+  });
+});
+
+describe('planChanges — cumulative-warning preservation across passes (Codex M8 finding #1)', () => {
+  it('--set-raw rejection after a prior --set fired stale_cache_refreshed: both warnings fold into details.resolver_warnings', async () => {
+    // Stale-cache-then-raw-failure scenario: a prior --set token
+    // triggers a `stale_cache_refreshed` warning during column
+    // resolution; a subsequent --set-raw against a read-only-forever
+    // column rejects with `unsupported_column_type`. Pre-fix, the
+    // catch site folded only the CURRENT raw token's
+    // `resolution.warnings`, dropping the prior --set's warning. The
+    // M5b R19 contract requires the CUMULATIVE warnings array to
+    // survive into `error.details.resolver_warnings` so agents see
+    // every signal from a failed batch.
+    const stats: Stats = { calls: 0, operations: [] };
+    // Stale: no `priority` column. Fresh: includes `priority`. Both
+    // include `mirror_1` so the raw entry resolves either way.
+    const fresh = {
+      boards: [
+        {
+          ...(board67890().boards[0] as object),
+          columns: [
+            ...(board67890().boards[0] as { columns: unknown[] }).columns,
+            {
+              id: 'priority',
+              title: 'Priority',
+              type: 'numbers',
+              description: null,
+              archived: false,
+              settings_str: null,
+              width: null,
+            },
+          ],
+        },
+      ],
+    };
+    // Sequence:
+    //   call 1 — seed planChanges loads stale metadata (cache miss).
+    //   call 2 — seed planChanges reads item.
+    //   (test planChanges loads metadata cache hit, no call.)
+    //   call 3 — refresh fires for `priority` (not in stale).
+    //   (mirror_1 resolves from refreshed metadata, no call.)
+    //   (translate throws in pass (c) before the item read fires —
+    //    so no 4th call.)
+    const client = buildClient(
+      [board67890(), itemAtBacklog(), fresh],
+      stats,
+    );
+    // Seed the metadata cache with the stale shape.
+    await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'status', value: 'Done' }],
+      env: xdgEnv(),
+    });
+    // Now: --set priority=5 forces a cache-miss-refresh (warning
+    // fires); --set-raw mirror_1 then rejects post-resolution as
+    // read-only-forever.
+    let thrown: unknown;
+    try {
+      await planChanges({
+        client,
+        boardId: '67890',
+        itemId: '12345',
+        setEntries: [{ token: 'priority', value: '5' }],
+        rawEntries: [parseSetRawExpression('mirror_1={"text":"x"}')],
+        env: xdgEnv(),
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ApiError);
+    const apiErr = thrown as ApiError;
+    expect(apiErr.code).toBe('unsupported_column_type');
+    const details = apiErr.details as
+      | {
+          resolver_warnings?: readonly { code: string; details?: { token?: string } }[];
+        }
+      | undefined;
+    expect(details?.resolver_warnings).toBeDefined();
+    expect(
+      details?.resolver_warnings?.some(
+        (w) => w.code === 'stale_cache_refreshed' && w.details?.token === 'priority',
+      ),
+    ).toBe(true);
   });
 });

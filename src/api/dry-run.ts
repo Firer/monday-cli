@@ -234,11 +234,22 @@ export const planChanges = async (
     );
   }
 
-  // 1) Resolve every column token. Cache-miss-refresh per §5.3 step 5
-  //    fires once per token (resolveColumnWithRefresh owns the dance);
-  //    we collect warnings + source/age aggregates as we go.
+  // 1) Resolve every column token (friendly + raw) BEFORE any
+  //    translation runs. Three passes:
+  //      a. resolve all tokens, aggregating warnings/source/age
+  //         and catching same-token duplicates + archived columns;
+  //      b. cross-token duplicate-resolved-ID check (the §5.3 line
+  //         961-972 mutual-exclusion contract);
+  //      c. translate each resolved entry into the wire payload.
+  //    Pre-fix, translation ran inline with resolution, so a
+  //    `--set X=bad-date --set-raw X={...}` surfaced the date
+  //    `usage_error` instead of the mutual-exclusion `usage_error`
+  //    (Codex M8 finding #2). Splitting passes also lets the catch
+  //    sites in pass (c) fold the cumulative `warnings` array (every
+  //    leg's warnings) rather than just the current resolution's,
+  //    which is the M5b R19 contract for stale-cache-then-failure
+  //    flows (Codex M8 finding #1).
   const warnings: ResolverWarning[] = [];
-  const resolvedByToken = new Map<string, TranslatedColumnValue>();
   const resolvedIds: Record<string, string> = {};
   // Aggregate source starts as `undefined` so the first leg's value
   // becomes the seed; merging then folds subsequent legs in. Pre-fix,
@@ -247,14 +258,50 @@ export const planChanges = async (
   let aggregateSource: 'live' | 'cache' | 'mixed' | undefined = undefined;
   let aggregateCacheAge: number | null = null;
 
+  interface ResolvedSet {
+    readonly kind: 'set';
+    readonly entry: SetEntry;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  interface ResolvedRaw {
+    readonly kind: 'raw';
+    readonly entry: ParsedSetRawExpression;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  const resolved: (ResolvedSet | ResolvedRaw)[] = [];
+
+  // Pass (a) — friendly --set entries. Mutation paths must include
+  // archived columns in the resolver view so we can distinguish
+  // "doesn't exist" from "exists but archived" — cli-design §5.3
+  // step 6: "Mutations against archived columns return
+  // `column_archived` regardless". resolveColumnWithRefresh would
+  // otherwise filter archived columns out and we'd surface
+  // `column_not_found`, which is the wrong code (the column DOES
+  // exist; it's just archived).
   for (const entry of inputs.setEntries) {
-    // Mutation paths must include archived columns in the resolver
-    // view so we can distinguish "doesn't exist" from "exists but
-    // archived" — cli-design §5.3 step 6: "Mutations against
-    // archived columns return `column_archived` regardless".
-    // resolveColumnWithRefresh would otherwise filter archived
-    // columns out and we'd surface `column_not_found`, which is
-    // the wrong code (the column DOES exist; it's just archived).
+    if (resolvedIds[entry.token] !== undefined) {
+      // Same-token duplicate within friendly --set entries. Folds
+      // cumulative warnings so any prior collision /
+      // stale_cache_refreshed signals survive into details.
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set entries target column token ${JSON.stringify(entry.token)}. ` +
+            `Pass at most one --set per column; if two tokens resolve to the ` +
+            `same column ID after NFC + case-fold normalisation, use the ` +
+            `\`id:<column_id>\` prefix to disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        warnings,
+      );
+    }
     const resolution = await resolveColumnWithRefresh({
       client: inputs.client,
       boardId: inputs.boardId,
@@ -278,7 +325,9 @@ export const planChanges = async (
       // the shared `foldResolverWarningsIntoError` helper so the
       // dry-run engine + every M5b mutation surface (item set /
       // clear / update) preserve the warnings via one source of
-      // truth.
+      // truth. M8 fix: fold the cumulative `warnings` array, not
+      // just `resolution.warnings`, so prior tokens' warnings
+      // survive (Codex M8 finding #1).
       throw foldResolverWarningsIntoError(
         new ApiError(
           'column_archived',
@@ -295,51 +344,44 @@ export const planChanges = async (
             },
           },
         ),
-        resolution.warnings,
+        warnings,
       );
     }
 
-    const translated = await translateColumnValueAsync({
-      column: { id: resolution.match.column.id, type: resolution.match.column.type },
-      value: entry.value,
-      ...(inputs.dateResolution === undefined
-        ? {}
-        : { dateResolution: inputs.dateResolution }),
-      ...(inputs.peopleResolution === undefined
-        ? {}
-        : { peopleResolution: inputs.peopleResolution }),
+    resolved.push({
+      kind: 'set',
+      entry,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
     });
-
-    if (resolvedIds[entry.token] !== undefined) {
-      // Duplicate token — same as `selectMutation`'s duplicate-id
-      // branch but caught earlier so the column-resolution work
-      // stops. Same shape so the multi-call path's error doesn't
-      // diverge from the single-call path's error.
-      throw new ApiError(
-        'usage_error',
-        `Multiple --set entries target column token ${JSON.stringify(entry.token)}. ` +
-          `Pass at most one --set per column; if two tokens resolve to the ` +
-          `same column ID after NFC + case-fold normalisation, use the ` +
-          `\`id:<column_id>\` prefix to disambiguate.`,
-        {
-          details: {
-            token: entry.token,
-            resolved_id: resolution.match.column.id,
-          },
-        },
-      );
-    }
-    resolvedByToken.set(entry.token, translated);
     resolvedIds[entry.token] = resolution.match.column.id;
   }
 
-  // 1b) Resolve every --set-raw token (M8 escape hatch). Same
-  //     cache-miss-refresh + warnings/source aggregation as the
-  //     friendly loop above; per-entry uses `translateRawColumnValue`
-  //     post-resolution so the read-only-forever / files-shaped
-  //     reject lists fire.
-  const rawTranslatedByToken = new Map<string, TranslatedColumnValue>();
+  // Pass (a continued) — --set-raw entries (M8 escape hatch). Same
+  // cache-miss-refresh + warnings/source aggregation as the friendly
+  // pass; same-token duplicates within raw OR shared with a friendly
+  // --set entry surface as usage_error per cli-design §5.3 line
+  // 961-972.
   for (const entry of rawEntries) {
+    if (resolvedIds[entry.token] !== undefined) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries target column token ` +
+            `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
+            `if two tokens resolve to the same column ID after NFC + ` +
+            `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
+            `disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        warnings,
+      );
+    }
     const resolution = await resolveColumnWithRefresh({
       client: inputs.client,
       boardId: inputs.boardId,
@@ -369,88 +411,95 @@ export const planChanges = async (
             },
           },
         ),
-        resolution.warnings,
+        warnings,
       );
     }
 
-    // The raw-write helper applies the read-only-forever / files-
-    // shaped reject lists post-resolution — these throw
-    // ApiError(unsupported_column_type) before any wire payload
-    // assembles. Resolver warnings (collision, stale_cache_refreshed)
-    // fold into the thrown error's details.resolver_warnings so the
-    // refresh signal isn't dropped.
-    let translated;
-    try {
-      translated = translateRawColumnValue(
-        { id: resolution.match.column.id, type: resolution.match.column.type },
-        entry.value,
-        entry.rawJson,
-      );
-    } catch (err) {
-      if (err instanceof ApiError) {
-        throw foldResolverWarningsIntoError(err, resolution.warnings);
-      }
-      throw err;
-    }
-
-    if (
-      resolvedIds[entry.token] !== undefined ||
-      rawTranslatedByToken.has(entry.token)
-    ) {
-      // Duplicate raw token, OR token shared with a friendly --set
-      // entry. The latter is the cli-design §5.3 line 961-972 mutual-
-      // exclusion case; either way, agents have no way to know which
-      // payload won, so surface as usage_error before the diff is
-      // built.
-      throw new ApiError(
-        'usage_error',
-        `Multiple --set / --set-raw entries target column token ` +
-          `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
-          `if two tokens resolve to the same column ID after NFC + ` +
-          `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
-          `disambiguate.`,
-        {
-          details: {
-            token: entry.token,
-            resolved_id: resolution.match.column.id,
-          },
-        },
-      );
-    }
-    rawTranslatedByToken.set(entry.token, translated);
+    resolved.push({
+      kind: 'raw',
+      entry,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
+    });
     resolvedIds[entry.token] = resolution.match.column.id;
   }
 
-  // Aggregate cross-column duplicate detection: two distinct tokens
-  // (e.g. `status` and `id:status_4`) may resolve to the same column.
-  // selectMutation owns this check for the multi case but it's
-  // correct to surface the failure pre-translation so the engine
-  // never produces a half-built diff. M8: the union of friendly +
-  // raw translations is checked together — two distinct tokens that
-  // resolve to the same column ID via different flag kinds (--set vs
-  // --set-raw) trigger the same usage_error per cli-design §5.3 line
-  // 961-972 (mutual-exclusion contract).
+  // Pass (b) — cross-token duplicate-resolved-ID check. Two distinct
+  // tokens (e.g. `status` and `id:status_4`, or `--set status=Done`
+  // and `--set-raw id:status_4='{...}'`) may resolve to the same
+  // column. selectMutation also catches duplicate column IDs in the
+  // multi case, but surfacing here pre-translation keeps the engine
+  // from producing a half-built diff and avoids a translator error
+  // pre-empting the mutual-exclusion error (Codex M8 finding #2).
   const seenColumnIds = new Set<string>();
-  const allResolvedByToken: ReadonlyMap<string, TranslatedColumnValue> =
-    new Map([...resolvedByToken, ...rawTranslatedByToken]);
-  for (const [token, value] of allResolvedByToken) {
-    if (seenColumnIds.has(value.columnId)) {
-      throw new ApiError(
-        'usage_error',
-        `Multiple --set / --set-raw entries resolve to the same column ID ` +
-          `${JSON.stringify(value.columnId)} (last token: ` +
-          `${JSON.stringify(token)}). Pass at most one per column.`,
-        {
-          details: {
-            column_id: value.columnId,
-            tokens: [...allResolvedByToken.entries()]
-              .filter(([, v]) => v.columnId === value.columnId)
-              .map(([t]) => t),
+  for (const r of resolved) {
+    if (seenColumnIds.has(r.columnId)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries resolve to the same column ID ` +
+            `${JSON.stringify(r.columnId)} (last token: ` +
+            `${JSON.stringify(r.entry.token)}). Pass at most one per column.`,
+          {
+            details: {
+              column_id: r.columnId,
+              tokens: resolved
+                .filter((x) => x.columnId === r.columnId)
+                .map((x) => x.entry.token),
+            },
           },
-        },
+        ),
+        warnings,
       );
     }
-    seenColumnIds.add(value.columnId);
+    seenColumnIds.add(r.columnId);
+  }
+
+  // Pass (c) — translate. Friendly --set entries through
+  // `translateColumnValueAsync`; --set-raw through
+  // `translateRawColumnValue` (which applies the read-only-forever /
+  // files-shaped reject lists). Each catch folds the CUMULATIVE
+  // warnings array so prior tokens' collision /
+  // stale_cache_refreshed signals survive — Codex M8 finding #1.
+  const resolvedByToken = new Map<string, TranslatedColumnValue>();
+  const rawTranslatedByToken = new Map<string, TranslatedColumnValue>();
+  for (const r of resolved) {
+    if (r.kind === 'set') {
+      let translated;
+      try {
+        translated = await translateColumnValueAsync({
+          column: { id: r.columnId, type: r.columnType },
+          value: r.entry.value,
+          ...(inputs.dateResolution === undefined
+            ? {}
+            : { dateResolution: inputs.dateResolution }),
+          ...(inputs.peopleResolution === undefined
+            ? {}
+            : { peopleResolution: inputs.peopleResolution }),
+        });
+      } catch (err) {
+        if (err instanceof ApiError) {
+          throw foldResolverWarningsIntoError(err, warnings);
+        }
+        throw err;
+      }
+      resolvedByToken.set(r.entry.token, translated);
+    } else {
+      let translated;
+      try {
+        translated = translateRawColumnValue(
+          { id: r.columnId, type: r.columnType },
+          r.entry.value,
+          r.entry.rawJson,
+        );
+      } catch (err) {
+        if (err instanceof ApiError) {
+          throw foldResolverWarningsIntoError(err, warnings);
+        }
+        throw err;
+      }
+      rawTranslatedByToken.set(r.entry.token, translated);
+    }
   }
 
   // 2) Fetch item current state. The query mirrors `item get`'s
