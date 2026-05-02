@@ -1071,6 +1071,39 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item archive (live, --yes)', async () => {
+    const archivedItem = { ...sampleItem, state: 'archived' };
+    const out = await cachedDrive(
+      ['item', 'archive', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemArchive',
+            response: { data: { archive_item: archivedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item archive --dry-run (planned_changes envelope with item snapshot)', async () => {
+    const out = await cachedDrive(
+      ['item', 'archive', '12345', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemArchiveRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {
