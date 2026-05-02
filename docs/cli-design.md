@@ -526,7 +526,27 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # --position and --relative-to are required together;
                                           # one without the other → usage_error
                                           # --relative-to must reference an item on the same board
-monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
+monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]... [--set-raw <col>=<json>]...   v0.2
+                                          # idempotency-cluster verb (M12). 0 matches → create_item;
+                                          # 1 match → change_multiple_column_values with synthetic
+                                          # `name` (same wire shape as `item update --name --set`);
+                                          # 2+ matches → `ambiguous_match` with details.candidates.
+                                          # `--match-by` accepts column tokens (resolved via the same
+                                          # resolver `--set` uses) plus the literal `name`
+                                          # pseudo-token; the match value comes from `--name <n>`
+                                          # for `name` and from the corresponding `--set <token>=
+                                          # <value>` for each column token. AND-combined.
+                                          # Sequential-retry idempotent only — concurrent agents
+                                          # observing zero matches both create; the next call
+                                          # surfaces the duplicate as `ambiguous_match`. Race
+                                          # mitigation: pick a stable hidden-key column for
+                                          # `--match-by`. Concurrent-write protection: v0.4 (§9.3).
+                                          # `--set-raw <col>=<json>` participates in column updates
+                                          # but cannot appear in `--match-by` (JSON wire shapes
+                                          # aren't filter-comparable scalars).
+                                          # `data.operation: "create_item" | "update_item"` slot
+                                          # exposes the branch (§6.4); dry-run encodes the same
+                                          # via `planned_changes[0].operation`.
 monday item move <iid> --to-group <gid> [--to-board <bid>] [--columns-mapping <json>]   v0.2
                                           # Two transports under one verb:
                                           # `--to-group <gid>` alone → same-board move
@@ -1414,22 +1434,57 @@ it, by either (a) accepting the partial-state risk explicitly with
 a typed warning in the success envelope, or (b) implementing
 compensating-delete semantics. v0.2 ships neither.
 
-**Idempotent variant via `item upsert`.** Pattern:
+**Idempotent variant via `item upsert`** (v0.2 M12). Pattern:
 
 ```
-monday item upsert <bid> --name "Refactor login" --match-by name --set status=Backlog
+monday item upsert --board <bid> --name "Refactor login" --match-by name --set status=Backlog
 ```
 
 The CLI:
-1. Searches for an item matching the `--match-by` field(s).
-2. If found: updates it (idempotent).
-3. If not: creates it.
-4. Returns `{ "item": ..., "created": true|false }` so agents know
-   what happened.
+1. Searches for an item matching the `--match-by` field(s) (page-
+   walks `items_page` with AND-combined `any_of` rules).
+2. **0 matches** → branches to `create_item` with the bundled
+   column values (single round-trip per §5.8 — same wire shape as
+   `monday item create`). `data.operation: "create_item"`.
+3. **1 match** → branches to `change_multiple_column_values` with a
+   synthetic `name` key bundled alongside the resolved column
+   values (the v0.1 contract M5b ships for `item update --name
+   <n> --set <c>=<v>...`). M12 produces the same wire shape as
+   `monday item update` rather than re-implementing rename.
+   `data.operation: "update_item"`.
+4. **2+ matches** → fails with `ambiguous_match` (§6.5) carrying
+   `details.candidates: [{id, name}, ...]` and the resolved
+   `match_by` / `match_values` echo. **No mutation fires.** Agents
+   tighten the predicate (more match-by columns or a stable hidden
+   key column) so the next call resolves to a single item.
 
-`--match-by` accepts column IDs/names. Multiple match keys are AND'd.
-For uniqueness across runs, agents can use a hidden text column as a
-synthetic key.
+**Sequential-retry idempotent only.** Re-running with the same args
+from the same agent is safe: the second call sees the first call's
+created item and branches to `update_item` (same wire shape as the
+first-call create with column values; the post-state matches).
+**Concurrent agents are not a uniqueness guarantee** — two agents
+observing zero matches at the same instant both branch to
+`create_item`. The next call from either agent surfaces the
+duplicate as `ambiguous_match`, giving the agent the recovery info
+to widen `--match-by`. Concurrent-write protection through Monday's
+resource-locking mutations is a v0.4 candidate (§9.3).
+
+`--match-by` accepts column tokens (resolved via the same column
+resolver `--set` uses) plus the literal `name` pseudo-token, which
+matches against the item's `name` field. Multiple match-by tokens
+AND-combine — adding a token narrows the match set, so an agent
+seeing `ambiguous_match` knows widening the predicate by one column
+is the recovery path. The match value for a column token comes from
+the corresponding `--set <token>=<value>` (which is required for
+every match-by column token); the match value for the `name` token
+comes from `--name <n>`. `--set-raw <col>=<json>` entries cannot
+participate in match-by because the JSON wire shape isn't a
+filter-comparable scalar.
+
+For uniqueness across runs, agents should use a stable hidden text
+column as a synthetic key (or compose multiple match-by tokens) so
+the first call deterministically lands in the create branch and
+subsequent calls land in the update branch.
 
 ### 5.9 The `dev` namespace
 
@@ -2015,12 +2070,25 @@ Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
 
-For upsert-style commands, `data.created: true | false` indicates
-which path ran:
+For `monday item upsert` (M12), `data.operation` indicates which
+branch the wire mutation took:
 
 ```json
-{ "ok": true, "data": { "id": "5001", "created": true, ... }, ... }
+{ "ok": true,
+  "data": { "id": "5001", "operation": "create_item", ... },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" } }
 ```
+
+`data.operation` is `"create_item"` (no match — fresh create) or
+`"update_item"` (one match — synthetic-name + bundled column-values
+rename via `change_multiple_column_values` per §5.3 step 5). 2+
+matches → `ambiguous_match` (§6.5), no mutation fired. The slot
+lives on `data` rather than `meta` because v0.1's mutation envelope
+already keeps operation-shape signals in `data` (e.g.
+`duplicated_from_id` for `item duplicate`); `meta` is reserved for
+cross-verb cache / source / pagination state. M12 round-2 P2 closed.
 
 For `monday item duplicate`, the live mutation envelope's
 `data` extends the §6.2 projection with `duplicated_from_id:
@@ -2083,6 +2151,7 @@ removals are major bumps.
 | `not_found` | Item/board/etc. doesn't exist | No |
 | `ambiguous_name` | `find` matched multiple | No |
 | `ambiguous_column` | `--set` resolved to multiple columns | No |
+| `ambiguous_match` | `item upsert` matched 2+ items (M12) | No |
 | `column_not_found` | `--set` matched no column | No |
 | `user_not_found` | Email lookup failed | No |
 | `unsupported_column_type` | Tried `--set` on a type not in v0.1 allowlist | No |
@@ -2153,6 +2222,22 @@ slots that ship in v0.1 across multiple codes:
 - `ambiguous_column`:
   - `candidates: [{ id, title, type }, ...]` — the matching
     columns. Agents retry with explicit `id:<column_id>` prefix.
+- `ambiguous_match` (M12 — `item upsert` matched 2+ items):
+  - `board_id: string` — the `--board <bid>` the upsert ran against.
+  - `match_by: string[]` — the resolved `--match-by` tokens (the
+    literal `name` pseudo-token plus any column tokens, in the
+    order the agent supplied).
+  - `match_values: { [token: string]: string }` — the value the
+    upsert matched on, per token. Echoes `--name` for the `name`
+    pseudo-token and the corresponding `--set <token>=<value>` for
+    each column token.
+  - `matched_count: number` — total candidates Monday returned.
+  - `candidates: [{ id, name }, ...]` — first ≤10 matched items
+    by Monday return order. Agents tighten `--match-by` (add
+    columns or pick a stable hidden key column) so the next call
+    resolves to a single item. The list is capped at 10 because the
+    cursor-walked match set can grow unbounded; the typed error is
+    a recovery signal, not a paginated read surface.
 - `usage_error` for `--board` / item-board mismatch (dry-run
   only — see §5.3 step 1):
   - `item_board_id: string` — the item's actual `board.id`.
@@ -2272,6 +2357,7 @@ emitted so agents can see when the cache was misleading them.
 | `move_item_to_group` | Yes | If already in target group, no-op |
 | `move_item_to_board` | **No** | Re-running on an item already on the target board is undefined SDK behaviour; the `monday item move` verb's `idempotent: false` is the conservative bound across same-board (idempotent) + cross-board (not) paths |
 | `create_item`, `create_board`, `create_column`, `create_group` | **No** | Use `upsert` variants |
+| `item upsert` | Sequential-retry yes; concurrent no | Re-running with the same args from the same agent is safe (second call branches to `update_item`); two concurrent agents observing zero matches both branch to `create_item`. Recovery: the next call surfaces the duplicate as `ambiguous_match`. v0.4 candidate: lock-resource semantics (§9.3). |
 | `delete_*` | Yes (after first call) | Item already deleted → returns `not_found` |
 | `add_users_to_*` | Yes | Adding a user already a member is a no-op |
 | `create_update` (comment) | **No** | Two calls = two comments |
