@@ -754,8 +754,9 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
   summary: 'Create-or-update an item by --match-by predicate (idempotent)',
   examples: [
     'monday item upsert --board 67890 --name "Refactor login" --match-by name --set status=Backlog',
-    'monday item upsert --board 67890 --name "Refactor login" --match-by name,owner --set owner=alice@example.com --set status=Backlog',
     'monday item upsert --board 67890 --name "Refactor login" --match-by external_id --set external_id=ABC-123 --set status=Backlog',
+    'monday item upsert --board 67890 --name "Refactor login" --match-by name,owner --set owner=12345678 --set status=Backlog',
+    'monday item upsert --board 67890 --name "Refactor login" --match-by owner --set owner=me --set status=Backlog',
     'monday item upsert --board 67890 --name "Refactor login" --match-by name --set status=Backlog --dry-run --json',
   ],
   // Sequential-retry idempotent — see file header + cli-design §5.8.
@@ -805,6 +806,17 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
           'create_item; the next call surfaces the duplicate as',
           'ambiguous_match. Pick a stable hidden-key column for --match-by',
           'so race-induced duplicates are recoverable.',
+          '',
+          'Match-value caveat (people / date columns): the lookup pipeline',
+          'currently only resolves the `me` token for people columns. Email',
+          'addresses (`alice@example.com`) and relative date tokens (`+1w`,',
+          '`tomorrow`) are passed verbatim to Monday\'s items_page filter,',
+          'which expects user IDs / ISO dates respectively — so an upsert',
+          'whose --match-by points at a people / date column should pass',
+          '--set <token>=<numeric-id-or-iso-date> for the lookup to round-',
+          'trip. Email→ID and relative-date filter resolution is a v0.3',
+          'cross-surface follow-up (would also lift `item search` and',
+          '`item update --where`).',
           '',
         ].join('\n'),
       )

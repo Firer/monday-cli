@@ -1486,6 +1486,27 @@ column as a synthetic key (or compose multiple match-by tokens) so
 the first call deterministically lands in the create branch and
 subsequent calls land in the update branch.
 
+**Match-value resolution caveat (people / date columns).** The
+upsert lookup routes column-token entries through the same shared
+filter pipeline `item search` and `item update --where` use
+(`buildQueryParams`), which resolves the `me` token to the current
+user's ID for people columns. **It does not** resolve email
+addresses to user IDs or relative date tokens (`+1w`, `tomorrow`)
+to ISO dates — those pass verbatim to Monday's `items_page`
+filter, which expects the resolved forms. The mutation translator
+on the create / update legs DOES resolve emails / relative dates,
+which means a naive `--match-by owner --set owner=alice@example.com`
+creates an item with `owner: <user_id>` but the next lookup queries
+for `owner: "alice@example.com"` (string compare) — 0 matches →
+duplicate created. **Workaround for v0.2:** pass already-resolved
+forms in `--set` for any column token that participates in
+`--match-by` — numeric user IDs for people, ISO dates for date
+columns. The `me` token is the one exception (resolved
+symmetrically on both legs). Email→ID and relative-date filter
+resolution is a v0.3 cross-surface follow-up that would lift
+`item search` and `item update --where` simultaneously; lifting it
+in upsert alone would create inconsistent filter semantics.
+
 ### 5.9 The `dev` namespace
 
 Monday Dev's "sprint", "epic", "release", "bug", "task" concepts
