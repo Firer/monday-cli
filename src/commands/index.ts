@@ -74,6 +74,8 @@ import { itemCreateCommand } from './item/create.js';
 import { itemArchiveCommand } from './item/archive.js';
 import { itemDeleteCommand } from './item/delete.js';
 import { itemDuplicateCommand } from './item/duplicate.js';
+// M11 (v0.2) — item move (group + cross-board).
+import { itemMoveCommand } from './item/move.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -119,6 +121,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemArchiveCommand,
     itemDeleteCommand,
     itemDuplicateCommand,
+    itemMoveCommand,
     updateCreateCommand,
     rawCommand,
     boardDoctorCommand,
