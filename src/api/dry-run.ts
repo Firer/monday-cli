@@ -67,10 +67,12 @@ import {
 } from './item-helpers.js';
 import type { BoardColumn } from './board-metadata.js';
 import {
+  bundleColumnValues,
   selectMutation,
   translateColumnClear,
   translateColumnValueAsync,
   type DateResolutionContext,
+  type MultiColumnValue,
   type PeopleResolutionContext,
   type SelectedMutation,
   type TranslatedColumnValue,
@@ -773,6 +775,527 @@ export const planClear = async (
     cacheAgeSeconds: resolution.cacheAgeSeconds,
     warnings,
   };
+};
+
+// ============================================================
+// planCreate (M9 — `item create` dry-run engine).
+// ============================================================
+
+/**
+ * Discriminator over the two M9 create shapes (cli-design §6.4
+ * "Item-create shape").
+ *
+ *   - `item` — top-level `create_item`. Resolves columns against
+ *     `boardId`. `groupId` / `position` ride into the planned shape's
+ *     hoisted slots (`group_id`, `position`).
+ *   - `subitem` — `create_subitem`. Resolves columns against
+ *     `subitemsBoardId` (the auto-generated subitems board the
+ *     command layer derived from the parent's `subtasks` column,
+ *     classic-board-only). The planned shape omits `board_id` and
+ *     hoists `parent_item_id` instead. `--group` / `--position` are
+ *     argv-rejected before reaching here.
+ *
+ * The hierarchy_type gate (`multi_level` rejection) and the
+ * `--relative-to` same-board verification both live in the command
+ * layer — `planCreate` runs after those checks pass.
+ */
+export type CreateMode =
+  | {
+      readonly kind: 'item';
+      readonly boardId: string;
+      readonly groupId?: string;
+      readonly position?: {
+        readonly method: 'before' | 'after';
+        readonly relativeTo: string;
+      };
+    }
+  | {
+      readonly kind: 'subitem';
+      readonly parentItemId: string;
+      /**
+       * The subitems-board ID the column resolver targets. The
+       * command layer derives this from the parent's `subtasks`
+       * column's `settings_str.boardIds[0]` (classic-only); when
+       * that derivation isn't possible (e.g. parent's board has no
+       * `subtasks` column yet, or the settings_str is empty), the
+       * command rejects with `usage_error` before reaching
+       * planCreate.
+       */
+      readonly subitemsBoardId: string;
+    };
+
+export interface PlanCreateInputs {
+  readonly client: MondayClient;
+  readonly mode: CreateMode;
+  /** The new item's name (validated as non-empty by the command layer). */
+  readonly name: string;
+  readonly setEntries: readonly SetEntry[];
+  readonly rawEntries?: readonly ParsedSetRawExpression[];
+  readonly dateResolution?: DateResolutionContext;
+  readonly peopleResolution?: PeopleResolutionContext;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly noCache?: boolean;
+}
+
+/**
+ * One planned create — cli-design §6.4 "Item-create shape" /
+ * "Subitem variant". The shape is intentionally distinct from the
+ * column-mutation `PlannedChange`:
+ *
+ *   - `operation` discriminates `'create_item' | 'create_subitem'`.
+ *   - `name`, `group_id`, `position`, `parent_item_id` are
+ *     **hoisted** (top-level slots) rather than buried inside `diff`,
+ *     mirroring the comment-create shape's preference for agent-
+ *     scannable fields.
+ *   - `diff[<col>].from` is always `null` (the item doesn't exist
+ *     yet; nothing to diff against).
+ *
+ * Optional slots appear only when their input was supplied:
+ *   - `group_id` — only when the agent passed `--group <gid>`
+ *     (omitted = Monday assigns the default group server-side).
+ *   - `position` — only when both `--position` and `--relative-to`
+ *     were supplied. Subitem variant always omits.
+ *   - `board_id` — present on `create_item` only; the subitem
+ *     variant omits it (the subitems board is derived server-side
+ *     from the parent and surfacing it as `board_id` would falsely
+ *     imply the agent's `--board` value).
+ */
+export interface CreatePlannedChange {
+  readonly operation: 'create_item' | 'create_subitem';
+  readonly board_id?: string;
+  readonly name: string;
+  readonly group_id?: string;
+  readonly position?: {
+    readonly method: 'before' | 'after';
+    readonly relative_to: string;
+  };
+  readonly parent_item_id?: string;
+  readonly resolved_ids: Readonly<Record<string, string>>;
+  readonly diff: Readonly<Record<string, DiffCell>>;
+}
+
+export interface PlanCreateResult {
+  readonly plannedChanges: readonly CreatePlannedChange[];
+  /**
+   * Aggregate envelope source: same merge rule as `planChanges`
+   * (`live` / `cache` / `mixed`). When `setEntries` and `rawEntries`
+   * are both empty, no resolution legs run and `source` is `'none'` —
+   * dry-run create with no `--set` flags fires no API calls at all.
+   */
+  readonly source: 'live' | 'cache' | 'mixed' | 'none';
+  readonly cacheAgeSeconds: number | null;
+  readonly warnings: readonly ResolverWarning[];
+}
+
+/**
+ * Resolves every `--set` / `--set-raw` token, translates each value,
+ * and assembles a single `CreatePlannedChange`. **No item-state read**
+ * — the item doesn't exist yet, so every diff cell's `from` is `null`.
+ *
+ * **All-or-nothing semantics** (same as `planChanges`). Any resolution
+ * failure (`column_not_found` / `ambiguous_column` / `column_archived`
+ * / `unsupported_column_type` / `user_not_found` / duplicate token /
+ * duplicate resolved id) aborts before any further work.
+ *
+ * **Diff `to` projection.** The wire shape every Monday create
+ * mutation accepts is `column_values: JSON!` — the same map shape
+ * `change_multiple_column_values` accepts. So the diff `to` side
+ * routes through `bundleColumnValues` for byte-equivalence with the
+ * live mutation's wire payload, including the `long_text` re-wrap
+ * (`{text: <value>}` inside the map).
+ *
+ * **No-`--set` path.** Create with neither `--set` nor `--set-raw`
+ * is valid (Monday accepts `create_item(item_name: ..., column_values:
+ * null)`). The function short-circuits the resolution loop and
+ * returns a `CreatePlannedChange` with empty `resolved_ids` and `diff`.
+ * `source: 'none'` because no API call fired.
+ */
+export const planCreate = async (
+  inputs: PlanCreateInputs,
+): Promise<PlanCreateResult> => {
+  const rawEntries: readonly ParsedSetRawExpression[] = inputs.rawEntries ?? [];
+
+  // No-set short-circuit. Returns the create payload without any
+  // resolution / translation / API leg. Source is 'none' because
+  // nothing fired. The dry-run preview is just "name + placement".
+  if (inputs.setEntries.length === 0 && rawEntries.length === 0) {
+    return {
+      plannedChanges: [buildCreatePlannedChange(inputs, {}, {})],
+      source: 'none',
+      cacheAgeSeconds: null,
+      warnings: [],
+    };
+  }
+
+  // The board to resolve columns against — top-level `boardId` for
+  // `create_item`, `subitemsBoardId` for `create_subitem`.
+  const resolveBoardId =
+    inputs.mode.kind === 'item' ? inputs.mode.boardId : inputs.mode.subitemsBoardId;
+
+  const warnings: ResolverWarning[] = [];
+  const resolvedIds: Record<string, string> = {};
+  let aggregateSource: 'live' | 'cache' | 'mixed' | undefined = undefined;
+  let aggregateCacheAge: number | null = null;
+
+  interface ResolvedSet {
+    readonly kind: 'set';
+    readonly entry: SetEntry;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  interface ResolvedRaw {
+    readonly kind: 'raw';
+    readonly entry: ParsedSetRawExpression;
+    readonly columnId: string;
+    readonly columnType: string;
+  }
+  const resolved: (ResolvedSet | ResolvedRaw)[] = [];
+
+  // Pass (a-set) — resolve every --set token. `includeArchived: true`
+  // so archived columns surface as `column_archived` rather than
+  // `column_not_found` (cli-design §5.3 step 6).
+  for (const entry of inputs.setEntries) {
+    if (resolvedIds[entry.token] !== undefined) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set entries target column token ${JSON.stringify(entry.token)}. ` +
+            `Pass at most one --set per column; if two tokens resolve to the ` +
+            `same column ID after NFC + case-fold normalisation, use the ` +
+            `\`id:<column_id>\` prefix to disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        warnings,
+      );
+    }
+    const resolution = await resolveColumnWithRefresh({
+      client: inputs.client,
+      boardId: resolveBoardId,
+      token: entry.token,
+      includeArchived: true,
+      ...(inputs.env === undefined ? {} : { env: inputs.env }),
+      ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+    });
+    warnings.push(...resolution.warnings);
+    aggregateSource = mergeSource(aggregateSource, resolution.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
+
+    if (isArchivedColumn(resolution.match.column)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${resolveBoardId} is archived. Monday rejects writes against ` +
+            `archived columns; un-archive the column or pick a different target.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: resolveBoardId,
+            },
+          },
+        ),
+        warnings,
+      );
+    }
+
+    resolved.push({
+      kind: 'set',
+      entry,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
+    });
+    resolvedIds[entry.token] = resolution.match.column.id;
+  }
+
+  // Pass (a-raw) — resolve every --set-raw token. Same shape as
+  // planChanges, just against the create's resolveBoardId.
+  for (const entry of rawEntries) {
+    if (resolvedIds[entry.token] !== undefined) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries target column token ` +
+            `${JSON.stringify(entry.token)}. Pass at most one per column; ` +
+            `if two tokens resolve to the same column ID after NFC + ` +
+            `case-fold normalisation, use the \`id:<column_id>\` prefix to ` +
+            `disambiguate.`,
+          {
+            details: {
+              token: entry.token,
+              resolved_id: resolvedIds[entry.token],
+            },
+          },
+        ),
+        warnings,
+      );
+    }
+    const resolution = await resolveColumnWithRefresh({
+      client: inputs.client,
+      boardId: resolveBoardId,
+      token: entry.token,
+      includeArchived: true,
+      ...(inputs.env === undefined ? {} : { env: inputs.env }),
+      ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+    });
+    warnings.push(...resolution.warnings);
+    aggregateSource = mergeSource(aggregateSource, resolution.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
+
+    if (isArchivedColumn(resolution.match.column)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'column_archived',
+          `Column ${JSON.stringify(resolution.match.column.id)} on board ` +
+            `${resolveBoardId} is archived. Monday rejects writes against ` +
+            `archived columns; un-archive the column or pick a different target.`,
+          {
+            details: {
+              column_id: resolution.match.column.id,
+              column_title: resolution.match.column.title,
+              column_type: resolution.match.column.type,
+              board_id: resolveBoardId,
+            },
+          },
+        ),
+        warnings,
+      );
+    }
+
+    resolved.push({
+      kind: 'raw',
+      entry,
+      columnId: resolution.match.column.id,
+      columnType: resolution.match.column.type,
+    });
+    resolvedIds[entry.token] = resolution.match.column.id;
+  }
+
+  // Pass (b) — cross-token duplicate-resolved-ID check.
+  const seenColumnIds = new Set<string>();
+  for (const r of resolved) {
+    if (seenColumnIds.has(r.columnId)) {
+      throw foldResolverWarningsIntoError(
+        new ApiError(
+          'usage_error',
+          `Multiple --set / --set-raw entries resolve to the same column ID ` +
+            `${JSON.stringify(r.columnId)} (last token: ` +
+            `${JSON.stringify(r.entry.token)}). Pass at most one per column.`,
+          {
+            details: {
+              column_id: r.columnId,
+              tokens: resolved
+                .filter((x) => x.columnId === r.columnId)
+                .map((x) => x.entry.token),
+            },
+          },
+        ),
+        warnings,
+      );
+    }
+    seenColumnIds.add(r.columnId);
+  }
+
+  // Pass (c) — translate each resolved entry. Order preserved so the
+  // bundled column_values map's insertion order matches caller argv.
+  const orderedTranslated: TranslatedColumnValue[] = [];
+  for (const r of resolved) {
+    if (r.kind === 'set') {
+      try {
+        const t = await translateColumnValueAsync({
+          column: { id: r.columnId, type: r.columnType },
+          value: r.entry.value,
+          ...(inputs.dateResolution === undefined
+            ? {}
+            : { dateResolution: inputs.dateResolution }),
+          ...(inputs.peopleResolution === undefined
+            ? {}
+            : { peopleResolution: inputs.peopleResolution }),
+        });
+        orderedTranslated.push(t);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          throw foldResolverWarningsIntoError(err, warnings);
+        }
+        throw err;
+      }
+    } else {
+      try {
+        const t = translateRawColumnValue(
+          { id: r.columnId, type: r.columnType },
+          r.entry.value,
+          r.entry.rawJson,
+        );
+        orderedTranslated.push(t);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          throw foldResolverWarningsIntoError(err, warnings);
+        }
+        throw err;
+      }
+    }
+  }
+
+  // Bundle into the column_values map shape `create_item.column_values`
+  // accepts. Routing through `bundleColumnValues` keeps the long_text
+  // re-wrap consistent with the live mutation's wire payload.
+  const bundled = bundleColumnValues(orderedTranslated);
+
+  const diff: Record<string, DiffCell> = {};
+  for (const t of orderedTranslated) {
+    const wireTo = bundled[t.columnId];
+    /* c8 ignore next 4 — defensive: bundleColumnValues maps every
+       translated value into the bundle by columnId. */
+    if (wireTo === undefined) {
+      throw new ApiError('internal_error', 'planCreate: lost bundled entry');
+    }
+    diff[t.columnId] = buildCreateDiffCell(t, wireTo);
+  }
+
+  return {
+    plannedChanges: [buildCreatePlannedChange(inputs, resolvedIds, diff)],
+    /* c8 ignore next — defensive: the early-return at the top
+       handles the no-set case explicitly, so by this line at least
+       one resolution leg has populated `aggregateSource`. The `??
+       'none'` keeps the type-narrow tidy without surfacing
+       `undefined` on the result. */
+    source: aggregateSource ?? 'none',
+    cacheAgeSeconds: aggregateCacheAge,
+    warnings,
+  };
+};
+
+/**
+ * Builds the create planned-change envelope per cli-design §6.4
+ * "Item-create shape" (and its "Subitem variant" sibling). Optional
+ * top-level slots appear only when populated; agents read the shape
+ * by switching on `operation` and the presence of the optional keys
+ * (`board_id` / `parent_item_id` / `group_id` / `position`).
+ *
+ * Field order matches the cli-design sample for byte-stable JSON
+ * output: `operation`, `board_id?` (item only), `parent_item_id?`
+ * (subitem only), `name`, `group_id?`, `position?`, `resolved_ids`,
+ * `diff`.
+ */
+const buildCreatePlannedChange = (
+  inputs: PlanCreateInputs,
+  resolvedIds: Readonly<Record<string, string>>,
+  diff: Readonly<Record<string, DiffCell>>,
+): CreatePlannedChange => {
+  if (inputs.mode.kind === 'item') {
+    const change: {
+      operation: 'create_item';
+      board_id: string;
+      name: string;
+      group_id?: string;
+      position?: {
+        method: 'before' | 'after';
+        relative_to: string;
+      };
+      resolved_ids: Readonly<Record<string, string>>;
+      diff: Readonly<Record<string, DiffCell>>;
+    } = {
+      operation: 'create_item',
+      board_id: inputs.mode.boardId,
+      name: inputs.name,
+    } as {
+      operation: 'create_item';
+      board_id: string;
+      name: string;
+      resolved_ids: Readonly<Record<string, string>>;
+      diff: Readonly<Record<string, DiffCell>>;
+    };
+    if (inputs.mode.groupId !== undefined) {
+      change.group_id = inputs.mode.groupId;
+    }
+    if (inputs.mode.position !== undefined) {
+      change.position = {
+        method: inputs.mode.position.method,
+        relative_to: inputs.mode.position.relativeTo,
+      };
+    }
+    change.resolved_ids = resolvedIds;
+    change.diff = diff;
+    return change;
+  }
+  // subitem
+  const change: {
+    operation: 'create_subitem';
+    parent_item_id: string;
+    name: string;
+    resolved_ids: Readonly<Record<string, string>>;
+    diff: Readonly<Record<string, DiffCell>>;
+  } = {
+    operation: 'create_subitem',
+    parent_item_id: inputs.mode.parentItemId,
+    name: inputs.name,
+    resolved_ids: resolvedIds,
+    diff,
+  };
+  return change;
+};
+
+/**
+ * Builds one diff cell for a create's planned change. `from` is
+ * always `null` (item doesn't exist yet); `to` is the bundled wire
+ * value. Resolver echoes (`details.resolved_from`) for date / people
+ * inputs surface the same way `buildDiffCell` handles them — exclusivity
+ * pins the same internal_error guard so a future translator setting
+ * both echoes is loud, not silent.
+ */
+const buildCreateDiffCell = (
+  translated: TranslatedColumnValue,
+  to: MultiColumnValue,
+): DiffCell => {
+  if (translated.resolvedFrom !== null && translated.peopleResolution !== null) {
+    throw new ApiError(
+      'internal_error',
+      `Translator emitted both resolvedFrom and peopleResolution for ` +
+        `column "${translated.columnId}" (type "${translated.columnType}"). ` +
+        `These slots are mutually exclusive in v0.1; a translator setting ` +
+        `both is a wiring bug.`,
+      {
+        details: {
+          column_id: translated.columnId,
+          column_type: translated.columnType,
+        },
+      },
+    );
+  }
+  if (translated.resolvedFrom !== null) {
+    return {
+      from: null,
+      to,
+      details: {
+        resolved_from: {
+          input: translated.resolvedFrom.input,
+          timezone: translated.resolvedFrom.timezone,
+          now: translated.resolvedFrom.now,
+        },
+      },
+    };
+  }
+  if (translated.peopleResolution !== null) {
+    return {
+      from: null,
+      to,
+      details: {
+        resolved_from: {
+          tokens: translated.peopleResolution.tokens.map((t) => ({
+            input: t.input,
+            resolved_id: t.resolved_id,
+          })),
+        },
+      },
+    };
+  }
+  return { from: null, to };
 };
 
 /**
