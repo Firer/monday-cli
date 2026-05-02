@@ -217,6 +217,7 @@ const planColumnMappings = ({
 
   const planned: { source: string; target: string }[] = [];
   const unmatched: UnmatchedColumn[] = [];
+  const invalidMappings: { source_col_id: string; target_col_id: string }[] = [];
 
   for (const sourceId of sourceColumnIds) {
     // Check the explicit mapping first. The mapping wins over a
@@ -224,6 +225,18 @@ const planColumnMappings = ({
     // purpose by mapping it to a different target.
     const mapped = mapping?.[sourceId];
     if (mapped !== undefined) {
+      // Round-2 P2 (F2): validate the mapped target exists on the
+      // target board. The parser only checks JSON shape (non-empty
+      // string); without this gate `--columns-mapping
+      // '{"status_4":"typo"}'` would bypass the strict-default
+      // unmatched check and reach Monday with a bogus target ID
+      // (silently dropped server-side). We have target metadata
+      // already loaded — fail loud here so the "reject before silent
+      // drop" guarantee covers typo'd mapping targets too.
+      if (!targetColumnIds.has(mapped)) {
+        invalidMappings.push({ source_col_id: sourceId, target_col_id: mapped });
+        continue;
+      }
       planned.push({ source: sourceId, target: mapped });
       continue;
     }
@@ -243,6 +256,23 @@ const planColumnMappings = ({
       source_title: sourceCol?.title ?? sourceId,
       source_type: sourceCol?.type ?? 'unknown',
     });
+  }
+
+  if (invalidMappings.length > 0) {
+    throw new UsageError(
+      `Cross-board move's --columns-mapping points at ${String(
+        invalidMappings.length,
+      )} target column(s) that don't exist on the target board.`,
+      {
+        details: {
+          invalid_mappings: invalidMappings,
+          hint:
+            'verify the target column IDs against `monday board describe ' +
+            '<target_bid>`; the source IDs map to target IDs that must ' +
+            'already exist (move does not create columns).',
+        },
+      },
+    );
   }
 
   if (unmatched.length > 0) {
@@ -267,26 +297,60 @@ const planColumnMappings = ({
 };
 
 /**
- * Returns true when the projected column carries actual data — i.e.,
- * a non-empty wire value or a non-empty human-readable `text`. Empty
- * cells (no value, no text, or text === "") aren't worth mapping
- * because Monday wouldn't carry a value across the move anyway.
+ * Recursive "has content" check for a parsed wire value.
  *
- * Why both `value` and `text`. `parseColumnValue` returns `null` for
- * null/empty/malformed wire strings (Monday encodes column values as
- * JSON strings; `value: null` and `value: ""` both project to a null
- * `value`). But `text` can still be populated for read-only-shaped
- * cells where the structured `value` is null but Monday computed a
- * human form (e.g. `creation_log` rendering "Alice 5 minutes ago").
- * Either signal counts as "has data" for the unmatched check —
- * agents reading the strict-default error want a precise list of
- * what would be dropped, not noise from empty cells they never
- * touched.
+ * Round-2 P1 (F1): the round-1 fix only treated `null`/`undefined` as
+ * empty, missing the "rich clear" shapes Monday + the M5b clear
+ * translator both produce — `{}`, `{label: null, index: null}`,
+ * `{date: null, time: null}`, `{personsAndTeams: []}`, etc. (see
+ * `column-values.ts` clear payloads + `item-projection.test.ts`
+ * cleared-date case). A cleared status / date / people cell with
+ * `value: "{}"` parses to `{}` and the round-1 filter wrongly
+ * counted it as "has data", re-introducing the F1 bug for the
+ * rich-clear case.
+ *
+ * Semantic emptiness here:
+ *   - `null` / `undefined` → empty.
+ *   - String → empty when zero-length. Non-empty strings carry data.
+ *   - Number / boolean → always has content (`0` and `false` are
+ *     legitimate values for numeric / checkbox cells).
+ *   - Array → has content when ANY element has content.
+ *   - Object → has content when ANY value has content (recursive).
+ *
+ * The recursion stops at primitive leaves; cyclic objects shouldn't
+ * appear in JSON-parsed wire payloads, so no cycle guard.
+ */
+const valueHasContent = (v: unknown): boolean => {
+  if (v === null || v === undefined) return false;
+  if (typeof v === 'string') return v.length > 0;
+  if (typeof v === 'number' || typeof v === 'boolean') return true;
+  if (Array.isArray(v)) return v.some(valueHasContent);
+  if (typeof v === 'object') {
+    return Object.values(v as Record<string, unknown>).some(valueHasContent);
+  }
+  /* c8 ignore next — symbol / bigint / function aren't representable
+     in JSON-parsed Monday payloads; defensive. */
+  return true;
+};
+
+/**
+ * Returns true when the projected column carries actual data — i.e.,
+ * a semantically non-empty wire value (recursive check) or a non-
+ * empty human-readable `text`. Empty cells (cleared rich shapes like
+ * `{}`, empty arrays, all-null leaves, or empty `text`) aren't worth
+ * mapping because Monday wouldn't carry a value across the move
+ * anyway.
+ *
+ * Why both `value` and `text`. Monday returns `text` even for read-
+ * only-shaped cells whose structured `value` is null/empty (e.g.
+ * `creation_log` rendering "Alice 5 minutes ago"). Either signal
+ * counts as "has data" for the unmatched check — agents reading the
+ * strict-default error want a precise list of what would be
+ * dropped, not noise from empty cells they never touched.
  */
 const cellHasData = (col: { readonly value?: unknown; readonly text?: string | null }): boolean => {
-  if (col.value !== null && col.value !== undefined) return true;
   if (typeof col.text === 'string' && col.text.length > 0) return true;
-  return false;
+  return valueHasContent(col.value);
 };
 
 /**
@@ -617,12 +681,16 @@ const runCrossBoardMove = async ({
       itemId: parsed.itemId,
       boardId: toBoard,
       groupId: parsed.toGroup,
-      // Send `null` for "no mapping" so Monday treats it as the
-      // default (verbatim ID match); send the array (possibly empty)
-      // when the agent passed `--columns-mapping`. Empty array is
-      // the "drop everything" opt-in.
-      columnsMapping:
-        parsed.columnsMapping === undefined ? null : plan.columnsMapping,
+      // Round-2 P2 (F3): the live wire mapping mirrors the dry-run
+      // `column_mappings` echo so agents reading the preview see
+      // exactly what Monday will receive. The planner always emits
+      // an array — verbatim matches surface explicitly, mappings
+      // override, empty `--columns-mapping {}` collapses to `[]`
+      // (the "drop everything" opt-in). Pre-fix the no-flag case
+      // sent `null` and the dry-run echo diverged from the wire
+      // payload, weakening the "preview shows what will happen"
+      // guarantee.
+      columnsMapping: plan.columnsMapping,
     },
     { operationName: 'ItemMoveToBoard' },
   );

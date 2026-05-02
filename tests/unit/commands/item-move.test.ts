@@ -172,6 +172,58 @@ describe('planColumnMappings', () => {
     expect(plan.echo).toEqual([]);
   });
 
+  it('throws usage_error when --columns-mapping points at non-existent target ID (Codex round-2 F2)', () => {
+    // The parser only validates JSON shape (non-empty string); without
+    // the planner's target-existence check, a typo'd target ID would
+    // pass through to Monday's `columns_mapping` and silently drop
+    // server-side. Strict-default's "reject before silent drop"
+    // guarantee covers typo'd mappings too.
+    try {
+      planColumnMappings({
+        sourceColumnIds: ['status_4'],
+        sourceColumnsById: new Map([
+          ['status_4', sourceCol('status_4', 'Status', 'status')],
+        ]),
+        targetColumnIds: new Set(['status_42']),
+        mapping: { status_4: 'typo_does_not_exist' },
+      });
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UsageError);
+      const details = (err as UsageError).details as {
+        invalid_mappings?: readonly { source_col_id: string; target_col_id: string }[];
+        hint?: string;
+      };
+      expect(details.invalid_mappings).toEqual([
+        { source_col_id: 'status_4', target_col_id: 'typo_does_not_exist' },
+      ]);
+      expect(details.hint).toContain('monday board describe');
+    }
+  });
+
+  it('aggregates multiple invalid mapping targets into one usage_error', () => {
+    try {
+      planColumnMappings({
+        sourceColumnIds: ['a', 'b'],
+        sourceColumnsById: new Map([
+          ['a', sourceCol('a')],
+          ['b', sourceCol('b')],
+        ]),
+        targetColumnIds: new Set(['real']),
+        mapping: { a: 'typo_1', b: 'typo_2' },
+      });
+      throw new Error('expected throw');
+    } catch (err) {
+      const details = (err as UsageError).details as {
+        invalid_mappings?: readonly { target_col_id: string }[];
+      };
+      expect(details.invalid_mappings?.map((m) => m.target_col_id)).toEqual([
+        'typo_1',
+        'typo_2',
+      ]);
+    }
+  });
+
   it('aggregates multiple unmatched columns into one usage_error', () => {
     // The error decoration enumerates every unmatched column at
     // once — agents fix all the gaps in one revised --columns-mapping
@@ -208,10 +260,23 @@ describe('cellHasData / collectSourceColumnIds — Codex round-1 P1 (F1) regress
   // anyway. Post-fix, only populated cells (non-null `value` OR
   // non-empty `text`) count toward the unmatched check.
 
-  it('cellHasData: true when value is non-null', () => {
-    expect(cellHasData({ value: { label: 'Done' }, text: null })).toBe(true);
+  it('cellHasData: true for populated rich shapes (status / date / people)', () => {
+    expect(cellHasData({ value: { label: 'Done', index: 1 }, text: null })).toBe(true);
+    expect(cellHasData({ value: { date: '2026-05-01', time: null }, text: null })).toBe(true);
+    expect(
+      cellHasData({
+        value: { personsAndTeams: [{ id: 12345, kind: 'person' }] },
+        text: null,
+      }),
+    ).toBe(true);
+  });
+
+  it('cellHasData: true for primitive 0 / false (legitimate values)', () => {
+    // A `numbers` cell with value 0 is a legitimate populated value;
+    // a `checkbox` cell with `value: false` likewise. Both must
+    // count as "has data" so an unmatched zero-valued source
+    // column surfaces in the strict-default error.
     expect(cellHasData({ value: 0, text: null })).toBe(true);
-    expect(cellHasData({ value: '', text: null })).toBe(true);
     expect(cellHasData({ value: false, text: null })).toBe(true);
   });
 
@@ -219,10 +284,37 @@ describe('cellHasData / collectSourceColumnIds — Codex round-1 P1 (F1) regress
     expect(cellHasData({ value: null, text: 'Alice 5 mins ago' })).toBe(true);
   });
 
+  it('cellHasData: false for cleared rich shapes — Codex round-2 F1', () => {
+    // Monday + the M5b clear translator both produce these "rich
+    // clear" shapes for cleared cells. parseColumnValue parses the
+    // wire `"{}"` to `{}`; the round-1 fix wrongly counted those
+    // as "has data" because `value !== null`. The semantic-empty
+    // recursion catches every shape:
+    expect(cellHasData({ value: {}, text: null })).toBe(false);
+    expect(cellHasData({ value: { label: null, index: null }, text: null })).toBe(false);
+    expect(cellHasData({ value: { date: null, time: null }, text: null })).toBe(false);
+    expect(cellHasData({ value: { personsAndTeams: [] }, text: null })).toBe(false);
+    // Empty arrays at the top level too.
+    expect(cellHasData({ value: [], text: null })).toBe(false);
+    // Object whose only leaves are null/empty.
+    expect(cellHasData({ value: { a: null, b: { c: null } }, text: null })).toBe(false);
+  });
+
   it('cellHasData: false when both value and text are empty', () => {
     expect(cellHasData({ value: null, text: null })).toBe(false);
     expect(cellHasData({ value: null, text: '' })).toBe(false);
     expect(cellHasData({ value: undefined, text: undefined })).toBe(false);
+    expect(cellHasData({ value: '', text: null })).toBe(false);
+  });
+
+  it('cellHasData: text wins over empty value (read-only-shape cells)', () => {
+    // `creation_log` and `last_updated` cells often have populated
+    // `text` (Monday computes the human form server-side) but
+    // structured `value` may be empty. The unmatched check wants to
+    // count these as "has data" so agents see them in the strict-
+    // default unmatched list.
+    expect(cellHasData({ value: {}, text: 'Alice 5 mins ago' })).toBe(true);
+    expect(cellHasData({ value: null, text: 'Some history' })).toBe(true);
   });
 
   it('collectSourceColumnIds: drops empty cells', () => {

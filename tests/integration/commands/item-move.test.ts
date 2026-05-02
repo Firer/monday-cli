@@ -309,9 +309,12 @@ describe('monday item move (integration, M11)', () => {
               itemId: '12345',
               boardId: '222',
               groupId: 'topics',
-              // `--columns-mapping` absent → variable is null
-              // (Monday's "use defaults" signal).
-              columnsMapping: null,
+              // Round-2 F3: live wire mirrors the dry-run echo. The
+              // planner emits the verbatim match explicitly even when
+              // no `--columns-mapping` was passed, so agents
+              // previewing the call see exactly what Monday will
+              // receive.
+              columnsMapping: [{ source: 'date4', target: 'date4' }],
             },
             response: { data: { move_item_to_board: movedCrossBoard } },
           },
@@ -430,14 +433,11 @@ describe('monday item move (integration, M11)', () => {
               itemId: '12345',
               boardId: '222',
               groupId: 'topics',
-              // No `--columns-mapping` flag was passed, so the wire
-              // variable is null (Monday's permissive default — the
-              // verbatim ID matches happen server-side). The point of
-              // this test is that the unmatched check pre-mutation
-              // doesn't raise on the empty status_4 / notes cells; once
-              // it passes, the verb sends null to Monday because the
-              // agent didn't request an explicit override.
-              columnsMapping: null,
+              // Round-2 F3: live wire mirrors the dry-run echo. Only
+              // populated source cells appear in the mapping
+              // (status_4 + notes are empty so they drop out via
+              // `cellHasData`); date4 is verbatim-matched on target.
+              columnsMapping: [{ source: 'date4', target: 'date4' }],
             },
             response: { data: { move_item_to_board: movedCrossBoard } },
           },
@@ -445,6 +445,134 @@ describe('monday item move (integration, M11)', () => {
       },
     );
     expect(out.exitCode).toBe(0);
+  });
+
+  it("cross-board: rich-clear cells (value: '{}' / 'personsAndTeams: []') don't trigger unmatched (Codex round-2 F1)", async () => {
+    // Round-2 F1 regression: parseColumnValue parses the wire `"{}"`
+    // to `{}` — the "rich clear" shape the M5b clear translator and
+    // Monday both produce. Round-1's filter only excluded
+    // null/undefined values, so a cleared status cell on the source
+    // (value: '{}') incorrectly triggered the unmatched check.
+    // Round-2's recursive `valueHasContent` catches every empty rich
+    // shape.
+    const sourceItemRichClear = {
+      ...sampleItem,
+      column_values: [
+        // populated — survives.
+        {
+          id: 'date4',
+          type: 'date',
+          text: '2026-05-01',
+          value: '{"date":"2026-05-01","time":null}',
+          column: { title: 'Due date' },
+        },
+        // cleared rich shape — value: '{}' parses to {} → empty.
+        {
+          id: 'status_4',
+          type: 'status',
+          text: '',
+          value: '{}',
+          column: { title: 'Status' },
+        },
+        // cleared people — empty personsAndTeams → empty.
+        {
+          id: 'owners',
+          type: 'people',
+          text: '',
+          value: '{"personsAndTeams":[]}',
+          column: { title: 'Owners' },
+        },
+        // cleared with all-null leaves → empty.
+        {
+          id: 'priority',
+          type: 'status',
+          text: null,
+          value: '{"label":null,"index":null}',
+          column: { title: 'Priority' },
+        },
+      ],
+    };
+    const movedCrossBoard = {
+      ...sourceItemRichClear,
+      board: { id: '222' },
+    };
+    const out = await drive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sourceItemRichClear] } },
+          },
+          sourceBoardMetadataInteraction,
+          targetBoardMetadataInteraction,
+          {
+            operation_name: 'ItemMoveToBoard',
+            match_variables: {
+              itemId: '12345',
+              boardId: '222',
+              groupId: 'topics',
+              // Only date4 (the populated cell) → verbatim match.
+              // status_4 / owners / priority are all rich-clear and
+              // drop out via valueHasContent.
+              columnsMapping: [{ source: 'date4', target: 'date4' }],
+            },
+            response: { data: { move_item_to_board: movedCrossBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('cross-board: usage_error when --columns-mapping target ID does not exist on target board (Codex round-2 F2)', async () => {
+    // Round-2 F2 regression: `--columns-mapping '{"status_4":"typo"}'`
+    // pre-fix bypassed the strict-default check and reached Monday
+    // with a bogus target. Post-fix the planner validates each
+    // mapping target against `targetColumnIds` and raises
+    // `usage_error` with `details.invalid_mappings`.
+    const out = await drive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--columns-mapping',
+        '{"status_4":"typo_does_not_exist"}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sampleItem] } },
+          },
+          sourceBoardMetadataInteraction,
+          targetBoardMetadataInteraction,
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    const details = env.error?.details as {
+      invalid_mappings?: readonly { source_col_id: string; target_col_id: string }[];
+    };
+    expect(details.invalid_mappings).toEqual([
+      { source_col_id: 'status_4', target_col_id: 'typo_does_not_exist' },
+    ]);
   });
 
   it('cross-board: usage_error when source columns are unmatched and no mapping is supplied', async () => {

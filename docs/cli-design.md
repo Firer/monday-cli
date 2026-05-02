@@ -1973,9 +1973,10 @@ mutation verbs produce different planned-change shapes; the
   describes what Monday would receive on the wire). Three-leg
   dry-run (`ItemMoveRead` + source-board metadata + target-board
   metadata, parallel for the two metadata loads); *omits*
-  `board_id`, `resolved_ids`, and `diff`. `meta.source` aggregates
-  via `mergeSource` because the metadata loads can hit cache
-  (`'cache'` / `'live'` / `'mixed'`):
+  `board_id`, `resolved_ids`, and `diff`. `meta.source` is
+  `'live'` or `'mixed'` — the source-item read leg is always live,
+  so pure `'cache'` is impossible; the metadata loads can hit
+  cache, which collapses the aggregate to `'mixed'`:
 
   ```json
   {
