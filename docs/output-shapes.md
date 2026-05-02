@@ -657,6 +657,122 @@ Top-level emits `operation: "create_item"` with hoisted `board_id` /
 `board_id` (subitems-board derivation is server-side). `diff[<col>].
 from` is always `null` (item doesn't exist yet).
 
+### `item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set ...] [--set-raw ...] [--dry-run]`
+
+Idempotency-cluster verb (M12). Looks up items matching the
+`--match-by` predicate and branches: 0 matches → `create_item`; 1
+match → `change_multiple_column_values` with synthetic `name` (same
+wire shape as `item update --name --set`); 2+ matches →
+`ambiguous_match` (no mutation fires).
+
+Live envelope (create branch — same projection as `item create` /
+`item get` plus the `data.operation` discriminator):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "99001",
+    "name": "Refactor login",
+    "board_id": "111",
+    "group_id": "topics",
+    "parent_item_id": null,
+    "state": "active",
+    "url": "https://example.monday.com/items/99001",
+    "created_at": "2026-05-02T10:00:00Z",
+    "updated_at": "2026-05-02T10:00:00Z",
+    "columns": { "status_4": { ... } },
+    "operation": "create_item"
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+Live envelope (update branch — `data.operation: "update_item"`,
+otherwise the same shape):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "12345",
+    ...,
+    "operation": "update_item"
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+`data.operation` is always present on the live envelope and is the
+branch discriminator; agents key off `operation` to know whether
+the call created a fresh item or updated an existing one. The slot
+lives on `data` rather than `meta` because v0.1's mutation envelope
+already keeps operation-shape signals in `data` (e.g.
+`duplicated_from_id` for `item duplicate`); `meta` is reserved for
+cross-verb cache / source / pagination state. `resolved_ids` echoes
+the same token → column-ID map every column-mutation envelope
+carries. `warnings` may include `column_token_collision` /
+`stale_cache_refreshed` from the lookup-leg or update-leg column
+resolver.
+
+Dry-run envelope (verb-level operation rewrite — both branches):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "mixed", ... },
+  "planned_changes": [
+    {
+      "operation": "create_item",
+      "board_id": "111",
+      "name": "Refactor login",
+      "resolved_ids": { "status": "status_4" },
+      "diff": { "status_4": { "from": null, "to": { "label": "Backlog" } } },
+      "match_by": ["name"],
+      "matched_count": 0
+    }
+  ],
+  "warnings": []
+}
+```
+
+Update branch dry-run carries `operation: "update_item"`,
+`item_id`, the would-rename `name` slot (echoes `--name <n>`), and
+the diff shape `change_multiple_column_values` would have produced.
+The `match_by` and `matched_count` slots are M12-specific echoes —
+agents reading the dry-run know exactly what the lookup found
+without re-issuing the query.
+
+Errors (M12-specific):
+
+- `ambiguous_match` (exit 2) — 2+ matches. Carries
+  `details.board_id`, `details.match_by`, `details.match_values`,
+  `details.matched_count`, `details.candidates: [{id, name}, ...]`
+  (capped at 10). Agents tighten the predicate (add another
+  `--match-by` column or use a stable hidden-key column) and re-run.
+
+`--match-by` accepts column tokens (resolved via the same column
+resolver `--set` uses) plus the literal `name` pseudo-token, which
+matches against the item's `name` field. Each non-`name` token
+requires a corresponding `--set <token>=<value>` (the upsert pulls
+the match value from `--set` so the create-branch wire payload and
+the lookup share one source of truth). `--set-raw <col>=<json>`
+participates in column updates but **cannot appear in `--match-by`**
+(the JSON wire shape isn't a filter-comparable scalar — the parser
+rejects with `usage_error`).
+
+**Sequential-retry idempotent only.** Re-running with the same args
+from the same agent yields one item — the second call sees the
+just-created item and branches to `update_item`. Concurrent agents
+observing zero matches at the same instant both branch to
+`create_item`; the next call surfaces the duplicate as
+`ambiguous_match`. Concurrent-write protection is a v0.4 candidate.
+
 ### `item archive <iid> --yes [--dry-run]`
 
 Archive an item via Monday's `archive_item` mutation (M10). `--yes`

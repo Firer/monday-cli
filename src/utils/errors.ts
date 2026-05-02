@@ -1,8 +1,9 @@
 /**
  * Typed errors for the CLI. Every thrown error carries a stable
  * `code` from `cli-design.md` §6.5 — agents key off the code, never
- * the English `message`. The 26 codes below are the v0.1 frozen set;
- * `dev_*` codes ship in v0.3 but are listed here so the M5b agent
+ * the English `message`. v0.1 froze 26 codes; `ambiguous_match` ships
+ * in v0.2 M12 (`item upsert` with 2+ matches), bringing the count to
+ * 27. `dev_*` codes ship in v0.3 but are listed here so the M5b agent
  * doesn't need to backfill the type.
  */
 
@@ -12,6 +13,7 @@ export const ERROR_CODES = [
   'not_found',
   'ambiguous_name',
   'ambiguous_column',
+  'ambiguous_match',
   'column_not_found',
   'user_not_found',
   'unsupported_column_type',
@@ -103,6 +105,7 @@ export const CODE_RETRYABLE_DEFAULT: Readonly<Record<ErrorCode, boolean>> = Obje
   not_found: false,
   ambiguous_name: false,
   ambiguous_column: false,
+  ambiguous_match: false,
   column_not_found: false,
   user_not_found: false,
   unsupported_column_type: false,
@@ -142,6 +145,7 @@ export const CODE_TYPICAL_HTTP_STATUS: Readonly<Record<ErrorCode, number | null>
   not_found: 200,
   ambiguous_name: null,
   ambiguous_column: null,
+  ambiguous_match: null,
   column_not_found: null,
   user_not_found: null,
   unsupported_column_type: null,
@@ -253,6 +257,7 @@ export const exitCodeForError = (code: ErrorCode): ExitCode => {
     case 'not_found':
     case 'ambiguous_name':
     case 'ambiguous_column':
+    case 'ambiguous_match':
     case 'column_not_found':
     case 'user_not_found':
     case 'unsupported_column_type':

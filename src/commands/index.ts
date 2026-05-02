@@ -76,6 +76,8 @@ import { itemDeleteCommand } from './item/delete.js';
 import { itemDuplicateCommand } from './item/duplicate.js';
 // M11 (v0.2) — item move (group + cross-board).
 import { itemMoveCommand } from './item/move.js';
+// M12 (v0.2) — item upsert (idempotency-cluster verb).
+import { itemUpsertCommand } from './item/upsert.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -122,6 +124,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemDeleteCommand,
     itemDuplicateCommand,
     itemMoveCommand,
+    itemUpsertCommand,
     updateCreateCommand,
     rawCommand,
     boardDoctorCommand,

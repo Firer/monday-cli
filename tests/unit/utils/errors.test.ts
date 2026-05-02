@@ -15,12 +15,16 @@ import {
 } from '../../../src/utils/errors.js';
 
 describe('ERROR_CODES', () => {
-  it('contains exactly the 26 v0.1 stable codes', () => {
-    expect(ERROR_CODES).toHaveLength(26);
+  it('contains exactly the 27 stable codes (26 v0.1 + 1 v0.2 M12)', () => {
+    expect(ERROR_CODES).toHaveLength(27);
   });
 
   it('includes column_archived (precondition resolved per §6.5)', () => {
     expect(ERROR_CODES).toContain('column_archived');
+  });
+
+  it('includes ambiguous_match (M12 — `item upsert` matched 2+ items)', () => {
+    expect(ERROR_CODES).toContain('ambiguous_match');
   });
 
   it('has no duplicates', () => {

@@ -1373,6 +1373,236 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item upsert (create branch live — 0 matches → create_item)', async () => {
+    // Pins the M12 mutation envelope for the create branch — `data`
+    // carries the projected new item plus `data.operation:
+    // "create_item"` per cli-design §6.4. `meta.source: "mixed"`
+    // (cache-served metadata + live lookup + live mutation).
+    const newItem = {
+      ...sampleItem,
+      id: '99001',
+      name: 'Refactor login',
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--set',
+        'status=Backlog',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpsertLookup',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpsertCreate',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item upsert (update branch live — 1 match → update_item)', async () => {
+    // Pins the M12 update branch — `data.operation: "update_item"`,
+    // same projected-item shape as `item update` plus the operation
+    // discriminator. Synthetic `name` key bundled into
+    // change_multiple_column_values per §5.3 step 5.
+    const matchedItem = { ...sampleItem };
+    const out = await cachedDrive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--set',
+        'status=Backlog',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpsertLookup',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '12345', name: 'Refactor login' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpsertMulti',
+            response: {
+              data: { change_multiple_column_values: matchedItem },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item upsert --dry-run (create branch — operation: "create_item")', async () => {
+    // Pins the M12 dry-run shape for the create branch — verb-level
+    // `operation` in planned_changes plus the M12-specific
+    // `match_by` / `matched_count` echoes. `meta.source: "mixed"`
+    // (cache-served metadata + live lookup; planCreate's resolution
+    // legs hit cache).
+    const out = await cachedDrive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--set',
+        'status=Backlog',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpsertLookup',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item upsert --dry-run (update branch — operation: "update_item")', async () => {
+    // Pins the M12 dry-run shape for the update branch — verb-level
+    // operation rewrite (the underlying planChanges produces the
+    // wire-name `change_multiple_column_values`; M12 surfaces it as
+    // `update_item` for envelope consistency with the live shape).
+    const out = await cachedDrive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--set',
+        'status=Backlog',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpsertLookup',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '12345', name: 'Refactor login' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item upsert ambiguous_match error envelope (M12 §6.5)', async () => {
+    // Pins the M12 error envelope — `error.code: "ambiguous_match"`
+    // plus the §6.5 details schema (`board_id`, `match_by`,
+    // `match_values`, `matched_count`, `candidates`). No mutation
+    // fires; the envelope is the recovery contract.
+    const out = await cachedDrive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--set',
+        'status=Backlog',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemUpsertLookup',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '12345', name: 'Refactor login' },
+                        { id: '12346', name: 'Refactor login' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {
