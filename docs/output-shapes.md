@@ -733,6 +733,89 @@ retains deleted items in the trash for 30 days but exposes no
 assets / automation history). Agents needing reversal must recreate
 from a prior snapshot.
 
+### `item duplicate <iid> [--with-updates] [--dry-run]`
+
+Third sibling of M10's lifecycle cluster (M10 Session B). Calls
+Monday's `duplicate_item(item_id, board_id, with_updates)` mutation;
+unlike its M10 siblings duplicate is **creative** (not destructive),
+so it skips the `--yes` gate per cli-design §3.1 #7. `--with-updates`
+copies the source item's updates to the new item.
+
+Live envelope `data` extends the §6.2 single-resource projection
+with one field — `duplicated_from_id` — echoing the source item's
+ID so agents thread the lineage into subsequent operations without
+having to remember the positional they passed. The new item's `id`
+is fresh (Monday assigns it), `board_id` matches the source's
+(Monday duplicates onto the source's board), and the rest mirrors
+`item get`:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "67890",
+    "name": "Refactor login (copy)",
+    "board_id": "111",
+    "group_id": "topics",
+    "parent_item_id": null,
+    "state": "active",
+    "url": "https://example.monday.com/items/12345",
+    "created_at": "2026-04-29T10:00:00Z",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "columns": { ... },
+    "duplicated_from_id": "12345"
+  },
+  "meta": { ..., "source": "live", ... },
+  "warnings": []
+}
+```
+
+The `duplicated_from_id` extension mirrors upsert's `data.created`
+flag (cli-design §6.4 line 1827-1831 precedent): per-verb business
+signals extend `data`; top-level slots are reserved for cross-verb
+shapes (`resolved_ids`, `side_effects`).
+
+Dry-run envelope diverges from archive's + delete's only by the
+`with_updates` slot inside `planned_changes[0]` — agents reading
+the preview know whether re-running without `--dry-run` would copy
+the source's updates:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "live", ... },
+  "planned_changes": [
+    {
+      "operation": "duplicate_item",
+      "item_id": "12345",
+      "with_updates": true,
+      "item": <projected source snapshot — same shape as live data minus duplicated_from_id>
+    }
+  ],
+  "warnings": []
+}
+```
+
+The dry-run path is **single-leg** (only `ItemDuplicateRead` fires);
+the live path is **two-leg** (`ItemBoardLookup` first, then
+`duplicate_item` — Monday's mutation requires `board_id`, derived
+from the source item's board). Both legs of the live path are
+guaranteed live, so `meta.source: "live"` directly without source
+aggregation.
+
+`idempotent: false` — every call creates a new item, mirroring
+`monday item create`'s semantics per cli-design §9.1
+(`duplicate_item` shares `create_item`'s "every call creates a new
+item" inheritance; the table doesn't list it separately). Agents
+needing idempotent dup-or-update use `monday item upsert` (M12).
+
+`not_found` (exit 2) on either leg of the live path (source missing
+or null `duplicate_item` result — defence-in-depth for permission
+edge cases) carries the same `details.item_id` shape archive +
+delete + `item get` use, so agents key off one stable code
+regardless of which leg failed.
+
 ---
 
 ## raw

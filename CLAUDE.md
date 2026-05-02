@@ -17,20 +17,20 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main` — M0–M9.5
-shipped + M10 in flight (Session A: archive + delete on main).**
+**v0.1.0 published; v0.2.0 in development on `main` — M0–M10
+shipped on main; M11 (`item move`) is the next milestone.**
 The published tarball at `0.1.0` has the v0.1 surface (5 reader
 nouns + the four M5b mutations + diagnostics + escape hatch). On
 `main`, M8 expanded the writer surface (`--set-raw` escape hatch +
 firm-row `link` / `email` / `phone` translators), M9 added the
 first item-lifecycle verb (`item create` — top-level + classic-only
 subitem with single round-trip per cli-design §5.8), and M10
-Session A landed the two destructive lifecycle siblings
-(`item archive` idempotent + `item delete` non-idempotent, both
-behind `--yes` with `--dry-run` exemption). M10 Session B
-(`item duplicate` + post-mortem + final docs sweep) is the next
-session. The
-`@mondaydotcomorg/api` SDK pin (14.0.0 / API 2026-01) is unchanged.
+landed the three lifecycle siblings (`item archive` idempotent +
+`item delete` non-idempotent, both behind `--yes` with `--dry-run`
+exemption; `item duplicate` creative-not-destructive with
+`--with-updates` + the `data.duplicated_from_id` lineage echo).
+The `@mondaydotcomorg/api` SDK pin (14.0.0 / API 2026-01) is
+unchanged.
 The agent-flow E2E (`tests/e2e/agent-flow.test.ts`) exercises the
 v0.1 contract across four binary spawns — `item list` → `item set`
 → `item set` → `update create`. Three binding documents:
@@ -47,10 +47,11 @@ v0.1 contract across four binary spawns — `item list` → `item set`
   register, exit checklist, and per-milestone post-mortems
   (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b,
   §20 M6, §21 M7).
-- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~850 lines) —
+- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,250 lines) —
   the active v0.2 plan: eleven sequenced milestones M8–M18, per-
   milestone deliverables, exit criteria, decisions log, §10 M8 +
-  §11 M9 post-mortems.
+  §11 M9 + §13 M10 post-mortems (§12 is the post-M9 R20–R26
+  refactor backlog, all shipped).
 
 **Milestones:**
 
@@ -69,7 +70,7 @@ v0.1 contract across four binary spawns — `item list` → `item set`
 | M8 | shipped (on main) | Writer expansion: `--set-raw <col>=<json>` escape hatch (`raw-write.ts` parser + post-resolution gate that rejects `read-only-forever` / `files-shaped` types per cli-design §5.3 escape-hatch contract; `change_column_value` / `change_multiple_column_values` only — never `change_simple_column_value` for raw) + three firm-row friendly translators (`links.ts` pipe-form `url\|text`, `emails.ts` pipe-form, `phones.ts` E.164 + `iso-country-codes.ts` for the country-code allowlist). `--set-raw` wired into `item set` + `item update` single + `item update --where` bulk; resolution-time mutual-exclusion check (`--set` + `--set-raw` against same resolved column → `usage_error` per cli-design §5.3 step 2). Codex post-implementation fixes pinned the resolution-before-translation invariant (resolve every token first, then translate) so a `--set X=bad` alongside `--set-raw X={...}` surfaces the mutual-exclusion error rather than the translation error. |
 | M9 | shipped (on main) | `monday item create` — top-level + classic-only subitem with single round-trip per cli-design §5.8. New `commands/item/create.ts` (~1,340 LOC) + `bundleColumnValues` lift in `column-values.ts` (shared between `selectMutation`'s multi case and create's single bundled `column_values` parameter) + `planCreate` engine sibling in `dry-run.ts` (no item-state read; hoisted `name` / `group_id` / `position` / `parent_item_id` slots per cli-design §6.4 item-create shape). `--parent <iid>` triggers `create_subitem` against the auto-derived subitems board (`subtasks.settings_str.boardIds[0]`); multi-level boards (`hierarchy_type: "multi_level"`) rejected pre-mutation with `usage_error` carrying `details.deferred_to: "v0.3"`. Three rounds of Codex review (round 1 N → 2 partial Y → 3 Y / zero findings). |
 | M9.5 | shipped (on main) | post-M9 R-class refactor cleanup pre-M10 (v0.2-plan.md §12): `set-expression.ts` (R22 — `splitSetExpression`), `resolution-context.ts` (R24 — `buildResolutionContexts`), `item-board-lookup.ts` (R23 — `lookupItemBoard` + `lookupItemBoardWithHierarchy` + `resolveBoardId`), `source-aggregator.ts` (R21 — `mergeSource` + `mergeSourceWithPreflight` + `mergeCacheAge`), `resolver-error-fold.ts foldAndRemap` (R26 — mutation catch-arm wrapper for fold + F4 remap), `resolution-pass.ts` (R20 — three-pass column resolution helper consolidating ~80-90 LOC × 5 sites into one shared `resolveAndTranslate`). Plus R25 — drop drift `CreateModeFromCommand` in favour of imported `CreateMode`. Net ~1900 LOC duplication collapsed into ~660 LOC of shared helpers; coverage 98.82 / 95.17 / 99 / 98.91 above the 95/94/95/95 floor. M10's three new mutation commands (archive / delete / duplicate) inherit the helpers rather than copy the patterns. |
-| M10 (Session A) | shipped (on main) | Two destructive lifecycle siblings: `monday item archive <iid> --yes [--dry-run]` (`commands/item/archive.ts`, idempotent: true — wire-level no-op on re-archive per cli-design §9.1) + `monday item delete <iid> --yes [--dry-run]` (`commands/item/delete.ts`, idempotent: false — re-delete after interim create would target the new item). Same argv shape, same `--yes` confirmation gate (cli-design §3.1 #7) with `--dry-run` exempting the gate per §10.2; same projection (`ITEM_FIELDS_FRAGMENT` + `parseRawItem` + `projectItem` so the response shape matches `item get` byte-for-byte). One round-trip per path: live calls the mutation directly (returns the post-mutation `Item`); dry-run reads via `Item{Archive,Delete}Read` and emits the §6.4 envelope with `operation: "archive_item" \| "delete_item"`, `item_id`, and `item: <projected snapshot>` so the agent verifies the ID before re-running with `--yes`. Confirmation hints anchor at cli-design §5.4 (Monday's 30-day window + no `unarchive` / `unrestore` mutations). Spec-gap backfilled pre-implementation: cli-design §4.3 line 532 gained `--yes` on archive (delete already had it). One M10 e2e spawn for `delete --yes` (highest blast radius); archive's coverage stays at the integration layer because the gate condition + projection are shared. Coverage 98.94 / 95.44 / 99.34 / 99.04 above the 95/95/95/95 floor (both files at 100% lines + 100% branches). Session B — `item duplicate` + post-mortem + final docs sweep — explicitly out of scope here. |
+| M10 | shipped (on main) | Three item-lifecycle siblings closing M10's cluster — the four-verb set Monday's API exposes (`archive` / `delete` / `duplicate` here; `move_item_to_*` lands in M11). **Session A** (commits `67c9825` archive + `53b5e77` delete + `3a19a15` round-1 P2 fix): two destructive verbs sharing the `--yes` confirmation gate (cli-design §3.1 #7) with `--dry-run` exempting per §10.2. `monday item archive <iid> --yes [--dry-run]` (`commands/item/archive.ts`, idempotent: true — wire-level no-op on re-archive per cli-design §9.1) + `monday item delete <iid> --yes [--dry-run]` (`commands/item/delete.ts`, idempotent: false — re-delete after interim create would target the new item). One round-trip per path: live calls the mutation directly; dry-run reads via `Item{Archive,Delete}Read` and emits the §6.4 envelope with `operation: "archive_item" \| "delete_item"`, `item_id`, and `item: <projected snapshot>`. Round-1 P2: confirmation gate had to fire BEFORE `resolveClient()` so missing-token doesn't mask `confirmation_required` as `config_error`. **Session B** (commit `36ae3cf` duplicate): `monday item duplicate <iid> [--with-updates] [--dry-run]` (`commands/item/duplicate.ts`, idempotent: false — every call creates a new item, mirroring `create_item` per cli-design §9.1). Creative not destructive — no `--yes` gate per §3.1 #7; the gate-before-resolveClient pattern doesn't apply because there's no gate to mask. Two-leg live (`ItemBoardLookup` + `duplicate_item` — Monday requires `board_id`); single-leg dry-run (`ItemDuplicateRead` only). Mutation envelope `data` extends `projectedItemSchema` with `duplicated_from_id: ItemIdSchema` so v0.2-plan §3 M10's "Returns the new item's ID + the source item's ID" commitment lands as one field — mirrors upsert's `data.created` precedent at cli-design §6.4 line 1827-1831 (per-verb business signals extend `data`; top-level slots stay cross-verb). Dry-run shape carries `with_updates` echo so the preview tells the agent whether re-running without `--dry-run` would copy updates. `--with-updates` plumbing pinned via fixture `match_variables` (true + false). Spec gaps backfilled in Session B's docs sweep: cli-design §4.3 line 531 narrative + §6.4 archive/delete/duplicate dry-run shapes (the §6.4 omission carried over from Session A). One M10 e2e spawn for `delete --yes` (highest blast radius; Session A); archive + duplicate stay at the integration layer because gate condition + projection are shared. Coverage 98.95 / 95.47 / 99.34 / 99.05 above the 95/95/95/95 floor (archive + delete + duplicate at 100% lines + 100% branches). E2e timeout bumps in Session B: `agent-flow.test.ts` 10s → 15s + `schema.test.ts` defaults → 15s under the 40-command schema payload growth (CLAUDE.md predicted "bump to 15s if it flakes"). |
 
 > **If you're implementing anything in this repo, read
 > `docs/cli-design.md` for the contract and `docs/v0.2-plan.md` for
@@ -458,9 +459,10 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   cache, config. **v0.2 in development on `main`** — M8 added the
   `--set-raw` escape hatch + the `link`/`email`/`phone` firm-row
   translators; M9 added `item create` (top-level + classic-only
-  subitem). Remaining v0.2 milestones (M10–M18) cover `item archive`
-  / `delete` / `duplicate` / `move` / `upsert`, full update mutation
-  surface (`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
+  subitem); M10 closed the item-lifecycle cluster (`archive` /
+  `delete` / `duplicate`). Remaining v0.2 milestones (M11–M18) cover
+  `item move` / `upsert`, full update mutation surface
+  (`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
   workspace + board lifecycle, NDJSON streaming, and 0.2.0 release
   prep. Monday Dev shortcuts arrive in v0.3. Watch and concurrency
   are v0.4. **See §13 of cli-design.md for the full phase markers —

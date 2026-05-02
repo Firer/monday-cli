@@ -603,6 +603,47 @@
   importing both archive + delete CommandModules so a copy-
   paste regression that flips the wrong knob fails loud.
 
+- `commands/item/duplicate.ts` (M10 Session B) — `monday item
+  duplicate <iid> [--with-updates] [--dry-run]`. Third sibling
+  of M10's lifecycle cluster, closing the four-verb set Monday's
+  API exposes (`archive` / `delete` / `duplicate` here;
+  `move_item_to_*` lands in M11). Unlike its M10 siblings
+  duplicate is **creative** (not destructive), so it skips the
+  `--yes` gate per cli-design §3.1 #7 — `monday item create`
+  sets the precedent for creative verbs without confirmation;
+  `resolveClient` runs first since there's no pre-network gate
+  to be masked (Session A's round-1 P2 ordering trap doesn't
+  apply). **Two-leg live path**: Monday's `duplicate_item(item_
+  id, board_id: ID!, with_updates)` requires `board_id` (verified
+  at SDK `index.d.ts:2131`), so the CLI calls `lookupItemBoard`
+  first to derive it, then fires the mutation. Both legs are
+  guaranteed live — no cache participates — so `meta.source:
+  "live"` directly without `mergeSource` (the aggregator is for
+  cache + live combinations). **Single-leg dry-run**: only
+  `ItemDuplicateRead` fires; the source-item snapshot is the
+  preview. **Mutation envelope** (cli-design §6.4 line 1827-1831
+  precedent — upsert's `data.created` flag): output schema is
+  `projectedItemSchema.extend({ duplicated_from_id:
+  ItemIdSchema })`, echoing the source ID alongside the new
+  item's `id` so v0.2-plan §3 M10's "Returns the new item's ID
+  + the source item's ID" commitment lands as one self-
+  describing field on `data`. **Dry-run shape** carries the
+  additional `with_updates: true | false` slot inside
+  `planned_changes[0]` so the preview tells the agent whether
+  re-running without `--dry-run` would copy the source's
+  updates; otherwise identical to archive's + delete's dry-run
+  shapes. **Idempotent: false** — every call creates a new
+  item, mirroring `monday item create`'s semantics per
+  cli-design §9.1 (`duplicate_item` shares `create_item`'s
+  inheritance; the table doesn't list it separately). Pinned
+  via an integration-level idempotency knob assertion against
+  `itemCreateCommand.idempotent` (the parallel-false pin —
+  archive's `true` pin is already covered by Session A's delete
+  test). `--with-updates` plumbing pinned via fixture
+  `match_variables` (true + false cases) so a regression where
+  commander's `undefined` leaked through would surface as a
+  cassette mismatch.
+
 - `commands/update/create.ts` (M5b session 2) — posts a
   Monday update (comment) on an item via `create_update`.
   Body sources: `--body <md>` inline, `--body-file <path>`,

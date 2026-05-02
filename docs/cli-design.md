@@ -529,6 +529,24 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
 monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
 monday item duplicate <iid> [--with-updates]                                 v0.2
+                                          # creative verb — no `--yes` gate
+                                          # (the gate is for destructive ops
+                                          # only per §3.1 #7; re-running this
+                                          # creates a second duplicate).
+                                          # `--with-updates` copies the
+                                          # source item's updates (Monday's
+                                          # `with_updates` boolean).
+                                          # `--dry-run` previews the would-
+                                          # duplicate item via single-leg
+                                          # `ItemDuplicateRead`; live is
+                                          # two-leg (board lookup +
+                                          # `duplicate_item` mutation —
+                                          # Monday requires `board_id`).
+                                          # Idempotent: false. Mutation
+                                          # envelope `data` extends with
+                                          # `duplicated_from_id` (lineage
+                                          # echo per §6.4 line 1827-1831's
+                                          # upsert precedent).
 monday item archive <iid> --yes                                              v0.2
                                           # --yes mandatory for live archive
                                           # (destructive — Monday's 30-day
@@ -1820,6 +1838,69 @@ mutation verbs produce different planned-change shapes; the
   `details.hierarchy_type`. Multi-level subitem support is
   deferred to v0.3.
 
+- **Item-archive shape** (`item archive`; v0.2 M10).
+  `operation: "archive_item"`, `item_id`, and `item: <projected
+  source snapshot>` (the §6.2 single-resource shape the source
+  item would have *before* archive — so an agent can verify the
+  ID before re-running with `--yes`). *Omits* `board_id` (Monday's
+  `archive_item(item_id)` doesn't take a board parameter; the
+  CLI doesn't surface one), `resolved_ids`, and `diff` (no
+  per-column changes). `meta.source: "live"` because the
+  source-item read fired:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "live", ... },
+    "planned_changes": [
+      {
+        "operation": "archive_item",
+        "item_id": "12345",
+        "item": { "id": "12345", "name": "Refactor login", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+- **Item-delete shape** (`item delete`; v0.2 M10). Identical
+  shape to item-archive with `operation` flipped to
+  `"delete_item"`. Re-deleting an already-deleted item surfaces
+  `not_found` past the live mutation; the dry-run path simply
+  reports the source item the live call would target. Same
+  `meta.source: "live"` and same omissions.
+
+- **Item-duplicate shape** (`item duplicate`; v0.2 M10).
+  Identical shape to item-archive + item-delete with two
+  divergences. (1) `operation: "duplicate_item"`. (2) An
+  additional `with_updates: true | false` slot echoes the
+  agent's `--with-updates` flag (defaults `false`) so the
+  preview tells the agent whether re-running without `--dry-run`
+  would copy the source item's updates. The dry-run is
+  single-leg (`ItemDuplicateRead` only); the live path is
+  two-leg (`ItemBoardLookup` + `duplicate_item` — Monday's
+  `duplicate_item(board_id: ID!, item_id, with_updates)`
+  requires `board_id`, derived from the source item's board).
+  `meta.source: "live"`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "live", ... },
+    "planned_changes": [
+      {
+        "operation": "duplicate_item",
+        "item_id": "12345",
+        "with_updates": true,
+        "item": { "id": "12345", "name": "Refactor login", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
@@ -1830,6 +1911,19 @@ which path ran:
 ```json
 { "ok": true, "data": { "id": "5001", "created": true, ... }, ... }
 ```
+
+For `monday item duplicate`, the live mutation envelope's
+`data` extends the §6.2 projection with `duplicated_from_id:
+<source-iid>` so an agent has the source-ID echo handy without
+having to remember the positional they passed:
+
+```json
+{ "ok": true, "data": { "id": "67890", "duplicated_from_id": "12345", ... }, ... }
+```
+
+This mirrors upsert's `created` flag — verb-specific business
+signals extend `data`; top-level slots are reserved for cross-verb
+shapes (`resolved_ids`, `side_effects`).
 
 ### 6.5 Error
 
