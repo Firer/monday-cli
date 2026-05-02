@@ -17,18 +17,22 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main` — M0–M10
-shipped on main; M11 (`item move`) is the next milestone.**
+**v0.1.0 published; v0.2.0 in development on `main` — M0–M11
+shipped on main; M12 (`item upsert` + bulk `item clear --where`)
+is the next milestone.**
 The published tarball at `0.1.0` has the v0.1 surface (5 reader
 nouns + the four M5b mutations + diagnostics + escape hatch). On
 `main`, M8 expanded the writer surface (`--set-raw` escape hatch +
 firm-row `link` / `email` / `phone` translators), M9 added the
 first item-lifecycle verb (`item create` — top-level + classic-only
-subitem with single round-trip per cli-design §5.8), and M10
-landed the three lifecycle siblings (`item archive` idempotent +
-`item delete` non-idempotent, both behind `--yes` with `--dry-run`
-exemption; `item duplicate` creative-not-destructive with
-`--with-updates` + the `data.duplicated_from_id` lineage echo).
+subitem with single round-trip per cli-design §5.8), M10 landed the
+three lifecycle siblings (`item archive` idempotent + `item delete`
+non-idempotent, both behind `--yes` with `--dry-run` exemption;
+`item duplicate` creative-not-destructive with `--with-updates`
++ the `data.duplicated_from_id` lineage echo), and M11 closed the
+four-verb set with `item move` (group + cross-board) backed by
+`--columns-mapping <json>` and the strict-default unmatched-column
+check per §8 decision 5.
 The `@mondaydotcomorg/api` SDK pin (14.0.0 / API 2026-01) is
 unchanged.
 The agent-flow E2E (`tests/e2e/agent-flow.test.ts`) exercises the
@@ -47,13 +51,13 @@ v0.1 contract across four binary spawns — `item list` → `item set`
   register, exit checklist, and per-milestone post-mortems
   (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b,
   §20 M6, §21 M7).
-- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,600 lines) —
+- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,800 lines) —
   the active v0.2 plan: eleven sequenced milestones M8–M18, per-
   milestone deliverables, exit criteria, decisions log, §10 M8 +
-  §11 M9 + §13 M10 post-mortems (§12 is the post-M9 R20–R26
-  refactor backlog, all shipped; §14 is the post-M10 R27–R29
-  refactor backlog — R27 + R28 shipped in the M10→M11 cleanup
-  window, R29 deferred to M15).
+  §11 M9 + §13 M10 + §15 M11 post-mortems (§12 is the post-M9
+  R20–R26 refactor backlog, all shipped; §14 is the post-M10
+  R27–R29 refactor backlog — R27 + R28 shipped in the M10→M11
+  cleanup window, R29 deferred to M15).
 
 **Milestones:**
 
@@ -73,6 +77,7 @@ v0.1 contract across four binary spawns — `item list` → `item set`
 | M9 | shipped (on main) | `monday item create` — top-level + classic-only subitem with single round-trip per cli-design §5.8. New `commands/item/create.ts` (~1,340 LOC) + `bundleColumnValues` lift in `column-values.ts` (shared between `selectMutation`'s multi case and create's single bundled `column_values` parameter) + `planCreate` engine sibling in `dry-run.ts` (no item-state read; hoisted `name` / `group_id` / `position` / `parent_item_id` slots per cli-design §6.4 item-create shape). `--parent <iid>` triggers `create_subitem` against the auto-derived subitems board (`subtasks.settings_str.boardIds[0]`); multi-level boards (`hierarchy_type: "multi_level"`) rejected pre-mutation with `usage_error` carrying `details.deferred_to: "v0.3"`. Three rounds of Codex review (round 1 N → 2 partial Y → 3 Y / zero findings). |
 | M9.5 | shipped (on main) | post-M9 R-class refactor cleanup pre-M10 (v0.2-plan.md §12): `set-expression.ts` (R22 — `splitSetExpression`), `resolution-context.ts` (R24 — `buildResolutionContexts`), `item-board-lookup.ts` (R23 — `lookupItemBoard` + `lookupItemBoardWithHierarchy` + `resolveBoardId`), `source-aggregator.ts` (R21 — `mergeSource` + `mergeSourceWithPreflight` + `mergeCacheAge`), `resolver-error-fold.ts foldAndRemap` (R26 — mutation catch-arm wrapper for fold + F4 remap), `resolution-pass.ts` (R20 — three-pass column resolution helper consolidating ~80-90 LOC × 5 sites into one shared `resolveAndTranslate`). Plus R25 — drop drift `CreateModeFromCommand` in favour of imported `CreateMode`. Net ~1900 LOC duplication collapsed into ~660 LOC of shared helpers; coverage 98.82 / 95.17 / 99 / 98.91 above the 95/94/95/95 floor. M10's three new mutation commands (archive / delete / duplicate) inherit the helpers rather than copy the patterns. |
 | M10 | shipped (on main) | Three item-lifecycle siblings closing M10's cluster — the four-verb set Monday's API exposes (`archive` / `delete` / `duplicate` here; `move_item_to_*` lands in M11). **Session A** (commits `67c9825` archive + `53b5e77` delete + `3a19a15` round-1 P2 fix): two destructive verbs sharing the `--yes` confirmation gate (cli-design §3.1 #7) with `--dry-run` exempting per §10.2. `monday item archive <iid> --yes [--dry-run]` (`commands/item/archive.ts`, idempotent: true — wire-level no-op on re-archive per cli-design §9.1) + `monday item delete <iid> --yes [--dry-run]` (`commands/item/delete.ts`, idempotent: false — re-delete after interim create would target the new item). One round-trip per path: live calls the mutation directly; dry-run reads via `Item{Archive,Delete}Read` and emits the §6.4 envelope with `operation: "archive_item" \| "delete_item"`, `item_id`, and `item: <projected snapshot>`. Round-1 P2: confirmation gate had to fire BEFORE `resolveClient()` so missing-token doesn't mask `confirmation_required` as `config_error`. **Session B** (commit `36ae3cf` duplicate): `monday item duplicate <iid> [--with-updates] [--dry-run]` (`commands/item/duplicate.ts`, idempotent: false — every call creates a new item, mirroring `create_item` per cli-design §9.1). Creative not destructive — no `--yes` gate per §3.1 #7; the gate-before-resolveClient pattern doesn't apply because there's no gate to mask. Two-leg live (`ItemBoardLookup` + `duplicate_item` — Monday requires `board_id`); single-leg dry-run (`ItemDuplicateRead` only). Mutation envelope `data` extends `projectedItemSchema` with `duplicated_from_id: ItemIdSchema` so v0.2-plan §3 M10's "Returns the new item's ID + the source item's ID" commitment lands as one field — mirrors upsert's `data.created` precedent at cli-design §6.4 line 1827-1831 (per-verb business signals extend `data`; top-level slots stay cross-verb). Dry-run shape carries `with_updates` echo so the preview tells the agent whether re-running without `--dry-run` would copy updates. `--with-updates` plumbing pinned via fixture `match_variables` (true + false). Spec gaps backfilled in Session B's docs sweep: cli-design §4.3 line 531 narrative + §6.4 archive/delete/duplicate dry-run shapes (the §6.4 omission carried over from Session A). One M10 e2e spawn for `delete --yes` (highest blast radius; Session A); archive + duplicate stay at the integration layer because gate condition + projection are shared. Coverage 98.95 / 95.47 / 99.34 / 99.05 above the 95/95/95/95 floor (archive + delete + duplicate at 100% lines + 100% branches). E2e timeout bumps in Session B: `agent-flow.test.ts` 10s → 15s + `schema.test.ts` defaults → 15s under the 40-command schema payload growth (CLAUDE.md predicted "bump to 15s if it flakes"). |
+| M11 | shipped (on main) | `monday item move` — fourth and final lifecycle verb closing the four-verb set Monday's API exposes (`archive_item` / `delete_item` / `duplicate_item` / `move_item_to_*`). Two transports under one verb: same-board (`--to-group <gid>` alone) via `move_item_to_group`, cross-board (`--to-group <gid> --to-board <bid>`) via `move_item_to_board`. Net new `commands/item/move.ts` (~530 LOC) + `api/column-mapping.ts` (~140 LOC, the JSON parse boundary). Cross-board path is four-leg live (`ItemMoveRead` + source `BoardMetadata` + target `BoardMetadata` parallel + `ItemMoveToBoard`) and three-leg dry-run (no mutation); same-board is single-leg both ways. `--columns-mapping <json>` accepts the simple `{<src>: <target_id>}` form mapping directly to Monday's `columns_mapping: [ColumnMappingInput!]` parameter; strict default per cli-design §8 decision 5 — unmatched columns surface as `usage_error` with `details.unmatched: [{source_col_id, source_title, source_type}]` + `details.example_mapping: {<src>: "<target_col_id>"}` so agents copy-paste the seed into their next call. `--columns-mapping {}` is the explicit "drop everything" opt-in. Two scope adjustments versus the v0.2-plan §3 M11 deliverables, captured in §15 post-mortem: (1) the rich `{id, value?}` form for cross-board value-overrides was deferred to v0.3 because Monday's `ColumnMappingInput = { source: ID!, target?: ID }` (SDK 14.0.0) carries no value slot — supporting it would require a non-atomic post-move `change_multiple_column_values` mutation with cross-leg partial-failure envelope shapes that have no precedent; (2) `--to-group <gid>` is now required for both same-board AND cross-board because Monday's `move_item_to_board(group_id: ID!)` is mandatory, so cli-design §4.3 line 530's pre-M11 mutual-exclusion drafting was misleading and the M11 docs sweep updated it. Mutex now lives between `--columns-mapping` and `--to-board`'s absence. **idempotent: false** at the verb level (same-board `move_item_to_group` is wire-level no-op when already in target group per cli-design §9.1, but cross-board `move_item_to_board` re-running on the target board is undefined SDK behaviour; conservative bound across all paths mirrors `monday item create`). 40 new tests (13 mapping unit + 8 planner unit + 18 integration + 1 e2e); coverage 98.97 / 95.35 / 99.36 / 99.07. Inherited helpers paid off — `lookupItemBoard` (R23) for the projection-board-id-null fallback, `readSourceItemForDryRun` (R27, `operationName: 'ItemMoveRead'`), `projectMutationItem` (R28, `errorCode: 'not_found'`), and `mergeSource` + `mergeCacheAge` (R21) for the cross-board path's mixed cache + live source aggregation. |
 
 > **If you're implementing anything in this repo, read
 > `docs/cli-design.md` for the contract and `docs/v0.2-plan.md` for
@@ -467,6 +472,65 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   duplicate dry-run single-leg wire. No leg consults the cache,
   so `mergeSource` doesn't appear and `cache_age_seconds: null`
   on every M10 envelope.
+- **`item move` (M11).** `src/commands/item/move.ts` — fourth and
+  final lifecycle verb closing the four-verb set Monday's API
+  exposes. Two transports under one verb: same-board
+  (`--to-group <gid>` alone) via `move_item_to_group`, cross-board
+  (`--to-group <gid> --to-board <bid>`) via `move_item_to_board`.
+  **`--to-group` required for both forms** because Monday's
+  `move_item_to_board(group_id: ID!)` is mandatory; `--to-board`
+  alone (no `--to-group`) → `usage_error`. cli-design §4.3 line
+  530 originally drafted as mutually-exclusive `--to-group |
+  --to-board`; the M11 docs sweep updated it (M11 post-mortem
+  §15 captures the SDK-shape discovery that drove the change).
+  **Same-board:** single-leg live (`move_item_to_group`),
+  single-leg dry-run (`readSourceItemForDryRun(operationName:
+  'ItemMoveRead')` — R27 helper). **Cross-board:** four-leg live
+  (source-item read + source `BoardMetadata` + target
+  `BoardMetadata` parallel + `move_item_to_board`), three-leg
+  dry-run (no mutation). The cross-board `meta.source` aggregates
+  via `mergeSource` (R21) because metadata loads can hit cache;
+  same-board paths are pure-live single-leg so source is
+  unconditionally `'live'`. **`--columns-mapping <json>`** —
+  `src/api/column-mapping.ts` parses + validates the
+  `{<source_col_id>: <target_col_id>}` JSON shape into a typed
+  `ColumnMapping = Record<string, string>` (R18 unwrapOrThrow at
+  the parse boundary; `usage_error` on every malformed-JSON /
+  non-object-root / non-string-value path so agents see exit 1
+  with `details.issues` rather than runner-catch-all
+  `internal_error`). Maps directly to Monday's `columns_mapping:
+  [ColumnMappingInput!]` parameter where `ColumnMappingInput =
+  { source: ID!, target?: ID }` (SDK 14.0.0 / generated-2026-01).
+  **Strict default per cli-design §8 decision 5.** `commands/
+  item/move.ts planColumnMappings` enumerates every source column
+  with data — i.e., every key in the projected item's `columns:
+  {}` map — and checks (a) verbatim ID match on target OR (b)
+  agent-supplied mapping entry. Unmatched → `usage_error`
+  carrying `details.unmatched: [{source_col_id, source_title,
+  source_type}]` + `details.example_mapping: {<src>:
+  "<target_col_id>"}`. The example mapping seeds the agent's
+  next call. Verbatim ID matches surface explicitly in
+  `column_mappings` payload + dry-run echo (so the wire array
+  fully describes what Monday receives — comprehensive over
+  partial). Mapping-overrides win over verbatim matches (agents
+  can deliberately rename a same-ID column). `--columns-mapping
+  {}` (empty object) is the explicit "drop everything (Monday's
+  permissive default)" opt-in that bypasses the unmatched check.
+  **Value-overrides deferred to v0.3** — Monday's
+  `ColumnMappingInput` carries no value slot, so the v0.2-plan
+  §3 M11 deliverable's richer `{id, value?}` form would require a
+  non-atomic post-move `change_multiple_column_values` mutation
+  with cross-leg partial-failure envelope shapes that have no
+  precedent in v0.1+v0.2. Parser rejects the rich form loud with
+  `details.hint: "deferred to v0.3 — fire monday item set <iid>
+  <target>=<value> post-move when you need them"`. Captured in
+  v0.2-plan §15. **idempotent: false** at the verb level —
+  same-board (`move_item_to_group`) is wire-level no-op when
+  already in target group per cli-design §9.1 (idempotent), but
+  cross-board (`move_item_to_board`) re-running on the target
+  board is undefined SDK behaviour (not idempotent).
+  Conservative bound across all paths mirrors `monday item
+  create`'s rationale.
 - **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
   is lossy (new ID, no updates/assets/automation history). Don't add a
   misleading "restore" command — see §5.4 for what a future explicit
@@ -503,12 +567,14 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   cache, config. **v0.2 in development on `main`** — M8 added the
   `--set-raw` escape hatch + the `link`/`email`/`phone` firm-row
   translators; M9 added `item create` (top-level + classic-only
-  subitem); M10 closed the item-lifecycle cluster (`archive` /
-  `delete` / `duplicate`). Remaining v0.2 milestones (M11–M18) cover
-  `item move` / `upsert`, full update mutation surface
-  (`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
-  workspace + board lifecycle, NDJSON streaming, and 0.2.0 release
-  prep. Monday Dev shortcuts arrive in v0.3. Watch and concurrency
+  subitem); M10 added the item-lifecycle siblings (`archive` /
+  `delete` / `duplicate`); M11 closed the four-verb lifecycle set
+  with `item move` (group + cross-board with strict-default
+  `--columns-mapping`). Remaining v0.2 milestones (M12–M18) cover
+  `item upsert` + bulk `item clear --where`, the full update
+  mutation surface (`reply` / `edit` / `delete` / `like` / `pin` /
+  `clear-all`), workspace + board lifecycle, NDJSON streaming, and
+  0.2.0 release prep. Monday Dev shortcuts arrive in v0.3. Watch and concurrency
   are v0.4. **See §13 of cli-design.md for the full phase markers —
   every command in §4.3 also carries its phase.**
 - **`board describe` ships `example_set` per writable column** (M3

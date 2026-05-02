@@ -1189,6 +1189,190 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item move --to-group (same-board live)', async () => {
+    // Pins the M11 same-board mutation envelope — `data` is the §6.2
+    // single-resource projection of the moved item with the new
+    // `group_id`. `meta.source: "live"` (single-leg, no metadata
+    // load).
+    const movedItem = {
+      ...sampleItem,
+      group: { id: 'new_group', title: 'New group' },
+    };
+    const out = await cachedDrive(
+      ['item', 'move', '12345', '--to-group', 'new_group', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveToGroup',
+            response: { data: { move_item_to_group: movedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item move --to-group --dry-run (same-board planned_changes envelope)', async () => {
+    // Pins the M11 same-board dry-run shape — `operation:
+    // "move_item_to_group"`, `to_group_id`, `item: <projected>`.
+    // No mutation fires; single-leg ItemMoveRead supplies the
+    // snapshot.
+    const out = await cachedDrive(
+      ['item', 'move', '12345', '--to-group', 'new_group', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item move --to-board (cross-board live with --columns-mapping)', async () => {
+    // Pins the M11 cross-board mutation envelope — four-leg flow
+    // (source-item read + source + target metadata + the mutation).
+    // `data` carries the projected item on the target board.
+    // `meta.source` may be `mixed` (the metadata loads can hit cache
+    // depending on test ordering); the snapshot pins the byte shape
+    // either way.
+    const targetBoardMetadata = {
+      ...sampleBoardMetadata,
+      id: '222',
+      name: 'Tasks (target)',
+      columns: [
+        {
+          id: 'status_42',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'date4',
+          title: 'Due date',
+          type: 'date',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const movedItem = { ...sampleItem, board: { id: '222' } };
+    const out = await cachedDrive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--columns-mapping',
+        '{"status_4": "status_42"}',
+        '--no-cache',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sampleItem] } },
+          },
+          {
+            ...boardMetadataInteraction,
+            match_variables: { ids: ['111'] },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['222'] },
+            response: { data: { boards: [targetBoardMetadata] } },
+          },
+          {
+            operation_name: 'ItemMoveToBoard',
+            response: { data: { move_item_to_board: movedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item move --to-board --dry-run (cross-board planned_changes with column_mappings echo)', async () => {
+    // Pins the M11 cross-board dry-run shape — `column_mappings:
+    // [{source, target}]` enumerates every mapped column (verbatim
+    // matches surface explicitly) so agents reading the preview see
+    // the exact wire shape Monday will receive.
+    const targetBoardMetadata = {
+      ...sampleBoardMetadata,
+      id: '222',
+      name: 'Tasks (target)',
+      columns: [
+        {
+          id: 'status_42',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'date4',
+          title: 'Due date',
+          type: 'date',
+          description: null,
+          archived: false,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await cachedDrive(
+      [
+        'item',
+        'move',
+        '12345',
+        '--to-group',
+        'topics',
+        '--to-board',
+        '222',
+        '--columns-mapping',
+        '{"status_4": "status_42"}',
+        '--dry-run',
+        '--no-cache',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemMoveRead',
+            response: { data: { items: [sampleItem] } },
+          },
+          {
+            ...boardMetadataInteraction,
+            match_variables: { ids: ['111'] },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['222'] },
+            response: { data: { boards: [targetBoardMetadata] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {

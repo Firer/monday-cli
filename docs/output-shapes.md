@@ -816,6 +816,152 @@ edge cases) carries the same `details.item_id` shape archive +
 delete + `item get` use, so agents key off one stable code
 regardless of which leg failed.
 
+### `item move <iid> --to-group <gid> [--to-board <bid>] [--columns-mapping <json>] [--dry-run]`
+
+The fourth and final lifecycle verb closing the four-verb set
+Monday's API exposes (M11). Two transports under one verb:
+**same-board (group move)** with `--to-group <gid>` alone calls
+Monday's `move_item_to_group(item_id, group_id)`; **cross-board
+move** with `--to-group <gid> --to-board <bid>` calls
+`move_item_to_board(item_id, board_id, group_id, columns_mapping)`.
+`--to-group` is required for both forms because Monday's
+`move_item_to_board(group_id: ID!)` is mandatory; `--to-board`
+alone (no `--to-group`) is `usage_error`.
+
+Live envelope `data` is the §6.2 single-resource projection of the
+moved item — same shape as `item get` / archive / delete. For
+same-board moves the projection's `board_id` is unchanged
+(Monday's group move doesn't cross boards); for cross-board moves
+`board_id` reflects the target. Cross-board's `meta.source` may
+be `'live'` / `'cache'` / `'mixed'` because the source + target
+metadata loads can hit cache; same-board is unconditionally
+`'live'` (no metadata loads, no cache leg):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "12345",
+    "name": "Refactor login",
+    "board_id": "222",
+    "group_id": "topics",
+    "parent_item_id": null,
+    "state": "active",
+    "url": "https://example.monday.com/items/12345",
+    "created_at": "2026-04-29T10:00:00Z",
+    "updated_at": "2026-04-30T11:00:00Z",
+    "columns": { ... }
+  },
+  "meta": { ..., "source": "mixed", "cache_age_seconds": 42, ... },
+  "warnings": []
+}
+```
+
+Dry-run envelopes diverge by transport. **Same-board dry-run**
+(single-leg `ItemMoveRead`) carries `operation:
+"move_item_to_group"`, `item_id`, `to_group_id`, and `item:
+<projected source snapshot>`:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "live", ... },
+  "planned_changes": [
+    {
+      "operation": "move_item_to_group",
+      "item_id": "12345",
+      "to_group_id": "new_group",
+      "item": <projected source snapshot>
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Cross-board dry-run** (three legs: `ItemMoveRead` + source-board
++ target-board metadata) carries `operation: "move_item_to_board"`,
+`item_id`, `to_board_id`, `to_group_id`, `column_mappings: [{source,
+target}, ...]`, and `item: <projected source snapshot>`. The
+`column_mappings` array enumerates every source-column-with-data —
+verbatim ID matches surface explicitly so the array fully describes
+what Monday would receive on the wire:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "move_item_to_board",
+      "item_id": "12345",
+      "to_board_id": "222",
+      "to_group_id": "topics",
+      "column_mappings": [
+        { "source": "status_4", "target": "status_42" },
+        { "source": "date4", "target": "date4" }
+      ],
+      "item": <projected source snapshot>
+    }
+  ],
+  "warnings": []
+}
+```
+
+**`--columns-mapping <json>` (cross-board only).** Accepts the
+simple `{<source_col_id>: <target_col_id>}` form — string-to-string
+— mapping directly to Monday's `columns_mapping: [ColumnMappingInput!]`
+parameter where `ColumnMappingInput = { source: ID!, target?: ID }`.
+The richer `{id, value?}` form for cross-board value-overrides is
+deferred to v0.3 (Monday's wire shape carries no value slot;
+supporting it requires a non-atomic post-move
+`change_multiple_column_values` mutation with cross-leg partial-
+failure envelope shapes that have no precedent). Agents needing
+overrides fire `monday item set <iid> <target>=<value>` post-move
+until v0.3 ships an atomic primitive.
+
+**Strict default per cli-design §8 decision 5.** Source columns
+with data whose IDs don't exist on target AND aren't bridged by
+`--columns-mapping` raise `usage_error` (exit 1) even on
+`--dry-run` — agents see the same shape the live mutation would
+surface rather than a preview-of-failure. The error decoration
+seeds the agent's next call:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "Cross-board move would drop 1 column value(s) ...",
+    "details": {
+      "unmatched": [
+        {
+          "source_col_id": "status_4",
+          "source_title": "Status",
+          "source_type": "status"
+        }
+      ],
+      "example_mapping": { "status_4": "<target_col_id>" }
+    }
+  },
+  "meta": { ... }
+}
+```
+
+`--columns-mapping {}` (empty object) is the explicit "drop
+everything (Monday's permissive default)" opt-in that bypasses
+the unmatched check — Monday silently drops unmatched source
+column values.
+
+`idempotent: false` at the verb level. Same-board
+(`move_item_to_group`) is wire-level no-op when already in target
+group per cli-design §9.1, but cross-board (`move_item_to_board`)
+re-running on the target board is undefined SDK behaviour;
+conservative bound across all paths mirrors `monday item create`.
+Agents needing idempotent dup-or-update use `monday item upsert`
+(M12).
+
 ---
 
 ## raw

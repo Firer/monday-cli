@@ -527,7 +527,43 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # one without the other → usage_error
                                           # --relative-to must reference an item on the same board
 monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]...   v0.2
-monday item move <iid> --to-group <gid> | --to-board <bid> [--columns-mapping <json>]   v0.2
+monday item move <iid> --to-group <gid> [--to-board <bid>] [--columns-mapping <json>]   v0.2
+                                          # Two transports under one verb:
+                                          # `--to-group <gid>` alone → same-board move
+                                          # via `move_item_to_group` (no metadata loads).
+                                          # `--to-group <gid> --to-board <bid>` →
+                                          # cross-board move via `move_item_to_board`.
+                                          # Monday requires `group_id: ID!` on the target
+                                          # board, so `--to-group` is mandatory for both
+                                          # forms. `--to-board <bid>` alone (no
+                                          # `--to-group`) → `usage_error`.
+                                          # `--columns-mapping <json>` is cross-board-only;
+                                          # passing it without `--to-board` → `usage_error`.
+                                          # Strict default per §8 decision 5 — source
+                                          # column IDs that don't appear on target AND
+                                          # aren't bridged by --columns-mapping →
+                                          # `usage_error` with `details.unmatched: [...]` +
+                                          # `details.example_mapping`.
+                                          # `--columns-mapping {}` is the explicit "drop
+                                          # everything (Monday's permissive default)" opt-in.
+                                          # Mapping value form: `{<src>: <target>}` (string-
+                                          # to-string). The richer `{id, value?}` form for
+                                          # value-overrides is deferred to v0.3 (Monday's
+                                          # `ColumnMappingInput` carries no value slot;
+                                          # supporting it requires a non-atomic post-move
+                                          # `change_multiple_column_values`). Agents needing
+                                          # overrides fire `monday item set <iid>
+                                          # <target>=<value>` post-move.
+                                          # `--dry-run` previews the source-item snapshot +
+                                          # the planned `column_mappings` for cross-board
+                                          # (still raises `usage_error` on unmatched —
+                                          # agents shouldn't have to interpret a "would-fail"
+                                          # dry-run shape).
+                                          # Idempotent: false (verb-level conservative bound;
+                                          # `move_item_to_group` is wire-level no-op when
+                                          # already in target group per §9.1, but
+                                          # `move_item_to_board` re-running on the target
+                                          # board is undefined SDK behaviour).
 monday item duplicate <iid> [--with-updates]                                 v0.2
                                           # creative verb — no `--yes` gate
                                           # (the gate is for destructive ops
@@ -1901,6 +1937,79 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
+- **Item-move-to-group shape** (`item move --to-group <gid>`; v0.2
+  M11). Same-board (group) move. Carries `operation:
+  "move_item_to_group"`, `item_id`, `to_group_id`, and `item:
+  <projected source snapshot>`. Single-leg dry-run (the source-item
+  read via `ItemMoveRead`); *omits* `board_id`, `to_board_id`,
+  `column_mappings`, `resolved_ids`, and `diff` (no per-column
+  changes; the move doesn't translate column values). `meta.source:
+  "live"` because the source-item read fired:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "live", ... },
+    "planned_changes": [
+      {
+        "operation": "move_item_to_group",
+        "item_id": "12345",
+        "to_group_id": "new_group",
+        "item": { "id": "12345", "name": "Refactor login", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+- **Item-move-to-board shape** (`item move --to-group <gid>
+  --to-board <bid>`; v0.2 M11). Cross-board move. Carries
+  `operation: "move_item_to_board"`, `item_id`, `to_board_id`,
+  `to_group_id`, `column_mappings: [{source, target}, ...]`, and
+  `item: <projected source snapshot>`. The `column_mappings` array
+  enumerates every source-column-with-data + its target column —
+  verbatim ID matches surface explicitly (so the array fully
+  describes what Monday would receive on the wire). Three-leg
+  dry-run (`ItemMoveRead` + source-board metadata + target-board
+  metadata, parallel for the two metadata loads); *omits*
+  `board_id`, `resolved_ids`, and `diff`. `meta.source` aggregates
+  via `mergeSource` because the metadata loads can hit cache
+  (`'cache'` / `'live'` / `'mixed'`):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "move_item_to_board",
+        "item_id": "12345",
+        "to_board_id": "222",
+        "to_group_id": "topics",
+        "column_mappings": [
+          { "source": "status_4", "target": "status_42" },
+          { "source": "date4", "target": "date4" }
+        ],
+        "item": { "id": "12345", "name": "Refactor login", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  Strict default per §8 decision 5 — source columns whose IDs
+  don't exist on target AND aren't bridged by `--columns-mapping`
+  raise `usage_error` (exit 1) even on `--dry-run`, so agents see
+  the same shape the live mutation would surface rather than a
+  preview-of-failure. The error carries `details.unmatched:
+  [{source_col_id, source_title, source_type}]` +
+  `details.example_mapping: {<source>: "<target_col_id>"}` so the
+  next call's `--columns-mapping` is a copy-paste away.
+  `--columns-mapping {}` (empty object) bypasses the check —
+  Monday's permissive default applies (silently drops unmatched).
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
@@ -2160,6 +2269,7 @@ emitted so agents can see when the cache was misleading them.
 | `change_column_value(s)` | Yes | Same input → same state |
 | `archive_item`, `archive_board` | Yes | Re-archiving is a no-op |
 | `move_item_to_group` | Yes | If already in target group, no-op |
+| `move_item_to_board` | **No** | Re-running on an item already on the target board is undefined SDK behaviour; the `monday item move` verb's `idempotent: false` is the conservative bound across same-board (idempotent) + cross-board (not) paths |
 | `create_item`, `create_board`, `create_column`, `create_group` | **No** | Use `upsert` variants |
 | `delete_*` | Yes (after first call) | Item already deleted → returns `not_found` |
 | `add_users_to_*` | Yes | Adding a user already a member is a no-op |
