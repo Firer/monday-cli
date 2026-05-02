@@ -235,6 +235,13 @@
   `--set` is the caller's concern (resolution-time enforcement
   per §5.3 step 2; the cross-token duplicate-resolved-id check
   in `dry-run.ts` / each mutation command catches it).
+- `api/set-expression.ts` (M9.5 R22) — `splitSetExpression(raw) →
+  {token, value}`, the `--set <col>=<val>` argv splitter shared by
+  `item set` / `item update` (single + bulk) / `item create`. Lifted
+  from three identical 12-line copies; the M8 sibling
+  `parseSetRawExpression` in `raw-write.ts` keeps its own copy of the
+  first-`=` rule because its JSON-parsing concerns aren't duplicated.
+
 - `api/links.ts` / `api/emails.ts` / `api/phones.ts` (M8) —
   the firm-row friendly translators. `parseLinkInput("url|text")`
   → `{url, text}` (pipe-form; no auto-extraction of hostnames as
@@ -287,6 +294,33 @@
   `{input, resolved_id}` entry per non-empty input token) the
   dry-run engine renders as `details.resolved_from` on the diff
   cell.
+
+- `api/resolution-context.ts` (M9.5 R24) —
+  `buildResolutionContexts({client, ctx, globalFlags}) →
+  {dateResolution, peopleResolution}`. Builds the two contexts every
+  mutation surface that calls into `translateColumnValueAsync` /
+  `planChanges` / `planCreate` needs, closing over `ctx.clock` +
+  `ctx.env.MONDAY_TIMEZONE` (date side) and `client` + `ctx.env` +
+  `globalFlags.noCache` (people side via `resolveMeFactory` +
+  `userByEmail`). Lifted from four identical 12-line copies in
+  `set.ts` / `update.ts` (single + bulk) / `create.ts`. Pure function;
+  the natural seam for v0.3's `me`-token caching across translate
+  calls in one command run.
+
+- `api/item-board-lookup.ts` (M9.5 R23) — shared
+  `ITEM_BOARD_LOOKUP_QUERY` + `ITEM_PARENT_LOOKUP_QUERY` GraphQL
+  strings, their zod parse-boundary schemas
+  (`boardLookupResponseSchema` / `parentLookupResponseSchema`), plus
+  three helpers: `lookupItemBoard({client, itemId, label?,
+  detailKey?})` (M5b shape — id + board), `lookupItemBoardWithHierarchy`
+  (M9 shape — adds `hierarchy_type` for the multi-level gate),
+  `resolveBoardId({client, itemId, explicit})` (the `--board` ??
+  lookup wrapper). `set` / `clear` / `update` / `create.ts` each shed
+  ~70 LOC of duplicated GraphQL + schema + resolver. Error labels
+  caller-supplied (`Item` / `Parent item` / `--relative-to item`)
+  preserve consumer voice; null-board / not-found error codes
+  (`not_found`) and detail keys (`item_id` / `parent_item_id` /
+  `relative_to_id`) match every original site byte-for-byte.
 
 - `api/me-token.ts` (M5a R15) — shared `isMeToken(token)`
   recogniser plus the frozen `ME_TOKENS` array. Three
@@ -341,6 +375,44 @@
   safeParse + `ApiError(internal_error)` per validation.md
   (mirrors R17 + the userByEmail wrap + R18 across every later
   parse boundary).
+
+- `api/source-aggregator.ts` (M9.5 R21) — the §6.1 `meta.source` +
+  `meta.cache_age_seconds` merge rules as three exports:
+  `mergeSource(current, next)` (3-state aggregator: first leg seeds,
+  `mixed` is contagious, `cache + live → mixed`), `mergeSourceWith
+  Preflight(planner, preflight)` (4-state variant collapsing `'none'`
+  to the preflight when any preflight leg fired — used by
+  `item create` for parent-lookup + parent-board metadata + relative-
+  to legs that fire pre-planner), `mergeCacheAge(current, next)`
+  (null-aware `Math.max` for worst-case staleness). Lifted from four
+  sites: dry-run.ts (private), update.ts `mergeSourceForRemap` + five
+  inline `Math.max` cache-age folds, create.ts `mergeSourceLeg` +
+  `mergeSourceWithPreflight` + `mergeCacheAgeWithPreflight`. Every
+  multi-leg envelope now folds source/age through this module so the
+  rule is one source of truth.
+
+- `api/resolution-pass.ts` (M9.5 R20) — `resolveAndTranslate({client,
+  boardId, setEntries, rawEntries, dateResolution?,
+  peopleResolution?, env?, noCache?, initialSource?,
+  initialCacheAgeSeconds?}) → {resolved, translated, resolvedIds,
+  warnings, source, cacheAgeSeconds}`. Lifts the ~80-90 LOC three-
+  pass discipline from five sites (`planChanges`, `planCreate`,
+  `update.ts` single, `update.ts` bulk, `create.ts`) into one helper:
+  pass (a) resolve every `--set` token, then every `--set-raw` token,
+  with archived-column gate + same-token duplicate gate; pass (b)
+  cross-token duplicate-resolved-id check (cli-design §5.3 line 961-
+  972 mutual-exclusion contract); pass (c) translate friendly entries
+  through `translateColumnValueAsync`, raw entries through
+  `translateRawColumnValue`, with each catch folding cumulative
+  resolver warnings (M5b R19 contract — `instanceof MondayCliError`
+  catches both translator UsageErrors and ApiErrors). `initialSource`
+  + `initialCacheAgeSeconds` seed the aggregator from upstream legs
+  (e.g. update.ts's bulk path passes the board-metadata leg's
+  source/age). Two consistency normalisations landed alongside the
+  lift: archived-column message wording unified across all callers;
+  translate-time catch unified to MondayCliError (pre-fix the dry-run
+  paths only caught ApiError, missing translator UsageErrors that
+  the M5b R19 contract says should fold).
 
 - `types/json.ts` (M5a R-JsonValue) — `JsonValue` /
   `JsonObject` types narrowing the rich-payload slot to
@@ -502,20 +574,33 @@
   `body` + `body_length`); `meta.source: "none"` because
   no API call fires.
 
-- `api/resolver-error-fold.ts` (M5b R19, session 2) —
+- `api/resolver-error-fold.ts` (M5b R19, session 2 + M9.5 R26) —
   `foldResolverWarningsIntoError` + `mergeDetails` +
-  `maybeRemapValidationFailedToArchived`. Six consumers:
-  `item set` / `item clear` / `item update` single + bulk /
-  the dry-run engine / `update create`. Centralises the
-  resolver-warning preservation + cache-sourced remap
-  pattern so each consumer is a one-line call rather than
-  20-30 lines of inline fold + remap. Lifted on the third
-  consumer per the §17 R-class timing rule (item set + dry-
-  run engine → item clear was the third). M5b cleanup
-  generalised the remap from a single `columnId` to a
-  `columnIds: readonly string[]` array so multi-column
-  updates probe every translated column for the archived
-  flag, not just `translated[0]`.
+  `maybeRemapValidationFailedToArchived` + `foldAndRemap` (M9.5
+  R26 — async wrapper composing fold then remap with the empty-
+  columnIds short-circuit). Two integration patterns:
+  - **Translate-time catches** (fold-only, in
+    `resolution-pass.ts` and `dry-run.ts`'s `column_archived`
+    throw) call `foldResolverWarningsIntoError` directly — no
+    remap probe needed.
+  - **Post-mutation catches** (the five mutation surfaces:
+    `item set`, `item clear`, `item update` single + bulk,
+    `item create`) call `foldAndRemap` once per mutation site,
+    replacing the 25-LOC inline `fold + columnIds.length === 0
+    ? folded : maybeRemap` pattern. Bulk's per-item-progress
+    decoration stays bulk-specific: the bulk path calls
+    `foldAndRemap` first, then attaches `applied_count` /
+    `applied_to` / `failed_at_item` / `matched_count` before
+    re-throwing.
+
+  M5b cleanup generalised the remap from a single `columnId` to
+  a `columnIds: readonly string[]` array so multi-column updates
+  probe every translated column for the archived flag, not just
+  `translated[0]`. The Codex M9 P1 finding (cache-stale archived
+  columns surfacing as `validation_failed` from `item create`)
+  was caused by item create skipping this exact catch arm — R26
+  reduces the surface where a future command can forget to wire
+  it.
 
 - `commands/raw/index.ts` (M6) — generic GraphQL escape
   hatch. Six argv shapes (positional `<query>` /

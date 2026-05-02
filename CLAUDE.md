@@ -579,19 +579,26 @@ linked sections of `docs/cli-design.md` for the full reasoning.
   stale_cache_refreshed) survive the remap via
   `error.details.resolver_warnings`. The remapped error carries
   `details.remapped_from: "validation_failed"` for triage.
-- **Resolver-warning fold module (M5b R19).**
+- **Resolver-warning fold module (M5b R19 + M9.5 R26).**
   `src/api/resolver-error-fold.ts` — single source of truth for
   `foldResolverWarningsIntoError` + `mergeDetails` +
-  `maybeRemapValidationFailedToArchived`. Six consumers:
-  `item set`, `item clear`, `item update` single + bulk, the
-  dry-run engine (`api/dry-run.ts`'s `column_archived` throw),
-  and `update create`. Folds collision / stale_cache_refreshed
-  warnings into a thrown `MondayCliError`'s
-  `details.resolver_warnings` slot so a
+  `maybeRemapValidationFailedToArchived` + `foldAndRemap` (the
+  M9.5 R26 wrapper composing fold + remap with the empty-
+  columnIds short-circuit). Folds collision /
+  `stale_cache_refreshed` warnings into a thrown
+  `MondayCliError`'s `details.resolver_warnings` slot so a
   stale-cache-then-failure flow doesn't lose the refresh
   signal. Applies to every typed post-resolution failure:
   translator `UsageError`s, `ApiError(unsupported_column_type)` /
-  `user_not_found`, mutation-time `validation_failed`.
+  `user_not_found`, mutation-time `validation_failed`. Two
+  consumer patterns: translate-time catches (in
+  `resolution-pass.ts` + `dry-run.ts`) call
+  `foldResolverWarningsIntoError` directly — no remap probe.
+  Post-mutation catches in the five mutation surfaces (`item
+  set`, `item clear`, `item update` single + bulk, `item
+  create`) call `foldAndRemap` once per site so the M9 P1
+  pattern (create skipping the catch arm and surfacing
+  `validation_failed` for archived columns) can't recur.
   `maybeRemapValidationFailedToArchived` only fires for
   cache-sourced resolutions; live-sourced skip the remap (the
   live read already saw the archived flag). Remapped errors
