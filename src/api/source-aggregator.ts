@@ -73,3 +73,64 @@ export const mergeCacheAge = (
   if (current === null) return next;
   return Math.max(current, next);
 };
+
+/**
+ * Stateful accumulator wrapping `mergeSource` + `mergeCacheAge` for
+ * the multi-leg orchestrators in `commands/item/*` that fold per-leg
+ * `meta.source` / `cacheAgeSeconds` contributions into one aggregate
+ * before emitting the envelope. Lifted post-M11 (§16 R30) — five
+ * sites duplicated the same `let aggregate; record(source, cacheAge)`
+ * closure pattern (move's `runCrossBoardMove`, create's live path,
+ * update single, update bulk dry-run + live).
+ *
+ * The standalone `mergeSource` / `mergeCacheAge` exports stay — the
+ * `mergeSourceWithPreflight` shape in `create.ts` dry-run doesn't
+ * collapse cleanly into the class (it folds a `'none'`-claiming
+ * planner source against a preflight `EnvelopeSource | undefined`,
+ * not the class's per-leg `EnvelopeSource` shape).
+ */
+export class SourceAggregator {
+  private source: EnvelopeSource | undefined;
+  private cacheAge: number | null;
+
+  /**
+   * Optional seed for callers that already have a first leg's source
+   * + cacheAge in hand (e.g. update bulk's metadata leg). Equivalent
+   * to `new SourceAggregator()` followed by `.record(seed.source,
+   * seed.cacheAgeSeconds)`, but keeps the call site one line.
+   */
+  constructor(
+    seed?: {
+      readonly source: EnvelopeSource;
+      readonly cacheAgeSeconds: number | null;
+    },
+  ) {
+    this.source = seed?.source;
+    this.cacheAge = seed?.cacheAgeSeconds ?? null;
+  }
+
+  /**
+   * Folds a leg's `source` + `cacheAgeSeconds` into the running
+   * aggregate. First call seeds; subsequent calls apply the
+   * `mergeSource` / `mergeCacheAge` rules.
+   */
+  record(source: EnvelopeSource, cacheAgeSeconds: number | null): void {
+    this.source = mergeSource(this.source, source);
+    this.cacheAge = mergeCacheAge(this.cacheAge, cacheAgeSeconds);
+  }
+
+  /**
+   * Snapshot of the current aggregate. `fallback` (default `'live'`)
+   * is returned when no leg has been recorded — matches the
+   * `aggregate ?? 'live'` pattern every call site used pre-lift.
+   */
+  result(fallback: EnvelopeSource = 'live'): {
+    readonly source: EnvelopeSource;
+    readonly cacheAgeSeconds: number | null;
+  } {
+    return {
+      source: this.source ?? fallback,
+      cacheAgeSeconds: this.cacheAge,
+    };
+  }
+}

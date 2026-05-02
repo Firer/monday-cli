@@ -71,7 +71,7 @@ import {
   lookupItemBoardWithHierarchy,
 } from '../../api/item-board-lookup.js';
 import {
-  mergeSource,
+  SourceAggregator,
   mergeSourceWithPreflight,
   mergeCacheAge,
 } from '../../api/source-aggregator.js';
@@ -841,10 +841,26 @@ export const itemCreateCommand: CommandModule<
           ...resolutionResult.warnings,
         ];
         const resolvedIds = resolutionResult.resolvedIds;
-        const aggregateSource: 'live' | 'cache' | 'mixed' | undefined =
-          resolutionResult.source;
-        const aggregateCacheAge: number | null =
-          resolutionResult.cacheAgeSeconds;
+        // Live envelope source aggregates four legs (Codex M9 P2 #1):
+        // pre-planner network calls (parent lookup + parent metadata
+        // + relative-to verification) → column resolution legs →
+        // mutation (always live). Dry-run path stays on the
+        // standalone `mergeSourceWithPreflight` helper because the
+        // planner there can claim 'none' (no wire call); the class
+        // shape only handles `EnvelopeSource = 'live'|'cache'|'mixed'`.
+        const sourceAgg = new SourceAggregator();
+        if (resolutionResult.source !== undefined) {
+          sourceAgg.record(
+            resolutionResult.source,
+            resolutionResult.cacheAgeSeconds,
+          );
+        }
+        if (createModeResult.preflightSource !== undefined) {
+          sourceAgg.record(
+            createModeResult.preflightSource,
+            createModeResult.preflightCacheAgeSeconds,
+          );
+        }
         const translated: readonly TranslatedColumnValue[] =
           resolutionResult.translated;
 
@@ -894,35 +910,19 @@ export const itemCreateCommand: CommandModule<
               columnIds: translated.map((t) => t.columnId),
               env: ctx.env,
               noCache: globalFlags.noCache,
-              resolutionSource: aggregateSource ?? 'live',
+              resolutionSource: resolutionResult.source ?? 'live',
             });
           }
           throw err;
         }
 
         const warnings: readonly Warning[] = collectedWarnings;
-        // Final source folds four legs (Codex M9 P2 #1): pre-planner
-        // network calls (parent lookup + parent metadata + relative-
-        // to) → column resolution legs → mutation (always live).
-        // The live path never sees a 'none' source (the mutation leg
-        // is always live), so we merge through the leg-aware helper.
-        let liveSource: 'live' | 'cache' | 'mixed' | undefined =
-          aggregateSource;
-        if (createModeResult.preflightSource !== undefined) {
-          liveSource = mergeSource(
-            liveSource,
-            createModeResult.preflightSource,
-          );
-        }
-        const finalSource: 'live' | 'cache' | 'mixed' = mergeSource(
-          liveSource,
-          'live',
-        );
-        // Cache age folds preflight worst-case staleness too.
-        const finalCacheAge = mergeCacheAge(
-          aggregateCacheAge,
-          createModeResult.preflightCacheAgeSeconds,
-        );
+        // Mutation leg fires live; record it so the aggregate
+        // collapses cache-served resolution / preflight legs to
+        // `mixed`. Live path never sees a 'none' source (the
+        // mutation always fires) so the class's `EnvelopeSource`
+        // shape suffices.
+        sourceAgg.record('live', null);
         emitMutation({
           ctx,
           data: mutationResult.projected,
@@ -930,8 +930,7 @@ export const itemCreateCommand: CommandModule<
           programOpts: program.opts(),
           warnings,
           ...toEmit(mutationResult.response),
-          source: finalSource,
-          cacheAgeSeconds: finalCacheAge,
+          ...sourceAgg.result(),
           // cli-design §5.3 step 2 / §6.4: echo the resolved column
           // IDs so an agent's "create then re-read" loop can use the
           // resolved IDs without consulting metadata twice. Empty map

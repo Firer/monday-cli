@@ -64,7 +64,7 @@ import {
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
-import { mergeSource, mergeCacheAge } from '../../api/source-aggregator.js';
+import { SourceAggregator } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
@@ -420,8 +420,13 @@ export const itemUpdateCommand: CommandModule<
           ...resolutionResult.warnings,
         ];
         const resolvedIds = resolutionResult.resolvedIds;
-        const aggregateSource = resolutionResult.source;
-        const aggregateCacheAge = resolutionResult.cacheAgeSeconds;
+        const sourceAgg = new SourceAggregator();
+        if (resolutionResult.source !== undefined) {
+          sourceAgg.record(
+            resolutionResult.source,
+            resolutionResult.cacheAgeSeconds,
+          );
+        }
         const translated: readonly TranslatedColumnValue[] =
           resolutionResult.translated;
 
@@ -473,23 +478,19 @@ export const itemUpdateCommand: CommandModule<
               columnIds: translated.map((t) => t.columnId),
               env: ctx.env,
               noCache: globalFlags.noCache,
-              resolutionSource: aggregateSource ?? 'live',
+              resolutionSource: resolutionResult.source ?? 'live',
             });
           }
           throw err;
         }
 
         const warnings: readonly Warning[] = collectedWarnings;
-        // The mutation leg is always live, so the final envelope source
-        // merges `aggregateSource union 'live'`. Mirrors the bulk path
-        // (~line 1305) and item set (`resolution.source === 'cache' ?
-        // 'mixed' : resolution.source`). Pre-fix this derived source
-        // from warning presence alone, missing plain cache hits without
-        // `stale_cache_refreshed` warnings (Codex M5b finding #2).
-        const finalSource: 'live' | 'cache' | 'mixed' = mergeSource(
-          aggregateSource,
-          'live',
-        );
+        // The mutation leg is always live — fold it into the
+        // aggregator so a cache-served resolution + live mutation
+        // surfaces as `mixed`. Mirrors the bulk path's terminal
+        // `record('live', null)` (Codex M5b finding #2; the
+        // warning-only inference pre-fix missed plain cache hits).
+        sourceAgg.record('live', null);
         emitMutation({
           ctx,
           data: mutationResult.projected,
@@ -497,8 +498,7 @@ export const itemUpdateCommand: CommandModule<
           programOpts: program.opts(),
           warnings,
           ...toEmit(mutationResult.response),
-          source: finalSource,
-          cacheAgeSeconds: aggregateCacheAge,
+          ...sourceAgg.result(),
           // resolved_ids — same shape as `item set`. The synthetic
           // `name` field doesn't appear here because the slot only
           // echoes RESOLVED tokens (those that went through the
@@ -957,9 +957,10 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   if (globalFlags.dryRun) {
     const allPlanned: Readonly<Record<string, unknown>>[] = [];
     const aggregatedWarnings: Warning[] = [...filterResult.warnings];
-    let aggregatedSource: 'live' | 'cache' | 'mixed' =
-      meta.source === 'cache' ? 'cache' : 'live';
-    let aggregatedCacheAge: number | null = meta.cacheAgeSeconds;
+    const sourceAgg = new SourceAggregator({
+      source: meta.source,
+      cacheAgeSeconds: meta.cacheAgeSeconds,
+    });
     for (const itemId of matchedItemIds) {
       const result = await planChanges({
         client,
@@ -983,15 +984,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       for (const w of result.warnings) {
         aggregatedWarnings.push(w);
       }
-      aggregatedSource = mergeSource(aggregatedSource, result.source);
-      aggregatedCacheAge = mergeCacheAge(aggregatedCacheAge, result.cacheAgeSeconds);
+      sourceAgg.record(result.source, result.cacheAgeSeconds);
     }
     emitDryRun({
       ctx,
       programOpts,
       plannedChanges: allPlanned,
-      source: aggregatedSource,
-      cacheAgeSeconds: aggregatedCacheAge,
+      ...sourceAgg.result(),
       warnings: dedupeWarnings(aggregatedWarnings),
       apiVersion,
     });
@@ -1038,11 +1037,17 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   ];
   const resolverWarnings: ResolverWarning[] = [...resolutionResult.warnings];
   const resolvedIds = resolutionResult.resolvedIds;
-  const aggregateSource: 'live' | 'cache' | 'mixed' =
-    /* c8 ignore next — defensive: initialSource seeded above so the
-       aggregate is always defined post-helper. */
+  // resolveAndTranslate was seeded with meta.source / meta.cacheAge
+  // above, so resolutionResult.source is always defined post-helper.
+  // The `?? meta.source` fallback preserves the pre-R30 c8-ignored
+  // defensive widening; flow then folds the per-item mutation legs
+  // (always live) at emit time via `sourceAgg.record('live', null)`.
+  const sourceAgg = new SourceAggregator();
+  /* c8 ignore next 3 — defensive: initialSource seeded above so
+     resolutionResult.source is always defined post-helper. */
+  const remapSource: 'live' | 'cache' | 'mixed' =
     resolutionResult.source ?? meta.source;
-  const aggregateCacheAge: number | null = resolutionResult.cacheAgeSeconds;
+  sourceAgg.record(remapSource, resolutionResult.cacheAgeSeconds);
   const translated: readonly TranslatedColumnValue[] =
     resolutionResult.translated;
 
@@ -1075,7 +1080,6 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // `column_archived`. Single-column bulk passes a one-element
   // array, same as before.
   const remapColumnIds: readonly string[] = translated.map((t) => t.columnId);
-  const remapSource = aggregateSource;
   for (const itemId of matchedItemIds) {
     try {
       const result = await executeMutation(client, {
@@ -1146,11 +1150,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // bulk write path replicated the bug.
   //
   // The items_page walk and per-item mutations always fire live —
-  // merge that into `aggregateSource` so a fully-cached metadata +
+  // record one terminal `live` leg so a fully-cached metadata +
   // column-resolution path still surfaces as `mixed` (cache-served
-  // metadata + live wire calls). Mirrors the empty-match no-op
+  // metadata + live wire calls). N per-item mutations collapse to
+  // one `record('live', null)` because mergeSource is idempotent
+  // for a constant second leg. Mirrors the empty-match no-op
   // path's `emptyEnvelopeSource` derivation.
-  const finalSource = mergeSource(aggregateSource, 'live');
+  sourceAgg.record('live', null);
   emitMutation({
     ctx,
     data: {
@@ -1164,8 +1170,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     schema: bulkLiveDataSchema,
     programOpts,
     warnings: collectedWarnings,
-    source: finalSource,
-    cacheAgeSeconds: aggregateCacheAge,
+    ...sourceAgg.result(),
     apiVersion,
     resolvedIds,
   });

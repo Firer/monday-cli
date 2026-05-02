@@ -84,11 +84,7 @@ import { projectMutationItem } from '../../api/item-mutation-result.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
-import {
-  mergeCacheAge,
-  mergeSource,
-  type EnvelopeSource,
-} from '../../api/source-aggregator.js';
+import { SourceAggregator } from '../../api/source-aggregator.js';
 import {
   parseColumnMappingJson,
   type ColumnMapping,
@@ -586,12 +582,7 @@ const runCrossBoardMove = async ({
   parsed,
   toBoard,
 }: CrossBoardMoveInputs): Promise<void> => {
-  let aggregateSource: EnvelopeSource | undefined;
-  let aggregateCacheAge: number | null = null;
-  const recordLeg = (source: EnvelopeSource, cacheAgeSeconds: number | null): void => {
-    aggregateSource = mergeSource(aggregateSource, source);
-    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, cacheAgeSeconds);
-  };
+  const sourceAgg = new SourceAggregator();
 
   // Leg 1: source-item read. Two roles — provides the projected
   // snapshot for the dry-run envelope's `item` slot AND surfaces the
@@ -602,7 +593,7 @@ const runCrossBoardMove = async ({
     itemId: parsed.itemId,
     operationName: 'ItemMoveRead',
   });
-  recordLeg('live', null);
+  sourceAgg.record('live', null);
 
   // Leg 2: source-board lookup. The source item's projected
   // `board_id` is authoritative (the read just returned it), so we
@@ -615,7 +606,7 @@ const runCrossBoardMove = async ({
     (await lookupItemBoard({ client, itemId: parsed.itemId })).boardId;
   if (sourceItem.board_id === null) {
     // The fallback fired — count it as a live leg.
-    recordLeg('live', null);
+    sourceAgg.record('live', null);
   }
 
   // Leg 3 + 4: source + target board metadata. Loaded in parallel
@@ -625,8 +616,8 @@ const runCrossBoardMove = async ({
     loadBoardMetadata({ client, boardId: sourceBoardId, env: ctx.env }),
     loadBoardMetadata({ client, boardId: toBoard, env: ctx.env }),
   ]);
-  recordLeg(sourceMeta.source, sourceMeta.cacheAgeSeconds);
-  recordLeg(targetMeta.source, targetMeta.cacheAgeSeconds);
+  sourceAgg.record(sourceMeta.source, sourceMeta.cacheAgeSeconds);
+  sourceAgg.record(targetMeta.source, targetMeta.cacheAgeSeconds);
 
   // Build the source-columns-by-id map for the unmatched-column
   // detail decoration (so unmatched columns surface with their
@@ -664,8 +655,7 @@ const runCrossBoardMove = async ({
           item: sourceItem,
         },
       ],
-      source: aggregateSource ?? 'live',
-      cacheAgeSeconds: aggregateCacheAge,
+      ...sourceAgg.result(),
       warnings: [],
       apiVersion,
     });
@@ -694,7 +684,7 @@ const runCrossBoardMove = async ({
     },
     { operationName: 'ItemMoveToBoard' },
   );
-  recordLeg('live', null);
+  sourceAgg.record('live', null);
 
   const projected = projectMutationItem({
     raw: response.data.move_item_to_board,
@@ -710,8 +700,7 @@ const runCrossBoardMove = async ({
     programOpts: program.opts(),
     warnings: [],
     ...toEmit(response),
-    source: aggregateSource ?? 'live',
-    cacheAgeSeconds: aggregateCacheAge,
+    ...sourceAgg.result(),
   });
 };
 
