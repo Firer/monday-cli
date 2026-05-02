@@ -2,152 +2,64 @@
 
 > [AGENTS.md](https://agents.md/) format — context for AI coding agents.
 
-## Project Overview
+## Project overview
 
-`monday-cli` is a TypeScript command-line tool for interacting with the
-[Monday.com](https://monday.com) GraphQL API and Monday Dev. The primary
-audience is **AI coding agents** (Claude Code, Codex, etc.) — the CLI exists
-so that agents can pull down assigned tasks, file backlog items, update
-descriptions, reorder items, transition statuses, etc., without each agent
-needing to learn the GraphQL schema directly. Humans are second-class users
-but should still get a pleasant experience.
-
-The integration is being built **incrementally and entirely via Claude Code**
-on top of the official `@mondaydotcomorg/api` SDK.
+`monday-cli` is a TypeScript CLI for Monday.com's GraphQL API.
+**Primary audience is AI coding agents** (Claude Code, Codex, etc.);
+humans are second-class. Built incrementally via Claude Code on top of
+`@mondaydotcomorg/api` (pinned to 14.0.0; Monday API pinned `2026-01`).
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main` — M0–M11
-shipped on main; M12 (`item upsert` + bulk `item clear --where`)
-is the next milestone.**
-The published tarball at `0.1.0` has the v0.1 surface (5 reader
-nouns + the four M5b mutations + diagnostics + escape hatch). On
-`main`, M8 expanded the writer surface (`--set-raw` escape hatch +
-firm-row `link` / `email` / `phone` translators), M9 added the
-first item-lifecycle verb (`item create` — top-level + classic-only
-subitem with single round-trip per cli-design §5.8), M10 landed the
-three lifecycle siblings (`item archive` idempotent + `item delete`
-non-idempotent, both behind `--yes` with `--dry-run` exemption;
-`item duplicate` creative-not-destructive with `--with-updates`
-+ the `data.duplicated_from_id` lineage echo), and M11 closed the
-four-verb set with `item move` (group + cross-board) backed by
-`--columns-mapping <json>` and the strict-default unmatched-column
-check per §8 decision 5.
-The `@mondaydotcomorg/api` SDK pin (14.0.0 / API 2026-01) is
-unchanged.
-The agent-flow E2E (`tests/e2e/agent-flow.test.ts`) exercises the
-v0.1 contract across four binary spawns — `item list` → `item set`
-→ `item set` → `update create`. Three binding documents:
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M11 shipped;
+**M12 (`item upsert` + bulk `item clear --where`) is next.**
 
-- **[`docs/cli-design.md`](./docs/cli-design.md)** (~2,200 lines) —
-  the canonical CLI contract: command surface, output envelope,
-  error codes (26 stable), deferral list, every single design
-  decision. Two AI-collaborator review passes per change; M8/M9
-  hard-gate diffs cleared with N→Y verdicts before implementation.
-- **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** (~1,500 lines) —
-  the v0.1 implementation plan: ten sequenced milestones (M0–M7
-  with M5 split + M2.5 refactor pass inserted post-M2), per-
-  milestone deliverables, testing-pyramid commitments, risk
-  register, exit checklist, and per-milestone post-mortems
-  (§11 M0, §12 M2, §13 M2.5, §14 M3, §16 M4, §18 M5a, §19 M5b,
-  §20 M6, §21 M7).
-- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** (~1,800 lines) —
-  the active v0.2 plan: eleven sequenced milestones M8–M18, per-
-  milestone deliverables, exit criteria, decisions log, §10 M8 +
-  §11 M9 + §13 M10 + §15 M11 post-mortems (§12 is the post-M9
-  R20–R26 refactor backlog, all shipped; §14 is the post-M10
-  R27–R29 refactor backlog — R27 + R28 shipped in the M10→M11
-  cleanup window, R29 deferred to M15).
+The three binding documents — read in this order before writing code:
 
-**Milestones:**
+1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
+   contract: command surface, output envelope, 26 stable error codes,
+   deferral list, every binding decision. Changes land via PRs that
+   argue for the change, not by drift.
+2. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — active plan:
+   milestones M8–M18 with deliverables, exit criteria, decisions log,
+   per-milestone post-mortems (M8/M9/M10/M11 + R-class refactor
+   backlogs).
+3. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
+   M0–M7 with M2.5 refactor pass and the M5a/M5b split. Reference for
+   patterns every later milestone builds on.
 
-| ID | Status | Surface |
-|----|--------|---------|
-| M0 | shipped | runner + `errors.ts` + `redact.ts` + signal handling + envelope builders |
-| M1 | shipped | `config show/path`, `cache list/clear/stats`, `schema`; CommandModule registry |
-| M2 | shipped | `Transport` + `MondayClient` + retry; `account whoami/info/version/complexity` |
-| M2.5 | shipped | structural-debt cleanup pre-M3: `resolve-client.ts`, `envelope-out.ts` (`MetaBuilder`), `program.ts`, `toEmit` |
-| M3 | shipped | `workspace`/`board`/`user`/`update` reads (14 commands) + `board-metadata.ts` + `columns.ts` + `resolvers.ts` + `walk-pages.ts` |
-| M4 | shipped | `item` reads (5 commands: list/get/find/search/subitems) + `filters.ts` + `pagination.ts` + `sort.ts` + `item-projection.ts` + R6/R7 refactors (test helpers + get-by-id helper) |
-| M5a | shipped | `column-types.ts` (R8: shared writable allowlist + `parseColumnSettings`) + `column-values.ts` (all seven v0.1 translators: text / long_text / numbers / status / dropdown / date / people, plus `selectMutation` mutation-selection helper + `unsupported_column_type` error path + safe-integer guard + the async entry `translateColumnValueAsync` for people-resolution-needing paths) + `dates.ts` (ISO date / ISO date+time / relative tokens with DST-safe resolution against `MONDAY_TIMEZONE`) + `people.ts` (comma-split emails + `me` token via injected `resolveMe` + `resolveEmail` callbacks; defence-in-depth ID schema-tightening on `userByEmail`) + `src/types/json.ts` (R-JsonValue: tightened `JsonObject` slot replaces `Readonly<Record<string, unknown>>` for rich payloads) + `dry-run.ts` (M3 column resolution + R12 cache-miss-refresh + M5a translation + item-state read; all-or-nothing semantics + cli-design §6.4 byte-snapshot exit gate; resolver-warning preservation across `column_archived` throws) + `me-token.ts` (R15 shared `isMeToken` helper) + `DECIMAL_USER_ID_PATTERN` lift (R16) + R17 ZodError wrap at `userByEmail`. |
-| M5b | shipped | All four mutation commands: `item set` (single-column write) + `item clear` (per-type dedicated clear payload) + `item update` (multi-`--set` atomic + bulk `--where` w/ `confirmation_required`) + `update create` (`--body` / `--body-file` / stdin, `--dry-run` supported despite non-idempotent). Five supporting refactors: `item-helpers.ts` lift (R9 — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` + `collectColumnHeads` + `titleMap` + `resolveMeFactory` + `projectFromRaw` + `parseRawItem`) + `collectSecrets` consolidation (R10) + `resolveColumnsAcrossClauses` lift (R12) + `parse-boundary.ts unwrapOrThrow` (R18 — `board-metadata` + `item-helpers` + `emit.ts` drift catch) + `resolver-error-fold.ts` lift (R19 — `foldResolverWarningsIntoError` + `mergeDetails` + `maybeRemapValidationFailedToArchived`, six consumers); `emitMutation` + `emitDryRun` emit helpers; `MutationEnvelope.resolved_ids` echo per cli-design §5.3 step 2; `boardLookupResponseSchema` for implicit board lookup; `validation_failed` → `column_archived` remap on cache-sourced resolution (single + bulk per-item). |
-| M6 | shipped | `board doctor` (3 diagnostic kinds: duplicate_column_title / unsupported_column_type per roadmap category / broken_board_relation) + `raw` (GraphQL escape hatch w/ `<query>` positional, `--query-file <path\|->`, `--vars <json>`, `--vars-file <path\|->`, `--allow-mutation` gate, `--operation-name <n>`, AST-aware `analyzeRawDocument` analyser keying off the `graphql` reference parser, `--dry-run` honoured for mutations per §9.2 — close-arc Codex P1 fixes) + agent-flow E2E (4-spawn list → start → done → comment with `assertEnvelopeContract` per §6.1) |
-| M7 | shipped | release prep — `published-tarball.test.ts` (npm pack + extract + install runtime deps + smoke binary), `envelope-snapshots.test.ts` (40 snapshots — one per shipped command pinning the §6.1 byte shape so v0.2 drift fails loud), `docs/output-shapes.md` (per-command `data` reference, snapshot-backed), `CHANGELOG.md` 0.1.0, README auth + agent quickstarts, version bump → 0.1.0 |
-| M8 | shipped (on main) | Writer expansion: `--set-raw <col>=<json>` escape hatch (`raw-write.ts` parser + post-resolution gate that rejects `read-only-forever` / `files-shaped` types per cli-design §5.3 escape-hatch contract; `change_column_value` / `change_multiple_column_values` only — never `change_simple_column_value` for raw) + three firm-row friendly translators (`links.ts` pipe-form `url\|text`, `emails.ts` pipe-form, `phones.ts` E.164 + `iso-country-codes.ts` for the country-code allowlist). `--set-raw` wired into `item set` + `item update` single + `item update --where` bulk; resolution-time mutual-exclusion check (`--set` + `--set-raw` against same resolved column → `usage_error` per cli-design §5.3 step 2). Codex post-implementation fixes pinned the resolution-before-translation invariant (resolve every token first, then translate) so a `--set X=bad` alongside `--set-raw X={...}` surfaces the mutual-exclusion error rather than the translation error. |
-| M9 | shipped (on main) | `monday item create` — top-level + classic-only subitem with single round-trip per cli-design §5.8. New `commands/item/create.ts` (~1,340 LOC) + `bundleColumnValues` lift in `column-values.ts` (shared between `selectMutation`'s multi case and create's single bundled `column_values` parameter) + `planCreate` engine sibling in `dry-run.ts` (no item-state read; hoisted `name` / `group_id` / `position` / `parent_item_id` slots per cli-design §6.4 item-create shape). `--parent <iid>` triggers `create_subitem` against the auto-derived subitems board (`subtasks.settings_str.boardIds[0]`); multi-level boards (`hierarchy_type: "multi_level"`) rejected pre-mutation with `usage_error` carrying `details.deferred_to: "v0.3"`. Three rounds of Codex review (round 1 N → 2 partial Y → 3 Y / zero findings). |
-| M9.5 | shipped (on main) | post-M9 R-class refactor cleanup pre-M10 (v0.2-plan.md §12): `set-expression.ts` (R22 — `splitSetExpression`), `resolution-context.ts` (R24 — `buildResolutionContexts`), `item-board-lookup.ts` (R23 — `lookupItemBoard` + `lookupItemBoardWithHierarchy` + `resolveBoardId`), `source-aggregator.ts` (R21 — `mergeSource` + `mergeSourceWithPreflight` + `mergeCacheAge`), `resolver-error-fold.ts foldAndRemap` (R26 — mutation catch-arm wrapper for fold + F4 remap), `resolution-pass.ts` (R20 — three-pass column resolution helper consolidating ~80-90 LOC × 5 sites into one shared `resolveAndTranslate`). Plus R25 — drop drift `CreateModeFromCommand` in favour of imported `CreateMode`. Net ~1900 LOC duplication collapsed into ~660 LOC of shared helpers; coverage 98.82 / 95.17 / 99 / 98.91 above the 95/94/95/95 floor. M10's three new mutation commands (archive / delete / duplicate) inherit the helpers rather than copy the patterns. |
-| M10 | shipped (on main) | Three item-lifecycle siblings closing M10's cluster — the four-verb set Monday's API exposes (`archive` / `delete` / `duplicate` here; `move_item_to_*` lands in M11). **Session A** (commits `67c9825` archive + `53b5e77` delete + `3a19a15` round-1 P2 fix): two destructive verbs sharing the `--yes` confirmation gate (cli-design §3.1 #7) with `--dry-run` exempting per §10.2. `monday item archive <iid> --yes [--dry-run]` (`commands/item/archive.ts`, idempotent: true — wire-level no-op on re-archive per cli-design §9.1) + `monday item delete <iid> --yes [--dry-run]` (`commands/item/delete.ts`, idempotent: false — re-delete after interim create would target the new item). One round-trip per path: live calls the mutation directly; dry-run reads via `Item{Archive,Delete}Read` and emits the §6.4 envelope with `operation: "archive_item" \| "delete_item"`, `item_id`, and `item: <projected snapshot>`. Round-1 P2: confirmation gate had to fire BEFORE `resolveClient()` so missing-token doesn't mask `confirmation_required` as `config_error`. **Session B** (commit `36ae3cf` duplicate): `monday item duplicate <iid> [--with-updates] [--dry-run]` (`commands/item/duplicate.ts`, idempotent: false — every call creates a new item, mirroring `create_item` per cli-design §9.1). Creative not destructive — no `--yes` gate per §3.1 #7; the gate-before-resolveClient pattern doesn't apply because there's no gate to mask. Two-leg live (`ItemBoardLookup` + `duplicate_item` — Monday requires `board_id`); single-leg dry-run (`ItemDuplicateRead` only). Mutation envelope `data` extends `projectedItemSchema` with `duplicated_from_id: ItemIdSchema` so v0.2-plan §3 M10's "Returns the new item's ID + the source item's ID" commitment lands as one field — mirrors upsert's `data.created` precedent at cli-design §6.4 line 1827-1831 (per-verb business signals extend `data`; top-level slots stay cross-verb). Dry-run shape carries `with_updates` echo so the preview tells the agent whether re-running without `--dry-run` would copy updates. `--with-updates` plumbing pinned via fixture `match_variables` (true + false). Spec gaps backfilled in Session B's docs sweep: cli-design §4.3 line 531 narrative + §6.4 archive/delete/duplicate dry-run shapes (the §6.4 omission carried over from Session A). One M10 e2e spawn for `delete --yes` (highest blast radius; Session A); archive + duplicate stay at the integration layer because gate condition + projection are shared. Coverage 98.95 / 95.47 / 99.34 / 99.05 above the 95/95/95/95 floor (archive + delete + duplicate at 100% lines + 100% branches). E2e timeout bumps in Session B: `agent-flow.test.ts` 10s → 15s + `schema.test.ts` defaults → 15s under the 40-command schema payload growth (CLAUDE.md predicted "bump to 15s if it flakes"). |
-| M11 | shipped (on main) | `monday item move` — fourth and final lifecycle verb closing the four-verb set Monday's API exposes (`archive_item` / `delete_item` / `duplicate_item` / `move_item_to_*`). Two transports under one verb: same-board (`--to-group <gid>` alone) via `move_item_to_group`, cross-board (`--to-group <gid> --to-board <bid>`) via `move_item_to_board`. Net new `commands/item/move.ts` (~580 LOC) + `api/column-mapping.ts` (~140 LOC, the JSON parse boundary). Cross-board path is four-leg live (`ItemMoveRead` + source `BoardMetadata` + target `BoardMetadata` parallel + `ItemMoveToBoard`) and three-leg dry-run (no mutation); same-board is single-leg both ways. `--columns-mapping <json>` accepts the simple `{<src>: <target_id>}` form mapping directly to Monday's `columns_mapping: [ColumnMappingInput!]` parameter; strict default per cli-design §8 decision 5 — unmatched columns surface as `usage_error` with `details.unmatched: [{source_col_id, source_title, source_type}]` + `details.example_mapping: {<src>: "<target_col_id>"}` so agents copy-paste the seed into their next call. `--columns-mapping {}` is the explicit "drop everything" opt-in. Two scope adjustments versus the v0.2-plan §3 M11 deliverables, captured in §15 post-mortem: (1) the rich `{id, value?}` form for cross-board value-overrides was deferred to v0.3 because Monday's `ColumnMappingInput = { source: ID!, target?: ID }` (SDK 14.0.0) carries no value slot — supporting it would require a non-atomic post-move `change_multiple_column_values` mutation with cross-leg partial-failure envelope shapes that have no precedent; (2) `--to-group <gid>` is now required for both same-board AND cross-board because Monday's `move_item_to_board(group_id: ID!)` is mandatory, so cli-design §4.3 line 530's pre-M11 mutual-exclusion drafting was misleading and the M11 docs sweep updated it. Mutex now lives between `--columns-mapping` and `--to-board`'s absence. **idempotent: false** at the verb level (same-board `move_item_to_group` is wire-level no-op when already in target group per cli-design §9.1, but cross-board `move_item_to_board` re-running on the target board is undefined SDK behaviour; conservative bound across all paths mirrors `monday item create`). Five commits (`daa9d22` feat → `338a5ea` docs → `4385aba` round-1 fix → `747f300` round-2 fix → `19d5a1e` test gap-closers); 56 tests (15 mapping unit + 20 planner unit + 22 integration + 1 e2e); coverage 98.98 / 95.35 / 99.37 / 99.07. Round-1 caught F1 (empty cells incorrectly triggered the unmatched check — `Object.keys(source.columns)` ignored cell content); round-2 caught F1 escalation (rich-clear shapes like `{}` / `{personsAndTeams:[]}` were also "populated" by the round-1 filter — fixed via recursive `valueHasContent` predicate), F2 (`--columns-mapping` targets weren't validated against the target board — typo'd targets reached Monday and silently dropped server-side; now raise `usage_error` with `details.invalid_mappings`), F3 (live wire `columnsMapping` diverged from dry-run `column_mappings` echo when `--columns-mapping` was absent — fix sends `plan.columnsMapping` always so the preview matches the wire byte-for-byte). Inherited helpers paid off — `lookupItemBoard` (R23) for the projection-board-id-null fallback, `readSourceItemForDryRun` (R27, `operationName: 'ItemMoveRead'`), `projectMutationItem` (R28, `errorCode: 'not_found'`), and `mergeSource` + `mergeCacheAge` (R21) for the cross-board path's mixed cache + live source aggregation. M11 surfaced its own R-class backlog (v0.2-plan §16): R30 `SourceAggregator` accumulator helper (4 sites; ship in M11 → M12 cleanup window), R31 `cellHasData` lift to item-projection (defer to second consumer), R32 JSON-object argv parse helper (defer to third consumer). |
-
-> **If you're implementing anything in this repo, read
-> `docs/cli-design.md` for the contract and `docs/v0.2-plan.md` for
-> the active milestone before writing code.** The design contract is
-> binding — changes land via PRs that argue for the change, not by
-> drift. The plan is a living doc; update it when scope shifts.
-
-Updates to the design also update this file's "Contract at a glance"
-section below so a future fresh agent doesn't have to read the whole
-design doc to orient.
+Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)
+(snapshot-backed per-command `data` reference);
+[`docs/architecture.md`](./docs/architecture.md) (internal module
+structure); [`docs/api-reference.md`](./docs/api-reference.md) (Monday
+concepts cheat sheet — *not* contract).
 
 ## Commands
 
 ```bash
-# Install
 npm install
-
-# Develop
 npm run dev -- <args>          # tsx-based dev runner (no build step)
-npm run build                  # compile to dist/
-npm start -- <args>            # run compiled CLI
+npm run build && npm start -- <args>
 
-# Quality gates
-npm run typecheck              # tsc --noEmit
-npm run lint                   # eslint .
-npm run lint:fix               # eslint . --fix
-npm test                       # vitest run (all suites)
-npm run test:unit              # unit only
-npm run test:integration       # integration only
-npm run test:e2e               # E2E only
-npm run test:coverage          # with v8 coverage + threshold check
-npm run test:watch             # watch mode
+# Quality gates — run all three before committing
+npm run typecheck
+npm run lint
+npm test                       # add :unit / :integration / :e2e / :coverage / :watch as needed
 ```
 
-## Directory Layout
+## Directory layout
 
 ```
 src/
-  cli/         # Commander entry — wires commands to argv parsing
-  commands/    # One file per CLI subcommand (thin — delegate to api/)
+  cli/         # Commander entry, runner, signal/abort plumbing
+  commands/    # One file per CLI subcommand (thin — delegates to api/)
   api/         # Monday API wrapper around @mondaydotcomorg/api
-  config/      # Env/file config loading + zod validation
-  types/       # Shared TypeScript types not auto-generated by the SDK
-  utils/       # Logger, output formatters (json/table), error helpers
-tests/
-  unit/        # Pure logic — no network, no fs writes
-  integration/ # Hits a recorded fixture server or mocked GraphQL
-  e2e/         # Spawns the compiled CLI and asserts on stdout/exit codes
-  fixtures/    # Recorded GraphQL responses, sample column values, etc.
-docs/
-  cli-design.md     # ★ CANONICAL CONTRACT — read first. Command surface,
-                    #   output envelope, error codes, divergences from
-                    #   Monday's API, v0.1/v0.2/v0.3/v0.4 phasing.
-  v0.1-plan.md      # ★ shipped — v0.1 implementation plan M0–M7
-                    #   with M5 split + M2.5 refactor pass; per-milestone
-                    #   post-mortems §11–§21. Reference for the v0.1
-                    #   foundations every later milestone builds on.
-  v0.2-plan.md      # ★ ACTIVE IMPLEMENTATION PLAN — milestones M8–M18,
-                    #   per-milestone deliverables + tests + exit criteria,
-                    #   §10 M8 + §11 M9 post-mortems. Read after
-                    #   cli-design.md before any v0.2 code.
-  architecture.md   # Module boundaries (commands→api→SDK separation)
-  api-reference.md  # Monday concepts cheat sheet — supplementary; the
-                    #   canonical schema summary is cli-design.md §2
-  development.md    # Local dev workflow, how to add a new command
-  examples.md       # Worked agent sessions — instructional, not contract
-.claude/
-  rules/       # Path-scoped rule files for Claude Code agents
-.github/
-  workflows/ci.yml  # typecheck + lint + test + build smoke on Node 22 / 24
+  config/      # Env/file config + zod validation
+  types/       # Shared types (incl. branded IDs)
+  utils/       # Logger, output formatters, error helpers, redaction
+tests/         # unit / integration / e2e / fixtures
+docs/          # see "Status"; cli-design.md is the contract
+.claude/rules/ # path-scoped agent rules — see "Conventions"
 ```
 
 ## Conventions
@@ -155,749 +67,130 @@ docs/
 The full coding standard lives in `.claude/rules/` — files auto-load
 when editing matching paths:
 
-| File | Loads when editing | Contents |
-|------|--------------------|----------|
-| `typescript.md` | `src/**/*.ts`, `tests/**/*.ts` | TS strictness, no-`any`, no-`null`-by-default, imports, errors |
-| `testing.md` | `tests/**/*.ts` | Coverage standard (every branch), test layers, mocking rules |
-| `validation.md` | `src/**/*.ts`, `tests/**/*.ts` | zod patterns — branded IDs, discriminated unions, parse-at-boundary |
-| `security.md` | source + `.env*` | Token handling, redaction, fail-secure config, file permissions |
-| `cli.md` | `src/cli/**`, `src/commands/**` | CLI standards — output discipline, exit codes, signals, stdin, conventional commits |
+| File | Loads when editing | Topic |
+|------|--------------------|-------|
+| `typescript.md` | `src/**`, `tests/**` | TS strictness, no-`any`, no-`null`-by-default |
+| `testing.md` | `tests/**` | Coverage standard, test layers, mocking rules |
+| `validation.md` | `src/**`, `tests/**` | zod patterns — branded IDs, parse-at-boundary |
+| `security.md` | source + `.env*` | Token handling, redaction, fail-secure config |
+| `cli.md` | `src/cli/**`, `src/commands/**` | Output discipline, exit codes, signals, stdin |
 
-Headlines:
+Headlines (full detail in the rule files):
 
-- **Strictest TypeScript settings.** `strict`, `noUncheckedIndexedAccess`,
-  `exactOptionalPropertyTypes`, `noImplicitOverride`, `noUnusedLocals/Parameters`,
-  `useUnknownInCatchVariables`, `verbatimModuleSyntax`. **No `any` types**
-  (lint enforced). Avoid `null` unless `null` is a meaningful value distinct
-  from `undefined` — for "no value", prefer `undefined` or omit the property.
-- **ESLint: `strictTypeChecked` + `stylisticTypeChecked`** with extra rules
-  including `prefer-readonly`, `switch-exhaustiveness-check`,
-  `consistent-type-imports`, `explicit-function-return-type` on exported
-  functions. `no-console` is **off** because this is a CLI — `console` is the
-  product. Use the logger in `utils/` for anything structured.
-- **Tests cover every branch.** Happy path, edge cases, error cases, format
-  variations. Non-trivial commands need an E2E test that spawns the binary.
-  Coverage thresholds are **95% lines / functions / statements + 94% branches**
-  (post-M3 ratchet, sustained through M4); raise the floor as the codebase
-  grows, never lower it.
-- **Mock at the network boundary, not internal modules.** Stub
-  `fetch`/`undici` (or the SDK's `request` method) — never reach into
-  `commands/*` from a unit test to monkey-patch internal helpers.
-- **Files are ESM (`"type": "module"`).** Use `.js` import specifiers in
-  TypeScript (`import { foo } from './bar.js'`) — required by NodeNext
-  resolution.
-- **One subcommand per file** in `src/commands/`, following the shape:
-  `export const command: CommandModule = { ... }`. `cli/index.ts` registers
-  them.
+- **Strictest TypeScript settings.** No `any` (lint enforced). Avoid
+  `null` unless distinct from `undefined`.
+- **Tests cover every branch.** Coverage floor 95% / 95% / 95% / 94%
+  (lines / fns / stmts / branches). Raise it; never lower it.
+- **Mock at the network boundary** (stub `fetch`/`undici` or SDK
+  `request`), never `commands/*` helpers.
+- **ESM with `.js` import specifiers** (NodeNext requirement).
+- **One subcommand per file** in `src/commands/`, exported as
+  `CommandModule`, registered in `cli/index.ts`.
 
-## Contract at a glance
+## Contract headlines
 
-A summary of what the design doc commits to. **None of these is
-negotiable without a doc revision and PR-style argument.** Read the
-linked sections of `docs/cli-design.md` for the full reasoning.
+These are the binding rules most likely to bite if forgotten. Full
+reasoning (and per-subsystem implementation detail) lives in
+`docs/cli-design.md` at the linked section.
 
-- **Primary user is AI coding agents.** Humans are second-class. When
-  the two conflict, agent ergonomics win. (§1)
-- **Output:** table when stdout is a TTY, JSON when piped — preserves
-  `monday item list | jq` without flags. Agents in pseudo-TTYs use
-  `--json` (an explicit alias for `--output json`). Tables truncate
-  long values; `--full` disables; JSON output never truncates. (§3.1, §3.2)
-- **Universal envelope on every command.** Success:
-  `{ok: true, data, meta, warnings}`. Failure: `{ok: false, error, meta}`.
+- **Primary user is AI agents; humans are second-class** — when they
+  conflict, agent ergonomics win. (§1)
+- **Output:** table on TTY, JSON when piped; `--json` is the explicit
+  alias. Tables truncate; JSON never does. (§3.1, §3.2)
+- **Universal envelope** on every command. Success
+  `{ok, data, meta, warnings}`; failure `{ok: false, error, meta}`.
   `meta` always carries `schema_version`, `api_version`, `request_id`,
   `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
-  `retrieved_at`. Adding fields is non-breaking; removing/renaming is a
-  major-version bump. (§6.1)
-- **Stable error codes** (26 of them — `usage_error`, `not_found`,
-  `ambiguous_column`, `column_archived`, `unsupported_column_type`,
-  `rate_limited`, `complexity_exceeded`, `stale_cursor`, etc.).
-  Errors carry
-  `code`, `message`, `http_status`, `monday_code`, `request_id`,
-  `retryable`, `retry_after_seconds`. Agents key off `code`, never
-  English. (§6.5)
-- **Exit codes:** 0 success, 1 usage, 2 API/network, 3 config, 130 SIGINT.
-- **No interactive prompts. Ever.** Destructive ops without `--yes`
+  `retrieved_at`. Adding fields is non-breaking; removing/renaming is
+  major. (§6.1)
+- **26 stable error codes** (`usage_error` / `not_found` /
+  `ambiguous_column` / `column_archived` / `unsupported_column_type` /
+  `rate_limited` / `complexity_exceeded` / `stale_cursor` / etc.).
+  Errors carry `code`, `message`, `http_status`, `monday_code`,
+  `request_id`, `retryable`, `retry_after_seconds`. Agents key off
+  `code`, never English. (§6.5)
+- **Exit codes:** 0 success, 1 usage / `confirmation_required`,
+  2 API/network, 3 config, 130 SIGINT.
+- **No interactive prompts ever.** Destructive ops without `--yes`
   return `confirmation_required`. (§3.1)
-- **Monday API pinned to `2026-01`** matching SDK 14.0.0's
-  `CURRENT_VERSION`. The pin goes on every request via the
-  `API-Version` header. Override via `--api-version` for newer-API
-  features (will need raw GraphQL where the SDK doesn't type them). (§2)
-- **Column-value abstraction (§5.3)** is what makes `--set` work.
-  Writable allowlist after M8 firm-row promotion: `status`, `text`,
-  `long_text`, `numbers`, `dropdown`, `date`, `people` (v0.1) plus
-  `link`, `email`, `phone` (M8). Other types return
-  `unsupported_column_type` with per-category guidance:
-  v0.2-tentative writer-expansion (`tags` / `board_relation` /
-  `dependency`) carries `deferred_to: "v0.2"` plus a `--set-raw`
-  hint; read-only-forever (`mirror` / `formula` / `auto_number` /
-  `creation_log` / `last_updated` / `item_id`) carries
-  `read_only: true` with a hint pointing at the underlying source
-  column; other types carry `deferred_to: "future"` plus a
-  `--set-raw` hint when the underlying mutation is shaped like
-  `change_column_value`.
-  **`--set-raw <col>=<json>` escape hatch (M8).** Bypasses the
-  friendly translator — agent supplies the wire JSON object verbatim.
-  Argv-parse-time validation rejects malformed JSON / non-object JSON
-  with `usage_error`; post-resolution gate rejects read-only-forever
-  + files-shaped types per §5.3 escape-hatch contract. Always uses
-  `change_column_value` / `change_multiple_column_values` (never
-  `change_simple_column_value`); for create, bundles into the same
-  `column_values` map. Resolution-time mutual exclusion with `--set`
-  (same resolved column ID across both → `usage_error` per §5.3 step 2).
-  The CLI resolves `<col>` as ID > NFC-normalised
-  exact title > NFC + case-fold > `ambiguous_column`. `me` is a
-  recognised token for people columns. **Read-side resolver lives at
-  `src/api/columns.ts`** (M3) and is the seam M5a's value translator
-  reuses; archived columns surface as `column_not_found` for read
-  paths. Cache-aware lookups via `resolveColumnWithRefresh` auto-
-  refresh once on `column_not_found` after a cache hit per §5.3
-  step 5; the refresh-then-resolve case sets `meta.source: "mixed"`
-  with a `stale_cache_refreshed` warning. ID/title collisions on the
-  ID-match path emit a `column_token_collision` warning (§5.3 step 3).
-- **Column-type contract (M5a R8 + M8).** `src/api/column-types.ts`
-  is the single source of truth for the writable allowlist:
-  `WRITABLE_COLUMN_TYPES` (frozen `as const` array — order is part
-  of the contract; tests iterate it; 10 entries post-M8),
-  `isWritableColumnType` (type guard narrowing to the
-  `WritableColumnType` union), `parseColumnSettings` (defensive
-  `settings_str` JSON parser that returns `null` on null/empty/
-  malformed input rather than throwing), `isReadOnlyForeverType` /
-  `isFilesShapedType` (M8 — gate `--set-raw`'s post-resolution
-  reject lists), `getColumnRoadmapCategory` (M8 — drives the
-  category-accurate `unsupported_column_type` hint). Three
-  consumers: `commands/board/describe.ts` (writable + example_set),
-  `api/column-values.ts` (the friendly writer), `api/raw-write.ts`
-  (the M8 escape hatch). Adding a v0.2-tentative type is one
-  entry's worth of edit.
-- **Column-value writer (M5a + M8).** `src/api/column-values.ts`
-  is the write half of §5.3. `translateColumnValue({ column,
-  value })` returns a `TranslatedColumnValue` carrying `columnId`,
-  `columnType`, `rawInput`, and a discriminated `payload` —
-  `{ format: 'simple', value: <bare-string> }` for the simple-form
-  mutation path or `{ format: 'rich', value: <plain-object> }` for
-  the JSON-object form. **Ten types translate** (7 v0.1 + 3 M8):
-  `text` / `long_text` / `numbers` (all simple) and `status` /
-  `dropdown` / `date` / `people` / `link` / `email` / `phone`
-  (rich). **Two entry points**: the sync `translateColumnValue`
-  covers the locally-resolvable types; `translateColumnValueAsync`
-  is the unified async wrapper M5b's command layer always calls —
-  it delegates to sync for non-people, dispatches
-  `parsePeopleInput` for `people` (which needs network/cache
-  lookup for email→ID resolution).
-  **Status payload**: label-first (`{label:<verbatim>}`) with
-  non-negative integer fallback (`{index:N}`, JS number). **Dropdown
-  payload**: comma-split, per-segment trimmed, empties dropped;
-  all-numeric → `{ids:[N1,N2]}` (numbers), any non-numeric →
-  `{labels:[s1,s2]}` (strings). **Date payload**: ISO date
-  → `{date}`, ISO date+time → `{date,time:"HH:MM:SS"}`,
-  relative tokens (`today` / `tomorrow` / `+Nd` / `-Nw` / `+Nh`)
-  → resolved against `MONDAY_TIMEZONE` via the M0-injected
-  clock pattern; the resolution context plumbs through
-  `TranslateColumnValueInputs.dateResolution` (defaulting to
-  system clock + system tz). The full grammar lives in
-  `src/api/dates.ts` with DST-boundary tests pinned for
-  Europe/London + Pacific/Auckland 2026 transitions. Relative
-  offsets are bounded to ±100 years magnitude so unsafe inputs
-  surface as typed `usage_error` rather than malformed wire
-  payloads. **People payload**: comma-split tokens (emails or
-  case-insensitive `me`), each resolved through injected
-  `resolveMe` + `resolveEmail` callbacks (mirrors `filters.ts`'s
-  `me` plumbing — one rule across `--where Owner=me`, `item
-  search --where Owner=me`, and `--set Owner=me`). Wire shape
-  `{personsAndTeams:[{id:N,kind:'person'},...]}` with `id` as JS
-  number; `kind` literal `'person'` only (teams deferred to
-  v0.2). Numeric tokens (`--set Owner=12345`) rejected with
-  `usage_error` carrying a `--set-raw` paste-ready hint
-  (M8 — the hint now points at a flag that exists);
-  unknown emails surface as `user_not_found` (bubbled from
-  `resolveEmail`). The full grammar lives in
-  `src/api/people.ts`. Defence-in-depth ID
-  validation: `userByEmail`'s schema enforces decimal
-  non-negative integer strings, AND the translator's
-  `idStringToNumber` re-checks before `Number()` conversion —
-  malformed shapes (`"0x2a"`, `"1e3"`) surface as
-  `internal_error` rather than silently corrupting the wire
-  payload. **Safe-integer guard**: numeric input > 2^53 - 1
-  throws `usage_error` rather than silently rounding via
-  `Number(raw)` and corrupting the wire payload.
-  **Mutation selection** (`selectMutation`, §5.3 step 5):
-  1 simple → `change_simple_column_value`; 1 rich →
-  `change_column_value`; N (any combo) →
-  `change_multiple_column_values` (atomic). Inside the multi
-  mutation, `long_text` is re-wrapped as `{text:<value>}`
-  because Monday's per-column blob there requires the object
-  form (logged as a spec gap in v0.1-plan §3 M5a; pinned via
-  fixture). Duplicate column IDs in a multi bundle throw
-  `usage_error` (last-write-wins is silent corruption).
-  **Bundled `column_values` map (M9 lift).** The
-  per-column projection (`projectForMulti` + the long_text
-  re-wrap rule) lives behind `bundleColumnValues(translated)`
-  — the shared helper both `selectMutation`'s multi case AND
-  M9's `item create` use to build the `column_values: JSON!`
-  parameter. Same shape across `change_multiple_column_values`,
-  `create_item`, and `create_subitem`; the fixture-pin tests
-  in `column-values.test.ts` "create_item.column_values shape
-  pin (M9)" cover the create surface alongside the original
-  multi-update pin.
-  **Monday `JSON` scalar discipline:** every payload is a
-  plain JS value; the SDK / fetch layer stringifies at the
-  wire boundary. The translator never `JSON.stringify`s —
-  pinned by regression tests per category so a future
-  contributor doesn't introduce double-encoding.
-  Fixture-pinned wire shape per (count × type) cell so M5b's
-  bulk surface and M9's create surface both inherit unchanged.
-- **Dry-run engine (M5a + M9).** `src/api/dry-run.ts` exports
-  two orchestrators. **`planChanges(...)`** powers M5b's mutation
-  surfaces (`item set` / `item clear` / `item update`) — ties
-  together M3 column resolution (with `includeArchived: true` so
-  archived targets surface as `column_archived`, not
-  `column_not_found`), M5a's `translateColumnValueAsync` +
-  `selectMutation`, and a fresh item-state read for the diff
-  `from` side. Output matches cli-design §6.4's column-mutation
-  `planned_changes[]` shape byte-for-byte — pinned via a
-  `JSON.stringify(result.plannedChanges[0])` literal-byte snapshot.
-  **`planCreate(...)`** powers M9's `item create` (top-level +
-  subitem). Sibling shape: same three-pass resolution, same
-  resolver-warning preservation, same all-or-nothing semantics —
-  but **no item-state read** (the item doesn't exist; `from` is
-  always `null`) and the diff `to` side projects through
-  `bundleColumnValues` (the shared map shape, not single-column
-  variants) so the long_text re-wrap surfaces verbatim. The
-  `CreateMode` discriminator handles top-level (`{kind: 'item',
-  boardId, groupId?, position?}`) vs subitem (`{kind: 'subitem',
-  parentItemId, subitemsBoardId}`) in one shape; the planned
-  change hoists `name` / `group_id` / `position` /
-  `parent_item_id` to top-level slots per cli-design §6.4
-  item-create shape. Subitem variant **omits `board_id`** because
-  Monday derives the subitems board server-side from the parent.
-  **All-or-nothing semantics**: any resolution failure
-  (`column_not_found` / `ambiguous_column` / `column_archived` /
-  `unsupported_column_type` / `user_not_found` / item `not_found`
-  / item-on-wrong-board / duplicate token / duplicate resolved id)
-  aborts the batch BEFORE the item read fires. **Diff projection
-  through `selectMutation`** (planChanges) / `bundleColumnValues`
-  (planCreate): the diff `to` side surfaces the actual wire shape
-  the live mutation would send — including the `long_text` re-wrap
-  inside the map. Resolver warnings on a `column_archived` throw
-  fold into `error.details.resolver_warnings` via
-  `foldResolverWarningsIntoError` so a stale-cache-then-archived
-  flow doesn't lose the `stale_cache_refreshed` signal. **Echo
-  design — Option B**: `TranslatedColumnValue` carries parallel
-  `resolvedFrom: DateResolution | null` and `peopleResolution:
-  PeopleResolution | null` slots; `buildDiffCell` (and
-  `buildCreateDiffCell`) enforces exclusivity via `internal_error`
-  if a translator wires both. The people echo shape
-  (`{tokens: [{input, resolved_id}, ...]}`) is logged as cli-design
-  §6.4 backfill. **Parse-boundary discipline**: every wire-shape
-  schema parse boundary uses safeParse + `ApiError(internal_error)`
-  per validation.md, mirroring R17 / R18.
-- **`item create` (M9).** `src/commands/item/create.ts` —
-  `monday item create --board <bid> --name <n> [--group <gid>]
-  [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent
-  <iid>] [--position before|after --relative-to <iid>]`. Two
-  argv shapes: top-level (calls `create_item`) and subitem
-  (`--parent` triggers `create_subitem`). **Single round-trip is
-  a hard exit gate** (cli-design §5.8): every `--set` / `--set-raw`
-  value bundles into the single `column_values` parameter via
-  `bundleColumnValues`; the CLI does NOT fall back to
-  `create_item` + `change_multiple_column_values` on partial
-  failure (partial-state risk). **Classic boards only** for v0.2:
-  multi-level boards (`hierarchy_type: "multi_level"` per §2.8)
-  rejected pre-mutation with `usage_error` carrying
-  `details.hierarchy_type` + `deferred_to: "v0.3"`. The
-  hierarchy_type check fires AFTER parent-item lookup but BEFORE
-  any column resolution / value translation / mutation. **Subitems-
-  board derivation**: when `--set` / `--set-raw` is supplied, the
-  CLI loads parent's BoardMetadata, finds the `subtasks` column,
-  parses `settings_str.boardIds[0]` to get the auto-generated
-  subitems-board ID — column resolution targets that board, not
-  the parent's. **Cross-flag mutex**: `--parent` excludes
-  `--board` / `--group` / `--position` (subitems live on the
-  subitems board, not in groups, not relative to arbitrary items);
-  `--position` and `--relative-to` are required together; multiple
-  `--set` against the same token caught at parse time. **F4 remap
-  wired** (Codex round-1 P1): cache-sourced resolution + Monday
-  `validation_failed` → forced metadata refresh → if archived,
-  remap to `column_archived` with `details.remapped_from`. Mirrors
-  every M5b mutation surface. **Mutation envelope**: `data: {id,
-  name, board_id, group_id, parent_id?}` plus top-level
-  `resolved_ids` echo per cli-design §5.3 step 2 / §6.4. **Source
-  aggregation across pre-planner legs** (Codex round-1 P2): parent
-  lookup is always live, parent-board metadata may be cache or
-  live, column resolution may be cache / live / mixed, mutation is
-  always live — `mergeSourceWithPreflight` + `mergeSource` (both
-  from `api/source-aggregator.ts` post-R21) fold every leg into the
-  final envelope source. **Idempotent: false**
-  — re-running creates a duplicate item; `monday item upsert`
-  (M12) is the idempotent variant.
-- **`item archive` / `delete` / `duplicate` (M10).** Three
-  lifecycle siblings closing the four-verb set Monday's API
-  exposes (`move_item_to_*` lands in M11). Every verb shares the
-  v0.1 R9 + R18 boundary (`ITEM_FIELDS_FRAGMENT` + `parseRawItem`
-  + `projectItem`) so each envelope's `data` (live) or
-  `planned_changes[0].item` (dry-run) matches `monday item get`
-  byte-for-byte. **`item archive` / `delete`** (Session A —
-  `commands/item/archive.ts` + `commands/item/delete.ts`):
-  destructive verbs sharing the cli-design §3.1 #7 `--yes`
-  confirmation gate (`--dry-run` exempts per §10.2). Single-leg
-  per path (live calls the mutation directly; dry-run reads via
-  `Item{Archive,Delete}Read`). archive `idempotent: true`
-  (re-archive is wire-level no-op per §9.1); delete
-  `idempotent: false` (re-running after an interim `create`
-  would target the new item; the mutation itself returns
-  `not_found` past the first call). **Confirmation gate must
-  fire before `resolveClient()`** (Session A round-1 P2): the
-  gate is unconditional per §3.1 #7, so missing-token must not
-  mask `confirmation_required` (exit 1) as `config_error`
-  (exit 3). Pattern documented + pinned via a regression test
-  per verb that drops `MONDAY_API_TOKEN` from the env.
-  **`item duplicate`** (Session B — `commands/item/duplicate.ts`):
-  creative verb (no `--yes` gate per §3.1 #7 — gate is for
-  destructive ops only). Two-leg live (`ItemBoardLookup` +
-  `duplicate_item` — Monday's `duplicate_item(item_id, board_id:
-  ID!, with_updates)` requires `board_id`, derived via
-  `lookupItemBoard`); single-leg dry-run (`ItemDuplicateRead`).
-  `--with-updates` plumbs through to the mutation variable
-  (pinned via fixture `match_variables` for both true and false).
-  Output schema =
-  `projectedItemSchema.extend({ duplicated_from_id: ItemIdSchema })`
-  — the lineage echo lands in `data` per cli-design §6.4 line
-  1827-1831's upsert-`data.created` precedent (verb-specific
-  business signals extend `data`; top-level slots stay
-  cross-verb). Dry-run shape carries `with_updates` echo so
-  agents preview-aware. `idempotent: false` mirroring `create_
-  item`'s "every call creates a new item" semantics.
-  **`meta.source: "live"`** for every M10 path: archive + delete
-  live single-leg wire calls, duplicate live two-leg both wire,
-  duplicate dry-run single-leg wire. No leg consults the cache,
-  so `mergeSource` doesn't appear and `cache_age_seconds: null`
-  on every M10 envelope.
-- **`item move` (M11).** `src/commands/item/move.ts` — fourth and
-  final lifecycle verb closing the four-verb set Monday's API
-  exposes. Two transports under one verb: same-board
-  (`--to-group <gid>` alone) via `move_item_to_group`, cross-board
-  (`--to-group <gid> --to-board <bid>`) via `move_item_to_board`.
-  **`--to-group` required for both forms** because Monday's
-  `move_item_to_board(group_id: ID!)` is mandatory; `--to-board`
-  alone (no `--to-group`) → `usage_error`. cli-design §4.3 line
-  530 originally drafted as mutually-exclusive `--to-group |
-  --to-board`; the M11 docs sweep updated it (M11 post-mortem
-  §15 captures the SDK-shape discovery that drove the change).
-  **Same-board:** single-leg live (`move_item_to_group`),
-  single-leg dry-run (`readSourceItemForDryRun(operationName:
-  'ItemMoveRead')` — R27 helper). **Cross-board:** four-leg live
-  (source-item read + source `BoardMetadata` + target
-  `BoardMetadata` parallel + `move_item_to_board`), three-leg
-  dry-run (no mutation). The cross-board `meta.source` aggregates
-  via `mergeSource` (R21) because metadata loads can hit cache;
-  same-board paths are pure-live single-leg so source is
-  unconditionally `'live'`. **`--columns-mapping <json>`** —
-  `src/api/column-mapping.ts` parses + validates the
-  `{<source_col_id>: <target_col_id>}` JSON shape into a typed
-  `ColumnMapping = Record<string, string>` (R18 unwrapOrThrow at
-  the parse boundary; `usage_error` on every malformed-JSON /
-  non-object-root / non-string-value path so agents see exit 1
-  with `details.issues` rather than runner-catch-all
-  `internal_error`). Maps directly to Monday's `columns_mapping:
-  [ColumnMappingInput!]` parameter where `ColumnMappingInput =
-  { source: ID!, target?: ID }` (SDK 14.0.0 / generated-2026-01).
-  **Strict default per cli-design §8 decision 5.** `commands/
-  item/move.ts planColumnMappings` enumerates every source column
-  **with actual content** — populated cells per `cellHasData`'s
-  recursive emptiness check (non-null `value` whose object/array
-  leaves aren't all empty, OR non-empty `text`). Empty cells (no
-  value, cleared rich shapes like `{}` / `{personsAndTeams: []}` /
-  `{label: null, index: null}`, or empty `text`) drop out because
-  Monday wouldn't carry their values across the move anyway. For
-  each populated source column, the planner checks (a) verbatim
-  ID match on target OR (b) agent-supplied mapping entry. The
-  round-1 F1 fix added the populated-cells filter; the round-2
-  F1 escalation made the emptiness check semantic (recursive
-  `valueHasContent`) so cleared rich shapes don't slip through.
-  **F2 — explicit mapping targets validated against the target
-  board.** Round-2 added: `--columns-mapping '{"status_4":"typo"}'`
-  pre-fix bypassed the strict-default check and reached Monday
-  with a bogus target ID (silently dropped server-side); post-fix
-  the planner validates each mapping target against
-  `targetColumnIds` and raises `usage_error` with
-  `details.invalid_mappings: [{source_col_id, target_col_id}]`.
-  Unmatched → `usage_error` carrying `details.unmatched:
-  [{source_col_id, source_title, source_type}]` +
-  `details.example_mapping: {<src>: "<target_col_id>"}`. The
-  example mapping seeds the agent's next call. Verbatim ID matches
-  surface explicitly in `column_mappings` payload + dry-run echo.
-  **F3 — live wire mirrors dry-run echo.** Round-2 added: pre-fix
-  the live `columnsMapping` variable was `null` when
-  `--columns-mapping` was absent (Monday's default), but the
-  dry-run `column_mappings` slot showed the verbatim matches —
-  preview and wire diverged. Post-fix the live mutation always
-  sends `plan.columnsMapping` so the dry-run echo describes the
-  wire payload byte-for-byte. Mapping-overrides win over verbatim
-  matches (agents can deliberately rename a same-ID column).
-  `--columns-mapping {}` (empty object) is the explicit "drop
-  everything (Monday's permissive default)" opt-in that bypasses
-  the unmatched check.
-  **Value-overrides deferred to v0.3** — Monday's
-  `ColumnMappingInput` carries no value slot, so the v0.2-plan
-  §3 M11 deliverable's richer `{id, value?}` form would require a
-  non-atomic post-move `change_multiple_column_values` mutation
-  with cross-leg partial-failure envelope shapes that have no
-  precedent in v0.1+v0.2. Parser rejects the rich form loud with
-  `details.hint: "deferred to v0.3 — fire monday item set <iid>
-  <target>=<value> post-move when you need them"`. Captured in
-  v0.2-plan §15. **idempotent: false** at the verb level —
-  same-board (`move_item_to_group`) is wire-level no-op when
-  already in target group per cli-design §9.1 (idempotent), but
-  cross-board (`move_item_to_board`) re-running on the target
-  board is undefined SDK behaviour (not idempotent).
-  Conservative bound across all paths mirrors `monday item
-  create`'s rationale.
-- **No `restore` in v0.1.** Monday has no unarchive mutation; recreating
-  is lossy (new ID, no updates/assets/automation history). Don't add a
-  misleading "restore" command — see §5.4 for what a future explicit
-  recreate command would look like.
-- **Two-level command depth** (`monday <noun> <verb>`) for CRUD
-  surfaces, **with `dev` carved out** as a workflow namespace allowed
-  three levels deep (`monday dev sprint current`). (§5.2)
-- **Pagination cursor expires at 60 min.** Fail-fast with
-  `stale_cursor` rather than silently re-issuing — silent re-issue can
-  duplicate or skip rows. There's no safe deterministic resume in v0.1;
-  callers restart with idempotent operations or a known-stable filter.
-  (§5.6) M3 commands are page-based (Monday's `workspaces` / `boards`
-  / `users` / `updates` use `limit` + `page`, not cursors). M4 added
-  cursor pagination (`item list` / `search` via `items_page` →
-  `next_items_page`) through `src/api/pagination.ts`'s `paginate`
-  walker — fail-fast on `stale_cursor` with enriched
-  `details.cursor_age_seconds / items_returned_so_far / last_item_id`,
-  per-call effective `limit = min(pageSize, remainingBudget)` so
-  Monday's cursor advances over exactly the rows the walker emits
-  (no silent-skip on `--limit < pageSize` resume), and an injected
-  clock so tests pin expiry without wall-clock waits. Page-based
-  `--all` walks cap at `--limit-pages` (default 50, max 500); a
-  cap-hit on a still-full page emits a `pagination_cap_reached`
-  warning so agents can widen the cap or narrow the query. M4 reuses
-  the same warning code on `item find` when the cap-bounded scan was
-  truncated and uniqueness can't be verified. **Spec gaps (logged in
-  v0.1-plan §3 M3 / §3 M4 for backfill):** `--limit-pages` /
-  `pagination_cap_reached` aren't in cli-design.md yet; same for the
-  M4 `--state` deferral and the find-cap variant of the warning. All
-  additive / non-breaking.
-- **v0.1 (published 0.1.0)** is read-heavy: account info, board
-  list/get/find/describe/doctor, item list/get/find/search/set/clear/
-  update (single mutation), update list/get/create, schema, raw,
-  cache, config. **v0.2 in development on `main`** — M8 added the
-  `--set-raw` escape hatch + the `link`/`email`/`phone` firm-row
-  translators; M9 added `item create` (top-level + classic-only
-  subitem); M10 added the item-lifecycle siblings (`archive` /
-  `delete` / `duplicate`); M11 closed the four-verb lifecycle set
-  with `item move` (group + cross-board with strict-default
-  `--columns-mapping`). Remaining v0.2 milestones (M12–M18) cover
-  `item upsert` + bulk `item clear --where`, the full update
-  mutation surface (`reply` / `edit` / `delete` / `like` / `pin` /
-  `clear-all`), workspace + board lifecycle, NDJSON streaming, and
-  0.2.0 release prep. Monday Dev shortcuts arrive in v0.3. Watch and concurrency
-  are v0.4. **See §13 of cli-design.md for the full phase markers —
-  every command in §4.3 also carries its phase.**
-- **`board describe` ships `example_set` per writable column** (M3
-  exit criteria). Agents reading one `board describe` payload can
-  construct `--set <token>=<value>` calls for every M5b-writable
-  column on the board without consulting external Monday docs. Lives
-  at `src/commands/board/describe.ts`.
-- **Cross-noun resolver patterns (M3 share-out, extended M4).**
-  `findOne(scope, query)` in `src/api/resolvers.ts` powers every
-  `find` verb (boards in M3; items in M4) with identical NFC +
-  case-fold + `--first` semantics. `userByEmail` in the same module
-  owns the directory-cache + `users(emails:)` fallback that M5a's
-  `--set Owner=<email>` value translator will reuse; M4's `--where
-  owner=me` resolves through `client.whoami()` instead (cached for
-  the lifetime of one filter-build call).
-- **Pagination helpers.** Two walkers, one contract per Monday
-  shape:
-  - `walkPages` (`src/api/walk-pages.ts`) — page-based (`limit:` +
-    `page:`), used by `workspace` / `board` / `user` / `update`
-    list commands. Owns `--all` semantics, the `--limit-pages` cap,
-    and the `pagination_cap_reached` warning.
-  - `paginate` (`src/api/pagination.ts`) — cursor-based
-    (`items_page` → `next_items_page`), used by M4 `item list` /
-    `item search` / `item find`. Owns `--all` + `--limit` +
-    streaming `onItem` + the §5.6 stale-cursor fail-fast contract.
-    Result type carries every §6.1 + §6.3 meta slot from day one
-    (`source / cacheAgeSeconds / complexity / warnings /
-    nextCursor / hasMore / totalReturned / pagesFetched /
-    lastResponse`) — §14 M3 prophylactic.
-- **Filter DSL parser (M4).** `src/api/filters.ts` —
-  `parseWhereSyntax` (pure syntax) + `buildFilterRules` (with
-  `onColumnNotFound` cache-miss-refresh callback per §5.3 step 5) +
-  `buildQueryParams` (top-level helper used by `item list`). Operator
-  allowlist `=`, `!=`, `~=`, `<`, `<=`, `>`, `>=`, `:is_empty`,
-  `:is_not_empty`. Splits on first operator per §5.3 step 2.b;
-  operator-in-title columns route through `--filter-json` (the
-  `title:`/`id:` prefix doesn't disambiguate post-split — see the
-  module header). `me` sugar restricted to `people` columns;
-  resolves through the injected `resolveMe` callback. `--where`
-  and `--filter-json` mutually exclusive. Result type carries
-  `warnings + refreshed` so callers fold `stale_cache_refreshed`
-  into the envelope and flip `meta.source` to `'mixed'`.
-- **Item projection (M4).** `src/api/item-projection.ts` —
-  `rawItemSchema` (parse boundary) + `projectItem({raw,
-  columnTitles?, omitColumnTitles?})` (canonical §6.2 shape).
-  Single-resource calls (`item get`) keep per-cell `title` inline;
-  collection calls (`item list / search`) drop per-cell `title`
-  and consolidate into `meta.columns` per §6.3. Typed inline
-  fields for the v0.1-allowlisted writable types (status / date /
-  people); other types surface `text + value`.
-- **Get-by-id action helper (M4 R7).** `src/commands/run-by-id-lookup.ts`
-  compresses the parseArgv → resolveClient → client.raw → not_found
-  → emit shape into one call; used by `workspace get`, `board get`,
-  `user get`, `update get`, `item get`. Optional `project` callback
-  for shapes that need a parse-then-project step (item get uses
-  it for the column projection).
-- **Integration test helpers (M4 R6).** `tests/integration/helpers.ts`
-  — `baseOptions / EnvelopeShape / parseEnvelope /
-  assertEnvelopeContract / drive` shared by every M2+ integration
-  test file. New M5+ test files should start at one import line.
-- **Item-command shared helpers (M5b R9).** `src/api/item-helpers.ts`
-  — `COLUMN_VALUES_FRAGMENT` + `ITEM_FIELDS_FRAGMENT` (the
-  GraphQL projection §6.2 + §6.3 surface across every item-shape
-  query), `collectColumnHeads` + `titleMap` (per-board column
-  heads + title-by-id map), `resolveMeFactory` (whoami-based `me`
-  token resolver), `projectFromRaw` (parse + project with §6.3
-  same-board title de-dup), `parseRawItem` (R18-wrapped raw item
-  schema parser). Six consumers: `item get / list / find /
-  search / subitems` + the dry-run engine + `item set`.
-- **Cross-clause column resolution (M5b R12).**
-  `resolveColumnsAcrossClauses` in `src/api/columns.ts` — batched
-  variant of `resolveColumnWithRefresh` that takes pre-loaded
-  metadata + N tokens + an optional refresh callback, returns N
-  matches in input order with cache-miss-refresh-once semantics.
-  Two consumers (`api/filters.ts` + `commands/item/search.ts`);
-  M5b's bulk `--where` will be the third. The dry-run engine
-  keeps its per-token `resolveColumnWithRefresh` loop because it
-  loads metadata internally per-token (different shape).
-- **Parse-boundary wrap helper (M5b R18).** `src/utils/parse-
-  boundary.ts unwrapOrThrow` — single-line `safeParse + ApiError(
-  internal_error, ..., { details: { issues } })` used at every
-  parse boundary that consumes data from outside the compiled
-  bundle. Live-fetch parses, agent-input parses, output-schema
-  drift catches all funnel through this. Cache-read parses
-  (board-metadata, user directory) intentionally don't — the
-  surrounding cache-miss try/catch swallows them as misses
-  (corrupt cache → re-fetch live, the established contract).
-- **Mutation envelope (M5b).** `src/utils/output/envelope.ts
-  buildMutation` — the §6.4 mutation result envelope shape with
-  optional `side_effects` (for v0.3 dev shortcuts) + optional
-  `resolved_ids` slot (cli-design §5.3 step 2 — token → resolved
-  column ID echo). `emitMutation` (in `commands/emit.ts`) is the
-  call-site helper with R18 outputSchema-drift wrap; M5b's `item
-  set` is the first consumer. Adding `resolved_ids` is the M5b
-  spec-gap candidate — cli-design §6.4's live sample doesn't show
-  the slot; backfill alongside the M5b docs sweep.
-- **Dry-run envelope (M5b).** `buildDryRun` in envelope.ts +
-  `emitDryRun` in `commands/emit.ts`. The §6.4 dry-run shape
-  (`data: null`, `meta.dry_run: true`, top-level
-  `planned_changes: [...]`). JSON-only — the dry-run shape doesn't
-  have a sensible non-JSON rendering. Item set passes the M5a
-  `planChanges` result through `emitDryRun`; bulk paths in M5b's
-  `item update --where` will pass an N-element array with the
-  same shape.
-- **Live mutation `validation_failed` → `column_archived` remap
-  (M5b, Codex pass-1 F4 + M5b cleanup).**
-  `maybeRemapValidationFailedToArchived` (in
-  `src/api/resolver-error-fold.ts`) — when a live mutation fails
-  with `validation_failed` AFTER cache-sourced resolution
-  succeeded (cache said active), force a metadata refresh. If
-  any of the translated column IDs is now archived, remap the
-  error to `column_archived` so agents key off the stable code
-  per cli-design §6.5. **Probes every translated column id**
-  (M5b finding #3 — pre-fix probed only `translated[0]`, missing
-  multi-column updates where a later target was archived).
-  Single-column callers (`item set`, `item clear`) pass a
-  one-element array; multi-column callers (`item update` single
-  + bulk) pass every translated real column ID. First archived
-  match in input order wins (deterministic). Live-sourced
-  resolutions skip the remap (the live read already saw the
-  archived flag). Resolver warnings (collision /
-  stale_cache_refreshed) survive the remap via
-  `error.details.resolver_warnings`. The remapped error carries
-  `details.remapped_from: "validation_failed"` for triage.
-- **Resolver-warning fold module (M5b R19 + M9.5 R26).**
-  `src/api/resolver-error-fold.ts` — single source of truth for
-  `foldResolverWarningsIntoError` + `mergeDetails` +
-  `maybeRemapValidationFailedToArchived` + `foldAndRemap` (the
-  M9.5 R26 wrapper composing fold + remap with the empty-
-  columnIds short-circuit). Folds collision /
-  `stale_cache_refreshed` warnings into a thrown
-  `MondayCliError`'s `details.resolver_warnings` slot so a
-  stale-cache-then-failure flow doesn't lose the refresh
-  signal. Applies to every typed post-resolution failure:
-  translator `UsageError`s, `ApiError(unsupported_column_type)` /
-  `user_not_found`, mutation-time `validation_failed`. Two
-  consumer patterns: translate-time catches (in
-  `resolution-pass.ts` + `dry-run.ts`) call
-  `foldResolverWarningsIntoError` directly — no remap probe.
-  Post-mutation catches in the five mutation surfaces (`item
-  set`, `item clear`, `item update` single + bulk, `item
-  create`) call `foldAndRemap` once per site so the M9 P1
-  pattern (create skipping the catch arm and surfacing
-  `validation_failed` for archived columns) can't recur.
-  `maybeRemapValidationFailedToArchived` only fires for
-  cache-sourced resolutions; live-sourced skip the remap (the
-  live read already saw the archived flag). Remapped errors
-  carry `details.remapped_from: "validation_failed"`.
-- **Item clear (M5b).** `src/commands/item/clear.ts` — dedicated
-  per-column clear verb (single-item, single-column).
-  `translateColumnClear` in `api/column-values.ts` returns the
-  per-type clear payload: simple types (`text`, `long_text`,
-  `numbers`) → `""`; rich types (`status`, `dropdown`, `date`,
-  `people`) → `{}`. `planClear` in `api/dry-run.ts` builds the
-  diff `to` side accordingly. Accepts implicit `--board` lookup
-  via `ItemBoardLookup`. Archived column → `column_archived`.
-  Item-on-wrong-board (only detected in dry-run) → `usage_error`
-  with `item_board_id` + `requested_board_id` for self-correction.
-- **Item update (M5b).** `src/commands/item/update.ts` — atomic
-  multi-`--set` write with optional `--name`, plus the bulk
-  `--where` / `--filter-json` path. Single-item shape uses
-  `change_simple_column_value` / `change_column_value` (1
-  target) or `change_multiple_column_values` (multi target,
-  with `name` synthetically bundled as a column-id when
-  `--name` is set — Monday's multi mutation accepts `name` as
-  a key alongside real columns). Bulk shape requires
-  `--board <bid>`, walks `items_page` cursor pagination,
-  fails fast on stale cursor, and gates without `--yes` /
-  `--dry-run` with `confirmation_required` carrying
-  `matched_count` + `where_clauses` (or `filter_json`) +
-  `board_id` in details. Bulk live: per-item mutation is
-  sequential (cli-design §9.3); per-item failure decorates
-  the error envelope with `applied_count` / `applied_to`
-  (mutated items before failure) / `failed_at_item` /
-  `matched_count` so agents can reconstruct partial progress.
-  Bulk dry-run: per-item `planChanges` results aggregate into
-  one N-element `planned_changes`; warnings dedupe by
-  `code+message+token` so collision warnings don't spam the
-  envelope. F3 (Codex pass-1): bulk per-item failures run the
-  F4 `validation_failed` → `column_archived` remap too. M5b
-  cleanup widened the probe to every translated column id, so a
-  bulk multi-column update where a later target was archived
-  still surfaces `column_archived` (pre-fix only the first
-  translated column was checked). Bulk envelope source
-  aggregation (Codex pass-2): merges metadata + column-resolution
-  + walk + mutation legs per cli-design §6.1 — cache-served
-  metadata + live wire calls correctly surfaces as
-  `meta.source: 'mixed'`.
-- **Update create (M5b).** `src/commands/update/create.ts` —
-  posts a comment (Monday "update") on an item via
-  `create_update`. Body sources: `--body <md>` inline,
-  `--body-file <path>`, or `--body-file -` for stdin.
-  Mutually exclusive with each other. Inline whitespace-only
-  bodies rejected post-trim (`usage_error`); empty file or
-  empty stdin same. Markdown is passed verbatim — Monday
-  renders to HTML; the rendering risk is documented in
-  cli-design §6. **`--dry-run` supported despite
-  non-idempotent**: the dry-run shape diverges from
-  column-mutation shape (no `board_id`, no `resolved_ids`,
-  no `diff` — instead `operation: "create_update"` +
-  `body` + `body_length`). Dry-run `meta.source: "none"`
-  because no API call fires. `idempotent: false` in the
-  CommandModule since re-running creates a duplicate
-  comment.
-- **Process exitCode drain (M5b session 2).**
-  `src/cli/index.ts` uses `process.exitCode = N` rather than
-  `process.exit(N)` so stdout drains naturally before the
-  event loop terminates. Pre-fix, `process.exit` could
-  truncate stdout on slow consumers when the payload exceeded
-  ~64KB (the `monday schema --json` output passed this
-  threshold during M5b). Pre-existing bug masked by smaller
-  M0–M4 payloads; M5b's schema growth surfaced it.
+- **Two-level command depth** (`monday <noun> <verb>`); `dev` namespace
+  carved out at three levels. (§5.2)
+- **Cursor pagination expires at 60 min — fail fast with
+  `stale_cursor`, never silently re-issue.** (§5.6)
+- **Column-value abstraction** is what makes `--set` work. Writable
+  allowlist after M8: `text`, `long_text`, `numbers`, `status`,
+  `dropdown`, `date`, `people`, `link`, `email`, `phone`. Other types
+  → `unsupported_column_type` with category-specific hints; the
+  `--set-raw <col>=<json>` escape hatch covers `change_column_value`-
+  shaped types (M8). (§5.3)
+- **`board describe` ships `example_set` per writable column** so an
+  agent can construct `--set` calls from one read. (M3 exit criterion)
 
-## Workflow Rules
+For per-subsystem detail (column-types module, dry-run engine, item
+create/move/archive/delete/duplicate semantics, resolver-warning fold,
+mutation envelope shape, pagination walkers, filter DSL, etc.) read the
+relevant cli-design.md section and the milestone post-mortems in
+v0.1-plan.md / v0.2-plan.md. **Don't restate them here.**
 
-- **Auto-test:** run `npm run typecheck && npm run lint && npm test` after
-  any change. Failing gates block the change.
-- **Auto-document:** when adding a command, also update
-  `docs/cli-design.md` (§4.3 command tree + any contract changes) and
-  this CLAUDE.md's "Contract at a glance" if a binding decision moved.
-  `docs/api-reference.md` is supplementary cheat-sheet material — not
-  a contract — but keep it in sync if you touch the underlying
-  Monday concept.
-- **Two-AI review for non-trivial design decisions AND per-milestone
-  implementation passes.** We use Codex (gpt-5.5) as a second reviewer
-  via `codex exec -m gpt-5.5 -s read-only - < .review-prompt.md >
-  .review-output.md` with a prompt explaining what to evaluate.
-  `.review-*.md` is gitignored; the resulting design / fix-up changes
-  go in normal commits. Two distinct triggers:
-  - **Design changes** to `docs/cli-design.md` or `docs/v0.1-plan.md`
-    get reviewed before merge. See `docs/cli-design.md` history
-    (commits `ee3f288`, `5218ca0`) for worked examples.
-  - **Implementation milestones** (M0, M1, … in `docs/v0.1-plan.md`)
-    get reviewed *before declaring the milestone done*. The M0 review
-    (post-mortem note in `v0.1-plan.md` §11) caught ten bugs the
-    coder missed — including a token-leak path, SIGINT not actually
-    aborting, schema/commander drift, and contract drift around
-    `meta.complexity` and the NDJSON trailer. **Don't skip this**;
-    the cost of one Codex run is far less than the cost of fixing
-    those bugs after M(N+1) builds on top.
-  Ask before adding new AI collaborators.
-- **Atomic, incremental commits.** Each commit is one self-contained
-  unit of progress — small enough to revert cleanly, large enough to
-  stand alone (e.g. one command + its tests + its doc update). Don't
-  bundle unrelated changes; don't split a coherent change. Never
+## Workflow rules
+
+- **Auto-test:** `npm run typecheck && npm run lint && npm test` after
+  any change. Failing gates block.
+- **Auto-document:** new commands → update `docs/cli-design.md` §4.3
+  + any contract changes. Update *this file's* "Contract headlines"
+  only if a binding decision moved.
+- **Two-AI review** for non-trivial design decisions AND per-milestone
+  implementation passes. Codex (gpt-5.5) via
+  `codex exec -m gpt-5.5 -s read-only - < .review-prompt.md > .review-output.md`
+  (`.review-*.md` is gitignored). Two triggers:
+  - Design changes to `docs/cli-design.md` or `docs/v0.x-plan.md` →
+    reviewed before merge.
+  - Implementation milestones → reviewed before declaring done. The M0
+    review caught 10 bugs (token leak, broken SIGINT, schema/commander
+    drift); skipping costs more than the Codex run. Ask before adding
+    new AI collaborators.
+- **Atomic, incremental commits.** One self-contained unit per commit:
+  small enough to revert cleanly, large enough to stand alone. Never
   commit broken `main`.
-- **Commit messages explain WHY and HOW, not WHAT.** A reader of the
-  diff already sees what changed; pretty self-documenting code makes
-  that obvious. Spend the message on:
-  - *Why* — the motivation, the constraint, the user-facing reason.
-  - *How* — the approach, the trade-off, the rejected alternative.
-  If there's no meaningful why/how to add, the conventional-commit
-  subject line alone is fine — better short than padded with
-  "added X, removed Y" prose. See `git log --grep='Why:'` for shape.
-- **Conventional Commits + SemVer.** Subject: `feat:` / `fix:` /
-  `docs:` / `refactor:` / `test:` / `chore:`. Major bump for breaking
-  output/exit-code changes, minor for new commands, patch for bug
-  fixes.
-- **CI gates everything.** `.github/workflows/ci.yml` runs typecheck +
-  lint + test (with coverage threshold) + build smoke-test on Node 22
-  and 24. Don't merge red.
-- **No `any`, no `null`-by-default, validate every boundary.** See
-  `validation.md`. Heavy validation is a feature — Nick has explicitly
-  endorsed this.
+- **Commit messages explain WHY and HOW, not WHAT.** Diff shows what.
+  Spend the message on motivation and approach. Bare conventional-commit
+  subject is fine when there's no meaningful why/how — better short than
+  padded with "added X, removed Y" prose.
+- **Conventional Commits + SemVer.** `feat:` / `fix:` / `docs:` /
+  `refactor:` / `test:` / `chore:`. Major bump for breaking
+  output/exit-code changes; minor for new commands; patch for fixes.
+- **CI gates everything** on Node 22 + 24
+  (`.github/workflows/ci.yml`). Don't merge red.
 
-## Monday API Notes
+## Monday API notes
 
-> The full picture is `cli-design.md` §2. Headlines for orientation:
+Full picture in `cli-design.md` §2. Headlines:
 
-- **Endpoint:** `https://api.monday.com/v2` (GraphQL, POST).
-- **Auth:** `Authorization: <api_token>` header (no `Bearer ` prefix).
-  Tokens from the user's Monday admin panel; guests can't mint one.
-  CLI loads `MONDAY_API_TOKEN` from env or `.env`.
-- **API version PINNED to `2026-01`.** Matches the
-  `CURRENT_VERSION` exported by `@mondaydotcomorg/api@14.0.0`
-  (verifiable in `node_modules/.../constants/index.d.ts`). Sent on
-  every request via the `API-Version` header. Override per-request
-  with `--api-version` or per-environment with `MONDAY_API_VERSION`.
-  Bumping the pin requires bumping the SDK and is a SemVer-minor (or
-  major if output schema changes).
-- **SDK ↔ API drift.** The SDK's typed surface lags Monday's actual
-  schema. SDK 14.0.0 types `2026-01` but doesn't expose
-  `BatteryValue` (status rollups), `hierarchy_type`, `is_leaf`,
-  `capabilities` — those need raw GraphQL via `client.request<T>()`
-  in `src/api/` (see `cli-design.md` §2.8 / §2.9).
+- **Endpoint:** `POST https://api.monday.com/v2`.
+- **Auth:** `Authorization: <token>` (no `Bearer ` prefix). Loaded from
+  `MONDAY_API_TOKEN` env or `.env`.
+- **API version pinned `2026-01`** (`API-Version` header on every
+  request); matches SDK 14.0.0's `CURRENT_VERSION`. Override with
+  `--api-version` or `MONDAY_API_VERSION`. Bumping the pin requires
+  bumping the SDK and is a SemVer-minor (major if output schema
+  changes).
+- **SDK ↔ API drift.** SDK 14.0.0 types `2026-01` but doesn't expose
+  some fields (`BatteryValue`, `hierarchy_type`, `is_leaf`,
+  `capabilities`) — those need raw GraphQL via `client.request<T>()`.
+  See `cli-design.md` §2.8 / §2.9.
 - **Boundary-typing trap.** SDK exports
   `QueryVariables = Record<string, any>`. The `src/api/` wrapper must
-  wrap this so `any` doesn't leak into `commands/*` — internal code
-  sees `Record<string, unknown>` (or named GraphQL input types) and
-  parses at the boundary.
+  keep `any` from leaking into `commands/*` — internal code sees
+  `Record<string, unknown>` (or named GraphQL input types).
 - **Pagination:** `items_page(limit ≤500, cursor)` →
-  `next_items_page(cursor)`. **60-minute cursor lifetime from the
-  initial call.** Stale cursor returns `stale_cursor` error — never
-  silently re-issued. The flat `items` query is deprecated.
-- **Rate limits and error codes** — six distinct limits
-  (per-minute, complexity, daily, concurrency, IP, locked-resource).
-  All carry `retry_in_seconds` (or HTTP `Retry-After`). Mapped to
-  CLI `error.code` values listed in `cli-design.md` §2.5 / §6.5.
+  `next_items_page(cursor)`; 60-min cursor lifetime. Flat `items`
+  query is deprecated.
+- **Rate limits + error codes** mapped to CLI `error.code` per
+  `cli-design.md` §2.5 / §6.5.
 
 ## References
 
 - Monday API reference: https://developer.monday.com/api-reference/
 - Official Node SDK: https://github.com/mondaycom/monday-graphql-api
-  (`@mondaydotcomorg/api` on npm, **pinned to 14.0.0**).
+  (`@mondaydotcomorg/api`, **pinned to 14.0.0**).
 - API changelog: https://developer.monday.com/api-reference/changelog
