@@ -76,6 +76,11 @@ import {
   lookupItemBoardWithHierarchy,
 } from '../../api/item-board-lookup.js';
 import {
+  mergeSource,
+  mergeSourceWithPreflight,
+  mergeCacheAge,
+} from '../../api/source-aggregator.js';
+import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
@@ -85,18 +90,10 @@ import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 // ============================================================
-// GraphQL queries + mutations.
+// GraphQL mutations. The parent lookup + relative-to lookup queries
+// live in api/item-board-lookup.ts (R23 lift).
 // ============================================================
 
-/**
- * Parent lookup for the subitem path. Fetches the parent's board id
- * + `hierarchy_type` so the multi-level gate fires before any column
- * resolution / value translation runs (cli-design §5.8).
- *
- * `hierarchy_type` lives on Monday's `Board` type but the SDK 14.0.0
- * `boards` typed query doesn't surface it (cli-design §2.8); the
- * raw escape hatch is the v0.2 work-around.
- */
 const CREATE_ITEM_MUTATION = `
   mutation ItemCreateTopLevel(
     $boardId: ID!
@@ -814,7 +811,7 @@ export const itemCreateCommand: CommandModule<
             result.source,
             createModeResult.preflightSource,
           );
-          const dryRunCacheAge = mergeCacheAgeWithPreflight(
+          const dryRunCacheAge = mergeCacheAge(
             result.cacheAgeSeconds,
             createModeResult.preflightCacheAgeSeconds,
           );
@@ -885,7 +882,7 @@ export const itemCreateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSourceLeg(aggregateSource, resolution.source);
+          aggregateSource = mergeSource(aggregateSource, resolution.source);
           if (
             resolution.cacheAgeSeconds !== null &&
             (aggregateCacheAge === null ||
@@ -945,7 +942,7 @@ export const itemCreateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSourceLeg(aggregateSource, resolution.source);
+          aggregateSource = mergeSource(aggregateSource, resolution.source);
           if (
             resolution.cacheAgeSeconds !== null &&
             (aggregateCacheAge === null ||
@@ -1115,17 +1112,17 @@ export const itemCreateCommand: CommandModule<
         let liveSource: 'live' | 'cache' | 'mixed' | undefined =
           aggregateSource;
         if (createModeResult.preflightSource !== undefined) {
-          liveSource = mergeSourceLeg(
+          liveSource = mergeSource(
             liveSource,
             createModeResult.preflightSource,
           );
         }
-        const finalSource: 'live' | 'cache' | 'mixed' = mergeSourceLeg(
+        const finalSource: 'live' | 'cache' | 'mixed' = mergeSource(
           liveSource,
           'live',
         );
         // Cache age folds preflight worst-case staleness too.
-        const finalCacheAge = mergeCacheAgeWithPreflight(
+        const finalCacheAge = mergeCacheAge(
           aggregateCacheAge,
           createModeResult.preflightCacheAgeSeconds,
         );
@@ -1297,56 +1294,3 @@ const executeCreateSubitem = async (
   };
 };
 
-/**
- * Same merge rule the dry-run engine + every M5b mutation surface
- * use: first leg seeds (`undefined → next`); any `mixed` is
- * contagious; otherwise `cache + live → mixed`; otherwise the
- * unanimous value. Local copy because the dry-run engine's
- * `mergeSource` is a private helper there; lifting once a fourth
- * consumer arrives.
- */
-const mergeSourceLeg = (
-  current: 'live' | 'cache' | 'mixed' | undefined,
-  next: 'live' | 'cache' | 'mixed',
-): 'live' | 'cache' | 'mixed' => {
-  if (current === undefined) return next;
-  if (current === 'mixed' || next === 'mixed') return 'mixed';
-  if (current === next) return current;
-  return 'mixed';
-};
-
-/**
- * Folds the pre-planner preflight source ('live' / 'cache' / 'mixed'
- * / undefined when no preflight network leg fired) into the planner /
- * mutation source ('live' / 'cache' / 'mixed' / 'none'). Used by
- * both the dry-run and live paths so the envelope's `meta.source`
- * reflects every wire leg that fired (Codex M9 P2 #1). Returns the
- * planner source unchanged when no preflight leg fired; otherwise
- * merges via the `mergeSourceLeg` rule. The 'none' planner source
- * (no-set short-circuit) collapses to the preflight source when any
- * preflight leg fired — `none` only survives when every leg was
- * absent.
- */
-const mergeSourceWithPreflight = (
-  plannerSource: 'live' | 'cache' | 'mixed' | 'none',
-  preflightSource: 'live' | 'cache' | 'mixed' | undefined,
-): 'live' | 'cache' | 'mixed' | 'none' => {
-  if (preflightSource === undefined) return plannerSource;
-  if (plannerSource === 'none') return preflightSource;
-  return mergeSourceLeg(plannerSource, preflightSource);
-};
-
-/**
- * Folds preflight cache-age into the planner cache-age. Same merge
- * rule as the dry-run engine's `mergeCacheAge`: `null` legs (live
- * fetches) don't update; otherwise pick the larger (worst-case
- * staleness). Returns `null` when both inputs are null.
- */
-const mergeCacheAgeWithPreflight = (
-  planner: number | null,
-  preflight: number | null,
-): number | null => {
-  if (preflight === null) return planner;
-  if (planner === null) return preflight;
-  return Math.max(planner, preflight);
-};

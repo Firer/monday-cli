@@ -79,6 +79,7 @@ import {
 } from './column-values.js';
 import { translateRawColumnValue, type ParsedSetRawExpression } from './raw-write.js';
 import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
+import { mergeSource, mergeCacheAge } from './source-aggregator.js';
 
 /**
  * One agent-supplied `--set <token>=<value>` pair, pre-split by the
@@ -1298,38 +1299,6 @@ const buildCreateDiffCell = (
   return { from: null, to };
 };
 
-/**
- * Merges per-leg `source` values into the aggregate envelope source
- * per §6.1: the first leg seeds (`undefined → next`); any `mixed` is
- * contagious; otherwise `cache + live → mixed`; otherwise the
- * unanimous value. Same rule callers fold across multi-leg reads in
- * M3 / M4.
- */
-const mergeSource = (
-  current: 'live' | 'cache' | 'mixed' | undefined,
-  next: 'live' | 'cache' | 'mixed',
-): 'live' | 'cache' | 'mixed' => {
-  if (current === undefined) return next;
-  if (current === 'mixed' || next === 'mixed') return 'mixed';
-  if (current === next) return current;
-  return 'mixed';
-};
-
-/**
- * Merges per-leg `cacheAgeSeconds` into the aggregate. Per §6.1,
- * the envelope's `cache_age_seconds` is the **oldest** age across
- * legs that hit cache — it represents the worst-case staleness.
- * `null` legs (live fetches) don't update the aggregate; if all
- * legs are live, the aggregate stays `null`.
- */
-const mergeCacheAge = (
-  current: number | null,
-  next: number | null,
-): number | null => {
-  if (next === null) return current;
-  if (current === null) return next;
-  return Math.max(current, next);
-};
 
 /**
  * Projects the wire-side `to` value for a translated column,

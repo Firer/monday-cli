@@ -69,6 +69,7 @@ import {
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
+import { mergeSource, mergeCacheAge } from '../../api/source-aggregator.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
@@ -483,14 +484,8 @@ export const itemUpdateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
-          if (
-            resolution.cacheAgeSeconds !== null &&
-            (aggregateCacheAge === null ||
-              resolution.cacheAgeSeconds > aggregateCacheAge)
-          ) {
-            aggregateCacheAge = resolution.cacheAgeSeconds;
-          }
+          aggregateSource = mergeSource(aggregateSource, resolution.source);
+          aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
 
           if (resolution.match.column.archived === true) {
             throw foldResolverWarningsIntoError(
@@ -555,14 +550,8 @@ export const itemUpdateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           collectedWarnings.push(...resolution.warnings);
-          aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
-          if (
-            resolution.cacheAgeSeconds !== null &&
-            (aggregateCacheAge === null ||
-              resolution.cacheAgeSeconds > aggregateCacheAge)
-          ) {
-            aggregateCacheAge = resolution.cacheAgeSeconds;
-          }
+          aggregateSource = mergeSource(aggregateSource, resolution.source);
+          aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
           if (resolution.match.column.archived === true) {
             throw foldResolverWarningsIntoError(
               new ApiError(
@@ -722,7 +711,7 @@ export const itemUpdateCommand: CommandModule<
         // 'mixed' : resolution.source`). Pre-fix this derived source
         // from warning presence alone, missing plain cache hits without
         // `stale_cache_refreshed` warnings (Codex M5b finding #2).
-        const finalSource: 'live' | 'cache' | 'mixed' = mergeSourceForRemap(
+        const finalSource: 'live' | 'cache' | 'mixed' = mergeSource(
           aggregateSource,
           'live',
         );
@@ -823,24 +812,6 @@ const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem => {
   return projectItem({ raw: parseRawItem(raw, { item_id: itemId }) });
 };
 
-/**
- * Aggregates per-leg `source` values into the merge value the F4
- * remap helper consumes. Same merge rule the dry-run engine applies
- * (`live + live → live`, `cache + live → mixed`, `mixed → mixed`).
- * Local copy rather than an export from `api/dry-run.ts` because
- * the engine's `mergeSource` is a private helper there; lifting it
- * would expand the engine's surface for one consumer. If a third
- * consumer arrives, lift to a shared module then.
- */
-const mergeSourceForRemap = (
-  current: 'live' | 'cache' | 'mixed' | undefined,
-  next: 'live' | 'cache' | 'mixed',
-): 'live' | 'cache' | 'mixed' => {
-  if (current === undefined) return next;
-  if (current === 'mixed' || next === 'mixed') return 'mixed';
-  if (current === next) return current;
-  return 'mixed';
-};
 
 /**
  * Bulk dry-run aggregates per-item resolver warnings — the same
@@ -1234,14 +1205,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       for (const w of result.warnings) {
         aggregatedWarnings.push(w);
       }
-      aggregatedSource = mergeSourceForRemap(aggregatedSource, result.source);
-      if (
-        result.cacheAgeSeconds !== null &&
-        (aggregatedCacheAge === null ||
-          result.cacheAgeSeconds > aggregatedCacheAge)
-      ) {
-        aggregatedCacheAge = result.cacheAgeSeconds;
-      }
+      aggregatedSource = mergeSource(aggregatedSource, result.source);
+      aggregatedCacheAge = mergeCacheAge(aggregatedCacheAge, result.cacheAgeSeconds);
     }
     emitDryRun({
       ctx,
@@ -1333,14 +1298,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     });
     collectedWarnings.push(...resolution.warnings);
     resolverWarnings.push(...resolution.warnings);
-    aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
-    if (
-      resolution.cacheAgeSeconds !== null &&
-      (aggregateCacheAge === null ||
-        resolution.cacheAgeSeconds > aggregateCacheAge)
-    ) {
-      aggregateCacheAge = resolution.cacheAgeSeconds;
-    }
+    aggregateSource = mergeSource(aggregateSource, resolution.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
         new ApiError(
@@ -1402,14 +1361,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     });
     collectedWarnings.push(...resolution.warnings);
     resolverWarnings.push(...resolution.warnings);
-    aggregateSource = mergeSourceForRemap(aggregateSource, resolution.source);
-    if (
-      resolution.cacheAgeSeconds !== null &&
-      (aggregateCacheAge === null ||
-        resolution.cacheAgeSeconds > aggregateCacheAge)
-    ) {
-      aggregateCacheAge = resolution.cacheAgeSeconds;
-    }
+    aggregateSource = mergeSource(aggregateSource, resolution.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, resolution.cacheAgeSeconds);
     if (resolution.match.column.archived === true) {
       throw foldResolverWarningsIntoError(
         new ApiError(
@@ -1608,7 +1561,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // column-resolution path still surfaces as `mixed` (cache-served
   // metadata + live wire calls). Mirrors the empty-match no-op
   // path's `emptyEnvelopeSource` derivation.
-  const finalSource = mergeSourceForRemap(aggregateSource, 'live');
+  const finalSource = mergeSource(aggregateSource, 'live');
   emitMutation({
     ctx,
     data: {
