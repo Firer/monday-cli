@@ -68,6 +68,7 @@ import {
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
+import { resolveBoardId } from '../../api/item-board-lookup.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
@@ -101,15 +102,6 @@ import {
   type ProjectedItem,
 } from '../../api/item-projection.js';
 import type { Warning } from '../../utils/output/envelope.js';
-
-const ITEM_BOARD_LOOKUP_QUERY = `
-  query ItemBoardLookup($ids: [ID!]!) {
-    items(ids: $ids) {
-      id
-      board { id }
-    }
-  }
-`;
 
 const CHANGE_SIMPLE_COLUMN_VALUE_MUTATION = `
   mutation ItemUpdateSimple(
@@ -168,19 +160,6 @@ const CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION = `
     }
   }
 `;
-
-const boardLookupResponseSchema = z
-  .object({
-    items: z
-      .array(
-        z.object({
-          id: ItemIdSchema,
-          board: z.object({ id: BoardIdSchema }).nullable(),
-        }),
-      )
-      .nullable(),
-  })
-  .loose();
 
 interface ChangeSimpleResponse {
   readonly change_simple_column_value: unknown;
@@ -304,48 +283,6 @@ const validateInputShape = (parsed: ParsedInput): DispatchShape => {
   return { kind: 'bulk' };
 };
 
-const resolveBoardId = async (
-  client: MondayClient,
-  itemId: string,
-  explicit: string | undefined,
-): Promise<string> => {
-  if (explicit !== undefined) return explicit;
-  const response = await client.raw<unknown>(
-    ITEM_BOARD_LOOKUP_QUERY,
-    { ids: [itemId] },
-    { operationName: 'ItemBoardLookup' },
-  );
-  const data = unwrapOrThrow(
-    boardLookupResponseSchema.safeParse(response.data),
-    {
-      context: `Monday returned a malformed ItemBoardLookup response for id ${itemId}`,
-      details: { item_id: itemId },
-      hint:
-        'this is a data-integrity error in Monday\'s response; verify ' +
-        'the response shape and update boardLookupResponseSchema if ' +
-        'Monday\'s contract has changed.',
-    },
-  );
-  const first = data.items?.[0];
-  if (first === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Item ${itemId} does not exist or the token has no read access.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  if (first.board === null) {
-    throw new ApiError(
-      'not_found',
-      `Item ${itemId} has no readable board; the token may not have ` +
-        `permission on the item's board, or the item is in a deleted ` +
-        `board.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  return first.board.id;
-};
-
 export const itemUpdateCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemUpdateOutput
@@ -439,11 +376,11 @@ export const itemUpdateCommand: CommandModule<
         const rawEntries: readonly ParsedSetRawExpression[] =
           parsed.setRaw.map(parseSetRawExpression);
 
-        const boardId = await resolveBoardId(
+        const boardId = await resolveBoardId({
           client,
-          dispatch.itemId,
-          parsed.board,
-        );
+          itemId: dispatch.itemId,
+          explicit: parsed.board,
+        });
 
         const { dateResolution, peopleResolution } = buildResolutionContexts(
           { client, ctx, globalFlags },

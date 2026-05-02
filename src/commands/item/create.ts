@@ -72,6 +72,10 @@ import {
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import {
+  lookupItemBoard,
+  lookupItemBoardWithHierarchy,
+} from '../../api/item-board-lookup.js';
+import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
@@ -93,32 +97,6 @@ import type { Warning } from '../../utils/output/envelope.js';
  * `boards` typed query doesn't surface it (cli-design §2.8); the
  * raw escape hatch is the v0.2 work-around.
  */
-const ITEM_PARENT_LOOKUP_QUERY = `
-  query ItemParentLookup($ids: [ID!]!) {
-    items(ids: $ids) {
-      id
-      board {
-        id
-        hierarchy_type
-      }
-    }
-  }
-`;
-
-/**
- * Same lookup as the M5b `item set` / `item update` board-resolver
- * uses, kept verbatim so the wrong-board check on `--relative-to`
- * shares the same wire shape.
- */
-const ITEM_BOARD_LOOKUP_QUERY = `
-  query ItemBoardLookup($ids: [ID!]!) {
-    items(ids: $ids) {
-      id
-      board { id }
-    }
-  }
-`;
-
 const CREATE_ITEM_MUTATION = `
   mutation ItemCreateTopLevel(
     $boardId: ID!
@@ -171,37 +149,6 @@ const CREATE_SUBITEM_MUTATION = `
 // ============================================================
 // Wire response zod schemas (parse-boundary discipline, R18).
 // ============================================================
-
-const itemParentLookupResponseSchema = z
-  .object({
-    items: z
-      .array(
-        z.object({
-          id: ItemIdSchema,
-          board: z
-            .object({
-              id: BoardIdSchema,
-              hierarchy_type: z.string().nullable(),
-            })
-            .nullable(),
-        }),
-      )
-      .nullable(),
-  })
-  .loose();
-
-const itemBoardLookupResponseSchema = z
-  .object({
-    items: z
-      .array(
-        z.object({
-          id: ItemIdSchema,
-          board: z.object({ id: BoardIdSchema }).nullable(),
-        }),
-      )
-      .nullable(),
-  })
-  .loose();
 
 // Per cli-design §6.4: data shape carries id, name, board_id,
 // group_id (nullable when Monday returns no group — defensive,
@@ -422,46 +369,23 @@ const checkDuplicateTokens = (
 
 /**
  * Looks up the parent item's board id + `hierarchy_type` so the
- * multi-level gate can fire pre-mutation. Returns `null` for the
- * board / hierarchy_type slots when the parent is missing or the
- * token can't read the parent's board (mapped to `not_found` /
- * `usage_error` upstream).
+ * multi-level gate can fire pre-mutation. Wraps the shared
+ * `lookupItemBoardWithHierarchy` helper with the parent-item label
+ * + detail key.
  */
 const lookupParent = async (
   client: MondayClient,
   parentItemId: string,
 ): Promise<{ boardId: string; hierarchyType: string | null }> => {
-  const response = await client.raw<unknown>(
-    ITEM_PARENT_LOOKUP_QUERY,
-    { ids: [parentItemId] },
-    { operationName: 'ItemParentLookup' },
-  );
-  const data = unwrapOrThrow(
-    itemParentLookupResponseSchema.safeParse(response.data),
-    {
-      context: `Monday returned a malformed ItemParentLookup response for id ${parentItemId}`,
-      details: { parent_item_id: parentItemId },
-    },
-  );
-  const first = data.items?.[0];
-  if (first === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Parent item ${parentItemId} does not exist or the token has no read access.`,
-      { details: { parent_item_id: parentItemId } },
-    );
-  }
-  if (first.board === null) {
-    throw new ApiError(
-      'not_found',
-      `Parent item ${parentItemId} has no readable board; the token may ` +
-        `not have permission on the parent's board, or the board is deleted.`,
-      { details: { parent_item_id: parentItemId } },
-    );
-  }
+  const result = await lookupItemBoardWithHierarchy({
+    client,
+    itemId: parentItemId,
+    label: 'Parent item',
+    detailKey: 'parent_item_id',
+  });
   return {
-    boardId: first.board.id,
-    hierarchyType: first.board.hierarchy_type,
+    boardId: result.boardId,
+    hierarchyType: result.hierarchyType,
   };
 };
 
@@ -570,43 +494,21 @@ const verifyRelativeToOnBoard = async (
   relativeToId: string,
   boardId: string,
 ): Promise<void> => {
-  const response = await client.raw<unknown>(
-    ITEM_BOARD_LOOKUP_QUERY,
-    { ids: [relativeToId] },
-    { operationName: 'ItemBoardLookup' },
-  );
-  const data = unwrapOrThrow(
-    itemBoardLookupResponseSchema.safeParse(response.data),
-    {
-      context: `Monday returned a malformed ItemBoardLookup response for id ${relativeToId}`,
-      details: { relative_to_id: relativeToId },
-    },
-  );
-  const first = data.items?.[0];
-  if (first === undefined) {
-    throw new ApiError(
-      'not_found',
-      `--relative-to item ${relativeToId} does not exist or the token has no read access.`,
-      { details: { relative_to_id: relativeToId } },
-    );
-  }
-  if (first.board === null) {
-    throw new ApiError(
-      'not_found',
-      `--relative-to item ${relativeToId} has no readable board; the ` +
-        `token may not have permission, or the board is deleted.`,
-      { details: { relative_to_id: relativeToId } },
-    );
-  }
-  if (first.board.id !== boardId) {
+  const result = await lookupItemBoard({
+    client,
+    itemId: relativeToId,
+    label: '--relative-to item',
+    detailKey: 'relative_to_id',
+  });
+  if (result.boardId !== boardId) {
     throw new UsageError(
-      `--relative-to item ${relativeToId} lives on board ${first.board.id}, ` +
+      `--relative-to item ${relativeToId} lives on board ${result.boardId}, ` +
         `but --board is ${boardId}. Pass a --relative-to item on the same ` +
         `board, or drop --position / --relative-to.`,
       {
         details: {
           relative_to_id: relativeToId,
-          item_board_id: first.board.id,
+          item_board_id: result.boardId,
           requested_board_id: boardId,
         },
       },

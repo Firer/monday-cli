@@ -71,12 +71,12 @@ import {
 } from '../../api/raw-write.js';
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
+import { resolveBoardId } from '../../api/item-board-lookup.js';
 import {
   foldResolverWarningsIntoError,
   maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
   parseRawItem,
@@ -87,15 +87,6 @@ import {
   type ProjectedItem,
 } from '../../api/item-projection.js';
 import type { Warning } from '../../utils/output/envelope.js';
-
-const ITEM_BOARD_LOOKUP_QUERY = `
-  query ItemBoardLookup($ids: [ID!]!) {
-    items(ids: $ids) {
-      id
-      board { id }
-    }
-  }
-`;
 
 const CHANGE_SIMPLE_COLUMN_VALUE_MUTATION = `
   mutation ItemSetSimple(
@@ -133,31 +124,6 @@ const CHANGE_COLUMN_VALUE_MUTATION = `
   }
 `;
 
-// Pass-1 finding F3: parse the board-lookup response through zod
-// before reading. Pre-fix, `client.raw<BoardLookupResponse>` was a
-// trusted boundary — a malformed response (Monday schema drift)
-// would surface downstream as a raw ZodError from `BoardIdSchema.
-// parse`, contrary to validation.md "Never bubble raw ZodError
-// out of a parse boundary". Now the parse boundary lives at the
-// item-set entry point with `unwrapOrThrow`.
-//
-// Pass-2 finding: validate id-shaped fields with the branded
-// schemas (BoardIdSchema / ItemIdSchema) — a `z.string().min(1)`
-// would let `"not-a-board-id"` through, escaping the parse
-// boundary and surfacing downstream as a raw ZodError from
-// `BoardIdSchema.parse` in `loadBoardMetadata`.
-const boardLookupResponseSchema = z
-  .object({
-    items: z
-      .array(
-        z.object({
-          id: ItemIdSchema,
-          board: z.object({ id: BoardIdSchema }).nullable(),
-        }),
-      )
-      .nullable(),
-  })
-  .loose();
 interface ChangeSimpleResponse {
   readonly change_simple_column_value: unknown;
 }
@@ -188,61 +154,6 @@ const inputSchema = z
       path: ['setExpr'],
     },
   );
-
-/**
- * Resolves the board id for the target item. `--board` is
- * authoritative; without it, Monday is queried for the item's
- * current board. Per cli-design §5.3 step 1 — "Implicit (preferred):
- * `--board <bid>` skips a lookup and is authoritative."
- */
-const resolveBoardId = async (
-  client: MondayClient,
-  itemId: string,
-  explicit: string | undefined,
-): Promise<string> => {
-  if (explicit !== undefined) return explicit;
-  const response = await client.raw<unknown>(
-    ITEM_BOARD_LOOKUP_QUERY,
-    { ids: [itemId] },
-    { operationName: 'ItemBoardLookup' },
-  );
-  // Pass-1 finding F3: parse the response shape via zod so a
-  // malformed Monday payload surfaces as typed `internal_error`
-  // with `details.issues` rather than a raw ZodError downstream.
-  const data = unwrapOrThrow(
-    boardLookupResponseSchema.safeParse(response.data),
-    {
-      context: `Monday returned a malformed ItemBoardLookup response for id ${itemId}`,
-      details: { item_id: itemId },
-      hint:
-        'this is a data-integrity error in Monday\'s response; verify ' +
-        'the response shape and update boardLookupResponseSchema if ' +
-        'Monday\'s contract has changed.',
-    },
-  );
-  const first = data.items?.[0];
-  if (first === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Item ${itemId} does not exist or the token has no read access.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  if (first.board === null) {
-    // Defensive — Monday's items query returns board.id for every
-    // visible item; a null here would mean a board the token can't
-    // see. Surface as `not_found` (the item is effectively
-    // inaccessible) with the item_id for triage.
-    throw new ApiError(
-      'not_found',
-      `Item ${itemId} has no readable board; the token may not have ` +
-        `permission on the item's board, or the item is in a deleted ` +
-        `board.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  return first.board.id;
-};
 
 export const itemSetCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -311,11 +222,11 @@ export const itemSetCommand: CommandModule<
           throw new UsageError('item set: token narrowing failed');
         }
 
-        const boardId = await resolveBoardId(
+        const boardId = await resolveBoardId({
           client,
-          parsed.itemId,
-          parsed.board,
-        );
+          itemId: parsed.itemId,
+          explicit: parsed.board,
+        });
 
         // Resolution contexts. `MONDAY_TIMEZONE` env override threads
         // to date.parseDateInput per cli-design §5.3 line 765;
