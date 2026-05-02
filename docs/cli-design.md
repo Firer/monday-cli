@@ -1490,22 +1490,38 @@ subsequent calls land in the update branch.
 upsert lookup routes column-token entries through the same shared
 filter pipeline `item search` and `item update --where` use
 (`buildQueryParams`), which resolves the `me` token to the current
-user's ID for people columns. **It does not** resolve email
-addresses to user IDs or relative date tokens (`+1w`, `tomorrow`)
-to ISO dates — those pass verbatim to Monday's `items_page`
-filter, which expects the resolved forms. The mutation translator
-on the create / update legs DOES resolve emails / relative dates,
-which means a naive `--match-by owner --set owner=alice@example.com`
-creates an item with `owner: <user_id>` but the next lookup queries
-for `owner: "alice@example.com"` (string compare) — 0 matches →
-duplicate created. **Workaround for v0.2:** pass already-resolved
-forms in `--set` for any column token that participates in
-`--match-by` — numeric user IDs for people, ISO dates for date
-columns. The `me` token is the one exception (resolved
-symmetrically on both legs). Email→ID and relative-date filter
-resolution is a v0.3 cross-surface follow-up that would lift
-`item search` and `item update --where` simultaneously; lifting it
-in upsert alone would create inconsistent filter semantics.
+user's ID for people columns and passes everything else verbatim
+to Monday's `items_page` filter. The mutation translator on the
+create / update legs has a different grammar — defined by §5.3
+step 3 — that resolves `me` *and* emails for people columns and
+*and* relative-date tokens for date columns, but **rejects raw
+numeric user IDs** in the people grammar (`numericPeopleTokenError`,
+v0.2-deferred per the M5b note). The two grammars only overlap
+cleanly on a small subset:
+
+- **People:** only `me` round-trips. `--match-by owner --set
+  owner=me` works on both legs. `--set owner=alice@example.com`
+  resolves to a user ID on mutation but the next lookup queries
+  for the email string → 0 matches → duplicate. `--set
+  owner=12345678` (raw user ID) fails outright on the create /
+  update leg with `usage_error`.
+- **Date:** ISO dates (`YYYY-MM-DD`) round-trip — both
+  translators accept the literal string. Relative tokens (`+1w`,
+  `tomorrow`) resolve to ISO on mutation but pass verbatim on
+  lookup → 0 matches → duplicate.
+- **Other column kinds (text / numbers / status / dropdown /
+  link / email / phone / external_id-shaped text):** values
+  pass verbatim on both legs and round-trip cleanly.
+
+**v0.2 contract:** people columns participating in `--match-by`
+are restricted to `me`; date columns are restricted to ISO. The
+help text reproduces this caveat so an agent reading
+`monday item upsert --help` sees the limitation without having
+to check this section first. Email→ID, numeric-user-ID acceptance,
+and relative-date filter resolution are v0.3 cross-surface
+follow-ups that would lift `item search` and `item update
+--where` simultaneously; lifting any in upsert alone would create
+inconsistent filter semantics across the three surfaces.
 
 ### 5.9 The `dev` namespace
 

@@ -815,18 +815,26 @@ observing zero matches at the same instant both branch to
 `create_item`; the next call surfaces the duplicate as
 `ambiguous_match`. Concurrent-write protection is a v0.4 candidate.
 
-**Match-value caveat (people / date columns).** The lookup pipeline
-resolves `me` to the current user's ID but does **not** resolve
-emails (`alice@example.com`) to user IDs or relative-date tokens
-(`+1w`) to ISO dates — those pass verbatim to Monday's items_page
-filter, which expects the resolved forms. Naive
-`--match-by owner --set owner=alice@example.com` creates an item
-storing `<user_id>` but the next lookup queries for the email
-string → 0 matches → duplicate created. **For v0.2: pass already-
-resolved forms** (numeric user IDs, ISO dates) in `--set` for any
-column-token participating in `--match-by`. `me` is the one
-exception. Email→ID and relative-date filter resolution is a v0.3
-follow-up. cli-design §5.8 covers the same note.
+**Match-value caveat (people / date columns).** The lookup
+pipeline and the `--set` translator have asymmetric grammars in
+v0.2 — they only overlap cleanly on a small subset, so
+`--match-by` against people / date columns is restricted:
+
+- **People columns: only `me` round-trips.** Emails resolve in
+  `--set` but pass verbatim in lookup (→ duplicate); raw numeric
+  user IDs are rejected by the people `--set` grammar outright
+  (cli-design §5.3 step 3, M5b).
+- **Date columns: only ISO dates round-trip.** Relative tokens
+  (`+1w`, `tomorrow`) resolve in `--set` but pass verbatim in
+  lookup (→ duplicate).
+- **Other column kinds (text / numbers / status / dropdown /
+  link / email / phone / external_id-shaped text)** round-trip
+  cleanly — values pass verbatim on both legs.
+
+Email→ID, numeric-user-ID acceptance, and relative-date filter
+resolution are v0.3 follow-ups that would lift `item search` /
+`item update --where` simultaneously. cli-design §5.8 covers the
+same note in long form.
 
 ### `item archive <iid> --yes [--dry-run]`
 
