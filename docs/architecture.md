@@ -487,16 +487,36 @@
   on cache-sourced resolution if a forced refresh confirms
   the archived state.
 
-- `commands/item/clear.ts` (M5b session 2) — dedicated
-  per-column clear verb. `monday item clear <iid> <col>
-  [--board <bid>]`. Reuses the resolution / mutation
-  selection / projection pipeline; the only divergence from
-  `item set` is the value source: `translateColumnClear` in
-  `api/column-values.ts` returns the per-type clear payload
-  (text → `""`, status → `{}`, etc.) rather than translating
-  user input. Per-type table is the canonical "what's a
-  clear" mapping and lives alongside the writer's
-  set-payload table.
+- `commands/item/clear.ts` (M5b session 2 + M12) — dedicated
+  per-column clear verb across two argv shapes:
+  - **Single-item (M5b):** `monday item clear <iid> <col>
+    [--board <bid>]`. Reuses the resolution / mutation
+    selection / projection pipeline; the only divergence from
+    `item set` is the value source: `translateColumnClear` in
+    `api/column-values.ts` returns the per-type clear payload
+    (text → `""`, status → `{}`, etc.) rather than translating
+    user input. Per-type table is the canonical "what's a
+    clear" mapping and lives alongside the writer's
+    set-payload table.
+  - **Bulk (M12):** `monday item clear --board <bid> <col>
+    (--where <c>=<v>... | --filter-json <json>) [--yes]
+    [--dry-run]`. Same cursor-walk + `confirmation_required`
+    + per-item-failure decoration as bulk `item update --where`
+    (M5b). The dispatch (`parseBulkOrSingleArgv`) checks
+    whether `--where` / `--filter-json` is present — bulk path
+    requires `--board`, single path keeps the positional `<iid>`.
+    Output schema is now a `z.union([projectedItemSchema,
+    bulkLiveDataSchema])` so `monday schema item.clear` advertises
+    both branches (Codex round-1 F4 pinned the union schema).
+    Bulk envelope: `{summary: {matched_count, applied_count,
+    board_id}, items: [...]}` matching bulk update's shape.
+    Per-item failure error decorates with
+    `details.applied_count` / `details.applied_to` /
+    `details.failed_at_item` / `details.matched_count`. The
+    bulk leg shares almost every behaviour with bulk update —
+    same gating, same walker, same dry-run aggregation — and
+    is documented as R35 in v0.2-plan §18 as a defer-until-
+    third-consumer lift candidate.
 
 - `commands/item/update.ts` (M5b + M8) — multi-column
   atomic update + bulk path. `monday item update <iid>
@@ -710,6 +730,66 @@
   defensive, deliberately uncovered per v0.2-plan §15), R27
   (`readSourceItemForDryRun(operationName: 'ItemMoveRead')`),
   R28 (`projectMutationItem(errorCode: 'not_found')`).
+
+- `commands/item/upsert.ts` (M12) — `monday item upsert
+  --board <bid> --name <n> --match-by <col>[,<col>...]
+  [--set <col>=<val>]... [--set-raw <col>=<json>]...
+  [--create-labels-if-missing] [--dry-run]`. The idempotency-
+  cluster verb (cli-design §5.8). **Three-state branch
+  decision** via `decideBranch({matchCount, cursor})`: 0
+  matches with null cursor → `{kind: 'create'}` → routes
+  through `runCreateBranch` (M9 surface reused via
+  `create_item`); 1 match → `{kind: 'update', itemId}` →
+  routes through `runUpdateBranch` (M5b surface reused via
+  `change_multiple_column_values` with synthetic `name`); 2+
+  matches → `{kind: 'ambiguous', error: ApiError}` → fails
+  fast with `ambiguous_match` carrying
+  `details.candidates: [{id, name}]` (up to 10 from the
+  `limit: 11` lookahead — the planner can distinguish
+  "exactly 2..10 matches" from "11+ matches" in one page) +
+  `details.match_by` / `details.match_values` /
+  `details.matched_count`. Empty-page-with-non-null-cursor
+  raises `internal_error` directly (Codex round-1 F3 —
+  Monday's items_page returns `cursor: null` when no more
+  pages exist, so non-null cursor with empty items is
+  API-side malformation, not "no matches"). **Lookup leg
+  routes through `buildQueryParams`** (Codex round-1 F1) —
+  the same `items_page(query_params)` filter pipeline `item
+  list --where` and bulk `item update --where` use, so
+  `me`-resolution + cache-miss-refresh + collision warnings
+  inherit automatically. `name` pseudo-token entries skip
+  column resolution and feed Monday's built-in `column_id:
+  "name"` filter directly. **v0.2 match-by safe-list**
+  (cli-design §5.8 — narrowed across Codex rounds 2–4):
+  always-safe (`name` / `text` / `long_text` / `numbers` /
+  external_id-shaped hidden text), safe-via-label-text
+  (`status` / `dropdown`), restricted (`people` → `me` only),
+  not-v0.2-safe (`date` / `link` / `email` / `phone`).
+  Recommended canonical pattern: stable hidden text /
+  external_id column as the synthetic key. **`data.operation:
+  "create_item" \| "update_item"`** exposes the branch on the
+  success envelope (cli-design §6.4); dry-run encodes the
+  same via `planned_changes[0].operation`. **Sequential-retry
+  idempotent only** (`idempotent: true` at the verb level —
+  the flag is a coarse boolean, the nuanced contract lives in
+  cli-design §9.1) — concurrent agents observing zero matches
+  both branch to `create_item`; the next call surfaces the
+  duplicate as `ambiguous_match`. Concurrent-write protection
+  via lock-resource semantics is a v0.4 candidate (cli-design
+  §9.3). **Inherited helpers:** `SourceAggregator` (R30) for
+  the lookup + create-or-update aggregation across both
+  branches; `mergeSourceWithPreflight` (R21) for the dry-run
+  create branch; `splitSetExpression` (R22) for the
+  `--match-by`-into-where-clause translation;
+  `projectMutationItem` (R28) for both branches'
+  live-mutation projection. Net new ~1345 LOC; per-file
+  branch coverage 78.12 — notably below sibling files because
+  of the state-machine fan-out, flagged in v0.2-plan §17 as
+  follow-up. Five Codex review rounds during M12 (vs M11's
+  two) all narrowed the v0.2 round-trip contract; the
+  load-bearing lesson ("wire-shape claims need empirical
+  proof, not translator-input-shape reasoning") lives in
+  v0.2-plan §17.
 
 - `commands/update/create.ts` (M5b session 2) — posts a
   Monday update (comment) on an item via `create_update`.
