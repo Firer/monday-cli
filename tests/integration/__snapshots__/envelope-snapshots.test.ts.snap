@@ -875,6 +875,122 @@ exports[`envelope snapshot — item mutations > item create subitem --dry-run (s
 }
 `;
 
+exports[`envelope snapshot — item mutations > item delete (live, --yes) 1`] = `
+{
+  "data": {
+    "board_id": "111",
+    "columns": {
+      "date4": {
+        "date": "2026-05-01",
+        "id": "date4",
+        "text": "2026-05-01",
+        "time": null,
+        "title": "Due date",
+        "type": "date",
+        "value": {
+          "date": "2026-05-01",
+          "time": null,
+        },
+      },
+      "status_4": {
+        "id": "status_4",
+        "index": 1,
+        "label": "Done",
+        "text": "Done",
+        "title": "Status",
+        "type": "status",
+        "value": {
+          "index": 1,
+          "label": "Done",
+        },
+      },
+    },
+    "created_at": "2026-04-29T10:00:00Z",
+    "group_id": "topics",
+    "id": "12345",
+    "name": "Refactor login",
+    "parent_item_id": null,
+    "state": "deleted",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "url": "https://example.monday.com/items/12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item delete --dry-run (planned_changes envelope with item snapshot) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "item": {
+        "board_id": "111",
+        "columns": {
+          "date4": {
+            "date": "2026-05-01",
+            "id": "date4",
+            "text": "2026-05-01",
+            "time": null,
+            "title": "Due date",
+            "type": "date",
+            "value": {
+              "date": "2026-05-01",
+              "time": null,
+            },
+          },
+          "status_4": {
+            "id": "status_4",
+            "index": 1,
+            "label": "Done",
+            "text": "Done",
+            "title": "Status",
+            "type": "status",
+            "value": {
+              "index": 1,
+              "label": "Done",
+            },
+          },
+        },
+        "created_at": "2026-04-29T10:00:00Z",
+        "group_id": "topics",
+        "id": "12345",
+        "name": "Refactor login",
+        "parent_item_id": null,
+        "state": "active",
+        "updated_at": "2026-04-29T11:00:00Z",
+        "url": "https://example.monday.com/items/12345",
+      },
+      "item_id": "12345",
+      "operation": "delete_item",
+    },
+  ],
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — item mutations > item set (single, rich) 1`] = `
 {
   "data": {
@@ -1452,7 +1568,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 38,
+    "command_count": 39,
     "error_codes": [
       {
         "code": "usage_error",

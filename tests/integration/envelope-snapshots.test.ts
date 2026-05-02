@@ -1104,6 +1104,39 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item delete (live, --yes)', async () => {
+    const deletedItem = { ...sampleItem, state: 'deleted' };
+    const out = await cachedDrive(
+      ['item', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemDelete',
+            response: { data: { delete_item: deletedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item delete --dry-run (planned_changes envelope with item snapshot)', async () => {
+    const out = await cachedDrive(
+      ['item', 'delete', '12345', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemDeleteRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {
