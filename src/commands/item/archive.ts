@@ -58,25 +58,17 @@ import {
   ITEM_FIELDS_FRAGMENT,
   parseRawItem,
 } from '../../api/item-helpers.js';
+import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import {
   projectItem,
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
 
-// Same projection as `item get` — the response the mutation emits is
-// shaped like an `Item`, so the read-time fragment serves both verbs
-// unchanged. Operation names diverge so fixture cassettes + Monday's
-// request-log telemetry can distinguish source-item read (dry-run)
-// from the live archive mutation.
-const ITEM_ARCHIVE_READ_QUERY = `
-  query ItemArchiveRead($ids: [ID!]!) {
-    items(ids: $ids) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
+// The live mutation returns an `Item` shape — same fragment as
+// `item get`. The dry-run source-item read goes through
+// `readSourceItemForDryRun` (R27) so the query string + null-handling
+// stay one-source-of-truth across the M10 lifecycle verbs.
 const ARCHIVE_ITEM_MUTATION = `
   mutation ItemArchive($itemId: ID!) {
     archive_item(item_id: $itemId) {
@@ -87,10 +79,6 @@ const ARCHIVE_ITEM_MUTATION = `
 
 interface ArchiveItemResponse {
   readonly archive_item: unknown;
-}
-
-interface ItemArchiveReadResponse {
-  readonly items: readonly unknown[] | null;
 }
 
 export const itemArchiveOutputSchema = projectedItemSchema;
@@ -173,25 +161,15 @@ export const itemArchiveCommand: CommandModule<
 
         if (globalFlags.dryRun) {
           // Dry-run path: read the source item so the agent can
-          // verify the ID before re-running with --yes. Same query
-          // `item get` uses; null result → `not_found` (mirrors the
-          // live path's null-handling so the error shape matches).
-          const readResponse = await client.raw<ItemArchiveReadResponse>(
-            ITEM_ARCHIVE_READ_QUERY,
-            { ids: [parsed.itemId] },
-            { operationName: 'ItemArchiveRead' },
-          );
-          const items = readResponse.data.items;
-          const first: unknown = Array.isArray(items) ? items[0] : undefined;
-          if (first === undefined || first === null) {
-            throw new ApiError(
-              'not_found',
-              `Monday returned no item for id ${parsed.itemId}`,
-              { details: { item_id: parsed.itemId } },
-            );
-          }
-          const projected = projectItem({
-            raw: parseRawItem(first, { item_id: parsed.itemId }),
+          // verify the ID before re-running with --yes. Lifted to
+          // `readSourceItemForDryRun` (R27) — same query body all
+          // three M10 lifecycle verbs share; null result → `not_found`
+          // (mirrors the live path's null-handling so the error shape
+          // matches).
+          const projected = await readSourceItemForDryRun({
+            client,
+            itemId: parsed.itemId,
+            operationName: 'ItemArchiveRead',
           });
           emitDryRun({
             ctx,

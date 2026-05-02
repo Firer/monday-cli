@@ -59,24 +59,17 @@ import {
   ITEM_FIELDS_FRAGMENT,
   parseRawItem,
 } from '../../api/item-helpers.js';
+import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import {
   projectItem,
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
 
-// Read query for `--dry-run` source-item snapshot; mutation for the
-// live delete. Operation names diverge so fixture cassettes +
-// Monday's request-log telemetry can distinguish source-item read
-// from the live delete (mirrors the archive verb's split).
-const ITEM_DELETE_READ_QUERY = `
-  query ItemDeleteRead($ids: [ID!]!) {
-    items(ids: $ids) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
+// The live mutation returns an `Item` shape — same fragment as
+// `item get`. The dry-run source-item read goes through
+// `readSourceItemForDryRun` (R27) so the query string + null-handling
+// stay one-source-of-truth across the M10 lifecycle verbs.
 const DELETE_ITEM_MUTATION = `
   mutation ItemDelete($itemId: ID!) {
     delete_item(item_id: $itemId) {
@@ -87,10 +80,6 @@ const DELETE_ITEM_MUTATION = `
 
 interface DeleteItemResponse {
   readonly delete_item: unknown;
-}
-
-interface ItemDeleteReadResponse {
-  readonly items: readonly unknown[] | null;
 }
 
 export const itemDeleteOutputSchema = projectedItemSchema;
@@ -168,26 +157,15 @@ export const itemDeleteCommand: CommandModule<
 
         if (globalFlags.dryRun) {
           // Dry-run path: read the source item so the agent can
-          // verify the ID before committing. Same query shape archive
-          // uses; null result → `not_found` with the same shape so
-          // agents key off one error code regardless of which verb
-          // they ran.
-          const readResponse = await client.raw<ItemDeleteReadResponse>(
-            ITEM_DELETE_READ_QUERY,
-            { ids: [parsed.itemId] },
-            { operationName: 'ItemDeleteRead' },
-          );
-          const items = readResponse.data.items;
-          const first: unknown = Array.isArray(items) ? items[0] : undefined;
-          if (first === undefined || first === null) {
-            throw new ApiError(
-              'not_found',
-              `Monday returned no item for id ${parsed.itemId}`,
-              { details: { item_id: parsed.itemId } },
-            );
-          }
-          const projected = projectItem({
-            raw: parseRawItem(first, { item_id: parsed.itemId }),
+          // verify the ID before committing. Lifted to
+          // `readSourceItemForDryRun` (R27) — same query body archive
+          // + duplicate share; null result → `not_found` with the
+          // same shape so agents key off one error code regardless of
+          // which verb they ran.
+          const projected = await readSourceItemForDryRun({
+            client,
+            itemId: parsed.itemId,
+            operationName: 'ItemDeleteRead',
           });
           emitDryRun({
             ctx,

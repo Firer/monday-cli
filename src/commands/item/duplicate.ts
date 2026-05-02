@@ -73,25 +73,17 @@ import {
   parseRawItem,
 } from '../../api/item-helpers.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
+import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import {
   projectItem,
   projectedItemSchema,
 } from '../../api/item-projection.js';
 
-// Read query for `--dry-run` source-item snapshot; mutation for the
-// live duplicate. Operation names diverge from archive + delete so
-// fixture cassettes + Monday's request-log telemetry can distinguish
-// the source-item read from the live duplicate (mirrors the M10
-// archive + delete naming convention — `Item<Verb>Read` for the
-// dry-run preview, `Item<Verb>` for the live mutation).
-const ITEM_DUPLICATE_READ_QUERY = `
-  query ItemDuplicateRead($ids: [ID!]!) {
-    items(ids: $ids) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
+// The live mutation returns an `Item` shape — same fragment as
+// `item get`. The dry-run source-item read goes through
+// `readSourceItemForDryRun` (R27) so the query string + null-handling
+// stay one-source-of-truth across the M10 lifecycle verbs (archive
+// + delete + duplicate).
 const DUPLICATE_ITEM_MUTATION = `
   mutation ItemDuplicate($itemId: ID!, $boardId: ID!, $withUpdates: Boolean) {
     duplicate_item(item_id: $itemId, board_id: $boardId, with_updates: $withUpdates) {
@@ -102,10 +94,6 @@ const DUPLICATE_ITEM_MUTATION = `
 
 interface DuplicateItemResponse {
   readonly duplicate_item: unknown;
-}
-
-interface ItemDuplicateReadResponse {
-  readonly items: readonly unknown[] | null;
 }
 
 /**
@@ -199,24 +187,13 @@ export const itemDuplicateCommand: CommandModule<
           // `--dry-run`. The dry-run shape carries `with_updates` so
           // the agent reading the planned change knows whether they
           // requested update copying. No board lookup needed — we
-          // aren't firing the mutation.
-          const readResponse =
-            await client.raw<ItemDuplicateReadResponse>(
-              ITEM_DUPLICATE_READ_QUERY,
-              { ids: [parsed.itemId] },
-              { operationName: 'ItemDuplicateRead' },
-            );
-          const items = readResponse.data.items;
-          const first: unknown = Array.isArray(items) ? items[0] : undefined;
-          if (first === undefined || first === null) {
-            throw new ApiError(
-              'not_found',
-              `Monday returned no item for id ${parsed.itemId}`,
-              { details: { item_id: parsed.itemId } },
-            );
-          }
-          const projected = projectItem({
-            raw: parseRawItem(first, { item_id: parsed.itemId }),
+          // aren't firing the mutation. Lifted to
+          // `readSourceItemForDryRun` (R27) — same query body archive
+          // + delete share.
+          const projected = await readSourceItemForDryRun({
+            client,
+            itemId: parsed.itemId,
+            operationName: 'ItemDuplicateRead',
           });
           emitDryRun({
             ctx,
