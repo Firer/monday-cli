@@ -1557,6 +1557,116 @@ describe('envelope snapshot — item mutations', () => {
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 
+  it('item clear --where (bulk live with --yes — same envelope shape as item update --where)', async () => {
+    // Pins the M12 bulk-clear envelope. `data.summary` carries
+    // matched_count / applied_count / board_id; `data.items` is the
+    // per-item projected list. `resolved_ids` echoes the agent
+    // token → resolved column ID map.
+    const cleared = (id: string): typeof sampleItem => ({
+      ...sampleItem,
+      id,
+      column_values: [
+        {
+          id: 'status_4',
+          type: 'status',
+          text: '',
+          value: null,
+          column: { title: 'Status' },
+        },
+        sampleItem.column_values[1],
+      ],
+    });
+    const out = await cachedDrive(
+      [
+        'item',
+        'clear',
+        'status',
+        '--board',
+        '111',
+        '--where',
+        'status=Backlog',
+        '--yes',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: cleared('5001') } },
+          },
+          {
+            operation_name: 'ItemClearRich',
+            response: { data: { change_column_value: cleared('5002') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item clear --where confirmation_required envelope (without --yes / --dry-run)', async () => {
+    // Pins the §6.5 confirmation_required envelope shape for bulk
+    // clear — same details schema as bulk update (matched_count,
+    // where_clauses, board_id). Agents read this envelope to know
+    // how many items they're about to mutate before re-running with
+    // --yes.
+    const out = await cachedDrive(
+      [
+        'item',
+        'clear',
+        'status',
+        '--board',
+        '111',
+        '--where',
+        'status=Backlog',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '5001' },
+                        { id: '5002' },
+                        { id: '5003' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
   it('item upsert ambiguous_match error envelope (M12 §6.5)', async () => {
     // Pins the M12 error envelope — `error.code: "ambiguous_match"`
     // plus the §6.5 details schema (`board_id`, `match_by`,

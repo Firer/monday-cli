@@ -555,6 +555,48 @@ Same envelope as `item set`. Cleared cell shows `text: ""` /
 `value: null` (Monday's post-clear shape varies by type; the
 projector handles both).
 
+### `item clear --board <bid> <col> --where ...` (bulk)
+
+Bulk clear across `--where` matches (M12). Without `--yes` or
+`--dry-run`, returns `confirmation_required` (exit 1) with
+`matched_count`, `where_clauses`, `board_id` in `error.details` —
+same shape bulk `item update --where` ships.
+
+Bulk live envelope on success aggregates `matched_count` +
+per-item results in `data` (mirrors bulk update's shape):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "summary": {
+      "matched_count": 12,
+      "applied_count": 12,
+      "board_id": "67890"
+    },
+    "items": [
+      { "id": "5001", "name": "...", "columns": { ... } },
+      { "id": "5002", "name": "...", "columns": { ... } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+Per-item failure decorates the error envelope with `applied_count`
++ `applied_to` + `failed_at_item` + `matched_count` so agents can
+reconstruct partial progress (same shape bulk update uses).
+
+Bulk dry-run aggregates per-item `planClear` results into one
+N-element `planned_changes` array, deduplicating resolver warnings
+by code+message+token. Empty match set → clean no-op envelope (no
+confirmation gate — `--yes` shouldn't be required to confirm "no
+items matched"). The bulk path requires `--board <bid>`; mixing a
+positional `<iid>` with `--where`/`--filter-json` raises
+`usage_error`.
+
 ### `item update <id>`
 
 Atomic multi-`--set` and/or `--set-raw`. `--name <new-name>` optional;

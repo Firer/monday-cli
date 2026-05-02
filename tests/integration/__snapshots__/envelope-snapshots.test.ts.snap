@@ -758,6 +758,136 @@ exports[`envelope snapshot — item mutations > item clear (single, rich) 1`] = 
 }
 `;
 
+exports[`envelope snapshot — item mutations > item clear --where (bulk live with --yes — same envelope shape as item update --where) 1`] = `
+{
+  "data": {
+    "items": [
+      {
+        "board_id": "111",
+        "columns": {
+          "date4": {
+            "date": "2026-05-01",
+            "id": "date4",
+            "text": "2026-05-01",
+            "time": null,
+            "title": "Due date",
+            "type": "date",
+            "value": {
+              "date": "2026-05-01",
+              "time": null,
+            },
+          },
+          "status_4": {
+            "id": "status_4",
+            "index": null,
+            "label": null,
+            "text": "",
+            "title": "Status",
+            "type": "status",
+            "value": null,
+          },
+        },
+        "created_at": "2026-04-29T10:00:00Z",
+        "group_id": "topics",
+        "id": "5001",
+        "name": "Refactor login",
+        "parent_item_id": null,
+        "state": "active",
+        "updated_at": "2026-04-29T11:00:00Z",
+        "url": "https://example.monday.com/items/12345",
+      },
+      {
+        "board_id": "111",
+        "columns": {
+          "date4": {
+            "date": "2026-05-01",
+            "id": "date4",
+            "text": "2026-05-01",
+            "time": null,
+            "title": "Due date",
+            "type": "date",
+            "value": {
+              "date": "2026-05-01",
+              "time": null,
+            },
+          },
+          "status_4": {
+            "id": "status_4",
+            "index": null,
+            "label": null,
+            "text": "",
+            "title": "Status",
+            "type": "status",
+            "value": null,
+          },
+        },
+        "created_at": "2026-04-29T10:00:00Z",
+        "group_id": "topics",
+        "id": "5002",
+        "name": "Refactor login",
+        "parent_item_id": null,
+        "state": "active",
+        "updated_at": "2026-04-29T11:00:00Z",
+        "url": "https://example.monday.com/items/12345",
+      },
+    ],
+    "summary": {
+      "applied_count": 2,
+      "board_id": "111",
+      "matched_count": 2,
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": 0,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "mixed",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item mutations > item clear --where confirmation_required envelope (without --yes / --dry-run) 1`] = `
+{
+  "error": {
+    "code": "confirmation_required",
+    "details": {
+      "board_id": "111",
+      "hint": "Use --dry-run to inspect the planned_changes for every matched item before applying.",
+      "matched_count": 3,
+      "where_clauses": [
+        "status=Backlog",
+      ],
+    },
+    "http_status": null,
+    "message": "Bulk item clear would mutate 3 matched item(s). Re-run with --yes to confirm, or --dry-run to preview.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — item mutations > item create (top-level, single --set) 1`] = `
 {
   "data": {
