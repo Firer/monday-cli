@@ -1855,7 +1855,7 @@ exports[`envelope snapshot — item mutations > item upsert --dry-run (create br
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
-    "source": "cache",
+    "source": "mixed",
   },
   "ok": true,
   "planned_changes": [

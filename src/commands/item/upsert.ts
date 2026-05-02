@@ -83,7 +83,12 @@ import {
   type SetExpression,
 } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
-import { SourceAggregator } from '../../api/source-aggregator.js';
+import {
+  SourceAggregator,
+  mergeSource,
+  mergeCacheAge,
+  mergeSourceWithPreflight,
+} from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planChanges, planCreate } from '../../api/dry-run.js';
@@ -92,10 +97,11 @@ import {
   refreshBoardMetadata,
   type BoardMetadata,
 } from '../../api/board-metadata.js';
-import { resolveColumnsAcrossClauses } from '../../api/columns.js';
+import { buildQueryParams, type QueryParams } from '../../api/filters.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
+  resolveMeFactory,
 } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
 import {
@@ -442,14 +448,29 @@ interface LookupInputs {
  * `items_page` once with `limit: 11` so the 0 / 1 / 2+ branch
  * decision needs no second round-trip.
  *
- * `name` pseudo-tokens skip the column resolver entirely — Monday
- * accepts `column_id: "name"` in `query_params.rules` as a built-in
- * filter against the item's `name` field, no metadata lookup needed.
+ * Column-token rules go through `buildQueryParams` — the same path
+ * `item search` / `item update --where` use — so per-column-type
+ * value resolution (the `me` token for people columns, the same
+ * cache-miss-refresh + collision-warning collection) inherits
+ * automatically. `name` pseudo-tokens skip the column resolver
+ * entirely (Monday accepts `column_id: "name"` in `query_params.rules`
+ * as a built-in filter against the item's `name` field, no metadata
+ * lookup needed) and are prepended to the rules array post-build.
+ *
+ * **Known limitation (Codex round-1 F1).** Email-as-people-token and
+ * relative-date sugar (e.g. `tomorrow`, `+1w`) are passed verbatim to
+ * Monday — the same limitation `item search` and `item update --where`
+ * ship today. Agents should pass already-resolved IDs (numeric user
+ * IDs, ISO dates) when match-by targets people / date columns. The
+ * `me` token IS resolved via the shared `resolveMe` factory.
+ * Email→ID and relative-date resolution for filter rules is a
+ * cross-surface v0.3 candidate; lifting it here without lifting it
+ * for `item search` would create inconsistent filter semantics.
  */
 const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
   // Split into name + column tokens. Column tokens go through the
-  // resolver; name tokens contribute a literal `column_id: "name"`
-  // rule.
+  // shared filter pipeline; name tokens contribute a literal
+  // `column_id: "name"` rule prepended to the resulting rules array.
   const columnEntries = inputs.matchBy.filter(
     (e): e is Extract<MatchByEntry, { kind: 'column' }> => e.kind === 'column',
   );
@@ -457,52 +478,36 @@ const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
     (e): e is Extract<MatchByEntry, { kind: 'name' }> => e.kind === 'name',
   );
 
-  // Resolve column tokens. `resolveColumnsAcrossClauses` handles the
-  // cache-miss-refresh + collision-warning collection (R12 lift). The
-  // resolver returns matches in the same order as the input tokens.
-  const resolved = await resolveColumnsAcrossClauses({
+  // Convert column match-by entries to `--where`-shaped strings and
+  // hand to the shared filter pipeline. `splitSetExpression` and
+  // `parseWhereSyntax` both split on first `=`, so a value containing
+  // `=` round-trips correctly.
+  const whereClauses = columnEntries.map((e) => `${e.token}=${e.value}`);
+  const filterResult = await buildQueryParams({
     metadata: inputs.metadata,
-    tokens: columnEntries.map((e) => e.token),
+    resolveMe: resolveMeFactory(inputs.client),
+    whereClauses,
+    filterJson: undefined,
     ...(inputs.onColumnNotFound === undefined
       ? {}
       : { onColumnNotFound: inputs.onColumnNotFound }),
   });
 
-  // Build `query_params.rules`. Each rule pairs a column ID with a
-  // single match value via the `any_of` operator (Monday's idiomatic
-  // equality filter). AND-combine across rules is the default rule-
-  // array behaviour (no nested groups in v0.2). The `name` pseudo-
-  // token contributes `column_id: "name"`, which Monday accepts on
-  // the items_page filter surface.
-  const rules: {
+  // Prepend the `name` pseudo-token rules. Monday accepts
+  // `column_id: "name"` in `query_params.rules` as a built-in filter
+  // against the item's `name` field — no column resolution needed.
+  const nameRules: readonly {
     readonly column_id: string;
     readonly operator: string;
     readonly compare_value: readonly string[];
-  }[] = [];
-  for (const entry of nameEntries) {
-    rules.push({
-      column_id: 'name',
-      operator: 'any_of',
-      compare_value: [entry.value],
-    });
-  }
-  for (let i = 0; i < columnEntries.length; i++) {
-    const entry = columnEntries[i];
-    const match = resolved.matches[i];
-    /* c8 ignore next 6 — defensive: matches.length === tokens.length
-       by helper contract; the index guard exists for
-       noUncheckedIndexedAccess narrowing only. */
-    if (entry === undefined || match === undefined) {
-      throw new UsageError(
-        `lookupMatches: lost entry/match alignment at index ${String(i)}`,
-      );
-    }
-    rules.push({
-      column_id: match.column.id,
-      operator: 'any_of',
-      compare_value: [entry.value],
-    });
-  }
+  }[] = nameEntries.map((e) => ({
+    column_id: 'name',
+    operator: 'any_of',
+    compare_value: [e.value],
+  }));
+  const columnRules =
+    (filterResult.queryParams as QueryParams | undefined)?.rules ?? [];
+  const rules = [...nameRules, ...columnRules];
 
   const response = await inputs.client.raw<unknown>(
     UPSERT_LOOKUP_QUERY,
@@ -529,9 +534,12 @@ const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
   return {
     items: board.items_page.items,
     hasMore: board.items_page.cursor !== null,
-    warnings: resolved.warnings,
-    refreshed: resolved.refreshed,
-    metadata: resolved.metadata,
+    // Filter pipeline returns `Warning` shape; resolver-warning
+    // codes (`column_token_collision`, `stale_cache_refreshed`)
+    // structurally widen to ResolverWarning cleanly.
+    warnings: filterResult.warnings as readonly ResolverWarning[],
+    refreshed: filterResult.refreshed,
+    metadata: inputs.metadata,
   };
 };
 
@@ -550,7 +558,28 @@ const decideBranch = (inputs: {
   readonly matchBy: readonly MatchByEntry[];
 }): BranchDecision => {
   const items = inputs.lookup.items;
+  // 0 matches → create branch only when the page is definitively
+  // empty (cursor null). An empty page with a non-null cursor is a
+  // Monday API anomaly (the items_page contract returns `cursor:
+  // null` when no more pages exist) — we can't prove there are zero
+  // matches, so fail-closed with internal_error rather than create
+  // a duplicate. Codex round-1 F3.
   if (items.length === 0) {
+    if (inputs.lookup.hasMore) {
+      throw new ApiError(
+        'internal_error',
+        `item upsert lookup returned an empty page with a non-null cursor on board ${inputs.boardId}; ` +
+          `Monday's items_page contract returns cursor: null when no more matches exist. ` +
+          `Refusing to create-or-update without a definitive 0/1/2+ count. ` +
+          `Re-run; if the issue persists, file a bug.`,
+        {
+          details: {
+            board_id: inputs.boardId,
+            match_by: inputs.matchBy.map((e) => e.token),
+          },
+        },
+      );
+    }
     return { kind: 'create' };
   }
   if (items.length === 1 && !inputs.lookup.hasMore) {
@@ -985,12 +1014,27 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
       match_by: matchByTokenList(inputs.matchBy),
       matched_count: 0,
     };
+    // Fold the upsert preflight legs (metadata + lookup) into the
+    // dry-run source — `meta.source` must reflect EVERY wire leg that
+    // fired, not just planCreate's. The metadata leg may be cache or
+    // live; the lookup is always live (items_page never caches), so
+    // the aggregate is at minimum 'live' (or 'mixed' if metadata
+    // hit cache). Codex round-1 F2.
+    const preflight = inputs.sourceAgg.result();
+    const dryRunSource = mergeSourceWithPreflight(
+      result.source,
+      preflight.source,
+    );
+    const dryRunCacheAge = mergeCacheAge(
+      result.cacheAgeSeconds,
+      preflight.cacheAgeSeconds,
+    );
     emitDryRun({
       ctx: inputs.ctx,
       programOpts: inputs.programOpts,
       plannedChanges: [planned],
-      source: result.source,
-      cacheAgeSeconds: result.cacheAgeSeconds,
+      source: dryRunSource,
+      cacheAgeSeconds: dryRunCacheAge,
       warnings: [...inputs.lookupWarnings, ...result.warnings],
       apiVersion: inputs.apiVersion,
     });
@@ -1126,12 +1170,22 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       match_by: matchByTokenList(inputs.matchBy),
       matched_count: 1,
     };
+    // Fold the upsert preflight legs (metadata + lookup) into the
+    // dry-run source. planChanges' source is always `'live' |
+    // 'cache' | 'mixed'` (no `'none'` arm — it always reads the
+    // item state); use mergeSource directly. Codex round-1 F2.
+    const preflight = inputs.sourceAgg.result();
+    const dryRunSource = mergeSource(preflight.source, result.source);
+    const dryRunCacheAge = mergeCacheAge(
+      result.cacheAgeSeconds,
+      preflight.cacheAgeSeconds,
+    );
     emitDryRun({
       ctx: inputs.ctx,
       programOpts: inputs.programOpts,
       plannedChanges: [planned],
-      source: result.source,
-      cacheAgeSeconds: result.cacheAgeSeconds,
+      source: dryRunSource,
+      cacheAgeSeconds: dryRunCacheAge,
       warnings: [...inputs.lookupWarnings, ...result.warnings],
       apiVersion: inputs.apiVersion,
     });

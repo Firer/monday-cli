@@ -149,8 +149,37 @@ interface ChangeColumnResponse {
   readonly change_column_value: unknown;
 }
 
-export const itemClearOutputSchema = projectedItemSchema;
-export type ItemClearOutput = ProjectedItem;
+/**
+ * Wrapped data shape for the bulk-clear-live success envelope. Same
+ * shape `item update --where` ships — `summary` carries
+ * `matched_count` / `applied_count` / `board_id`; `items` is the
+ * per-item projected list. Defined here at module top so it's
+ * available to the union output schema below.
+ */
+const bulkLiveDataSchema = z.object({
+  summary: z.object({
+    matched_count: z.number().int().nonnegative(),
+    applied_count: z.number().int().nonnegative(),
+    board_id: z.string(),
+  }),
+  items: z.array(projectedItemSchema),
+});
+
+type BulkLiveData = z.infer<typeof bulkLiveDataSchema>;
+
+/**
+ * `item clear`'s `data` is a discriminated union — single-item path
+ * emits the §6.2 projected item; bulk path emits `{summary, items}`.
+ * `monday schema item.clear` reads this schema, so agents can plan
+ * against either shape without surprises (Codex round-1 F4 — pre-fix
+ * the schema only described the single-item shape, leaving the bulk
+ * surface invisible to schema-driven agents).
+ */
+export const itemClearOutputSchema = z.union([
+  projectedItemSchema,
+  bulkLiveDataSchema,
+]);
+export type ItemClearOutput = z.infer<typeof itemClearOutputSchema>;
 
 /**
  * Input shape — supports both single-item and bulk shapes.
@@ -559,23 +588,9 @@ type BulkItem = z.infer<typeof bulkItemSchema>;
 type InitialPageResponse = z.infer<typeof initialPageResponseSchema>;
 type NextPageResponse = z.infer<typeof nextPageResponseSchema>;
 
-/**
- * Wrapped data shape for the bulk-clear-live success envelope. Same
- * shape `item update --where` ships — `summary` carries
- * `matched_count` / `applied_count` / `board_id`; `items` is the
- * per-item projected list. Agents read `data.applied_count` for the
- * "did it work?" probe and `data.items` for the post-clear state.
- */
-const bulkLiveDataSchema = z.object({
-  summary: z.object({
-    matched_count: z.number().int().nonnegative(),
-    applied_count: z.number().int().nonnegative(),
-    board_id: z.string(),
-  }),
-  items: z.array(projectedItemSchema),
-});
-
-type BulkLiveData = z.infer<typeof bulkLiveDataSchema>;
+// `bulkLiveDataSchema` + `BulkLiveData` are defined at module top
+// (next to `itemClearOutputSchema`) so the union shape is the single
+// source of truth `monday schema item.clear` reads.
 
 interface RunBulkInputs {
   readonly parsed: ParsedInput;
@@ -733,7 +748,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         summary: { matched_count: 0, applied_count: 0, board_id: boardId },
         items: [],
       } satisfies BulkLiveData,
-      schema: bulkLiveDataSchema,
+      schema: itemClearOutputSchema,
       programOpts,
       warnings: filterResult.warnings,
       source: emptyEnvelopeSource,
@@ -946,7 +961,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       },
       items: appliedItems,
     } satisfies BulkLiveData,
-    schema: bulkLiveDataSchema,
+    schema: itemClearOutputSchema,
     programOpts,
     warnings: aggregatedWarnings,
     ...sourceAgg.result(),

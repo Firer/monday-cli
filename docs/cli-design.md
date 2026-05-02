@@ -526,7 +526,7 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # --position and --relative-to are required together;
                                           # one without the other → usage_error
                                           # --relative-to must reference an item on the same board
-monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]... [--set-raw <col>=<json>]...   v0.2
+monday item upsert --board <bid> --name <n> --match-by <col>[,<col>...] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--dry-run]   v0.2
                                           # idempotency-cluster verb (M12). 0 matches → create_item;
                                           # 1 match → change_multiple_column_values with synthetic
                                           # `name` (same wire shape as `item update --name --set`);

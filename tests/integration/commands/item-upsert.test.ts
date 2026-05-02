@@ -517,6 +517,38 @@ describe('monday item upsert — ambiguous_match (2+ matches)', () => {
     expect(env.error?.details.candidates.length).toBe(10);
   });
 
+  it('lookup returns 0 with cursor non-null → internal_error (Codex round-1 F3)', async () => {
+    // Empty page with non-null cursor is a Monday API anomaly. Codex
+    // round-1 F3 — pre-fix the upsert treated empty-with-cursor as
+    // "0 matches → create", which would create a duplicate if Monday
+    // were lying about the empty page. Post-fix: refuse to mutate.
+    const out = await drive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'name',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          lookupInteraction([], 'next-cursor'),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.board_id).toBe('111');
+  });
+
   it('lookup returns 1 with cursor non-null → conservative ambiguous_match', async () => {
     // Edge case: Monday returns a single item but with a non-null
     // cursor (a partial page suggesting more exists). decideBranch
@@ -688,6 +720,152 @@ describe('monday item upsert — dry-run', () => {
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('ambiguous_match');
+  });
+});
+
+// ============================================================
+// `me` resolution for people columns in match-by (Codex round-1 F1)
+// ============================================================
+
+describe('monday item upsert — me-token resolution in --match-by', () => {
+  it('--set Owner=me resolves via Whoami; lookup queries with the resolved user id', async () => {
+    // Codex round-1 F1 regression pin. Pre-fix the upsert sent the
+    // literal string "me" to Monday's items_page filter, missing the
+    // match and creating a duplicate. The fix routes match-by column
+    // values through `buildQueryParams` (the same shared filter
+    // pipeline `item search` and `item update --where` use), which
+    // resolves `me` to the current user's ID via the Whoami query.
+    const peopleMeta = {
+      id: '111',
+      name: 'Tasks',
+      description: null,
+      state: 'active',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: '5',
+      url: null,
+      hierarchy_type: null,
+      is_leaf: true,
+      updated_at: null,
+      groups: [],
+      columns: [
+        {
+          id: 'person',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'upsert',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--match-by',
+        'Owner',
+        '--set',
+        'Owner=me',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [peopleMeta] } },
+          },
+          {
+            operation_name: 'Whoami',
+            response: {
+              data: {
+                me: {
+                  id: '777',
+                  name: 'Alice',
+                  email: 'alice@example.test',
+                  account: { id: '99', name: 'Org', slug: 'org' },
+                },
+              },
+            },
+          },
+          // Lookup query — assert the rule's compare_value carries
+          // the RESOLVED user id (`'777'`), not the literal `'me'`.
+          {
+            operation_name: 'ItemUpsertLookup',
+            match_variables: {
+              boardId: '111',
+              limit: 11,
+              queryParams: {
+                rules: [
+                  {
+                    column_id: 'person',
+                    operator: 'any_of',
+                    compare_value: ['777'],
+                  },
+                ],
+              },
+            },
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+          // Create branch — Whoami fires AGAIN inside the people
+          // translator for `--set Owner=me` because each resolution
+          // pass keeps its own resolveMe closure.
+          {
+            operation_name: 'Whoami',
+            response: {
+              data: {
+                me: {
+                  id: '777',
+                  name: 'Alice',
+                  email: 'alice@example.test',
+                  account: { id: '99', name: 'Org', slug: 'org' },
+                },
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpsertCreate',
+            response: {
+              data: {
+                create_item: {
+                  id: '99001',
+                  name: 'Refactor login',
+                  state: 'active',
+                  url: null,
+                  created_at: null,
+                  updated_at: null,
+                  board: { id: '111' },
+                  group: { id: 'topics', title: 'Topics' },
+                  parent_item: null,
+                  column_values: [
+                    {
+                      id: 'person',
+                      type: 'people',
+                      text: 'Alice',
+                      value: '{"personsAndTeams":[{"id":777,"kind":"person"}]}',
+                      column: { title: 'Owner' },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; operation: string };
+    };
+    expect(env.data.id).toBe('99001');
+    expect(env.data.operation).toBe('create_item');
   });
 });
 
