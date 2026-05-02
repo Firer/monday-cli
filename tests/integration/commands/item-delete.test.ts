@@ -50,6 +50,29 @@ describe('monday item delete (integration, M10)', () => {
     // reading the gate know recovery is best-effort.
     expect(env.error?.details?.hint).toMatch(/no.*restore mutation/);
     expect(env.error?.details?.hint).toMatch(/30 days/);
+    // Gate-error envelope reports source: 'none' (no wire call
+    // fired). Same regression archive pins.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required, not config_error', async () => {
+    // Codex M10 round-1 P2 regression pin. Same shape archive's
+    // mirror test — verifies the gate is unconditional regardless
+    // of token configuration (cli-design §3.1 #7). See the archive
+    // test's full rationale for the pre-fix behaviour.
+    const out = await drive(
+      ['item', 'delete', '12345', '--json'],
+      { interactions: [] },
+      {
+        env: {
+          MONDAY_API_URL: 'https://api.monday.com/v2',
+        },
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
   });
 
   it('live: --yes deletes the item and returns the projected envelope', async () => {

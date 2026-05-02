@@ -49,6 +49,7 @@ import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import {
   ApiError,
   ConfirmationRequiredError,
@@ -128,16 +129,22 @@ export const itemArchiveCommand: CommandModule<
       )
       .action(async (itemId: unknown) => {
         const parsed = parseArgv(itemArchiveCommand.inputSchema, { itemId });
-        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
-          ctx,
-          program.opts(),
-        );
 
-        // Confirmation gate — `--yes` mandatory for the live path.
-        // `--dry-run` exempts the gate (agent previews without
-        // committing). Mirrors the bulk `item update --where`
-        // confirmation contract; details.item_id lets the agent
-        // re-run with `--yes` keying off the same ID.
+        // Confirmation gate fires BEFORE `resolveClient()` so a
+        // missing `--yes` always surfaces as `confirmation_required`
+        // — never masked by `config_error` from `loadConfig()`'s
+        // missing-token check. Codex M10 round-1 P2: cli-design
+        // §3.1 #7 makes the gate unconditional, but pre-fix the
+        // ordering let `monday item archive 12345 --json` (no `--yes`,
+        // no token) exit 3 with `config_error` instead of exit 1
+        // with `confirmation_required`. `raw` already had this
+        // pre-network ordering precedent (commands/raw/index.ts:435).
+        // As a side-benefit, the gate-error envelope's `meta.source`
+        // stays at the runner's `'none'` default rather than the
+        // `live` `resolveClient` would have committed via
+        // `ctx.meta.setSource('live')` — agents reading provenance
+        // see `'none'` because no wire call fired (cli-design §6.1).
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
         if (!globalFlags.dryRun && !globalFlags.yes) {
           throw new ConfirmationRequiredError(
             `monday item archive ${parsed.itemId} would archive the ` +
@@ -154,6 +161,15 @@ export const itemArchiveCommand: CommandModule<
             },
           );
         }
+
+        // Gate cleared — now resolve the client. Both the dry-run
+        // read and the live mutation need a `MondayClient`, so a
+        // missing token here legitimately surfaces as `config_error`
+        // (the user opted into the wire path via `--yes` or `--dry-run`).
+        const { client, apiVersion, toEmit } = resolveClient(
+          ctx,
+          program.opts(),
+        );
 
         if (globalFlags.dryRun) {
           // Dry-run path: read the source item so the agent can

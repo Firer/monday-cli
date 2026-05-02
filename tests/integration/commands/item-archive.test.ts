@@ -60,6 +60,38 @@ describe('monday item archive (integration, M10)', () => {
     expect(env.error?.code).toBe('confirmation_required');
     expect(env.error?.details?.item_id).toBe('12345');
     expect(env.error?.details?.hint).toMatch(/30 days/);
+    // Gate-error envelope reports source: 'none' because no wire
+    // call fired (cli-design §6.1). The gate runs BEFORE
+    // `resolveClient()`, so `ctx.meta.setSource('live')` never
+    // commits — agents reading provenance see the truth.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required, not config_error', async () => {
+    // Codex M10 round-1 P2 regression pin. cli-design §3.1 #7
+    // makes the gate unconditional: a missing `--yes` MUST surface
+    // as `confirmation_required` regardless of the rest of the
+    // environment. Pre-fix, `resolveClient()` ran first and called
+    // `loadConfig()`, so a missing `MONDAY_API_TOKEN` collapsed the
+    // gate's exit-1 / `confirmation_required` into exit 3 /
+    // `config_error`. The fix moves the gate before `resolveClient`.
+    const out = await drive(
+      ['item', 'archive', '12345', '--json'],
+      { interactions: [] },
+      // Override env to drop the token — `useItemTestEnv()` would
+      // otherwise inject `LEAK_CANARY` and mask the regression. The
+      // tmpdir override stays for cache isolation parity.
+      {
+        env: {
+          // No MONDAY_API_TOKEN — the regression fires here.
+          MONDAY_API_URL: 'https://api.monday.com/v2',
+        },
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
   });
 
   it('live: --yes archives the item and returns the projected envelope', async () => {

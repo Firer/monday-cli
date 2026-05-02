@@ -50,6 +50,7 @@ import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import {
   ApiError,
   ConfirmationRequiredError,
@@ -128,15 +129,16 @@ export const itemDeleteCommand: CommandModule<
       )
       .action(async (itemId: unknown) => {
         const parsed = parseArgv(itemDeleteCommand.inputSchema, { itemId });
-        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
-          ctx,
-          program.opts(),
-        );
 
-        // Confirmation gate — same shape `monday item archive` uses.
-        // `--yes` mandatory; `--dry-run` exempts the gate per
-        // cli-design §10.2's "--dry-run takes precedence over --yes"
-        // rule (preview path is non-destructive).
+        // Confirmation gate fires BEFORE `resolveClient()` — same
+        // ordering archive uses. Codex M10 round-1 P2: a missing
+        // `--yes` MUST surface as `confirmation_required` per
+        // cli-design §3.1 #7's unconditional contract, never masked
+        // by `config_error` when no token is configured. The gate-
+        // error envelope's `meta.source` stays at the runner's
+        // `'none'` default because no wire call fires (cli-design
+        // §6.1). See archive.ts for the full rationale.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
         if (!globalFlags.dryRun && !globalFlags.yes) {
           throw new ConfirmationRequiredError(
             `monday item delete ${parsed.itemId} would delete the ` +
@@ -154,6 +156,15 @@ export const itemDeleteCommand: CommandModule<
             },
           );
         }
+
+        // Gate cleared — resolve the client now. Both dry-run + live
+        // need `MondayClient`; a missing token here legitimately
+        // surfaces as `config_error` (the user opted into the wire
+        // path via `--yes` or `--dry-run`).
+        const { client, apiVersion, toEmit } = resolveClient(
+          ctx,
+          program.opts(),
+        );
 
         if (globalFlags.dryRun) {
           // Dry-run path: read the source item so the agent can
