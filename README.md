@@ -269,16 +269,35 @@ tarball — `package.json` still pinned to `0.1.0`):
   (Monday's `ColumnMappingInput` carries no value slot —
   agents fire `monday item set` post-move when they need
   overrides).
+- **M12** ships the idempotency cluster — `monday item upsert`
+  + bulk `monday item clear --where`. Upsert takes
+  `--match-by <col>[,<col>...]` plus `--name` / `--set` and
+  routes 0 / 1 / 2+ matches to `create_item` / `update_item` /
+  `ambiguous_match` (the 28th stable error code). Sequential-
+  retry idempotent — re-running with the same args from the
+  same agent is safe; concurrent agents are NOT a uniqueness
+  guarantee (agents should pick a stable hidden key column for
+  `--match-by` so race-induced duplicates surface as
+  `ambiguous_match` on the next call). The match-by safe-list is
+  intentionally narrow in v0.2: `name` / `text` / `long_text` /
+  `numbers` / external_id-shaped hidden text round-trip
+  verbatim; `status` / `dropdown` round-trip via label-text;
+  `people` is restricted to `me`; `date` / `link` / `email` /
+  `phone` are NOT v0.2-safe (the lookup-leg vs mutation-leg
+  grammars don't reconverge at the wire — see cli-design §5.8
+  for the per-kind breakdown). Bulk `clear --where` extends
+  M5b's per-item clear with the same cursor walk + `--yes`
+  gate + per-item failure decoration as bulk `update --where`.
 
 **Writer allowlist** (other types return `unsupported_column_type`
 with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
 `people`, plus M8 firm row `link`, `email`, `phone`.
 
-**Remaining v0.2 milestones (M12–M18) on `main`:** `item upsert`
-+ bulk `item clear --where`, full update mutation surface
-(`reply` / `edit` / `delete` / `like` / `pin` / `clear-all`),
-workspace + board lifecycle, NDJSON streaming, 0.2.0 release prep.
+**Remaining v0.2 milestones (M13–M18) on `main`:** full update
+mutation surface (`reply` / `edit` / `delete` / `like` / `pin` /
+`clear-all`), workspace + board lifecycle, NDJSON streaming,
+0.2.0 release prep.
 
 **Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
 friendly translators (still tentative; usable today via

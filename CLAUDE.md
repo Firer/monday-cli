@@ -11,8 +11,8 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M11 shipped;
-**M12 (`item upsert` + bulk `item clear --where`) is next.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M12 shipped;
+**M13 (update mutations + `update list` expansions) is next.**
 
 The three binding documents — read in this order before writing code:
 
@@ -22,7 +22,7 @@ The three binding documents — read in this order before writing code:
    argue for the change, not by drift.
 2. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — active plan:
    milestones M8–M18 with deliverables, exit criteria, decisions log,
-   per-milestone post-mortems (M8/M9/M10/M11 + R-class refactor
+   per-milestone post-mortems (M8/M9/M10/M11/M12 + R-class refactor
    backlogs).
 3. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
    M0–M7 with M2.5 refactor pass and the M5a/M5b split. Reference for
