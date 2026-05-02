@@ -70,9 +70,10 @@ import { itemUpdateCommand } from './item/update.js';
 import { updateCreateCommand } from './update/create.js';
 // M9 (v0.2) — item create + subitem create.
 import { itemCreateCommand } from './item/create.js';
-// M10 (v0.2) — item lifecycle: archive + delete (Session A).
+// M10 (v0.2) — item lifecycle: archive + delete + duplicate.
 import { itemArchiveCommand } from './item/archive.js';
 import { itemDeleteCommand } from './item/delete.js';
+import { itemDuplicateCommand } from './item/duplicate.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -117,6 +118,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemCreateCommand,
     itemArchiveCommand,
     itemDeleteCommand,
+    itemDuplicateCommand,
     updateCreateCommand,
     rawCommand,
     boardDoctorCommand,

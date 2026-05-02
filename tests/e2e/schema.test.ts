@@ -2,8 +2,14 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 import { spawnCli } from './spawn.js';
 
+// M10 Session B: explicit 15s budget across both spawns. The schema
+// payload now serialises 40 commands' worth of JSON Schema (was 39
+// pre-duplicate, 38 pre-Session A); under heavy concurrent test load
+// the default 5s started flaking. Same headroom rationale agent-flow
+// uses — the spawn cost is the dominant factor (tsx + commander
+// registration), not the marginal payload growth.
 describe('e2e: monday schema', () => {
-  it('--json produces a valid JSON Schema 2020-12 envelope', async () => {
+  it('--json produces a valid JSON Schema 2020-12 envelope', { timeout: 15000 }, async () => {
     const result = await spawnCli({
       args: ['schema', '--json'],
       env: { PATH: process.env.PATH ?? '' },
@@ -32,7 +38,7 @@ describe('e2e: monday schema', () => {
     }
   });
 
-  it('narrows to a single command when given a positional argument', async () => {
+  it('narrows to a single command when given a positional argument', { timeout: 15000 }, async () => {
     const result = await spawnCli({
       args: ['schema', 'config.show', '--json'],
       env: { PATH: process.env.PATH ?? '' },

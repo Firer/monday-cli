@@ -1137,6 +1137,58 @@ describe('envelope snapshot — item mutations', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  it('item duplicate (live, two-leg lookup + mutation, with duplicated_from_id)', async () => {
+    // Pins the M10 Session B mutation envelope shape — `data` carries
+    // the projected new item plus the `duplicated_from_id` lineage
+    // echo (cli-design §6.4 line 1827-1831 precedent: per-verb
+    // extensions to `data`, mirroring upsert's `created` flag).
+    const duplicatedItem = {
+      ...sampleItem,
+      id: '67890',
+      name: 'Refactor login (copy)',
+    };
+    const out = await cachedDrive(
+      ['item', 'duplicate', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: { items: [{ id: '12345', board: { id: '111' } }] },
+            },
+          },
+          {
+            operation_name: 'ItemDuplicate',
+            response: { data: { duplicate_item: duplicatedItem } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item duplicate --with-updates --dry-run (planned_changes envelope with with_updates echo)', async () => {
+    // Pins the dry-run envelope shape — diverges from archive +
+    // delete only in the additional `with_updates` slot inside
+    // planned_changes[0]. `meta.source: "live"` because the source-
+    // item read fired (single-leg dry-run; the live path is the
+    // two-leg one).
+    const out = await cachedDrive(
+      ['item', 'duplicate', '12345', '--with-updates', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemDuplicateRead',
+            response: { data: { items: [sampleItem] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — raw', () => {

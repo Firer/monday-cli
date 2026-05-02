@@ -209,8 +209,12 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
   // runs on Node 22/24 in CI and occasionally trips the default
   // when tsx import + commander registration are both warming up).
   // Pre-M9 this passed at ~4.8s; M9 added one more registered
-  // command (item.create) and tipped the scale by ~50ms.
-  it('list backlog → start → done → comment, contract holds across 4 spawns', { timeout: 10000 }, async () => {
+  // command (item.create) and tipped the scale by ~50ms. M10 Session
+  // B added duplicate (registry now 40 entries vs 39); under heavy
+  // concurrent test load the 10s budget started flaking, so the
+  // ceiling lifts to 15s. CLAUDE.md predicted this — the headroom
+  // bump is the documented response.
+  it('list backlog → start → done → comment, contract holds across 4 spawns', { timeout: 15000 }, async () => {
     const cassette: Cassette = {
       interactions: [
         // Step 1: `monday item list --board 111 --where status=Backlog --where owner=me`
