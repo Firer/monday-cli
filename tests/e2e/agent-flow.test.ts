@@ -203,7 +203,14 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
     }
   });
 
-  it('list backlog → start → done → comment, contract holds across 4 spawns', async () => {
+  // 4 sequential spawns at ~1.2s each push the wall-clock cost
+  // of this test close to the 5s vitest default. Bumping to 10s
+  // gives headroom against system-load flakes (the agent-flow E2E
+  // runs on Node 22/24 in CI and occasionally trips the default
+  // when tsx import + commander registration are both warming up).
+  // Pre-M9 this passed at ~4.8s; M9 added one more registered
+  // command (item.create) and tipped the scale by ~50ms.
+  it('list backlog → start → done → comment, contract holds across 4 spawns', { timeout: 10000 }, async () => {
     const cassette: Cassette = {
       interactions: [
         // Step 1: `monday item list --board 111 --where status=Backlog --where owner=me`

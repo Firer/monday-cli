@@ -743,7 +743,7 @@ exports[`envelope snapshot — item mutations > item create subitem --dry-run (s
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
-    "source": "none",
+    "source": "live",
   },
   "ok": true,
   "planned_changes": [

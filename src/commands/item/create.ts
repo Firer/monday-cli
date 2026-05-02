@@ -74,6 +74,7 @@ import {
 import { userByEmail } from '../../api/resolvers.js';
 import {
   foldResolverWarningsIntoError,
+  maybeRemapValidationFailedToArchived,
 } from '../../api/resolver-error-fold.js';
 import { planCreate } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
@@ -649,6 +650,36 @@ interface ResolveCreateModeInputs {
 }
 
 /**
+ * Result of `resolveCreateMode`. Carries the dispatch-ready
+ * `CreateMode` PLUS the per-leg source / cacheAge from the
+ * pre-planner network calls (parent lookup, parent-board metadata
+ * for subitems-board derivation, --relative-to verification). The
+ * action layer folds these into the final envelope source so a
+ * `meta.source: "none"` claim never lies about a parent lookup or
+ * metadata fetch that already fired (Codex M9 P2 #1).
+ */
+interface ResolveCreateModeResult {
+  readonly mode: CreateModeFromCommand;
+  /**
+   * Source contribution from the pre-planner legs:
+   *   - subitem path: parent lookup is always live; parent-board
+   *     metadata leg may be cache or live (when `--set` is supplied).
+   *   - top-level path: --relative-to verification is always live
+   *     (when `--position` is supplied); otherwise undefined.
+   *
+   * `undefined` when no pre-planner network leg fired (e.g. top-level
+   * with no `--position`).
+   */
+  readonly preflightSource: 'live' | 'cache' | 'mixed' | undefined;
+  /**
+   * Worst-case cache age across pre-planner legs (currently only the
+   * parent-board metadata fetch can be cache-served). `null` when
+   * every pre-planner leg was live or none fired.
+   */
+  readonly preflightCacheAgeSeconds: number | null;
+}
+
+/**
  * Builds the `CreateMode` (dry-run engine + live path consume the
  * same shape) from the dispatch result. Three orchestration steps
  * for the subitem path:
@@ -668,9 +699,10 @@ interface ResolveCreateModeInputs {
  */
 const resolveCreateMode = async (
   inputs: ResolveCreateModeInputs,
-): Promise<CreateModeFromCommand> => {
+): Promise<ResolveCreateModeResult> => {
   const { client, dispatch, setEntries, rawEntries, env, noCache } = inputs;
   if (dispatch.kind === 'subitem') {
+    // Parent lookup is always live (no item-level cache in v0.2).
     const parent = await lookupParent(client, dispatch.parentItemId);
     if (parent.hierarchyType === 'multi_level') {
       throw new UsageError(
@@ -700,20 +732,42 @@ const resolveCreateMode = async (
         dispatch.parentItemId,
         parent.boardId,
       );
+      // Parent lookup is always live; parent metadata may be cache
+      // or live. Merge the two so the final envelope reflects both
+      // pre-planner legs (Codex M9 P2 #1). The 'cache' branch fires
+      // when the metadata cache is pre-warmed by a prior call within
+      // the TTL window — covered by item set / item update tests for
+      // the broader cache plumbing; M9 inherits the tested helper
+      // and pins the non-cache branch via the integration tests.
+      /* c8 ignore next 2 — cache pre-warming for the parent-board
+         metadata leg needs a multi-call XDG_CACHE_HOME setup that's
+         covered for the same `loadBoardMetadata` helper in item set
+         / item update tests; M9 inherits the helper's coverage. */
+      const parentSource: 'live' | 'mixed' =
+        parentMetadata.source === 'cache' ? 'mixed' : 'live';
       return {
-        kind: 'subitem',
-        parentItemId: dispatch.parentItemId,
-        subitemsBoardId,
+        mode: {
+          kind: 'subitem',
+          parentItemId: dispatch.parentItemId,
+          subitemsBoardId,
+        },
+        preflightSource: parentSource,
+        preflightCacheAgeSeconds: parentMetadata.cacheAgeSeconds,
       };
     }
     // No --set / --set-raw → no column resolution needed. Reuse
     // parent's board id as the placeholder (subitemsBoardId is
     // unused when both arrays are empty per planCreate's no-set
     // short-circuit and the live path's resolution loop).
+    // Parent lookup was live; no metadata leg fired.
     return {
-      kind: 'subitem',
-      parentItemId: dispatch.parentItemId,
-      subitemsBoardId: parent.boardId,
+      mode: {
+        kind: 'subitem',
+        parentItemId: dispatch.parentItemId,
+        subitemsBoardId: parent.boardId,
+      },
+      preflightSource: 'live',
+      preflightCacheAgeSeconds: null,
     };
   }
   // top-level
@@ -723,14 +777,27 @@ const resolveCreateMode = async (
       dispatch.position.relativeTo,
       dispatch.boardId,
     );
+    return {
+      mode: {
+        kind: 'item',
+        boardId: dispatch.boardId,
+        ...(dispatch.groupId === undefined ? {} : { groupId: dispatch.groupId }),
+        position: dispatch.position,
+      },
+      // --relative-to verification is always live; no cache leg.
+      preflightSource: 'live',
+      preflightCacheAgeSeconds: null,
+    };
   }
   return {
-    kind: 'item',
-    boardId: dispatch.boardId,
-    ...(dispatch.groupId === undefined ? {} : { groupId: dispatch.groupId }),
-    ...(dispatch.position === undefined
-      ? {}
-      : { position: dispatch.position }),
+    mode: {
+      kind: 'item',
+      boardId: dispatch.boardId,
+      ...(dispatch.groupId === undefined ? {} : { groupId: dispatch.groupId }),
+    },
+    // No pre-planner network leg.
+    preflightSource: undefined,
+    preflightCacheAgeSeconds: null,
   };
 };
 
@@ -839,10 +906,15 @@ export const itemCreateCommand: CommandModule<
         // group / position. For subitem, it's the parent item id +
         // the derived subitems-board id (used for column resolution).
         // Building it once avoids a let-assignment pattern that
-        // forced non-null assertions later. Mirrors the dispatch
-        // shape from validateInputShape but specialises with the
-        // resolved subitems-board id where needed.
-        const createMode = await resolveCreateMode({
+        // forced non-null assertions later.
+        //
+        // The result also carries `preflightSource` /
+        // `preflightCacheAgeSeconds` for the parent-lookup +
+        // parent-metadata + relative-to-verification legs that fire
+        // before planCreate / live mutation (Codex M9 P2 #1). These
+        // fold into the final envelope source so a `meta.source`
+        // claim never lies about a network leg that fired.
+        const createModeResult = await resolveCreateMode({
           client,
           dispatch,
           setEntries,
@@ -850,6 +922,7 @@ export const itemCreateCommand: CommandModule<
           env: ctx.env,
           noCache: globalFlags.noCache,
         });
+        const createMode = createModeResult.mode;
         const resolveBoardId =
           createMode.kind === 'subitem'
             ? createMode.subitemsBoardId
@@ -886,6 +959,19 @@ export const itemCreateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
+          // Dry-run envelope source folds three legs (Codex M9 P2 #1):
+          // pre-planner network calls (parent lookup + parent-board
+          // metadata + --relative-to verification) + planCreate's
+          // column-resolution legs. `meta.source: "none"` is only
+          // accurate when ZERO wire calls fired.
+          const dryRunSource = mergeSourceWithPreflight(
+            result.source,
+            createModeResult.preflightSource,
+          );
+          const dryRunCacheAge = mergeCacheAgeWithPreflight(
+            result.cacheAgeSeconds,
+            createModeResult.preflightCacheAgeSeconds,
+          );
           emitDryRun({
             ctx,
             programOpts: program.opts(),
@@ -893,11 +979,8 @@ export const itemCreateCommand: CommandModule<
               result.plannedChanges as unknown as readonly Readonly<
                 Record<string, unknown>
               >[],
-            // planCreate never reads the item state (item doesn't
-            // exist), so source is purely the column-resolution leg.
-            // 'none' when no --set / --set-raw fired any wire calls.
-            source: result.source,
-            cacheAgeSeconds: result.cacheAgeSeconds,
+            source: dryRunSource,
+            cacheAgeSeconds: dryRunCacheAge,
             warnings: result.warnings,
             apiVersion,
           });
@@ -1143,25 +1226,62 @@ export const itemCreateCommand: CommandModule<
           }
         } catch (err) {
           if (err instanceof MondayCliError) {
-            // No `validation_failed` → `column_archived` remap on
-            // create — the resolver already gated on archived (with
-            // `includeArchived: true` and the explicit throw above).
-            // Monday's `validation_failed` here would be a true
-            // value-shape failure (label typo, schema mismatch, etc.),
-            // not a stale-cache archived-column miss.
-            throw foldResolverWarningsIntoError(err, collectedWarnings);
+            // F4 remap: cache-sourced resolution + Monday rejecting
+            // as validation_failed → check live archived state.
+            // Codex M9 P1: pre-fix the create path skipped the remap
+            // on the assumption that the explicit archived gate above
+            // (`includeArchived: true` + throw) covered every case.
+            // It doesn't — cache can say "active" after Monday
+            // archived the column post-cache-write, the resolver
+            // passes the cache's stale view, and the create mutation
+            // surfaces `validation_failed` instead of the stable
+            // `column_archived` agents key off (cli-design §6.5).
+            // Mirrors item set's catch arm verbatim — see set.ts
+            // line ~484. Pass every translated column ID (M5b
+            // finding #3) so multi-`--set` cases where a later
+            // target is archived still remap.
+            const folded = foldResolverWarningsIntoError(
+              err,
+              collectedWarnings,
+            );
+            const columnIds = translated.map((t) => t.columnId);
+            if (columnIds.length === 0) {
+              throw folded;
+            }
+            throw await maybeRemapValidationFailedToArchived(folded, {
+              client,
+              boardId: resolveBoardId,
+              columnIds,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+              resolutionSource: aggregateSource ?? 'live',
+            });
           }
           throw err;
         }
 
         const warnings: readonly Warning[] = collectedWarnings;
-        // The mutation leg is always live, so the final source merges
-        // the resolution aggregate with `live`. Mirrors item set's
-        // pattern: pure-cache resolution → mixed (cache metadata +
-        // live mutation); live resolution → live.
+        // Final source folds four legs (Codex M9 P2 #1): pre-planner
+        // network calls (parent lookup + parent metadata + relative-
+        // to) → column resolution legs → mutation (always live).
+        // The live path never sees a 'none' source (the mutation leg
+        // is always live), so we merge through the leg-aware helper.
+        let liveSource: 'live' | 'cache' | 'mixed' | undefined =
+          aggregateSource;
+        if (createModeResult.preflightSource !== undefined) {
+          liveSource = mergeSourceLeg(
+            liveSource,
+            createModeResult.preflightSource,
+          );
+        }
         const finalSource: 'live' | 'cache' | 'mixed' = mergeSourceLeg(
-          aggregateSource,
+          liveSource,
           'live',
+        );
+        // Cache age folds preflight worst-case staleness too.
+        const finalCacheAge = mergeCacheAgeWithPreflight(
+          aggregateCacheAge,
+          createModeResult.preflightCacheAgeSeconds,
         );
         emitMutation({
           ctx,
@@ -1171,7 +1291,7 @@ export const itemCreateCommand: CommandModule<
           warnings,
           ...toEmit(mutationResult.response),
           source: finalSource,
-          cacheAgeSeconds: aggregateCacheAge,
+          cacheAgeSeconds: finalCacheAge,
           // cli-design §5.3 step 2 / §6.4: echo the resolved column
           // IDs so an agent's "create then re-read" loop can use the
           // resolved IDs without consulting metadata twice. Empty map
@@ -1311,15 +1431,21 @@ const executeCreateSubitem = async (
       { details: { parent_item_id: inputs.parentItemId } },
     );
   }
+  // Always populate `parent_id` from argv — the CLI knows the
+  // parent ID it just sent on the wire, so omitting it when Monday
+  // returns `parent_item: null` would create a documented-shape
+  // drift (output-shapes.md subitem section pins parent_id as
+  // present). Codex M9 P2 #3.
   return {
     projected: {
       id: parsed.id,
       name: parsed.name,
       board_id: parsed.board.id,
       group_id: parsed.group?.id ?? null,
-      ...(parsed.parent_item === null
-        ? {}
-        : { parent_id: parsed.parent_item.id }),
+      // Re-parse through ItemIdSchema to satisfy the brand;
+      // `inputs.parentItemId` is plain `string` from the input
+      // shape but this slot needs the branded type.
+      parent_id: ItemIdSchema.parse(inputs.parentItemId),
     },
     response,
   };
@@ -1341,4 +1467,40 @@ const mergeSourceLeg = (
   if (current === 'mixed' || next === 'mixed') return 'mixed';
   if (current === next) return current;
   return 'mixed';
+};
+
+/**
+ * Folds the pre-planner preflight source ('live' / 'cache' / 'mixed'
+ * / undefined when no preflight network leg fired) into the planner /
+ * mutation source ('live' / 'cache' / 'mixed' / 'none'). Used by
+ * both the dry-run and live paths so the envelope's `meta.source`
+ * reflects every wire leg that fired (Codex M9 P2 #1). Returns the
+ * planner source unchanged when no preflight leg fired; otherwise
+ * merges via the `mergeSourceLeg` rule. The 'none' planner source
+ * (no-set short-circuit) collapses to the preflight source when any
+ * preflight leg fired — `none` only survives when every leg was
+ * absent.
+ */
+const mergeSourceWithPreflight = (
+  plannerSource: 'live' | 'cache' | 'mixed' | 'none',
+  preflightSource: 'live' | 'cache' | 'mixed' | undefined,
+): 'live' | 'cache' | 'mixed' | 'none' => {
+  if (preflightSource === undefined) return plannerSource;
+  if (plannerSource === 'none') return preflightSource;
+  return mergeSourceLeg(plannerSource, preflightSource);
+};
+
+/**
+ * Folds preflight cache-age into the planner cache-age. Same merge
+ * rule as the dry-run engine's `mergeCacheAge`: `null` legs (live
+ * fetches) don't update; otherwise pick the larger (worst-case
+ * staleness). Returns `null` when both inputs are null.
+ */
+const mergeCacheAgeWithPreflight = (
+  planner: number | null,
+  preflight: number | null,
+): number | null => {
+  if (preflight === null) return planner;
+  if (planner === null) return preflight;
+  return Math.max(planner, preflight);
 };
