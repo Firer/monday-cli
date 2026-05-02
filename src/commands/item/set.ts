@@ -78,12 +78,9 @@ import {
   foldResolverWarningsIntoError,
 } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
+import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
 import {
-  ITEM_FIELDS_FRAGMENT,
-  parseRawItem,
-} from '../../api/item-helpers.js';
-import {
-  projectItem,
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
@@ -466,13 +463,18 @@ const executeMutation = async (
   );
 };
 
-const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem => {
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'internal_error',
+// Thin wrapper around `api/item-mutation-result.ts projectMutationItem`
+// (R28). M5b chose `internal_error` + "no item payload" to flag a
+// mutation that succeeded server-side but returned an empty payload
+// (rare server-side glitch); M10's destructive verbs use `not_found`
+// for Monday's idiomatic null-for-missing behaviour. Both shapes flow
+// through the shared helper; the wrapper preserves M5b's call-site
+// signature so update-/clear-/set-style call sites stay untouched.
+const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem =>
+  projectMutationItemShared({
+    raw,
+    itemId,
+    errorCode: 'internal_error',
+    errorMessage:
       `Monday returned no item payload from the mutation for id ${itemId}.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  return projectItem({ raw: parseRawItem(raw, { item_id: itemId }) });
-};
+  });

@@ -51,17 +51,11 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import {
-  ApiError,
-  ConfirmationRequiredError,
-} from '../../utils/errors.js';
-import {
-  ITEM_FIELDS_FRAGMENT,
-  parseRawItem,
-} from '../../api/item-helpers.js';
+import { ConfirmationRequiredError } from '../../utils/errors.js';
+import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import { projectMutationItem } from '../../api/item-mutation-result.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import {
-  projectItem,
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
@@ -196,16 +190,12 @@ export const itemDeleteCommand: CommandModule<
           { itemId: parsed.itemId },
           { operationName: 'ItemDelete' },
         );
-        const raw = response.data.delete_item;
-        if (raw === null || raw === undefined) {
-          throw new ApiError(
-            'not_found',
+        const projected = projectMutationItem({
+          raw: response.data.delete_item,
+          itemId: parsed.itemId,
+          errorCode: 'not_found',
+          errorMessage:
             `Monday returned no item from delete_item for id ${parsed.itemId}`,
-            { details: { item_id: parsed.itemId } },
-          );
-        }
-        const projected = projectItem({
-          raw: parseRawItem(raw, { item_id: parsed.itemId }),
         });
 
         emitMutation({

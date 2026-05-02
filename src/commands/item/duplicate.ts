@@ -67,17 +67,11 @@ import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
-import {
-  ITEM_FIELDS_FRAGMENT,
-  parseRawItem,
-} from '../../api/item-helpers.js';
+import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
+import { projectMutationItem } from '../../api/item-mutation-result.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
-import {
-  projectItem,
-  projectedItemSchema,
-} from '../../api/item-projection.js';
+import { projectedItemSchema } from '../../api/item-projection.js';
 
 // The live mutation returns an `Item` shape — same fragment as
 // `item get`. The dry-run source-item read goes through
@@ -237,23 +231,19 @@ export const itemDuplicateCommand: CommandModule<
           },
           { operationName: 'ItemDuplicate' },
         );
-        const raw = response.data.duplicate_item;
-        if (raw === null || raw === undefined) {
-          // Defence-in-depth — `lookupItemBoard` already verified the
-          // source item exists, so a null `duplicate_item` here
-          // implies a permission edge case (token can read but not
-          // duplicate) or a transient Monday-side rejection. Surfaces
-          // as `not_found` matching the dry-run path's shape so
-          // agents key off one stable code regardless of which leg
-          // failed.
-          throw new ApiError(
-            'not_found',
+        // Defence-in-depth — `lookupItemBoard` already verified the
+        // source item exists, so a null `duplicate_item` here implies
+        // a permission edge case (token can read but not duplicate)
+        // or a transient Monday-side rejection. `projectMutationItem`
+        // (R28) surfaces it as `not_found` matching the dry-run
+        // path's shape so agents key off one stable code regardless
+        // of which leg failed.
+        const projected = projectMutationItem({
+          raw: response.data.duplicate_item,
+          itemId: parsed.itemId,
+          errorCode: 'not_found',
+          errorMessage:
             `Monday returned no item from duplicate_item for id ${parsed.itemId}`,
-            { details: { item_id: parsed.itemId } },
-          );
-        }
-        const projected = projectItem({
-          raw: parseRawItem(raw, { item_id: parsed.itemId }),
         });
 
         emitMutation({

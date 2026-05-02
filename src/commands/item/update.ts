@@ -87,11 +87,10 @@ import type { GlobalFlags } from '../../types/global-flags.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
-  parseRawItem,
   resolveMeFactory,
 } from '../../api/item-helpers.js';
+import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
 import {
-  projectItem,
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
@@ -577,16 +576,19 @@ const executeMutation = async (
   };
 };
 
-const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem => {
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'internal_error',
+// Thin wrapper around `api/item-mutation-result.ts projectMutationItem`
+// (R28). M5b's `internal_error` + "no item payload" semantics for an
+// empty-payload mutation success are preserved; the wrapper keeps the
+// existing `(raw, itemId)` call signature so the executeMutation arms
+// + the bulk per-item dispatch site stay untouched.
+const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem =>
+  projectMutationItemShared({
+    raw,
+    itemId,
+    errorCode: 'internal_error',
+    errorMessage:
       `Monday returned no item payload from the mutation for id ${itemId}.`,
-      { details: { item_id: itemId } },
-    );
-  }
-  return projectItem({ raw: parseRawItem(raw, { item_id: itemId }) });
-};
+  });
 
 
 /**
