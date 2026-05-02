@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create |
 | [item (reads)](#item-reads) | list, get, find, search, subitems |
-| [item (mutations)](#item-mutations) | set, clear, update (single + bulk) |
+| [item (mutations)](#item-mutations) | set, clear, update (single + bulk), create, archive, delete |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
@@ -656,6 +656,82 @@ Top-level emits `operation: "create_item"` with hoisted `board_id` /
 "create_subitem"` with hoisted `parent_item_id` and **omits**
 `board_id` (subitems-board derivation is server-side). `diff[<col>].
 from` is always `null` (item doesn't exist yet).
+
+### `item archive <iid> --yes [--dry-run]`
+
+Archive an item via Monday's `archive_item` mutation (M10). `--yes`
+mandatory for the live path; without `--yes` (and without
+`--dry-run`) returns `confirmation_required` (exit 1) with
+`details.item_id` + a recovery-window hint. `--dry-run` exempts the
+gate per cli-design §10.2.
+
+Live envelope (single-resource — same projection as `item get`,
+state flips to `"archived"`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "12345",
+    "name": "Refactor login",
+    "board_id": "111",
+    "group_id": "topics",
+    "parent_item_id": null,
+    "state": "archived",
+    "url": "https://example.monday.com/items/12345",
+    "created_at": "2026-04-29T10:00:00Z",
+    "updated_at": "2026-04-29T11:00:00Z",
+    "columns": { ... }
+  },
+  "meta": { ..., "source": "live", ... },
+  "warnings": []
+}
+```
+
+Dry-run envelope (`data: null`, `meta.dry_run: true`,
+`planned_changes: [{operation: "archive_item", item_id, item:
+<projected snapshot>}]`):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "live", ... },
+  "planned_changes": [
+    {
+      "operation": "archive_item",
+      "item_id": "12345",
+      "item": <projected snapshot — same shape as live data>
+    }
+  ],
+  "warnings": []
+}
+```
+
+`meta.source: "live"` for both paths because the dry-run still reads
+the source item to verify the ID. Idempotent on the wire (cli-design
+§9.1) — re-archiving an archived item is a no-op; the CLI marks
+`idempotent: true`. `not_found` (exit 2) when the ID doesn't exist
+or the token has no access (mirrors `item get`).
+
+### `item delete <iid> --yes [--dry-run]`
+
+Sibling of `item archive` — same argv, same projection, same
+confirmation contract. The differences are the wire mutation
+(`delete_item`), the post-mutation state (`"deleted"`), and the
+idempotency knob (`idempotent: false` because re-running with the
+same `<iid>` after an interim `monday item create` would delete the
+new item — agents can't safely retry without verifying the ID still
+names the same record).
+
+Live envelope same shape as archive's, with `state: "deleted"`.
+Dry-run envelope same shape with `operation: "delete_item"`.
+
+The `confirmation_required` hint anchors at cli-design §5.4: Monday
+retains deleted items in the trash for 30 days but exposes no
+`unrestore` mutation; recreating is lossy (new ID, no updates /
+assets / automation history). Agents needing reversal must recreate
+from a prior snapshot.
 
 ---
 

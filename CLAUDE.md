@@ -17,13 +17,19 @@ on top of the official `@mondaydotcomorg/api` SDK.
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main` — M0–M9 shipped.**
+**v0.1.0 published; v0.2.0 in development on `main` — M0–M9.5
+shipped + M10 in flight (Session A: archive + delete on main).**
 The published tarball at `0.1.0` has the v0.1 surface (5 reader
 nouns + the four M5b mutations + diagnostics + escape hatch). On
 `main`, M8 expanded the writer surface (`--set-raw` escape hatch +
-firm-row `link` / `email` / `phone` translators) and M9 added the
+firm-row `link` / `email` / `phone` translators), M9 added the
 first item-lifecycle verb (`item create` — top-level + classic-only
-subitem with single round-trip per cli-design §5.8). The
+subitem with single round-trip per cli-design §5.8), and M10
+Session A landed the two destructive lifecycle siblings
+(`item archive` idempotent + `item delete` non-idempotent, both
+behind `--yes` with `--dry-run` exemption). M10 Session B
+(`item duplicate` + post-mortem + final docs sweep) is the next
+session. The
 `@mondaydotcomorg/api` SDK pin (14.0.0 / API 2026-01) is unchanged.
 The agent-flow E2E (`tests/e2e/agent-flow.test.ts`) exercises the
 v0.1 contract across four binary spawns — `item list` → `item set`
@@ -63,6 +69,7 @@ v0.1 contract across four binary spawns — `item list` → `item set`
 | M8 | shipped (on main) | Writer expansion: `--set-raw <col>=<json>` escape hatch (`raw-write.ts` parser + post-resolution gate that rejects `read-only-forever` / `files-shaped` types per cli-design §5.3 escape-hatch contract; `change_column_value` / `change_multiple_column_values` only — never `change_simple_column_value` for raw) + three firm-row friendly translators (`links.ts` pipe-form `url\|text`, `emails.ts` pipe-form, `phones.ts` E.164 + `iso-country-codes.ts` for the country-code allowlist). `--set-raw` wired into `item set` + `item update` single + `item update --where` bulk; resolution-time mutual-exclusion check (`--set` + `--set-raw` against same resolved column → `usage_error` per cli-design §5.3 step 2). Codex post-implementation fixes pinned the resolution-before-translation invariant (resolve every token first, then translate) so a `--set X=bad` alongside `--set-raw X={...}` surfaces the mutual-exclusion error rather than the translation error. |
 | M9 | shipped (on main) | `monday item create` — top-level + classic-only subitem with single round-trip per cli-design §5.8. New `commands/item/create.ts` (~1,340 LOC) + `bundleColumnValues` lift in `column-values.ts` (shared between `selectMutation`'s multi case and create's single bundled `column_values` parameter) + `planCreate` engine sibling in `dry-run.ts` (no item-state read; hoisted `name` / `group_id` / `position` / `parent_item_id` slots per cli-design §6.4 item-create shape). `--parent <iid>` triggers `create_subitem` against the auto-derived subitems board (`subtasks.settings_str.boardIds[0]`); multi-level boards (`hierarchy_type: "multi_level"`) rejected pre-mutation with `usage_error` carrying `details.deferred_to: "v0.3"`. Three rounds of Codex review (round 1 N → 2 partial Y → 3 Y / zero findings). |
 | M9.5 | shipped (on main) | post-M9 R-class refactor cleanup pre-M10 (v0.2-plan.md §12): `set-expression.ts` (R22 — `splitSetExpression`), `resolution-context.ts` (R24 — `buildResolutionContexts`), `item-board-lookup.ts` (R23 — `lookupItemBoard` + `lookupItemBoardWithHierarchy` + `resolveBoardId`), `source-aggregator.ts` (R21 — `mergeSource` + `mergeSourceWithPreflight` + `mergeCacheAge`), `resolver-error-fold.ts foldAndRemap` (R26 — mutation catch-arm wrapper for fold + F4 remap), `resolution-pass.ts` (R20 — three-pass column resolution helper consolidating ~80-90 LOC × 5 sites into one shared `resolveAndTranslate`). Plus R25 — drop drift `CreateModeFromCommand` in favour of imported `CreateMode`. Net ~1900 LOC duplication collapsed into ~660 LOC of shared helpers; coverage 98.82 / 95.17 / 99 / 98.91 above the 95/94/95/95 floor. M10's three new mutation commands (archive / delete / duplicate) inherit the helpers rather than copy the patterns. |
+| M10 (Session A) | shipped (on main) | Two destructive lifecycle siblings: `monday item archive <iid> --yes [--dry-run]` (`commands/item/archive.ts`, idempotent: true — wire-level no-op on re-archive per cli-design §9.1) + `monday item delete <iid> --yes [--dry-run]` (`commands/item/delete.ts`, idempotent: false — re-delete after interim create would target the new item). Same argv shape, same `--yes` confirmation gate (cli-design §3.1 #7) with `--dry-run` exempting the gate per §10.2; same projection (`ITEM_FIELDS_FRAGMENT` + `parseRawItem` + `projectItem` so the response shape matches `item get` byte-for-byte). One round-trip per path: live calls the mutation directly (returns the post-mutation `Item`); dry-run reads via `Item{Archive,Delete}Read` and emits the §6.4 envelope with `operation: "archive_item" \| "delete_item"`, `item_id`, and `item: <projected snapshot>` so the agent verifies the ID before re-running with `--yes`. Confirmation hints anchor at cli-design §5.4 (Monday's 30-day window + no `unarchive` / `unrestore` mutations). Spec-gap backfilled pre-implementation: cli-design §4.3 line 532 gained `--yes` on archive (delete already had it). One M10 e2e spawn for `delete --yes` (highest blast radius); archive's coverage stays at the integration layer because the gate condition + projection are shared. Coverage 98.94 / 95.44 / 99.34 / 99.04 above the 95/95/95/95 floor (both files at 100% lines + 100% branches). Session B — `item duplicate` + post-mortem + final docs sweep — explicitly out of scope here. |
 
 > **If you're implementing anything in this repo, read
 > `docs/cli-design.md` for the contract and `docs/v0.2-plan.md` for

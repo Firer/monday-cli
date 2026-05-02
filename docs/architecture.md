@@ -563,6 +563,46 @@
   creates a duplicate item; `monday item upsert` (M12) is
   the idempotent variant.
 
+- `commands/item/archive.ts` (M10 Session A) — `monday item
+  archive <iid> --yes [--dry-run]`. The smaller of M10's two
+  destructive verbs. Calls Monday's `archive_item` mutation
+  behind the cli-design §3.1 #7 confirmation gate (`--yes`
+  mandatory; `--dry-run` exempts the gate per §10.2). Single
+  round-trip per path: live calls `archive_item` directly (the
+  mutation returns the archived `Item`, so no pre-mutation read
+  fires); dry-run reads via `ItemArchiveRead` and emits the
+  §6.4 envelope with `operation: "archive_item"`, `item_id`,
+  and `item: <projected snapshot>` so the agent verifies the
+  ID before re-running with `--yes`. Both paths share
+  `ITEM_FIELDS_FRAGMENT` + `parseRawItem` + `projectItem` so
+  the response shape matches `item get` byte-for-byte. Null
+  result on the live mutation surfaces as `not_found` with
+  `details.item_id` (mirrors the dry-run path's null-handling
+  so the error shape stays identical across both paths).
+  **Idempotent: true** — re-archiving an already-archived item
+  is a no-op on Monday's side per cli-design §9.1; safe to
+  retry on transient transport failures. The
+  `confirmation_required` hint anchors at Monday's 30-day
+  recovery window + cli-design §5.4 (no `unarchive` mutation).
+
+- `commands/item/delete.ts` (M10 Session A) — `monday item
+  delete <iid> --yes [--dry-run]`. Sibling of `item archive`
+  — same argv shape, same confirmation contract, same
+  projection, one knob different: **`idempotent: false`**.
+  Calls `delete_item` instead of `archive_item`; post-mutation
+  state flips to `"deleted"`. Why non-idempotent despite
+  Monday's `delete_*` being idempotent past the first call
+  (cli-design §9.1 — re-deleting → `not_found`): re-running
+  with the same `<iid>` after an interim `monday item create`
+  would delete the *new* item, so agents can't safely retry
+  without verifying the ID still names the same record. The
+  `confirmation_required` hint anchors at cli-design §5.4
+  (Monday retains deleted items in the trash for 30 days but
+  exposes no `unrestore` mutation; recreating is lossy).
+  Pinned via an integration-level `idempotent` knob assertion
+  importing both archive + delete CommandModules so a copy-
+  paste regression that flips the wrong knob fails loud.
+
 - `commands/update/create.ts` (M5b session 2) — posts a
   Monday update (comment) on an item via `create_update`.
   Body sources: `--body <md>` inline, `--body-file <path>`,
