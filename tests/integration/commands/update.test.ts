@@ -1030,3 +1030,152 @@ describe('monday update delete (integration, M13)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday update like / unlike (integration, M13)', () => {
+  // SDK shape: `like_update(update_id: ID!) → Update`. Likewise
+  // `unlike_update(update_id: ID!) → Update`. The toggle helper sends
+  // the variable as `update_id` (vs `id` for pin / unpin).
+  const likedUpdate = {
+    id: '77',
+    body: '<p>Looks good</p>',
+    text_body: 'Looks good',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T09:01:00Z',
+  };
+
+  it('live: like — wires update_id to like_update and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'like', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateLike',
+            // Pin the variable name (`update_id` vs `id`) — Monday's
+            // SDK has a per-mutation divergence the toggle helper
+            // captures via `idVariable: 'update_id' | 'id'`.
+            match_variables: { update_id: '77' },
+            response: { data: { like_update: likedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('77');
+  });
+
+  it('live: unlike — wires update_id to unlike_update and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'unlike', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateUnlike',
+            match_variables: { update_id: '77' },
+            response: { data: { unlike_update: likedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('77');
+  });
+
+  it('--dry-run for like emits {operation: like_update, update_id} with source=none', async () => {
+    const out = await drive(
+      ['update', 'like', '77', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; update_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes[0]?.operation).toBe('like_update');
+    expect(env.planned_changes[0]?.update_id).toBe('77');
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('--dry-run for unlike emits {operation: unlike_update, update_id}', async () => {
+    const out = await drive(
+      ['update', 'unlike', '77', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { operation: string }[];
+    };
+    expect(env.planned_changes[0]?.operation).toBe('unlike_update');
+  });
+
+  it('not_found when like_update returns null (M10 R28 lifecycle pattern)', async () => {
+    const out = await drive(
+      ['update', 'like', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateLike',
+            response: { data: { like_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { update_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.update_id).toBe('99999');
+  });
+
+  it('rejects non-numeric update id as usage_error (toggle parser shared)', async () => {
+    const out = await drive(
+      ['update', 'like', 'abc', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('idempotent flag is true for both like and unlike (re-running is a server-side no-op)', async () => {
+    const out = await drive(
+      ['schema', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        commands: Readonly<Record<string, { idempotent: boolean }>>;
+      };
+    };
+    expect(env.data.commands['update.like']?.idempotent).toBe(true);
+    expect(env.data.commands['update.unlike']?.idempotent).toBe(true);
+  });
+
+  it('surfaces typed internal_error for malformed Monday like_update payload', async () => {
+    const out = await drive(
+      ['update', 'like', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateLike',
+            response: { data: { like_update: { id: 'not-numeric' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+});
