@@ -1179,3 +1179,122 @@ describe('monday update like / unlike (integration, M13)', () => {
     expect(env.error?.code).toBe('internal_error');
   });
 });
+
+describe('monday update pin / unpin (integration, M13)', () => {
+  // SDK shape: `pin_to_top(id: ID!) → Update`, `unpin_from_top(id:
+  // ID!) → Update`. The toggle helper sends the variable as `id` (vs
+  // `update_id` for like / unlike) — pin / unpin specifically diverge
+  // here on Monday's side.
+  const pinnedUpdate = {
+    id: '77',
+    body: '<p>Looks good</p>',
+    text_body: 'Looks good',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T09:01:00Z',
+  };
+
+  it('live: pin — wires id (NOT update_id) to pin_to_top and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'pin', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdatePin',
+            // The variable-name divergence is the load-bearing
+            // pin: pin / unpin take `id`; like / unlike take
+            // `update_id`. A future regression that collapses
+            // them would fail here.
+            match_variables: { id: '77' },
+            response: { data: { pin_to_top: pinnedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('77');
+  });
+
+  it('live: unpin — wires id to unpin_from_top and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'unpin', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateUnpin',
+            match_variables: { id: '77' },
+            response: { data: { unpin_from_top: pinnedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('77');
+  });
+
+  it('--dry-run for pin emits {operation: pin_to_top, update_id} with source=none', async () => {
+    const out = await drive(
+      ['update', 'pin', '77', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { operation: string; update_id: string }[];
+    };
+    expect(env.planned_changes[0]?.operation).toBe('pin_to_top');
+    expect(env.planned_changes[0]?.update_id).toBe('77');
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('--dry-run for unpin emits {operation: unpin_from_top}', async () => {
+    const out = await drive(
+      ['update', 'unpin', '77', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { operation: string }[];
+    };
+    expect(env.planned_changes[0]?.operation).toBe('unpin_from_top');
+  });
+
+  it('not_found when pin_to_top returns null', async () => {
+    const out = await drive(
+      ['update', 'pin', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdatePin',
+            response: { data: { pin_to_top: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('idempotent flag is true for both pin and unpin', async () => {
+    const out = await drive(
+      ['schema', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        commands: Readonly<Record<string, { idempotent: boolean }>>;
+      };
+    };
+    expect(env.data.commands['update.pin']?.idempotent).toBe(true);
+    expect(env.data.commands['update.unpin']?.idempotent).toBe(true);
+  });
+});
