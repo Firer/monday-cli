@@ -5,6 +5,15 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     globals: false,
+    // Default vitest timeout is 5s. M13's registry growth (50+
+    // commands) plus v8 coverage instrumentation pushes a handful
+    // of suites past that floor — schema-build / ajv-compile /
+    // published-tarball spawn / schema-snapshot all build the
+    // full registry and pay the per-command cost. Bumping the
+    // floor to 15s keeps `npm run test:coverage` runnable without
+    // sprinkling per-test overrides; the non-instrumented `npm
+    // test` finishes in ~13s overall.
+    testTimeout: 15_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],

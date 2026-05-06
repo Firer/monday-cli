@@ -11,8 +11,8 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M12 shipped;
-**M13 (update mutations + `update list` expansions) is next.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M13 shipped;
+**M14 (workspace lifecycle — admin-permission-sensitive) is next.**
 
 The three binding documents — read in this order before writing code:
 

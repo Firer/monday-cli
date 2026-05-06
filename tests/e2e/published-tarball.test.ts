@@ -76,10 +76,14 @@ const spawnNode = async (
   child.stderr.on('data', (c: Buffer) => stderrChunks.push(c));
   child.stdin.end();
   const exitCode = await new Promise<number>((resolveCode, rejectCode) => {
+    // M13 grew the registry past the original 10s budget under v8
+    // coverage instrumentation. The vitest test-level timeout
+    // (15s) is the outer bound; this kill timer is the safety net
+    // for runaway children.
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       rejectCode(new Error('tarball child timed out'));
-    }, 10_000);
+    }, 12_000);
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
       if (code !== null) {

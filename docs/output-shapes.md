@@ -338,9 +338,13 @@ Alias for `account whoami`. Same envelope.
 
 "Updates" in Monday lingo are comments on items.
 
-### `update list <item-id>`
+### `update list <item-id>` / `update list --board <bid>` (M13)
 
-Collection of comments on the given item.
+Collection of comments. Per-item via positional `<iid>`; per-board via
+`--board <bid>` (mutually exclusive). **v0.2 breaking change**:
+`replies: [...]` is empty by default; pass `--with-replies` to populate.
+v0.1 silently populated replies on every call; v0.2 makes the nested
+selection opt-in because Monday charges complexity for it.
 
 ```json
 [
@@ -353,6 +357,10 @@ Collection of comments on the given item.
     "replies": [] }
 ]
 ```
+
+With `--with-replies`, each update's `replies: [...]` contains the
+nested reply records (`id`, `body`, `text_body`, `creator_id`,
+`created_at`).
 
 ### `update get <update-id>`
 
@@ -389,6 +397,105 @@ supported (no `resolved_ids` because no column tokens).
   ]
 }
 ```
+
+### `update reply <parent-id> --body <md>` (M13)
+
+Posts a reply to an existing update via Monday's `create_update(parent_
+id, body)`. Same body-source plumbing as `update create`. **Not
+idempotent** — each call creates a new reply. The envelope echoes
+`parent_id` from argv into `data` so an agent has the lineage handy
+without consulting `monday update get`.
+
+```json
+{
+  "data": { "id": "88", "body": "<p>Acknowledged.</p>",
+            "text_body": "Acknowledged.",
+            "creator_id": "1",
+            "creator": { "id": "1", "name": "Alice", "email": "alice@example.test" },
+            "item_id": "12345",
+            "parent_id": "77",
+            "created_at": "2026-04-30T11:30:00Z",
+            "updated_at": "2026-04-30T11:30:00Z" }
+}
+```
+
+`--dry-run` carries `operation: "create_update"`, `parent_id`, `body`,
+`body_length`. `meta.source: "none"`.
+
+### `update edit <update-id> --body <md>` (M13)
+
+Replaces the body of an existing update. Idempotent (re-editing with
+the same body is a server-side no-op). Returns the projected update.
+Null wire result → `not_found` carrying `details.update_id`.
+`--dry-run` carries `operation: "edit_update"`, `update_id`, `body`,
+`body_length`. `meta.source: "none"`.
+
+### `update delete <update-id> --yes` (M13)
+
+Deletes an update. **Destructive** — `--yes` mandatory; without it
+exits 1 with `confirmation_required` (gate fires before
+`resolveClient` per the M10 round-1 P2 ordering invariant). Returns
+the projected deleted update. `--dry-run` is the minimal `{operation:
+"delete_update", update_id}` shape with `meta.source: "none"` (no
+preflight read fires).
+
+### `update like` / `unlike` / `pin` / `unpin <update-id>` (M13)
+
+Toggle verbs. Idempotent on Monday's side (re-running is a server-
+side no-op). Each returns the projected update. Per-mutation SDK
+divergence captured at the dispatch site: `like_update` /
+`unlike_update` take `update_id`; `pin_to_top` / `unpin_from_top`
+take `id`. `--dry-run` carries `{operation: "<mutation_name>",
+update_id}` with `meta.source: "none"`.
+
+### `update clear-all <item-id> --yes` (M13 — partial-success envelope)
+
+Deletes every update on an item. **Destructive** — `--yes`
+mandatory. **Partial-success envelope** per cli-design §6.4 / v0.2-
+plan §1 universal rule. The CLI page-walks `updates(item_id)`, then
+sequentially calls `delete_update` per collected ID. Per-update
+failures land in `data.results[i].error` rather than aborting the
+loop.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "results": [
+      { "update_id": "77", "ok": true },
+      { "update_id": "78", "ok": false,
+        "error": { "code": "forbidden",
+                   "message": "Permission denied" } },
+      { "update_id": "82", "ok": true }
+    ]
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+The envelope is **always `ok: true` when dispatch ran** — whole-call
+success means the page-walk + dispatch loop completed; per-target
+outcomes live in `data.results`. Top-level `error` (`ok: false`) is
+reserved for whole-call failure (item not_found, couldn't reach
+API). Re-running on an empty thread emits `results: []` (idempotent).
+
+`--dry-run` page-walks for would-delete IDs without firing any
+delete:
+
+```json
+{
+  "ok": true, "data": null,
+  "meta": { ..., "dry_run": true, "source": "live" },
+  "planned_changes": [
+    { "operation": "clear_all_updates",
+      "item_id": "12345",
+      "update_ids": ["77", "78", "82"] }
+  ]
+}
+```
+
+`meta.source: "live"` because the page-walk fired real reads.
 
 ---
 
