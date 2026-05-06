@@ -50,6 +50,26 @@ describe('monday update list', () => {
     // v0.2 breaking change: the wire variable is now `ids: [<iid>]`
     // (was `itemIds`), shared across the per-item + per-board
     // routing modes. Default projection emits `replies: []`.
+    //
+    // Codex M13 F2 (P2): pin the GraphQL query shape via
+    // `match_query` so a future regression that always requests
+    // replies (silently reintroducing the v0.1 complexity charge)
+    // fails loud. The fixture's response carries POPULATED replies
+    // to prove the projection's `normaliseReplies` empties them
+    // even when Monday hands them back — defense in depth covering
+    // both the wire-side query AND the client-side projection.
+    const updateWithPopulatedReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'reply body',
+          text_body: 'reply body',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
     const out = await drive(
       ['update', 'list', '5001', '--json'],
       {
@@ -57,8 +77,15 @@ describe('monday update list', () => {
           {
             operation_name: 'UpdateList',
             match_variables: { ids: ['5001'] },
+            // Default GraphQL must NOT include the `replies` selection.
+            // RegExp negative-lookahead via `match_query` (substring
+            // miss) — assertions in `tests/fixtures/load.ts` enforce
+            // present-substring; the `repliesAbsentRegex` matches the
+            // full query body and asserts the `replies {` substring
+            // doesn't appear.
+            match_query: /^(?:(?!replies \{).)*$/s,
             response: {
-              data: { items: [{ id: '5001', updates: [sampleUpdate] }] },
+              data: { items: [{ id: '5001', updates: [updateWithPopulatedReplies] }] },
             },
           },
         ],
@@ -66,6 +93,8 @@ describe('monday update list', () => {
     );
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout);
+    // Projection forces `replies: []` regardless of wire response —
+    // proves the F2 contract holds at both layers.
     expect(env.data).toEqual([{ ...sampleUpdate, replies: [] }]);
     expect(env.meta.total_returned).toBe(1);
   });
@@ -170,12 +199,14 @@ describe('monday update list', () => {
     expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
   });
 
-  it('--with-replies populates replies (v0.2 opt-in flag — default v0.2 omits)', async () => {
+  it('--with-replies populates replies AND requests them on the wire (v0.2 opt-in flag)', async () => {
     // The breaking change: pre-v0.2, replies were ALWAYS populated
     // on every `update list` call (Monday's nested selection). v0.2
     // makes the second leg opt-in via `--with-replies`. This test
-    // pins the behaviour: with the flag set, replies survive the
-    // projection; without it (the default test above), replies: [].
+    // pins the behaviour at both layers (Codex M13 F2):
+    //   1. Wire-side: `match_query` asserts the `replies {` selection
+    //      IS present in the GraphQL query.
+    //   2. Projection: replies survive the `normaliseReplies` pass.
     const updateWithReplies = {
       ...sampleUpdate,
       replies: [
@@ -195,6 +226,8 @@ describe('monday update list', () => {
           {
             operation_name: 'UpdateList',
             match_variables: { ids: ['5001'] },
+            // The opt-in path MUST include the replies selection.
+            match_query: /replies \{/,
             response: {
               data: { items: [{ id: '5001', updates: [updateWithReplies] }] },
             },
@@ -1692,5 +1725,109 @@ describe('monday update clear-all (integration, M13 — partial-success envelope
       };
     };
     expect(env.data.commands['update.clear-all']?.idempotent).toBe(true);
+  });
+
+  it('truncated page-walk surfaces pagination_cap_reached warning + dispatch covers the prefix only', async () => {
+    // Codex M13 F1 (P2) regression. With --limit-pages 2 and a thread
+    // bigger than 2 × 100 updates, the walker stops at the cap with
+    // `hasMore: true`. The CLI surfaces `pagination_cap_reached`
+    // (mirroring update list / item list) so the agent knows the
+    // partial-success envelope's `data.results` only covers the
+    // collected prefix — re-run to clear the rest.
+    const fullPage = (start: number) =>
+      Array.from({ length: 100 }, (_, i) => ({ id: String(start + i) }));
+    const out = await drive(
+      [
+        'update',
+        'clear-all',
+        '12345',
+        '--yes',
+        '--limit-pages',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { page: 1 },
+            response: {
+              data: {
+                items: [{ id: '12345', updates: fullPage(1) }],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { page: 2 },
+            response: {
+              data: {
+                items: [{ id: '12345', updates: fullPage(101) }],
+              },
+            },
+          },
+          // Per-update deletes for the 200 collected updates. `repeat`
+          // lets one canned response satisfy the loop without bloating
+          // the cassette.
+          {
+            operation_name: 'UpdateClearAllDelete',
+            response: { data: { delete_update: { id: '0' } } },
+            repeat: 200,
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { results: readonly { ok: boolean }[] };
+      warnings: readonly { code: string }[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.results.length).toBe(200);
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
+  });
+
+  it('--dry-run also surfaces pagination_cap_reached when the page-walk truncates', async () => {
+    // Same regression — dry-run paths must inherit the warning too,
+    // otherwise an agent previewing a too-big thread sees an
+    // incomplete `update_ids` list with no signal that more exist.
+    const fullPage = (start: number) =>
+      Array.from({ length: 100 }, (_, i) => ({ id: String(start + i) }));
+    const out = await drive(
+      [
+        'update',
+        'clear-all',
+        '12345',
+        '--dry-run',
+        '--limit-pages',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { page: 1 },
+            response: {
+              data: { items: [{ id: '12345', updates: fullPage(1) }] },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { page: 2 },
+            response: {
+              data: { items: [{ id: '12345', updates: fullPage(101) }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { update_ids: readonly string[] }[];
+      warnings: readonly { code: string }[];
+    };
+    expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
+    expect(env.planned_changes[0]?.update_ids.length).toBe(200);
   });
 });

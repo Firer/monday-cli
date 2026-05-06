@@ -56,11 +56,16 @@ import {
   ApiError,
   ConfirmationRequiredError,
 } from '../../utils/errors.js';
-import { walkPages, DEFAULT_MAX_PAGES } from '../../api/walk-pages.js';
+import {
+  buildCapWarning,
+  DEFAULT_MAX_PAGES,
+  walkPages,
+} from '../../api/walk-pages.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import type { MondayClient } from '../../api/client.js';
+import type { Warning } from '../../utils/output/envelope.js';
 
 const UPDATE_IDS_QUERY = `
   query UpdateClearAllRead($itemIds: [ID!], $limit: Int, $page: Int) {
@@ -115,15 +120,34 @@ export const updateClearAllOutputSchema = z
 
 export type UpdateClearAllOutput = z.infer<typeof updateClearAllOutputSchema>;
 
-const inputSchema = z.object({ itemId: ItemIdSchema }).strict();
+const inputSchema = z
+  .object({
+    itemId: ItemIdSchema,
+    limitPages: z.coerce.number().int().positive().max(500).optional(),
+  })
+  .strict();
 
 const PAGE_SIZE = 100;
+
+interface CollectedUpdates {
+  readonly ids: readonly string[];
+  /**
+   * `true` when the page-walker hit `maxPages` on a still-full page.
+   * Codex M13 F1: an item with more than `maxPages × PAGE_SIZE`
+   * updates would silently truncate without this signal — agent
+   * sees `ok: true` and assumes the thread was cleared, while
+   * older updates linger.
+   */
+  readonly hasMore: boolean;
+  readonly pagesFetched: number;
+}
 
 const collectUpdateIds = async (
   client: MondayClient,
   itemId: string,
   source: SourceAggregator,
-): Promise<readonly string[]> => {
+  maxPages: number,
+): Promise<CollectedUpdates> => {
   let pageCounter = 0;
   const result = await walkPages<{ readonly id: string }, UpdateIdsResponse>({
     fetchPage: async (page) => {
@@ -157,9 +181,13 @@ const collectUpdateIds = async (
     },
     pageSize: PAGE_SIZE,
     all: true,
-    maxPages: DEFAULT_MAX_PAGES,
+    maxPages,
   });
-  return result.items.map((u) => u.id);
+  return {
+    ids: result.items.map((u) => u.id),
+    hasMore: result.hasMore,
+    pagesFetched: result.pagesFetched,
+  };
 };
 
 export const updateClearAllCommand: CommandModule<
@@ -185,12 +213,19 @@ export const updateClearAllCommand: CommandModule<
     noun
       .command('clear-all <itemId>')
       .description(updateClearAllCommand.summary)
+      .option(
+        '--limit-pages <n>',
+        `max pages to walk for the page-walk leg (1-500, default ${String(DEFAULT_MAX_PAGES)}). On a thread bigger than the cap, the walker surfaces a pagination_cap_reached warning + the live dispatch covers only the collected prefix; agents re-run after the prefix clears.`,
+      )
       .addHelpText(
         'after',
         ['', 'Examples:', ...updateClearAllCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
       )
-      .action(async (itemId: unknown) => {
-        const parsed = parseArgv(updateClearAllCommand.inputSchema, { itemId });
+      .action(async (itemId: unknown, opts: unknown) => {
+        const parsed = parseArgv(updateClearAllCommand.inputSchema, {
+          itemId,
+          ...(opts as Readonly<Record<string, unknown>>),
+        });
 
         // Gate BEFORE `resolveClient()` — Codex M10 round-1 P2.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
@@ -222,7 +257,26 @@ export const updateClearAllCommand: CommandModule<
         // walk is always live; per-update deletes are always live;
         // aggregate stays 'live'. cache_age_seconds: null throughout.
         const sourceAgg = new SourceAggregator();
-        const updateIds = await collectUpdateIds(client, parsed.itemId, sourceAgg);
+        const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+        const collected = await collectUpdateIds(
+          client,
+          parsed.itemId,
+          sourceAgg,
+          maxPages,
+        );
+
+        // Codex M13 F1 (P2): the page-walker's `hasMore` signal must
+        // surface to the agent. On a thread with more updates than
+        // `maxPages × PAGE_SIZE`, the walker truncates and the
+        // dispatch only covers the collected prefix; without a
+        // warning the agent thinks "all cleared" while older updates
+        // linger. Per the v0.1 walkPages contract, surface
+        // `pagination_cap_reached` so the agent knows to re-run (or
+        // pass `--limit-pages` to extend the cap).
+        const warnings: Warning[] = [];
+        if (collected.hasMore) {
+          warnings.push(buildCapWarning(collected.pagesFetched));
+        }
 
         if (globalFlags.dryRun) {
           // Dry-run: report would-delete IDs after the page-walk.
@@ -236,11 +290,11 @@ export const updateClearAllCommand: CommandModule<
               {
                 operation: 'clear_all_updates',
                 item_id: parsed.itemId,
-                update_ids: updateIds,
+                update_ids: collected.ids,
               },
             ],
             ...sourceAgg.result(),
-            warnings: [],
+            warnings,
             apiVersion,
           });
           return;
@@ -254,7 +308,7 @@ export const updateClearAllCommand: CommandModule<
           ReturnType<typeof client.raw>
         > | undefined;
         const results = await dispatchSequential(
-          updateIds,
+          collected.ids,
           'update_id',
           async ({ targetId }) => {
             const response = await client.raw<unknown>(
@@ -305,7 +359,7 @@ export const updateClearAllCommand: CommandModule<
           }),
           schema: updateClearAllCommand.outputSchema,
           programOpts: program.opts(),
-          warnings: [],
+          warnings,
           ...(lastResponse === undefined
             ? { apiVersion }
             : toEmit(lastResponse)),
