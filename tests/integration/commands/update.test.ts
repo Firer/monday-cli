@@ -243,6 +243,24 @@ describe('monday update list', () => {
   });
 
   it('--board <bid> routes through boards(ids:).updates and projects the same shape', async () => {
+    // Codex round-2 F1 (P2): same query-shape pin the per-item route
+    // got. The board variant uses a SEPARATE GraphQL string
+    // (`UpdateListByBoard`); without `match_query` here, a board-only
+    // regression could silently re-introduce `replies {` and burn
+    // complexity on large board scans. The fixture also returns
+    // populated replies to prove the projection still empties them.
+    const updateWithPopulatedReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'reply body',
+          text_body: 'reply body',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
     const out = await drive(
       ['update', 'list', '--board', '111', '--json'],
       {
@@ -250,8 +268,10 @@ describe('monday update list', () => {
           {
             operation_name: 'UpdateListByBoard',
             match_variables: { ids: ['111'] },
+            // Default board path must NOT include `replies {` either.
+            match_query: /^(?:(?!replies \{).)*$/s,
             response: {
-              data: { boards: [{ id: '111', updates: [sampleUpdate] }] },
+              data: { boards: [{ id: '111', updates: [updateWithPopulatedReplies] }] },
             },
           },
         ],
@@ -260,6 +280,46 @@ describe('monday update list', () => {
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout);
     expect(env.data).toEqual([{ ...sampleUpdate, replies: [] }]);
+  });
+
+  it('--board --with-replies populates replies AND requests them on the wire', async () => {
+    // Codex round-2 F1 (P2) cont. — opt-in path on the board variant
+    // mirrors the per-item assertion. `match_query` confirms the
+    // `replies {` selection is present in `buildBoardQuery(true)`'s
+    // output, so a regression that drops the nested selection from
+    // the board path while leaving the item path intact fails loud.
+    const boardUpdateWithReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'board reply body',
+          text_body: 'board reply body',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
+    const out = await drive(
+      ['update', 'list', '--board', '111', '--with-replies', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateListByBoard',
+            match_variables: { ids: ['111'] },
+            match_query: /replies \{/,
+            response: {
+              data: { boards: [{ id: '111', updates: [boardUpdateWithReplies] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: readonly { replies: readonly unknown[] }[];
+    };
+    expect(env.data[0]?.replies).toHaveLength(1);
   });
 
   it('--board with non-existent id surfaces not_found with details.board_id', async () => {

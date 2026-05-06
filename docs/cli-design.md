@@ -690,7 +690,7 @@ monday update pin <uid> [--dry-run]                                          v0.
                                           # `pin_to_top`. Idempotent.
 monday update unpin <uid> [--dry-run]                                        v0.2
                                           # `unpin_from_top`. Idempotent.
-monday update clear-all <iid> --yes [--dry-run]                              v0.2
+monday update clear-all <iid> --yes [--limit-pages <n>] [--dry-run]          v0.2
                                           # delete all updates on item.
                                           # Destructive: --yes mandatory. Page-walks
                                           # `updates(item_id)` via walkPages to
@@ -707,7 +707,16 @@ monday update clear-all <iid> --yes [--dry-run]                              v0.
                                           # (couldn't reach API, item lookup
                                           # failed, etc.). Sequential per §8
                                           # decision 8 — parallel waits for v0.4
-                                          # `--concurrency`.
+                                          # `--concurrency`. `--limit-pages <n>`
+                                          # extends the page-walk cap (1-500,
+                                          # default 50, 100 updates per page); on
+                                          # threads bigger than `n × 100` updates
+                                          # the page-walker truncates and the CLI
+                                          # surfaces `pagination_cap_reached` in
+                                          # `warnings`. The live + dry-run envelopes
+                                          # then cover the collected prefix only —
+                                          # agents re-run after the prefix clears
+                                          # (per-call idempotency holds).
 
 # === USER ===
 monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]   v0.1
