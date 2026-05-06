@@ -14,6 +14,18 @@ humans are second-class. Built incrementally via Claude Code on top of
 **v0.1.0 published; v0.2.0 in development on `main`.** M0–M13 shipped;
 **M14 (workspace lifecycle — admin-permission-sensitive) is next.**
 
+**M13 → M14 cleanup window — pending lifts** (see `docs/v0.2-plan.md`
+§20):
+- **R37 + R38** ship as one consolidated commit before M14 opens.
+  R37 lifts `projectMutationUpdate` (5 sites across the eight M13
+  verbs); R38 lifts `UPDATE_FIELDS_FRAGMENT` (6 GraphQL sites). Pure
+  refactor — every existing test passes byte-identical. Same pattern
+  R30 / R34 followed in earlier cleanup windows.
+- **R29 (reactivated)** schedules into M14's docs sweep — workspace
+  delete arrives as the 5th destructive-verb gate consumer; lifting
+  then means M14 adopts the helper from day one rather than copying
+  the M10 round-1 P2 ordering block.
+
 The three binding documents — read in this order before writing code:
 
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
