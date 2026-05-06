@@ -906,3 +906,127 @@ describe('monday update edit (integration, M13)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday update delete (integration, M13)', () => {
+  const deletedUpdate = {
+    id: '77',
+    body: '<p>Looks good</p>',
+    text_body: 'Looks good',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T09:01:00Z',
+  };
+
+  it('rejects without --yes as confirmation_required (exit 1)', async () => {
+    const out = await drive(
+      ['update', 'delete', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { update_id?: string } };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.update_id).toBe('77');
+    // Gate fired before any wire call. `meta.source` reflects the
+    // runner's pre-resolve default (`'none'`) — same shape M10's
+    // archive / delete tests pin.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires even with no token configured (M10 round-1 P2 ordering)', async () => {
+    // Drives the gate-before-resolveClient ordering invariant: drop
+    // the token from env so a config_error WOULD fire if the gate
+    // ran second. Pre-fix shape was config_error / exit 3; post-fix
+    // is confirmation_required / exit 1.
+    const out = await drive(
+      ['update', 'delete', '77', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('live: --yes deletes the update and emits the projected envelope', async () => {
+    const out = await drive(
+      ['update', 'delete', '77', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateDelete',
+            match_variables: { id: '77' },
+            response: { data: { delete_update: deletedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    expect(env.data.id).toBe('77');
+  });
+
+  it('live: not_found when delete_update returns null', async () => {
+    const out = await drive(
+      ['update', 'delete', '99999', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateDelete',
+            response: { data: { delete_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { update_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.update_id).toBe('99999');
+  });
+
+  it('--dry-run: emits minimal planned_changes; no mutation fires', async () => {
+    const out = await drive(
+      ['update', 'delete', '77', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; update_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('delete_update');
+    expect(plan?.update_id).toBe('77');
+    // Minimal shape — no preflight read leg, source stays 'none'.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('rejects non-numeric update id as usage_error', async () => {
+    const out = await drive(
+      ['update', 'delete', 'abc', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('token never leaks across the destructive path', async () => {
+    const out = await drive(
+      ['update', 'delete', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});

@@ -72,6 +72,7 @@ import { updateCreateCommand } from './update/create.js';
 // unlike / pin / unpin / clear-all.
 import { updateReplyCommand } from './update/reply.js';
 import { updateEditCommand } from './update/edit.js';
+import { updateDeleteCommand } from './update/delete.js';
 // M9 (v0.2) — item create + subitem create.
 import { itemCreateCommand } from './item/create.js';
 // M10 (v0.2) — item lifecycle: archive + delete + duplicate.
@@ -132,6 +133,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateCreateCommand,
     updateReplyCommand,
     updateEditCommand,
+    updateDeleteCommand,
     rawCommand,
     boardDoctorCommand,
   ];
