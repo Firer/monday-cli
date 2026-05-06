@@ -1298,3 +1298,297 @@ describe('monday update pin / unpin (integration, M13)', () => {
     expect(env.data.commands['update.unpin']?.idempotent).toBe(true);
   });
 });
+
+describe('monday update clear-all (integration, M13 — partial-success envelope)', () => {
+  it('rejects without --yes as confirmation_required (exit 1)', async () => {
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { item_id?: string } };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.item_id).toBe('12345');
+  });
+
+  it('confirmation gate fires before resolveClient (M10 round-1 P2 ordering)', async () => {
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('--dry-run: page-walks then emits {operation: clear_all_updates, item_id, update_ids}; no delete fires', async () => {
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { itemIds: ['12345'], page: 1 },
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    updates: [{ id: '77' }, { id: '78' }, { id: '82' }],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        item_id: string;
+        update_ids: readonly string[];
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('clear_all_updates');
+    expect(plan?.item_id).toBe('12345');
+    expect(plan?.update_ids).toEqual(['77', '78', '82']);
+    // Page-walk fired real reads; meta.source: 'live'.
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: page-walks + sequential delete; emits ok:true with per-update results', async () => {
+    const updateOk = (id: string) => ({ id });
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    updates: [{ id: '77' }, { id: '78' }],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '77' },
+            response: { data: { delete_update: updateOk('77') } },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '78' },
+            response: { data: { delete_update: updateOk('78') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { update_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.results).toEqual([
+      { update_id: '77', ok: true },
+      { update_id: '78', ok: true },
+    ]);
+  });
+
+  it('live: empty thread (zero updates) → ok:true with empty results', async () => {
+    // Idempotency proof: re-running on an already-cleared item is a
+    // valid outcome — the dispatch loop ran zero times, the envelope
+    // still emits ok:true with results: [].
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: {
+              data: { items: [{ id: '12345', updates: [] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { results: readonly unknown[] };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.results).toEqual([]);
+  });
+
+  it('live: per-update failure decorates the result record but envelope stays ok:true (universal partial-success rule)', async () => {
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    updates: [{ id: '77' }, { id: '78' }, { id: '82' }],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '77' },
+            response: { data: { delete_update: { id: '77' } } },
+          },
+          // Second delete fails (Monday says forbidden mid-loop).
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '78' },
+            response: {
+              errors: [
+                {
+                  message: 'Permission denied',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+          // Third delete recovers (loop didn't abort on the failure).
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '82' },
+            response: { data: { delete_update: { id: '82' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly {
+          update_id: string;
+          ok: boolean;
+          error?: { code: string; message: string };
+        }[];
+      };
+    };
+    // Per the §1 universal rule: dispatch ran → envelope is ok:true
+    // even when a per-target call inside the loop failed.
+    expect(env.ok).toBe(true);
+    expect(env.data.results.length).toBe(3);
+    expect(env.data.results[0]).toEqual({ update_id: '77', ok: true });
+    expect(env.data.results[1]?.update_id).toBe('78');
+    expect(env.data.results[1]?.ok).toBe(false);
+    expect(env.data.results[1]?.error?.code).toBe('forbidden');
+    expect(env.data.results[2]).toEqual({ update_id: '82', ok: true });
+  });
+
+  it('live: every per-update delete fails — envelope stays ok:true (whole-call success means dispatch ran)', async () => {
+    const out = await drive(
+      ['update', 'clear-all', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: {
+              data: {
+                items: [
+                  { id: '12345', updates: [{ id: '77' }, { id: '78' }] },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '77' },
+            response: { data: { delete_update: null } },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            match_variables: { id: '78' },
+            response: { data: { delete_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly {
+          update_id: string;
+          ok: boolean;
+          error?: { code: string };
+        }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.results[0]?.ok).toBe(false);
+    expect(env.data.results[0]?.error?.code).toBe('not_found');
+    expect(env.data.results[1]?.ok).toBe(false);
+    expect(env.data.results[1]?.error?.code).toBe('not_found');
+  });
+
+  it('not_found surfaces at the WHOLE-CALL boundary when the item itself is missing', async () => {
+    // Page-walk's first page returns no items → not_found before
+    // any delete fires. This is the whole-call-failure exception
+    // to the partial-success rule (top-level `ok: false`).
+    const out = await drive(
+      ['update', 'clear-all', '99999', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: { data: { items: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { item_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.item_id).toBe('99999');
+  });
+
+  it('rejects non-numeric item id as usage_error', async () => {
+    const out = await drive(
+      ['update', 'clear-all', 'abc', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('idempotent flag is true (zero-update re-run is a valid outcome)', async () => {
+    const out = await drive(
+      ['schema', 'update.clear-all', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        commands: Readonly<Record<string, { idempotent: boolean }>>;
+      };
+    };
+    expect(env.data.commands['update.clear-all']?.idempotent).toBe(true);
+  });
+});
