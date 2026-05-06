@@ -46,14 +46,17 @@ describe('monday update list — null-data resilience', () => {
 });
 
 describe('monday update list', () => {
-  it('returns the projected updates for an item', async () => {
+  it('returns the projected updates for an item (default: replies omitted)', async () => {
+    // v0.2 breaking change: the wire variable is now `ids: [<iid>]`
+    // (was `itemIds`), shared across the per-item + per-board
+    // routing modes. Default projection emits `replies: []`.
     const out = await drive(
       ['update', 'list', '5001', '--json'],
       {
         interactions: [
           {
             operation_name: 'UpdateList',
-            match_variables: { itemIds: ['5001'] },
+            match_variables: { ids: ['5001'] },
             response: {
               data: { items: [{ id: '5001', updates: [sampleUpdate] }] },
             },
@@ -63,7 +66,7 @@ describe('monday update list', () => {
     );
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout);
-    expect(env.data).toEqual([sampleUpdate]);
+    expect(env.data).toEqual([{ ...sampleUpdate, replies: [] }]);
     expect(env.meta.total_returned).toBe(1);
   });
 
@@ -165,6 +168,105 @@ describe('monday update list', () => {
     };
     expect(env.meta.has_more).toBe(true);
     expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
+  });
+
+  it('--with-replies populates replies (v0.2 opt-in flag — default v0.2 omits)', async () => {
+    // The breaking change: pre-v0.2, replies were ALWAYS populated
+    // on every `update list` call (Monday's nested selection). v0.2
+    // makes the second leg opt-in via `--with-replies`. This test
+    // pins the behaviour: with the flag set, replies survive the
+    // projection; without it (the default test above), replies: [].
+    const updateWithReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'reply body',
+          text_body: 'reply body',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
+    const out = await drive(
+      ['update', 'list', '5001', '--with-replies', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            match_variables: { ids: ['5001'] },
+            response: {
+              data: { items: [{ id: '5001', updates: [updateWithReplies] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: readonly { replies: readonly unknown[] }[];
+    };
+    expect(env.data[0]?.replies).toHaveLength(1);
+  });
+
+  it('--board <bid> routes through boards(ids:).updates and projects the same shape', async () => {
+    const out = await drive(
+      ['update', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateListByBoard',
+            match_variables: { ids: ['111'] },
+            response: {
+              data: { boards: [{ id: '111', updates: [sampleUpdate] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([{ ...sampleUpdate, replies: [] }]);
+  });
+
+  it('--board with non-existent id surfaces not_found with details.board_id', async () => {
+    const out = await drive(
+      ['update', 'list', '--board', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateListByBoard',
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('99999');
+  });
+
+  it('rejects passing both <iid> and --board as usage_error (mutually exclusive)', async () => {
+    const out = await drive(
+      ['update', 'list', '5001', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects passing neither <iid> nor --board as usage_error', async () => {
+    const out = await drive(
+      ['update', 'list', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
   });
 
   it('--api-version reaches error envelope on HTTP 401', async () => {
