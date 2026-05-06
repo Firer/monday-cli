@@ -98,7 +98,7 @@ import {
   type BoardMetadata,
 } from '../../api/board-metadata.js';
 import { buildQueryParams, type QueryParams } from '../../api/filters.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { fetchItemsPage } from '../../api/items-page-walker.js';
 import {
   ITEM_FIELDS_FRAGMENT,
   resolveMeFactory,
@@ -111,36 +111,24 @@ import {
 import type { Warning } from '../../utils/output/envelope.js';
 
 // ============================================================
-// GraphQL — match-by lookup + mutation surface.
+// GraphQL — mutation surface (lookup uses the shared
+// `fetchItemsPage` helper from `api/items-page-walker.ts` lifted
+// post-M12 per §18 R34; the helper builds the `boards.items_page`
+// query inline from `operationName` + `itemFields` + `queryParams`,
+// so the lookup mirrors `item update --where`'s wire shape without
+// a per-file GraphQL constant).
 // ============================================================
 
 /**
- * Match-by lookup query. Mirrors `item update --where`'s
- * `items_page(query_params: {rules: [{column_id, compare_value,
- * operator}]})` shape so the resolver / cache contract stays the same
- * across the two surfaces. limit=11 short-circuits the
- * 0/1/2+ branch decision in a single round-trip without a full
- * cursor walk: the 11th item exists only when ≥11 candidates match,
- * which already gives `ambiguous_match` plus 10 capped candidates the
- * §6.5 details schema documents.
+ * Match-by lookup uses `fetchItemsPage` directly with `limit: 11` —
+ * the 11th item exists only when ≥11 candidates match, which already
+ * gives `ambiguous_match` plus 10 capped candidates the §6.5 details
+ * schema documents. No `next_items_page` continuation: the planner
+ * caps at 10 candidates, so a non-null cursor on the first page
+ * is the 2+ signal.
  */
-const UPSERT_LOOKUP_QUERY = `
-  query ItemUpsertLookup(
-    $boardId: ID!
-    $limit: Int!
-    $queryParams: ItemsQuery
-  ) {
-    boards(ids: [$boardId]) {
-      items_page(limit: $limit, query_params: $queryParams) {
-        cursor
-        items {
-          id
-          name
-        }
-      }
-    }
-  }
-`;
+const UPSERT_LOOKUP_ITEM_FIELDS = `id
+          name`;
 
 const CREATE_ITEM_MUTATION = `
   mutation ItemUpsertCreate(
@@ -226,23 +214,6 @@ const lookupItemSchema = z
   .object({
     id: z.string().min(1),
     name: z.string(),
-  })
-  .loose();
-
-const lookupResponseSchema = z
-  .object({
-    boards: z
-      .array(
-        z
-          .object({
-            items_page: z.object({
-              cursor: z.string().nullable(),
-              items: z.array(lookupItemSchema),
-            }),
-          })
-          .loose(),
-      )
-      .min(1),
   })
   .loose();
 
@@ -531,31 +502,18 @@ const lookupMatches = async (inputs: LookupInputs): Promise<LookupResult> => {
     (filterResult.queryParams as QueryParams | undefined)?.rules ?? [];
   const rules = [...nameRules, ...columnRules];
 
-  const response = await inputs.client.raw<unknown>(
-    UPSERT_LOOKUP_QUERY,
-    {
-      boardId: inputs.boardId,
-      limit: 11,
-      queryParams: { rules },
-    },
-    { operationName: 'ItemUpsertLookup' },
-  );
-  const data = unwrapOrThrow(
-    lookupResponseSchema.safeParse(response.data),
-    {
-      context: `Monday returned a malformed ItemUpsertLookup response for board ${inputs.boardId}`,
-      details: { board_id: inputs.boardId },
-    },
-  );
-  // c8 ignore — defensive: schema's `.min(1)` rejects empty arrays.
-  const board = data.boards[0];
-  /* c8 ignore next 3 */
-  if (board === undefined) {
-    throw new ApiError('internal_error', 'upsert lookup: empty boards array');
-  }
+  const lookup = await fetchItemsPage({
+    client: inputs.client,
+    operationName: 'ItemUpsertLookup',
+    boardId: inputs.boardId,
+    limit: 11,
+    queryParams: { rules },
+    itemFields: UPSERT_LOOKUP_ITEM_FIELDS,
+    itemSchema: lookupItemSchema,
+  });
   return {
-    items: board.items_page.items,
-    hasMore: board.items_page.cursor !== null,
+    items: lookup.data.items,
+    hasMore: lookup.data.cursor !== null,
     // Filter pipeline returns `Warning` shape; resolver-warning
     // codes (`column_token_collision`, `stale_cache_refreshed`)
     // structurally widen to ResolverWarning cleanly.

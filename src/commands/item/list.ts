@@ -44,8 +44,12 @@ import { buildQueryParams } from '../../api/filters.js';
 import {
   DEFAULT_PAGE_SIZE,
   paginate,
-  type PaginatedPage,
 } from '../../api/pagination.js';
+import {
+  fetchItemsPage,
+  fetchNextItemsPage,
+  type ItemsPagePayload,
+} from '../../api/items-page-walker.js';
 import {
   idFromRawItem,
   projectedItemSchema,
@@ -72,74 +76,24 @@ import {
 import { collectSecrets } from '../../cli/envelope-out.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
-const ITEMS_PAGE_QUERY = `
-  query ItemsPage(
-    $boardId: ID!
-    $limit: Int!
-    $queryParams: ItemsQuery
-  ) {
-    boards(ids: [$boardId]) {
-      items_page(limit: $limit, query_params: $queryParams) {
-        cursor
-        items {
-          ${ITEM_FIELDS_FRAGMENT}
-        }
-      }
-    }
-  }
-`;
+// items_page GraphQL surface lifted into `api/items-page-walker.ts`
+// per §18 R34 (post-M12). The helper builds the queries inline from
+// `operationName` + `itemFields` + optional `groupId` — the
+// top-level / by-group split (`boards.items_page` vs
+// `boards.groups.items_page`) and the malformed-response parse
+// boundary live there. `paginate.ts` stays the cursor walker for
+// this command's --all / --limit / --page-size / NDJSON onItem /
+// complexity tracking.
 
 /**
- * Group-scoped variant — Monday's items_page exposes a per-group
- * page when the query is rooted at `boards.groups.items_page`. The
- * top-level `items_page` doesn't accept a group filter, so the
- * group-aware path uses a separate query shape rather than a flag
- * inside `query_params`.
+ * Per-row schema is `z.unknown()` — list.ts hands raw rows to
+ * `projectFromRaw` (which is the boundary that types each row).
+ * Keeping the helper untyped here preserves byte-identical behaviour
+ * (no per-row narrowing on the items_page page itself).
  */
-const ITEMS_PAGE_BY_GROUP_QUERY = `
-  query ItemsPageByGroup(
-    $boardId: ID!
-    $groupId: String!
-    $limit: Int!
-    $queryParams: ItemsQuery
-  ) {
-    boards(ids: [$boardId]) {
-      groups(ids: [$groupId]) {
-        items_page(limit: $limit, query_params: $queryParams) {
-          cursor
-          items {
-            ${ITEM_FIELDS_FRAGMENT}
-          }
-        }
-      }
-    }
-  }
-`;
+const listItemSchema = z.unknown();
 
-const NEXT_ITEMS_PAGE_QUERY = `
-  query NextItemsPage($cursor: String!, $limit: Int!) {
-    next_items_page(limit: $limit, cursor: $cursor) {
-      cursor
-      items {
-        ${ITEM_FIELDS_FRAGMENT}
-      }
-    }
-  }
-`;
-
-interface InitialResponse {
-  readonly boards:
-    | readonly {
-        readonly items_page?: { readonly cursor: string | null; readonly items: readonly unknown[] };
-        readonly groups?: readonly {
-          readonly items_page: { readonly cursor: string | null; readonly items: readonly unknown[] };
-        }[];
-      }[]
-    | null;
-}
-interface NextResponse {
-  readonly next_items_page: { readonly cursor: string | null; readonly items: readonly unknown[] } | null;
-}
+type WalkerResponse = MondayResponse<ItemsPagePayload<unknown>>;
 
 export const itemListOutputSchema = z.array(projectedItemSchema);
 export type ItemListOutput = readonly ProjectedItem[];
@@ -179,60 +133,34 @@ const initialFetcher = (
   boardId: string,
   group: string | undefined,
   queryParams: Readonly<Record<string, unknown>> | undefined,
-): ((effectiveLimit: number) => Promise<MondayResponse<InitialResponse>>) => {
-  return (effectiveLimit) => {
-    const variables: Record<string, unknown> = {
+): ((effectiveLimit: number) => Promise<WalkerResponse>) => {
+  const operationName =
+    group === undefined ? 'ItemsPage' : 'ItemsPageByGroup';
+  return (effectiveLimit) =>
+    fetchItemsPage<unknown>({
+      client,
+      operationName,
       boardId,
+      ...(group === undefined ? {} : { groupId: group }),
       limit: effectiveLimit,
-    };
-    if (queryParams !== undefined) {
-      variables.queryParams = queryParams;
-    }
-    if (group !== undefined) {
-      variables.groupId = group;
-      return client.raw<InitialResponse>(ITEMS_PAGE_BY_GROUP_QUERY, variables, {
-        operationName: 'ItemsPageByGroup',
-      });
-    }
-    return client.raw<InitialResponse>(ITEMS_PAGE_QUERY, variables, {
-      operationName: 'ItemsPage',
+      queryParams,
+      itemFields: ITEM_FIELDS_FRAGMENT,
+      itemSchema: listItemSchema,
     });
-  };
 };
 
 const nextFetcher = (
   client: MondayClient,
-): ((cursor: string, effectiveLimit: number) => Promise<MondayResponse<NextResponse>>) => {
+): ((cursor: string, effectiveLimit: number) => Promise<WalkerResponse>) => {
   return (cursor, effectiveLimit) =>
-    client.raw<NextResponse>(
-      NEXT_ITEMS_PAGE_QUERY,
-      { cursor, limit: effectiveLimit },
-      { operationName: 'NextItemsPage' },
-    );
-};
-
-const extractInitial = (r: MondayResponse<InitialResponse>): PaginatedPage<unknown> => {
-  const board = r.data.boards?.[0];
-  // Group-scoped query: `boards[0].groups[0].items_page`.
-  // Top-level query: `boards[0].items_page`.
-  const page = board?.groups?.[0]?.items_page ?? board?.items_page;
-  /* c8 ignore next 4 — defensive nullish-coalescing for the
-     Monday-wire-shape `page` being undefined; the request always
-     returns an items_page object on success, the guard exists so a
-     malformed cassette / future schema drift doesn't crash. */
-  return {
-    cursor: page?.cursor ?? null,
-    items: page?.items ?? [],
-  };
-};
-
-const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> => {
-  const page = r.data.next_items_page;
-  /* c8 ignore next 4 — same defensive shape as extractInitial. */
-  return {
-    cursor: page?.cursor ?? null,
-    items: page?.items ?? [],
-  };
+    fetchNextItemsPage<unknown>({
+      client,
+      operationName: 'NextItemsPage',
+      cursor,
+      limit: effectiveLimit,
+      itemFields: ITEM_FIELDS_FRAGMENT,
+      itemSchema: listItemSchema,
+    });
 };
 
 /**
@@ -419,14 +347,11 @@ export const itemListCommand: CommandModule<
             source: effectiveSource,
             cacheAgeSeconds: effectiveCacheAge,
           });
-          const result = await paginate<unknown, InitialResponse | NextResponse>({
+          const result = await paginate<unknown, ItemsPagePayload<unknown>>({
             fetchInitial: initialFetcher(client, parsed.board, parsed.group, queryParams),
             fetchNext: nextFetcher(client),
             now: ctx.clock,
-            extractPage: (r): PaginatedPage<unknown> => {
-              if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
-              return extractInitial(r as MondayResponse<InitialResponse>);
-            },
+            extractPage: (r) => r.data,
             getId: idFromRawItem,
             all: flags.all,
             ...(flags.limit === undefined ? {} : { limit: flags.limit }),
@@ -445,14 +370,11 @@ export const itemListCommand: CommandModule<
 
         // Non-streaming path — collect, project, emit through the
         // standard envelope.
-        const result = await paginate<unknown, InitialResponse | NextResponse>({
+        const result = await paginate<unknown, ItemsPagePayload<unknown>>({
           fetchInitial: initialFetcher(client, parsed.board, parsed.group, queryParams),
           fetchNext: nextFetcher(client),
           now: ctx.clock,
-          extractPage: (r): PaginatedPage<unknown> => {
-            if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
-            return extractInitial(r as MondayResponse<InitialResponse>);
-          },
+          extractPage: (r) => r.data,
           getId: idFromRawItem,
           all: flags.all,
           ...(flags.limit === undefined ? {} : { limit: flags.limit }),

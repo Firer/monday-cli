@@ -90,11 +90,15 @@ import {
   type BoardMetadata,
 } from '../../api/board-metadata.js';
 import {
-  paginate,
   DEFAULT_PAGE_SIZE,
+  paginate,
   type PaginatedPage,
 } from '../../api/pagination.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import {
+  fetchItemsPage,
+  fetchNextItemsPage,
+  type ItemsPagePayload,
+} from '../../api/items-page-walker.js';
 import type { Warning } from '../../utils/output/envelope.js';
 import type { RunContext } from '../../cli/run.js';
 import type { GlobalFlags } from '../../types/global-flags.js';
@@ -518,75 +522,19 @@ const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem =>
 // ============================================================
 // Bulk path (cli-design §10.2 — `--where` / `--filter-json`).
 // Mirrors `item update --where`'s runBulk shape verbatim — same
-// items_page walker, same confirmation gate, same per-item failure
+// items_page walker (lifted into `api/items-page-walker.ts` per
+// §18 R34 post-M12), same confirmation gate, same per-item failure
 // decoration. The single-column scope keeps the pipeline thinner
 // (one column to resolve, one clear payload to build, one mutation
 // per item) but the orchestration shape is identical.
 // ============================================================
 
-const ITEMS_PAGE_QUERY = `
-  query ItemsPage(
-    $boardId: ID!
-    $limit: Int!
-    $queryParams: ItemsQuery
-  ) {
-    boards(ids: [$boardId]) {
-      items_page(limit: $limit, query_params: $queryParams) {
-        cursor
-        items {
-          id
-        }
-      }
-    }
-  }
-`;
-
-const NEXT_ITEMS_PAGE_QUERY = `
-  query NextItemsPage($cursor: String!, $limit: Int!) {
-    next_items_page(limit: $limit, cursor: $cursor) {
-      cursor
-      items {
-        id
-      }
-    }
-  }
-`;
-
-// Same parse-boundary discipline as `item update --where`'s bulk
-// path. Tight schemas surface schema drift as `internal_error` with
-// the failing field path on `details.issues` rather than collapsing
-// to a silent "0 matched, 0 applied" success.
+// Tight per-row schema. The shared walker wraps it in the
+// `items_page` envelope; schema drift surfaces as `internal_error`
+// with the failing field path on `details.issues` rather than
+// collapsing to a silent "0 matched, 0 applied" success.
 const bulkItemSchema = z.object({ id: ItemIdSchema }).loose();
-
-const initialPageResponseSchema = z
-  .object({
-    boards: z
-      .array(
-        z
-          .object({
-            items_page: z.object({
-              cursor: z.string().nullable(),
-              items: z.array(bulkItemSchema),
-            }),
-          })
-          .loose(),
-      )
-      .min(1),
-  })
-  .loose();
-
-const nextPageResponseSchema = z
-  .object({
-    next_items_page: z.object({
-      cursor: z.string().nullable(),
-      items: z.array(bulkItemSchema),
-    }),
-  })
-  .loose();
-
 type BulkItem = z.infer<typeof bulkItemSchema>;
-type InitialPageResponse = z.infer<typeof initialPageResponseSchema>;
-type NextPageResponse = z.infer<typeof nextPageResponseSchema>;
 
 // `bulkLiveDataSchema` + `BulkLiveData` are defined at module top
 // (next to `itemClearOutputSchema`) so the union shape is the single
@@ -657,65 +605,34 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     ...(onColumnNotFound === undefined ? {} : { onColumnNotFound }),
   });
 
-  // 2) Walk items_page collecting matched item IDs. Fail-fast on
-  //    stale-cursor per §5.6.
+  // 2) Walk items_page collecting matched item IDs. The §18 R34
+  //    helper (`fetchItemsPage` / `fetchNextItemsPage`) supplies the
+  //    GraphQL + parse boundary; `paginate.ts` keeps the §3.1 #8
+  //    per-page sort + §5.6 `stale_cursor` enrichment. Same pattern
+  //    `item list` uses post-lift.
   const matchedItemIds: string[] = [];
-  await paginate<BulkItem, InitialPageResponse | NextPageResponse>({
-    fetchInitial: async () => {
-      const response = await client.raw<unknown>(
-        ITEMS_PAGE_QUERY,
-        {
-          boardId,
-          limit: DEFAULT_PAGE_SIZE,
-          queryParams: filterResult.queryParams ?? null,
-        },
-        { operationName: 'ItemsPage' },
-      );
-      const data = unwrapOrThrow(
-        initialPageResponseSchema.safeParse(response.data),
-        {
-          context: `Monday returned a malformed ItemsPage response for board ${boardId}`,
-          details: { board_id: boardId },
-        },
-      );
-      return { ...response, data };
-    },
-    fetchNext: async (cursor) => {
-      const response = await client.raw<unknown>(
-        NEXT_ITEMS_PAGE_QUERY,
-        { cursor, limit: DEFAULT_PAGE_SIZE },
-        { operationName: 'NextItemsPage' },
-      );
-      const data = unwrapOrThrow(
-        nextPageResponseSchema.safeParse(response.data),
-        {
-          context: 'Monday returned a malformed NextItemsPage response',
-          details: { cursor },
-        },
-      );
-      return { ...response, data };
-    },
+  await paginate<BulkItem, ItemsPagePayload<BulkItem>>({
+    fetchInitial: () =>
+      fetchItemsPage<BulkItem>({
+        client,
+        operationName: 'ItemsPage',
+        boardId,
+        limit: DEFAULT_PAGE_SIZE,
+        queryParams: filterResult.queryParams,
+        itemFields: 'id',
+        itemSchema: bulkItemSchema,
+      }),
+    fetchNext: (cursor) =>
+      fetchNextItemsPage<BulkItem>({
+        client,
+        operationName: 'NextItemsPage',
+        cursor,
+        limit: DEFAULT_PAGE_SIZE,
+        itemFields: 'id',
+        itemSchema: bulkItemSchema,
+      }),
     now: ctx.clock,
-    extractPage: (r): PaginatedPage<BulkItem> => {
-      if ('next_items_page' in r.data) {
-        const nr = (r as MondayResponse<NextPageResponse>).data;
-        return {
-          items: nr.next_items_page.items,
-          cursor: nr.next_items_page.cursor,
-        };
-      }
-      const ir = (r as MondayResponse<InitialPageResponse>).data;
-      const board = ir.boards[0];
-      /* c8 ignore next 3 — defensive: schema's `.min(1)` rejects
-         empty arrays. */
-      if (board === undefined) {
-        throw new ApiError('internal_error', 'bulk page: empty boards array');
-      }
-      return {
-        items: board.items_page.items,
-        cursor: board.items_page.cursor,
-      };
-    },
+    extractPage: (r): PaginatedPage<BulkItem> => r.data,
     getId: (item) => item.id,
     all: true,
     onItem: (item) => {

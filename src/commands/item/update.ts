@@ -75,16 +75,20 @@ import {
   type BoardMetadata,
 } from '../../api/board-metadata.js';
 import {
-  paginate,
   DEFAULT_PAGE_SIZE,
+  paginate,
   type PaginatedPage,
 } from '../../api/pagination.js';
+import {
+  fetchItemsPage,
+  fetchNextItemsPage,
+  type ItemsPagePayload,
+} from '../../api/items-page-walker.js';
 import {
   ConfirmationRequiredError,
 } from '../../utils/errors.js';
 import type { RunContext } from '../../cli/run.js';
 import type { GlobalFlags } from '../../types/global-flags.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   ITEM_FIELDS_FRAGMENT,
   resolveMeFactory,
@@ -618,81 +622,17 @@ const dedupeWarnings = (warnings: readonly Warning[]): readonly Warning[] => {
 
 // ============================================================
 // Bulk path (cli-design §10.2 — `--where` / `--filter-json`).
+// items_page walker lifted into `api/items-page-walker.ts` per §18
+// R34 (post-M12) — the helper builds the GraphQL queries inline +
+// parses the response with the per-row schema below, surfacing
+// schema drift as `internal_error` with the failing field path on
+// `details.issues` rather than collapsing to a silent "0 matched,
+// 0 applied" success (the F6 pass-2 hardening lifts to all four
+// items_page consumers automatically).
 // ============================================================
 
-const ITEMS_PAGE_QUERY = `
-  query ItemsPage(
-    $boardId: ID!
-    $limit: Int!
-    $queryParams: ItemsQuery
-  ) {
-    boards(ids: [$boardId]) {
-      items_page(limit: $limit, query_params: $queryParams) {
-        cursor
-        items {
-          id
-        }
-      }
-    }
-  }
-`;
-
-const NEXT_ITEMS_PAGE_QUERY = `
-  query NextItemsPage($cursor: String!, $limit: Int!) {
-    next_items_page(limit: $limit, cursor: $cursor) {
-      cursor
-      items {
-        id
-      }
-    }
-  }
-`;
-
-// R18 / Codex pass-1 F6 + pass-2 follow-up: parse boundaries on the
-// bulk items_page + next_items_page responses. Schemas are tight —
-// `boards` is a non-nullable non-empty array; `items_page` is
-// required (not optional). Pre-fix, these were trusted via optional
-// chaining — a malformed Monday response (schema drift, a `boards`
-// key missing, `items` not an array) would silently surface as an
-// empty match set, which is the worst-of-both-worlds failure mode
-// for bulk mutations: agents see "0 matched, 0 applied" success
-// when the real story is "Monday's response shape changed and we
-// couldn't read it". Pass-1's first attempt loosened the schema
-// too far (kept items_page optional + boards nullable); pass-2
-// tightens the schema so missing fields surface as
-// `internal_error` with the failing field path on
-// `details.issues`.
 const bulkItemSchema = z.object({ id: ItemIdSchema }).loose();
-
-const initialPageResponseSchema = z
-  .object({
-    boards: z
-      .array(
-        z
-          .object({
-            items_page: z.object({
-              cursor: z.string().nullable(),
-              items: z.array(bulkItemSchema),
-            }),
-          })
-          .loose(),
-      )
-      .min(1),
-  })
-  .loose();
-
-const nextPageResponseSchema = z
-  .object({
-    next_items_page: z.object({
-      cursor: z.string().nullable(),
-      items: z.array(bulkItemSchema),
-    }),
-  })
-  .loose();
-
 type BulkItem = z.infer<typeof bulkItemSchema>;
-type InitialPageResponse = z.infer<typeof initialPageResponseSchema>;
-type NextPageResponse = z.infer<typeof nextPageResponseSchema>;
 
 /**
  * Wrapped data shape for the bulk-live success envelope. cli-design
@@ -796,71 +736,33 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     ...(onColumnNotFound === undefined ? {} : { onColumnNotFound }),
   });
 
-  // 2) Walk items_page collecting matched item IDs. Fail-fast on
-  //    stale-cursor per §5.6. Each page response is parsed through
-  //    `unwrapOrThrow` so malformed shapes surface as typed
-  //    `internal_error` (Codex pass-1 F6).
+  // 2) Walk items_page collecting matched item IDs. The §18 R34
+  //    helper (`fetchItemsPage` / `fetchNextItemsPage`) supplies the
+  //    GraphQL + parse boundary; `paginate.ts` keeps the §3.1 #8
+  //    per-page sort + §5.6 `stale_cursor` enrichment.
   const matchedItemIds: string[] = [];
-  await paginate<BulkItem, InitialPageResponse | NextPageResponse>({
-    fetchInitial: async () => {
-      const response = await client.raw<unknown>(
-        ITEMS_PAGE_QUERY,
-        {
-          boardId,
-          limit: DEFAULT_PAGE_SIZE,
-          queryParams: filterResult.queryParams ?? null,
-        },
-        { operationName: 'ItemsPage' },
-      );
-      const data = unwrapOrThrow(
-        initialPageResponseSchema.safeParse(response.data),
-        {
-          context: `Monday returned a malformed ItemsPage response for board ${boardId}`,
-          details: { board_id: boardId },
-        },
-      );
-      return { ...response, data };
-    },
-    fetchNext: async (cursor) => {
-      const response = await client.raw<unknown>(
-        NEXT_ITEMS_PAGE_QUERY,
-        { cursor, limit: DEFAULT_PAGE_SIZE },
-        { operationName: 'NextItemsPage' },
-      );
-      const data = unwrapOrThrow(
-        nextPageResponseSchema.safeParse(response.data),
-        {
-          context: 'Monday returned a malformed NextItemsPage response',
-          details: { cursor },
-        },
-      );
-      return { ...response, data };
-    },
+  await paginate<BulkItem, ItemsPagePayload<BulkItem>>({
+    fetchInitial: () =>
+      fetchItemsPage<BulkItem>({
+        client,
+        operationName: 'ItemsPage',
+        boardId,
+        limit: DEFAULT_PAGE_SIZE,
+        queryParams: filterResult.queryParams,
+        itemFields: 'id',
+        itemSchema: bulkItemSchema,
+      }),
+    fetchNext: (cursor) =>
+      fetchNextItemsPage<BulkItem>({
+        client,
+        operationName: 'NextItemsPage',
+        cursor,
+        limit: DEFAULT_PAGE_SIZE,
+        itemFields: 'id',
+        itemSchema: bulkItemSchema,
+      }),
     now: ctx.clock,
-    extractPage: (r): PaginatedPage<BulkItem> => {
-      if ('next_items_page' in r.data) {
-        const nr = (r as MondayResponse<NextPageResponse>).data;
-        return {
-          items: nr.next_items_page.items,
-          cursor: nr.next_items_page.cursor,
-        };
-      }
-      const ir = (r as MondayResponse<InitialPageResponse>).data;
-      // Schema enforces `boards` is non-empty + `items_page` is
-      // required, so `boards[0]` is non-undefined here. The
-      // type-system doesn't narrow `noUncheckedIndexedAccess` away
-      // from min(1) refinements — the guard keeps TS happy.
-      const board = ir.boards[0];
-      /* c8 ignore next 3 — defensive: schema's `.min(1)` rejects
-         empty arrays. */
-      if (board === undefined) {
-        throw new ApiError('internal_error', 'bulk page: empty boards array');
-      }
-      return {
-        items: board.items_page.items,
-        cursor: board.items_page.cursor,
-      };
-    },
+    extractPage: (r): PaginatedPage<BulkItem> => r.data,
     getId: (item) => item.id,
     all: true,
     onItem: (item) => {
