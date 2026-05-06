@@ -71,6 +71,7 @@ import { updateCreateCommand } from './update/create.js';
 // M13 (v0.2) — update mutations: reply / edit / delete / like /
 // unlike / pin / unpin / clear-all.
 import { updateReplyCommand } from './update/reply.js';
+import { updateEditCommand } from './update/edit.js';
 // M9 (v0.2) — item create + subitem create.
 import { itemCreateCommand } from './item/create.js';
 // M10 (v0.2) — item lifecycle: archive + delete + duplicate.
@@ -130,6 +131,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemUpsertCommand,
     updateCreateCommand,
     updateReplyCommand,
+    updateEditCommand,
     rawCommand,
     boardDoctorCommand,
   ];

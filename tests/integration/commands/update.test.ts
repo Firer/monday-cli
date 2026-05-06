@@ -732,3 +732,177 @@ describe('monday update reply (integration, M13)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday update edit (integration, M13)', () => {
+  const editedUpdate = {
+    id: '77',
+    body: '<p>Updated: actually shipping today.</p>',
+    text_body: 'Updated: actually shipping today.',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T12:00:00Z',
+  };
+
+  it('live: --body replaces the body and emits the projected update', async () => {
+    const out = await drive(
+      [
+        'update',
+        'edit',
+        '77',
+        '--body',
+        'Updated: actually shipping today.',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateEdit',
+            // Wire shape: id (not update_id) per Monday's
+            // edit_update(id, body) signature. Pinned via
+            // match_variables to catch any future drift that swaps
+            // the variable name.
+            match_variables: { id: '77', body: 'Updated: actually shipping today.' },
+            response: { data: { edit_update: editedUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; body: string };
+    };
+    expect(env.data.id).toBe('77');
+    expect(env.data.body).toContain('Updated');
+  });
+
+  it('rejects empty --body as usage_error', async () => {
+    const out = await drive(
+      ['update', 'edit', '77', '--body', '', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects no --body and no --body-file as usage_error', async () => {
+    const out = await drive(
+      ['update', 'edit', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric update id as usage_error', async () => {
+    const out = await drive(
+      ['update', 'edit', 'abc', '--body', 'x', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation edit_update; no mutation fires', async () => {
+    const out = await drive(
+      ['update', 'edit', '77', '--body', 'preview edit', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        update_id: string;
+        body: string;
+        body_length: number;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('edit_update');
+    expect(plan?.update_id).toBe('77');
+    expect(plan?.body).toBe('preview edit');
+    expect(plan?.body_length).toBe(12);
+  });
+
+  it('not_found when Monday returns null edit_update for an unknown id', async () => {
+    const out = await drive(
+      ['update', 'edit', '99999', '--body', 'x', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateEdit',
+            response: { data: { edit_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { update_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.update_id).toBe('99999');
+  });
+
+  it('idempotent flag is true (re-edit with same body is a no-op)', async () => {
+    // Pin the contract via the schema registry — agents introspect
+    // `monday schema update.edit` for the idempotency-knob and act
+    // accordingly. The check is structural to prevent silent drift
+    // if a future refactor flips the knob.
+    const out = await drive(
+      ['schema', 'update.edit', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        commands: Readonly<Record<string, { idempotent: boolean }>>;
+      };
+    };
+    expect(env.data.commands['update.edit']?.idempotent).toBe(true);
+  });
+
+  it('--body-file <path> reads contents and edits the body', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'monday-cli-update-edit-'));
+    try {
+      const path = join(tmpRoot, 'edit.md');
+      await writeFile(path, 'Body from disk\n', 'utf8');
+      const out = await drive(
+        ['update', 'edit', '77', '--body-file', path, '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'UpdateEdit',
+              match_variables: { id: '77', body: 'Body from disk' },
+              response: { data: { edit_update: editedUpdate } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { id: string };
+      };
+      expect(env.data.id).toBe('77');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('token never leaks in error envelopes', async () => {
+    const out = await drive(
+      ['update', 'edit', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});
