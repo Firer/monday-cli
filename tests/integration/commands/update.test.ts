@@ -515,3 +515,220 @@ describe('monday update create (integration, M5b)', () => {
     expect(out.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('monday update reply (integration, M13)', () => {
+  // create_update with parent_id returns the same Update shape as the
+  // top-level create. The CLI projects it + echoes parent_id from
+  // argv.
+  const createdReply = {
+    id: '88',
+    body: '<p>Acknowledged — looking now.</p>',
+    text_body: 'Acknowledged — looking now.',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T11:30:00Z',
+    updated_at: '2026-04-30T11:30:00Z',
+  };
+
+  it('live: --body posts the reply via parent_id and emits the projected update', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', 'Acknowledged — looking now.', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateReply',
+            // Wire shape: `parent_id` (not `item_id`); `body` is the
+            // trimmed agent input. Pinned via match_variables so a
+            // future drift that sends `item_id: <pid>` (mis-routes
+            // top-level) fails loudly.
+            match_variables: { parentId: '77', body: 'Acknowledged — looking now.' },
+            response: { data: { create_update: createdReply } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; parent_id: string; item_id: string };
+    };
+    expect(env.data.id).toBe('88');
+    expect(env.data.parent_id).toBe('77');
+    expect(env.data.item_id).toBe('12345');
+  });
+
+  it('rejects empty --body as usage_error', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', '', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects no --body and no --body-file as usage_error', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    // The verb-specific hint references "monday update reply" so the
+    // agent's recovery instruction is correct for this command.
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric parent id as usage_error', async () => {
+    const out = await drive(
+      ['update', 'reply', 'abc', '--body', 'x', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_update + parent_id; no mutation fires', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', 'preview reply', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        parent_id: string;
+        body: string;
+        body_length: number;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_update');
+    expect(plan?.parent_id).toBe('77');
+    expect(plan?.body).toBe('preview reply');
+    expect(plan?.body_length).toBe(13);
+  });
+
+  it('not_found when Monday returns null create_update for an unknown parent_id', async () => {
+    // Mirrors `item delete`'s null-wire-result → `not_found` shape
+    // (R28 `projectMutationItem({errorCode: 'not_found'})`). Monday
+    // returns `create_update: null` when the parent is deleted /
+    // hidden; the CLI surfaces it as `not_found` carrying
+    // `details.parent_id` so the agent has the lineage handy.
+    const out = await drive(
+      ['update', 'reply', '99999', '--body', 'x', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateReply',
+            response: { data: { create_update: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { parent_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.parent_id).toBe('99999');
+  });
+
+  it('surfaces typed internal_error for malformed Monday reply payload', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', 'x', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateReply',
+            response: { data: { create_update: { id: 'not-numeric-update-id' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('--body-file <path>: reads contents and posts the reply', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'monday-cli-update-reply-'));
+    try {
+      const path = join(tmpRoot, 'reply.md');
+      await writeFile(path, 'Reply from disk\n', 'utf8');
+      const out = await drive(
+        ['update', 'reply', '77', '--body-file', path, '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'UpdateReply',
+              match_variables: { parentId: '77', body: 'Reply from disk' },
+              response: {
+                data: {
+                  create_update: { ...createdReply, body: '<p>Reply from disk</p>', text_body: 'Reply from disk' },
+                },
+              },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { id: string; parent_id: string };
+      };
+      expect(env.data.parent_id).toBe('77');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('--body-file - reads from stdin', async () => {
+    const stdin = Readable.from(['Reply from stdin\n']);
+    const out = await drive(
+      ['update', 'reply', '77', '--body-file', '-', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateReply',
+            match_variables: { parentId: '77', body: 'Reply from stdin' },
+            response: {
+              data: {
+                create_update: { ...createdReply, body: '<p>Reply from stdin</p>', text_body: 'Reply from stdin' },
+              },
+            },
+          },
+        ],
+      },
+      { stdin },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { parent_id: string };
+    };
+    expect(env.data.parent_id).toBe('77');
+  });
+
+  it('rejects --body and --body-file together as usage_error (shared body-source contract)', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', 'inline', '--body-file', 'somewhere', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('token never leaks in error envelopes', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).not.toContain(LEAK_CANARY);
+    expect(out.stderr).not.toContain(LEAK_CANARY);
+  });
+});

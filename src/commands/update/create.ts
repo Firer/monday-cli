@@ -25,15 +25,15 @@
  * via `monday update list <iid>` first, or use a future
  * `update upsert` (deferred to v0.2).
  */
-import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
+import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { readUpdateBody } from './body-source.js';
 
 const CREATE_UPDATE_MUTATION = `
   mutation UpdateCreate($itemId: ID!, $body: String!) {
@@ -86,99 +86,6 @@ const responseSchema = z
   })
   .loose();
 
-/**
- * Reads the body content from one of the three accepted sources:
- *
- *   1. `--body <md>` (parsed.body) — inline.
- *   2. `--body-file <path>` (globalFlags.bodyFile) — from disk.
- *   3. `--body-file -` — from stdin (`ctx.stdin`).
- *
- * Throws `usage_error` for:
- *   - Both `--body` and `--body-file` set (mutually exclusive).
- *   - Neither set (no source).
- *   - `--body-file -` with no `ctx.stdin` available (programmer
- *     wiring bug; should not happen via the binary).
- *   - Empty result after read (Monday rejects empty body strings;
- *     surface up-front rather than wait for `validation_failed`).
- */
-const readBody = async (
-  inlineBody: string | undefined,
-  bodyFile: string | undefined,
-  stdin: NodeJS.ReadableStream | undefined,
-): Promise<string> => {
-  if (inlineBody !== undefined && bodyFile !== undefined) {
-    throw new UsageError(
-      '--body and --body-file are mutually exclusive; pick one.',
-      { details: { has_inline_body: true, body_file: bodyFile } },
-    );
-  }
-  if (inlineBody !== undefined) {
-    if (inlineBody.trim().length === 0) {
-      // Codex pass-1 F5: empty-after-trim must reject too — a
-      // user passing `--body "   "` (whitespace-only) shouldn't
-      // sneak past the empty-body check and surface as Monday's
-      // `validation_failed` post-mutation. Same trim policy the
-      // file / stdin branches apply.
-      throw new UsageError(
-        '--body cannot be empty (or whitespace-only). Pass markdown ' +
-          'content or use --body-file <path> to read from disk / stdin.',
-      );
-    }
-    return inlineBody;
-  }
-  if (bodyFile === undefined) {
-    throw new UsageError(
-      'monday update create requires either --body <md> or ' +
-        '--body-file <path>. Use --body-file - to read from stdin.',
-    );
-  }
-  if (bodyFile === '-') {
-    if (stdin === undefined) {
-      throw new UsageError(
-        '--body-file - requested stdin, but no stdin is wired into ' +
-          'the runner. This is a programmer wiring bug.',
-      );
-    }
-    const chunks: Buffer[] = [];
-    for await (const chunk of stdin) {
-      chunks.push(Buffer.from(chunk));
-    }
-    const body = Buffer.concat(chunks).toString('utf8').trimEnd();
-    if (body.length === 0) {
-      throw new UsageError(
-        'stdin produced an empty body. Pipe non-empty content into ' +
-          '--body-file - or pass --body <md> inline.',
-        { details: { body_file: '-' } },
-      );
-    }
-    return body;
-  }
-  // File on disk. UTF-8 always; binary content would corrupt the
-  // markdown anyway. Trim trailing whitespace so a trailing newline
-  // from `cat foo.md` doesn't surface as a literal `\n` in the
-  // posted comment.
-  const raw = await readFile(bodyFile, 'utf8').catch((err: unknown) => {
-    throw new UsageError(
-      `--body-file: failed to read ${JSON.stringify(bodyFile)} (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
-      {
-        cause: err,
-        details: { body_file: bodyFile },
-      },
-    );
-  });
-  const body = raw.trimEnd();
-  if (body.length === 0) {
-    throw new UsageError(
-      `--body-file: ${JSON.stringify(bodyFile)} is empty (after trim). ` +
-        `Monday rejects empty comment bodies.`,
-      { details: { body_file: bodyFile } },
-    );
-  }
-  return body;
-};
-
 export const updateCreateCommand: CommandModule<
   z.infer<typeof inputSchema>,
   UpdateCreateOutput
@@ -217,11 +124,14 @@ export const updateCreateCommand: CommandModule<
           program.opts(),
         );
 
-        const body = await readBody(
-          parsed.body,
-          globalFlags.bodyFile,
-          ctx.stdin,
-        );
+        const body = await readUpdateBody({
+          inlineBody: parsed.body,
+          bodyFile: globalFlags.bodyFile,
+          stdin: ctx.stdin,
+          verbHint:
+            'monday update create requires either --body <md> or ' +
+            '--body-file <path>. Use --body-file - to read from stdin.',
+        });
 
         if (globalFlags.dryRun) {
           // Dry-run shape for `update create` — `data: null`,
