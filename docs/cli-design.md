@@ -637,21 +637,77 @@ monday item subitems <iid>                # list children                    v0.
                                           # subitem creation = item create --parent <iid> (v0.2)
 
 # === UPDATE (comments) ===
-monday update list <iid>                  # comments on an item              v0.1
-                                          # --with-replies: thread expansion (v0.2)
-monday update list --board <bid>          # all updates across the board     v0.2
+monday update list <iid> [--with-replies]                                    v0.1 (--with-replies: v0.2)
+                                          # **Default-shape change in v0.2** (M13):
+                                          # without --with-replies, every update's
+                                          # `replies: []` is empty in the projection.
+                                          # v0.1 silently populated replies on every
+                                          # call; v0.2 makes the second leg opt-in
+                                          # because Monday charges complexity for the
+                                          # nested selection. Tagged as the only
+                                          # output-shape breaking change in v0.2 →
+                                          # CHANGELOG breaking-changes block + §13
+                                          # release upgrade notes. Agents that want
+                                          # the v0.1 behaviour pass --with-replies.
+monday update list --board <bid> [--with-replies]                            v0.2
+                                          # board-wide updates; mutually exclusive
+                                          # with positional <iid>. Same --with-
+                                          # replies opt-in semantics.
 monday update get <uid>                                                      v0.1
-monday update create <iid> --body <md> | --body-file <path>                  v0.1
+monday update create <iid> --body <md> | --body-file <path> [--dry-run]      v0.1
                                           # markdown rendered to HTML;
                                           # in v0.1 because workflow shortcuts depend on it
-monday update reply <uid> --body <md> | --body-file <path>                   v0.2
-monday update edit <uid> --body <md> | --body-file <path>                    v0.2
-monday update delete <uid> --yes                                             v0.2
-monday update like <uid>                                                     v0.2
-monday update unlike <uid>                                                   v0.2
-monday update pin <uid>                                                      v0.2
-monday update unpin <uid>                                                    v0.2
-monday update clear-all <iid> --yes       # delete all updates on item       v0.2
+monday update reply <uid> --body <md> | --body-file <path> [--dry-run]       v0.2
+                                          # `create_update(parent_id: <uid>)`. Reuses
+                                          # `update create`'s body-source plumbing
+                                          # (--body / --body-file / `--body-file -`
+                                          # for stdin) verbatim. Idempotent: NO
+                                          # (each call posts a fresh reply; Monday
+                                          # has no idempotency-key surface on
+                                          # create_update). Dry-run shape per §6.4
+                                          # comment-create variant: operation:
+                                          # "create_update", parent_id, body,
+                                          # body_length.
+monday update edit <uid> --body <md> | --body-file <path> [--dry-run]        v0.2
+                                          # `edit_update`. Idempotent: yes (re-
+                                          # editing with the same body is a no-op
+                                          # on Monday's side).
+monday update delete <uid> --yes [--dry-run]                                 v0.2
+                                          # `delete_update`. Destructive: --yes
+                                          # mandatory (without --yes →
+                                          # confirmation_required, exit 1). Re-
+                                          # deleting an already-deleted update
+                                          # surfaces `not_found` so the CLI marks
+                                          # `idempotent: false` (mirrors `item
+                                          # delete`'s rationale).
+monday update like <uid> [--dry-run]                                         v0.2
+                                          # `like_update`. Idempotent (Monday's
+                                          # like is a toggle keyed off the caller;
+                                          # re-running is a no-op).
+monday update unlike <uid> [--dry-run]                                       v0.2
+                                          # `unlike_update`. Idempotent.
+monday update pin <uid> [--dry-run]                                          v0.2
+                                          # `pin_to_top`. Idempotent.
+monday update unpin <uid> [--dry-run]                                        v0.2
+                                          # `unpin_from_top`. Idempotent.
+monday update clear-all <iid> --yes [--dry-run]                              v0.2
+                                          # delete all updates on item.
+                                          # Destructive: --yes mandatory. Page-walks
+                                          # `updates(item_id)` via walkPages to
+                                          # collect IDs, then sequential
+                                          # `delete_update` per ID. **Partial-
+                                          # success envelope** per §6.4 — emits
+                                          # `ok: true` (one success envelope) with
+                                          # per-update results in `data.results:
+                                          # [{update_id, ok, error?}]`. The
+                                          # envelope is `ok: true` even when every
+                                          # per-update delete fails (whole-call
+                                          # success means dispatch ran). Top-level
+                                          # `error` reserved for whole-call failure
+                                          # (couldn't reach API, item lookup
+                                          # failed, etc.). Sequential per §8
+                                          # decision 8 — parallel waits for v0.4
+                                          # `--concurrency`.
 
 # === USER ===
 monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]   v0.1
@@ -2144,9 +2200,124 @@ mutation verbs produce different planned-change shapes; the
   `--columns-mapping {}` (empty object) bypasses the check —
   Monday's permissive default applies (silently drops unmatched).
 
+- **Update-edit shape** (`update edit`; v0.2 M13). Single-leg
+  dry-run, no source read (Monday's `edit_update(id, body)` doesn't
+  need anything beyond the update id; the live mutation surfaces
+  `not_found` if the id is bogus). Carries `operation:
+  "edit_update"`, `update_id`, `body`, and `body_length`. Same
+  shape (modulo `parent_id` vs `item_id` vs `update_id` and the
+  `body` slot's absence) as the comment-create shape — `update
+  reply` reuses the `create_update` shape verbatim, replacing
+  `item_id` with `parent_id: <uid>`. `meta.source: "none"` (no
+  API call fires).
+
+- **Update-reply shape** (`update reply`; v0.2 M13). The
+  comment-create shape with `parent_id: <uid>` substituted for
+  `item_id: <iid>`. Carries `operation: "create_update"`,
+  `parent_id`, `body`, `body_length`. `meta.source: "none"`.
+
+- **Update-delete shape** (`update delete`; v0.2 M13). Minimal:
+  `operation: "delete_update"`, `update_id`. No diff section —
+  delete has no per-column changes, no read leg fires (the live
+  `delete_update` mutation reports `not_found` if the id is bogus
+  and the dry-run is purely argv-derived). `meta.source: "none"`.
+
+- **Update-toggle shape** (`update like` / `unlike` / `pin` /
+  `unpin`; v0.2 M13). Same minimal shape — `operation:
+  "like_update" | "unlike_update" | "pin_to_top" |
+  "unpin_from_top"`, `update_id`, no other slots. `meta.source:
+  "none"`. The four toggle verbs share the shape because their
+  contract is "flip a single boolean keyed off the caller" — the
+  dry-run echoes the operation that would fire and that's the
+  whole preview.
+
+- **Update-clear-all shape** (`update clear-all <iid>`; v0.2
+  M13). Single-leg dry-run that page-walks
+  `updates(item_id: <iid>)` via `walkPages` to enumerate the
+  would-delete IDs without firing any `delete_update`. Carries
+  `operation: "clear_all_updates"`, `item_id`, and `update_ids:
+  ["<u1>", "<u2>", ...]` listing every collected ID. `meta.source:
+  "live"` because the page-walk fires real reads (the dry-run is
+  a preview-of-state-change, not a preview-of-payload). When the
+  item has no updates, `update_ids: []` and the `ok: true` envelope
+  with `data: null` reports zero work to do — agents can skip the
+  follow-up live call:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "live", ... },
+    "planned_changes": [
+      {
+        "operation": "clear_all_updates",
+        "item_id": "12345",
+        "update_ids": ["77", "78", "82"]
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
+
+**Partial-success envelope** (M13 `update clear-all`; M14
+`workspace add-users` / `remove-users`; M15 `board add-users`).
+Multi-target verbs that dispatch one wire call per target emit
+**one success envelope** (`ok: true`) with per-target outcomes
+in `data.results: [...]`. Each per-target record carries
+`{<target_id_field>: string, ok: true | false, error?: { code,
+message }}` where the id-field name is verb-specific
+(`update_id` for `update clear-all`; `user_id` for the add/remove-
+users family). The shared envelope-builder
+(`buildPartialSuccessMutation`) takes the field name as a
+parameter so the per-verb shape is self-documenting in JSON
+without forcing every consumer to adopt a generic `target_id`.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "results": [
+      { "update_id": "77", "ok": true },
+      { "update_id": "78", "ok": false,
+        "error": { "code": "not_found",
+                   "message": "Monday returned no update for id 78" } },
+      { "update_id": "82", "ok": true }
+    ]
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+The envelope is **always `ok: true` when dispatch ran**, even
+when every per-target call inside the loop failed — the call's
+contract is "I ran the dispatch and here are the per-target
+outcomes." Top-level `error` (`ok: false`) is reserved for
+whole-call failure (couldn't reach the API at all, couldn't
+resolve any target before the loop began, an unrecoverable
+validation error). All-failed-but-each-call-attempted is still
+`ok: true` — the agent reads `data.results` to determine
+outcomes. This is the §6.1 universal rule applied uniformly
+across multi-target verbs (v0.2-plan §8 decision 3).
+
+The `data` slot reuses the existing `MutationEnvelope` (no §6.4
+schema bump) — the slot widens to accept `{ results: [...] }`
+for partial-success consumers; single-target verbs continue to
+use the `<resource>` projection. `resolved_ids` and
+`side_effects` slots are absent on partial-success envelopes
+(no token resolution, no implicit secondary operations — the
+secondary operations are exactly the per-target results, which
+live in `data.results`).
+
+The corresponding dry-run shape inverts: the dry-run's
+`planned_changes[]` lists the would-dispatch operations
+(operation-shape per §6.4 above; e.g. `clear_all_updates` with
+`update_ids: [...]`); the live envelope's `data.results` lists
+the actual per-target outcomes after the loop ran.
 
 For `monday item upsert` (M12), `data.operation` indicates which
 branch the wire mutation took:
