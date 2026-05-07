@@ -4828,3 +4828,513 @@ describe('monday board group-create (integration, M17)', () => {
     expect(postEnv.meta.source).toBe('cache');
   });
 });
+
+// =============================================================================
+// M17 — board group-update (cli-design §4.3 + §6.4 + §8 fan-out invalidation)
+// =============================================================================
+
+describe('monday board group-update (integration, M17)', () => {
+  // Board metadata fixture for the dry-run preflight read — group
+  // `topics` exists on board 12345.
+  const groupUpdateBoardMetadata: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: null,
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [
+              {
+                id: 'topics',
+                title: 'Topics',
+                color: 'blue',
+                position: '1.0',
+                archived: false,
+                deleted: false,
+              },
+            ],
+            columns: [],
+          },
+        ],
+      },
+    },
+  };
+
+  const renamedGroup = {
+    id: 'topics',
+    title: 'Sprint 42',
+    color: 'blue',
+    position: '1.0',
+    archived: false,
+    deleted: false,
+  };
+  const recolouredGroup = {
+    ...renamedGroup,
+    color: 'red',
+  };
+
+  it('rejects zero-flag invocation as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty <groupId> at argv parse', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', '', '--name', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --name (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --color (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--color', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('live: --name fires update_group with group_attribute: title and projects the response', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: {
+              boardId: '12345',
+              groupId: 'topics',
+              groupAttribute: 'title',
+              newValue: 'Sprint 42',
+            },
+            // Pin the wire arg name `group_attribute` (NOT `attribute`) and
+            // the GraphQL surface — a regression renaming would silently
+            // drop the field on the wire.
+            match_query: /update_group\(\s*board_id: \$boardId,\s*group_id: \$groupId/,
+            response: { data: { update_group: renamedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.data.id).toBe('topics');
+    expect(env.data.title).toBe('Sprint 42');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: --color fires update_group with group_attribute: color', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--color', 'red', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: {
+              boardId: '12345',
+              groupId: 'topics',
+              groupAttribute: 'color',
+              newValue: 'red',
+            },
+            response: { data: { update_group: recolouredGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { color: string };
+    };
+    expect(env.data.color).toBe('red');
+  });
+
+  it('live: --name --color fans out two sequential calls; data projects from the trailing call', async () => {
+    // Per §8 decision 8: sequential. Per cli-design §4.3 group-
+    // update: trailing call's response is authoritative because
+    // Monday's update_group returns the full Maybe<Group> post-
+    // mutation. No force-live final read leg fires —
+    // distinguishes group-update from board-update.
+    const out = await drive(
+      [
+        'board', 'group-update', '12345', 'topics',
+        '--name', 'Sprint 42',
+        '--color', 'red',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'title', newValue: 'Sprint 42' },
+            response: { data: { update_group: renamedGroup } },
+          },
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'color', newValue: 'red' },
+            // Trailing call returns recolouredGroup (renamed AND
+            // recoloured) — the trailing response is authoritative
+            // for every field per the M17 pre-flight load-bearing
+            // finding.
+            response: { data: { update_group: recolouredGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(2);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { title: string; color: string };
+    };
+    expect(env.data.title).toBe('Sprint 42');
+    expect(env.data.color).toBe('red');
+  });
+
+  it('live: per-attribute failure surfaces the failed call code; no envelope partial-success leak', async () => {
+    // Whole-call envelope is `ok: false` on any per-field failure;
+    // mirrors `column-update` / `board-update` contract.
+    const out = await drive(
+      [
+        'board', 'group-update', '12345', 'topics',
+        '--name', 'Sprint 42',
+        '--color', 'red',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'title' },
+            response: { data: { update_group: renamedGroup } },
+          },
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'color' },
+            response: { data: { update_group: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.ok).toBe(false);
+    // null path uses not_found per the R48 helper's group-update
+    // mapping.
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: surfaces internal_error when the response is missing the update_group root field (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('--dry-run: emits update_group planned change with field-level diff via BoardMetadata preflight', async () => {
+    const out = await drive(
+      [
+        'board', 'group-update', '12345', 'topics',
+        '--name', 'Sprint 42',
+        '--color', 'red',
+        '--dry-run', '--json',
+      ],
+      { interactions: [groupUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        group_id: string;
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('update_group');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.group_id).toBe('topics');
+    // Diff key is `name` (CLI-flag-side), `from` is current.title.
+    expect(plan?.diff.name).toEqual({ from: 'Topics', to: 'Sprint 42' });
+    expect(plan?.diff.color).toEqual({ from: 'blue', to: 'red' });
+  });
+
+  it('--dry-run: --name only emits diff with only the name field', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--name', 'Sprint 42', '--dry-run', '--json'],
+      { interactions: [groupUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { diff: Record<string, unknown> }[];
+    };
+    expect(Object.keys(env.planned_changes[0]?.diff ?? {})).toEqual(['name']);
+  });
+
+  it('--dry-run: --color only emits diff with only the color field', async () => {
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--color', 'red', '--dry-run', '--json'],
+      { interactions: [groupUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { diff: Record<string, unknown> }[];
+    };
+    expect(Object.keys(env.planned_changes[0]?.diff ?? {})).toEqual(['color']);
+  });
+
+  it('--dry-run: not_found when the group ID is missing on the board (details.group_id pinned)', async () => {
+    // Board-level read succeeds but the group ID isn't present —
+    // surface not_found with details.group_id so agents distinguish
+    // "wrong board id" from "wrong group id" without re-reading.
+    const out = await drive(
+      [
+        'board', 'group-update', '12345', 'ghost_group',
+        '--name', 'X',
+        '--dry-run', '--json',
+      ],
+      { interactions: [groupUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { group_id?: string; board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.group_id).toBe('ghost_group');
+    expect(env.error?.details?.board_id).toBe('12345');
+  });
+
+  it('--dry-run: not_found when the board itself is missing (preflight bubble)', async () => {
+    const out = await drive(
+      ['board', 'group-update', '99999', 'topics', '--name', 'X', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('cache invalidation round-trip: group-update → board describe sees renamed group with source: live + no stale_cache_refreshed warning', async () => {
+    // Per §8 fan-out call-site contract: invalidate ONCE after the
+    // loop settles. The round-trip MUST satisfy three pins per
+    // cassette to prove eager invalidation worked: post-mutation
+    // read sees live state; meta.source: 'live'; NO
+    // stale_cache_refreshed warning.
+    const preMutationGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    const renamedPostMutation = {
+      ...preMutationGroup,
+      title: 'Sprint 42',
+    };
+    // Seed cache.
+    const seed = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preMutationGroup])] },
+    );
+    expect(seed.exitCode).toBe(0);
+    // Fan-out single-leg (just --name) — invalidation fires after
+    // loop settle iff at least one leg succeeded.
+    const updated = await drive(
+      ['board', 'group-update', '111', 'topics', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: {
+              boardId: '111',
+              groupId: 'topics',
+              groupAttribute: 'title',
+              newValue: 'Sprint 42',
+            },
+            response: { data: { update_group: renamedPostMutation } },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(0);
+    // Post-mutation describe — clean cache miss → live fetch.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [renamedPostMutation])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string; title: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.find((g) => g.id === 'topics')?.title).toBe('Sprint 42');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation round-trip: partial-application (call #2 fails after call #1 succeeded) STILL invalidates per §8 high-water-mark rule', async () => {
+    // The §8 fan-out contract: invalidation fires after the loop
+    // settles iff at least one leg succeeded. Whole-call failure
+    // after call N succeeded MUST still invalidate because the
+    // cache must reflect the partially-applied server state.
+    const preMutationGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    const renamedPartial = { ...preMutationGroup, title: 'Sprint 42' };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preMutationGroup])] },
+    );
+    // Fan-out: call #1 (name) succeeds, call #2 (color) fails.
+    const updated = await drive(
+      [
+        'board', 'group-update', '111', 'topics',
+        '--name', 'Sprint 42',
+        '--color', 'red',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'title' },
+            response: { data: { update_group: renamedPartial } },
+          },
+          {
+            operation_name: 'GroupUpdate',
+            match_variables: { groupAttribute: 'color' },
+            response: { data: { update_group: null } },
+          },
+        ],
+      },
+    );
+    // Whole-call failure → exit 2.
+    expect(updated.exitCode).toBe(2);
+    // Post-mutation describe — invalidation fired despite the
+    // whole-call failure (succeededLegs=1), so this is a clean
+    // cache miss.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [renamedPartial])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string; title: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.find((g) => g.id === 'topics')?.title).toBe('Sprint 42');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: zero-legs-succeeded (very first call fails) does NOT invalidate per §8', async () => {
+    // §8: when zero legs succeeded (the very first call failed
+    // before any state changed), invalidation is skipped — Monday's
+    // per-attribute mutations are not transactional, but a failed-
+    // first-call is server-state-unchanged just like a single-leg
+    // error.
+    const preMutationGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache with the pre-mutation snapshot.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preMutationGroup])] },
+    );
+    // Fan-out: call #1 (name) fails → loop exits with succeededLegs=0.
+    const updated = await drive(
+      ['board', 'group-update', '111', 'topics', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            response: { data: { update_group: null } },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(2);
+    // Cache was NOT invalidated — the next describe should hit the
+    // cache (source: 'cache') because the pre-mutation snapshot is
+    // still valid (server state didn't change).
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: if the cache WAS invalidated, the live
+      // fetch would have nothing to read and the test would fail
+      // with an exhausted cassette.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
+});
