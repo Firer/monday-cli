@@ -2196,16 +2196,21 @@ describe('monday board delete (integration, M15)', () => {
   // M16 retrofit — invalidateBoard post-success per cli-design §8
   // ---------------------------------------------------------------
 
-  it('M16 retrofit: cache invalidation round-trip — board delete → board describe sees not_found with source: live + no stale_cache_refreshed warning', async () => {
+  it('M16 retrofit: cache invalidation round-trip — board delete → board describe sees post-delete live state with source: live + no stale_cache_refreshed warning', async () => {
     // Per cli-design §8 single-leg call-site contract: invalidate
     // AFTER `data` projection on success. The retrofit's
     // invalidation deletes the cache file so the next read cleanly
-    // cache-misses to the live `not_found` rather than serving a
-    // phantom board until TTL eviction. Round-trip pins the three
-    // §8 invariants per cassette: post-delete read sees not_found
-    // (live state); meta.source: 'live' (not 'cache'); no
-    // stale_cache_refreshed warning (the backstop is the path-not-
-    // under-test).
+    // cache-misses to the live state — Monday's post-delete
+    // `boards(ids:)` may return either an empty array (which the
+    // CLI surfaces as not_found) OR a `state: 'deleted'` projection,
+    // depending on whether the deletion has fully propagated. This
+    // test pins the cache-invalidation invariant by driving the
+    // deleted-state variant and asserting the success envelope's
+    // §8 pins: meta.source: 'live'; no stale_cache_refreshed warning
+    // (the backstop is the path-not-under-test). The not_found
+    // variant is exercised by board describe's existing test
+    // surface — what's M16-specific is the cache-invalidation
+    // round-trip, not which post-delete shape Monday returns.
     // Seed cache.
     await drive(
       ['board', 'describe', '111', '--json'],
