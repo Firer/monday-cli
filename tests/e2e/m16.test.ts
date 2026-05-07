@@ -88,3 +88,50 @@ describe('M16 e2e — board column-create (live)', () => {
     expect(result.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('M16 e2e — board column-update (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips change_column_title; envelope carries the projected column', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'ColumnChangeTitle',
+          response: {
+            data: {
+              change_column_title: {
+                id: 'status_4',
+                title: 'Priority',
+                type: 'status',
+                description: null,
+                archived: false,
+                settings_str: null,
+                width: 120,
+              },
+            },
+          },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: ['board', 'column-update', '12345', 'status_4', '--title', 'Priority', '--json'],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('status_4');
+    expect(env.data.title).toBe('Priority');
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});

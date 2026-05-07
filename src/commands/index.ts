@@ -106,6 +106,7 @@ import { boardAddUsersCommand } from './board/add-users.js';
 // M16 (v0.2) — board columns + eager-invalidation contract:
 // column-create / column-update / column-delete.
 import { boardColumnCreateCommand } from './board/column-create.js';
+import { boardColumnUpdateCommand } from './board/column-update.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -139,6 +140,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardDuplicateCommand,
     boardAddUsersCommand,
     boardColumnCreateCommand,
+    boardColumnUpdateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

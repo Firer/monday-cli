@@ -3181,3 +3181,522 @@ describe('monday board column-create (integration, M16)', () => {
     expect(warningCodes).not.toContain('stale_cache_refreshed');
   });
 });
+
+// =============================================================================
+// M16 — board column-update (cli-design §4.3 + §6.4 + §8 fan-out invalidation)
+// =============================================================================
+
+describe('monday board column-update (integration, M16)', () => {
+  // Board metadata fixture for the dry-run preflight read — column
+  // `status_4` exists on board 12345.
+  const columnUpdateBoardMetadata: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: null,
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [],
+            columns: [
+              {
+                id: 'status_4',
+                title: 'Status',
+                type: 'status',
+                description: null,
+                archived: false,
+                settings_str: '{"labels":["Backlog","Done"]}',
+                width: 120,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+
+  const renamedColumn = {
+    id: 'status_4',
+    title: 'Priority',
+    type: 'status',
+    description: null,
+    archived: false,
+    settings_str: '{"labels":["Backlog","Done"]}',
+    width: 120,
+  };
+  const annotatedColumn = {
+    ...renamedColumn,
+    description: 'Owner-set urgency',
+  };
+
+  it('rejects zero-flag invocation as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty <columnId> at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', '', '--title', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --title (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--title', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('live: --title fires change_column_title and emits the projected column', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--title', 'Priority', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            match_variables: {
+              boardId: '12345',
+              columnId: 'status_4',
+              title: 'Priority',
+            },
+            // Pin the wire surface so a future regression that
+            // re-routes --title through change_column_metadata
+            // (which would lose the more-specific Monday surface)
+            // fails here.
+            match_query: /change_column_title\(board_id: \$boardId/,
+            response: { data: { change_column_title: renamedColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.data.id).toBe('status_4');
+    expect(env.data.title).toBe('Priority');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: --description fires change_column_metadata({column_property: description}) and projects the response', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--description', 'Owner-set urgency', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeMetadata',
+            match_variables: {
+              boardId: '12345',
+              columnId: 'status_4',
+              columnProperty: 'description',
+              value: 'Owner-set urgency',
+            },
+            // Pin the column_property: description routing — a
+            // regression that swapped to column_property: title
+            // would silently overwrite the column's title.
+            match_query: /change_column_metadata\(/,
+            response: { data: { change_column_metadata: annotatedColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { description: string };
+    };
+    expect(env.data.description).toBe('Owner-set urgency');
+  });
+
+  it('live: --title --description fans out two sequential calls; data projects from the trailing call', async () => {
+    // Per §8 decision 8: sequential. Per cli-design §4.3 column-
+    // update: trailing call's response is authoritative because
+    // Monday's column mutations return the full Maybe<Column>
+    // post-mutation. No force-live final read leg fires —
+    // distinguishes column-update from board-update.
+    const out = await drive(
+      [
+        'board', 'column-update', '12345', 'status_4',
+        '--title', 'Priority',
+        '--description', 'Owner-set urgency',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            match_variables: { title: 'Priority' },
+            response: { data: { change_column_title: renamedColumn } },
+          },
+          {
+            operation_name: 'ColumnChangeMetadata',
+            match_variables: {
+              columnProperty: 'description',
+              value: 'Owner-set urgency',
+            },
+            response: { data: { change_column_metadata: annotatedColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(2);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { title: string; description: string };
+    };
+    // Trailing call (change_column_metadata) returned annotatedColumn,
+    // which carries both the renamed title AND the new description.
+    expect(env.data.title).toBe('Priority');
+    expect(env.data.description).toBe('Owner-set urgency');
+  });
+
+  it('live: per-attribute failure surfaces the failed call code; no envelope partial-success leak', async () => {
+    // Whole-call envelope is `ok: false` on any per-field failure;
+    // mirrors `board update`'s contract.
+    const out = await drive(
+      [
+        'board', 'column-update', '12345', 'status_4',
+        '--title', 'Priority',
+        '--description', 'X',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            response: { data: { change_column_title: renamedColumn } },
+          },
+          {
+            operation_name: 'ColumnChangeMetadata',
+            response: { data: { change_column_metadata: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.ok).toBe(false);
+    // change_column_metadata's null path uses not_found per the R45
+    // helper's column-update mapping.
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: surfaces internal_error when the title response is missing the root key (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--title', 'Priority', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('live: surfaces internal_error when the metadata response is missing the root key (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--description', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeMetadata',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('--dry-run: emits update_column planned change with field-level diff via BoardMetadata preflight', async () => {
+    const out = await drive(
+      [
+        'board', 'column-update', '12345', 'status_4',
+        '--title', 'Priority',
+        '--description', 'Owner-set urgency',
+        '--dry-run', '--json',
+      ],
+      { interactions: [columnUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        column_id: string;
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('update_column');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.column_id).toBe('status_4');
+    expect(plan?.diff.title).toEqual({ from: 'Status', to: 'Priority' });
+    expect(plan?.diff.description).toEqual({ from: null, to: 'Owner-set urgency' });
+  });
+
+  it('--dry-run: --title only emits diff with only the title field', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--title', 'Priority', '--dry-run', '--json'],
+      { interactions: [columnUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { diff: Record<string, unknown> }[];
+    };
+    expect(Object.keys(env.planned_changes[0]?.diff ?? {})).toEqual(['title']);
+  });
+
+  it('--dry-run: --description only emits diff with only the description field', async () => {
+    const out = await drive(
+      ['board', 'column-update', '12345', 'status_4', '--description', 'X', '--dry-run', '--json'],
+      { interactions: [columnUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly { diff: Record<string, unknown> }[];
+    };
+    expect(Object.keys(env.planned_changes[0]?.diff ?? {})).toEqual(['description']);
+  });
+
+  it('--dry-run: not_found when the column ID is missing on the board (details.column_id pinned)', async () => {
+    // Board-level read succeeds but the column ID isn't present —
+    // surface not_found with details.column_id so agents distinguish
+    // "wrong board id" from "wrong column id" without re-reading.
+    const out = await drive(
+      [
+        'board', 'column-update', '12345', 'ghost_col',
+        '--title', 'X',
+        '--dry-run', '--json',
+      ],
+      { interactions: [columnUpdateBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { column_id?: string; board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.column_id).toBe('ghost_col');
+    expect(env.error?.details?.board_id).toBe('12345');
+  });
+
+  it('--dry-run: not_found when the board itself is missing (preflight bubble)', async () => {
+    const out = await drive(
+      ['board', 'column-update', '99999', 'status_4', '--title', 'X', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('cache invalidation round-trip: column-update → board describe sees renamed column with source: live + no stale_cache_refreshed warning', async () => {
+    // Per §8 fan-out call-site contract: invalidate ONCE after the
+    // loop settles. The round-trip MUST satisfy three pins per
+    // cassette to prove eager invalidation worked (rather than the
+    // cache-miss-refresh backstop saving us): post-mutation read
+    // sees live state; meta.source: 'live'; NO stale_cache_refreshed
+    // warning.
+    const preMutationColumn = {
+      ...baseColumn,
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+    };
+    const renamedPostMutation = {
+      ...preMutationColumn,
+      title: 'Priority',
+    };
+    // Seed cache.
+    const seed = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preMutationColumn])] },
+    );
+    expect(seed.exitCode).toBe(0);
+    // Fan-out single-leg (just --title) — invalidation fires after
+    // loop settle iff at least one leg succeeded.
+    const updated = await drive(
+      ['board', 'column-update', '111', 'status_4', '--title', 'Priority', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            match_variables: { boardId: '111', columnId: 'status_4', title: 'Priority' },
+            response: {
+              data: { change_column_title: renamedPostMutation },
+            },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(0);
+    // Post-mutation describe — clean cache miss → live fetch.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([renamedPostMutation])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { columns: readonly { id: string; title: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.columns.find((c) => c.id === 'status_4')?.title).toBe('Priority');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation round-trip: partial-application (call #2 fails after call #1 succeeded) STILL invalidates per §8 high-water-mark rule', async () => {
+    // The §8 fan-out contract: invalidation fires after the loop
+    // settles iff at least one leg succeeded. Whole-call failure
+    // after call N succeeded MUST still invalidate because the
+    // cache must reflect the partially-applied server state.
+    const preMutationColumn = {
+      ...baseColumn,
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+    };
+    const renamedPartial = { ...preMutationColumn, title: 'Priority' };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preMutationColumn])] },
+    );
+    // Fan-out: call #1 (title) succeeds, call #2 (description) fails.
+    const updated = await drive(
+      [
+        'board', 'column-update', '111', 'status_4',
+        '--title', 'Priority',
+        '--description', 'X',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            response: { data: { change_column_title: renamedPartial } },
+          },
+          {
+            operation_name: 'ColumnChangeMetadata',
+            response: { data: { change_column_metadata: null } },
+          },
+        ],
+      },
+    );
+    // Whole-call failure → exit 2.
+    expect(updated.exitCode).toBe(2);
+    // Post-mutation describe — invalidation fired despite the whole-
+    // call failure (succeededLegs=1), so this is a clean cache miss.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([renamedPartial])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { columns: readonly { id: string; title: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    // The cache served the renamed column (partial-application
+    // committed server-side). source: live proves the cache file
+    // was unlinked between calls; absent stale_cache_refreshed
+    // proves the eager-invalidation path landed cleanly rather
+    // than the backstop firing.
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.columns.find((c) => c.id === 'status_4')?.title).toBe('Priority');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: zero-legs-succeeded (very first call fails) does NOT invalidate per §8', async () => {
+    // §8: when zero legs succeeded (the very first call failed
+    // before any state changed), invalidation is skipped — Monday's
+    // per-attribute mutations are not transactional, but a failed-
+    // first-call is server-state-unchanged just like a single-leg
+    // error.
+    const preMutationColumn = {
+      ...baseColumn,
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+    };
+    // Seed cache with the pre-mutation snapshot.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preMutationColumn])] },
+    );
+    // Fan-out: call #1 (title) fails → loop exits with succeededLegs=0.
+    const updated = await drive(
+      ['board', 'column-update', '111', 'status_4', '--title', 'Priority', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            response: { data: { change_column_title: null } },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(2);
+    // Cache was NOT invalidated — the next describe should hit the
+    // cache (source: 'cache') because the pre-mutation snapshot is
+    // still valid (server state didn't change).
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: if the cache WAS invalidated, the live
+      // fetch would have nothing to read and the test would fail
+      // with an exhausted cassette. The cache hit is what proves
+      // invalidation was correctly skipped.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape;
+    expect(postEnv.meta.source).toBe('cache');
+  });
+});
