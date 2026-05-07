@@ -39,6 +39,62 @@ interface EnvelopeShape {
 const parseEnvelope = (s: string): EnvelopeShape =>
   JSON.parse(s) as EnvelopeShape;
 
+describe('M14 e2e — workspace add-users (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips add_users_to_workspace; envelope carries data.operation + per-user results', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'WorkspaceAddUsers',
+          response: {
+            data: {
+              add_users_to_workspace: [
+                { id: '67890', name: 'User 67890', email: 'u67890@example.test' },
+              ],
+            },
+          },
+        },
+        {
+          operation_name: 'WorkspaceAddUsers',
+          response: {
+            data: {
+              add_users_to_workspace: [
+                { id: '67891', name: 'User 67891', email: 'u67891@example.test' },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: ['workspace', 'add-users', '12345', '--users', '67890,67891', '--json'],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly { user_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('add_users_to_workspace');
+    expect(env.data.results).toHaveLength(2);
+    expect(env.data.results[0]?.ok).toBe(true);
+    expect(env.data.results[1]?.ok).toBe(true);
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});
+
 describe('M14 e2e — workspace delete --yes (live)', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {

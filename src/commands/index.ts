@@ -93,6 +93,7 @@ import { itemUpsertCommand } from './item/upsert.js';
 import { workspaceCreateCommand } from './workspace/create.js';
 import { workspaceUpdateCommand } from './workspace/update.js';
 import { workspaceDeleteCommand } from './workspace/delete.js';
+import { workspaceAddUsersCommand } from './workspace/add-users.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -117,6 +118,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     workspaceCreateCommand,
     workspaceUpdateCommand,
     workspaceDeleteCommand,
+    workspaceAddUsersCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

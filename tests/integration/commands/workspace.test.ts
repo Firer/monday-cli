@@ -12,6 +12,7 @@ import {
   assertEnvelopeContract,
   drive,
   parseEnvelope,
+  useCachedIntegrationEnv,
   type EnvelopeShape,
 } from '../helpers.js';
 
@@ -904,5 +905,347 @@ describe('monday workspace delete (integration, M14)', () => {
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('forbidden');
+  });
+});
+
+describe('monday workspace add-users (integration, M14)', () => {
+  // Cache-isolated drive() — the email resolution leg writes the
+  // user-directory cache; tests must not interfere across runs.
+  const env = useCachedIntegrationEnv('monday-cli-workspace-addusers-int-');
+  const drive = env.drive;
+
+  const userById = (id: string) => ({
+    id,
+    name: `User ${id}`,
+    email: `user${id}@example.test`,
+  });
+
+  it('live: all-numeric --users fires one wire call per user; envelope carries data.operation + per-user results', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            // First dispatch: user 67890.
+            match_variables: { workspaceId: '12345', userIds: ['67890'] },
+            match_query: /add_users_to_workspace\(workspace_id: \$workspaceId, user_ids: \$userIds\)/,
+            response: { data: { add_users_to_workspace: [userById('67890')] } },
+          },
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67891'] },
+            response: { data: { add_users_to_workspace: [userById('67891')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly { user_id: string; ok: boolean; error?: { code: string } }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    // data.operation lives on `data` (not `meta`) per cli-design §6.4
+    // upsert precedent.
+    expect(envOut.data.operation).toBe('add_users_to_workspace');
+    expect(envOut.data.results).toEqual([
+      { user_id: '67890', ok: true },
+      { user_id: '67891', ok: true },
+    ]);
+    // All-numeric live path: zero resolver legs + 2 dispatch legs
+    // = source 'live' (the dispatch leg counts).
+    expect(envOut.meta.source).toBe('live');
+    assertEnvelopeContract(envOut);
+  });
+
+  it('live: mixed numeric + email — email resolves through userByEmail, both dispatch', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,alice@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          // Email resolution leg: userByEmail fires users(emails:).
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['alice@example.test'] },
+            response: {
+              data: {
+                users: [{ id: '99001', name: 'Alice', email: 'alice@example.test' }],
+              },
+            },
+          },
+          // Dispatch leg 1: numeric 67890.
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_workspace: [userById('67890')] } },
+          },
+          // Dispatch leg 2: resolved 99001.
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['99001'] },
+            response: { data: { add_users_to_workspace: [userById('99001')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly { user_id: string; ok: boolean }[];
+      };
+    };
+    expect(envOut.data.results).toEqual([
+      { user_id: '67890', ok: true },
+      { user_id: '99001', ok: true },
+    ]);
+  });
+
+  it('live: partial success — ghost email lands per-record while numeric dispatches OK', async () => {
+    // The widening v0.2-plan §3 M14 closed in cli-design round-2:
+    // mixed numeric + ghost-email stays partial-success; the ghost
+    // email's resolution failure surfaces in `results[i].error`
+    // rather than aborting the whole call.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,ghost@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['ghost@example.test'] },
+            response: { data: { users: [] } }, // ghost — no match
+          },
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_workspace: [userById('67890')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly {
+          user_id: string;
+          ok: boolean;
+          error?: { code: string; message: string };
+        }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.operation).toBe('add_users_to_workspace');
+    expect(envOut.data.results).toHaveLength(2);
+    expect(envOut.data.results[0]).toEqual({ user_id: '67890', ok: true });
+    expect(envOut.data.results[1]?.user_id).toBe('ghost@example.test');
+    expect(envOut.data.results[1]?.ok).toBe(false);
+    expect(envOut.data.results[1]?.error?.code).toBe('user_not_found');
+  });
+
+  it('live: per-target dispatch failure lands per-record (envelope stays ok: true)', async () => {
+    // Dispatch failure (Monday rejects the second per-user call)
+    // should NOT abort the loop. The first user's success + the
+    // second user's error appear in `data.results`.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_workspace: [userById('67890')] } },
+          },
+          {
+            operation_name: 'WorkspaceAddUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67891'] },
+            response: {
+              data: { add_users_to_workspace: null },
+              errors: [
+                {
+                  message: 'User 67891 cannot be added',
+                  extensions: { code: 'VALIDATION' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { user_id: string; ok: boolean; error?: { code: string } }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.results[0]?.ok).toBe(true);
+    expect(envOut.data.results[1]?.ok).toBe(false);
+    expect(envOut.data.results[1]?.error).toBeDefined();
+  });
+
+  it('whole-call user_not_found when ALL email tokens fail resolution and no numeric remains', async () => {
+    // Per cli-design §6.4 partial-success per-token-resolution-
+    // failures: top-level `user_not_found` (NOT `usage_error`)
+    // when no dispatchable user_id remains. Carries
+    // `details.failed_tokens: [...]`.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', 'a@example.test,b@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            response: { data: { users: [] } },
+          },
+          {
+            operation_name: 'UsersByEmail',
+            response: { data: { users: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { workspace_id?: string; failed_tokens?: readonly string[] };
+      };
+    };
+    expect(envOut.error?.code).toBe('user_not_found');
+    expect(envOut.error?.details?.workspace_id).toBe('12345');
+    expect(envOut.error?.details?.failed_tokens).toEqual([
+      'a@example.test',
+      'b@example.test',
+    ]);
+  });
+
+  it('rejects malformed --users tokens as usage_error at argv-parse', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', 'not-a-real-token', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { malformed_tokens?: readonly string[] } };
+    };
+    expect(envOut.error?.code).toBe('usage_error');
+    expect(envOut.error?.details?.malformed_tokens).toEqual(['not-a-real-token']);
+  });
+
+  it('rejects empty --users entries as usage_error', async () => {
+    // `--users ,67890` has a leading empty token — usage_error.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', ',67890', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --users as usage_error (commander requiredOption)', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: all-numeric → results with would_apply, source: "none" (no resolver leg fires)', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,67891', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        workspace_id: string;
+        results: readonly { user_id: string; would_apply: boolean }[];
+      }[];
+    };
+    expect(envOut.data).toBeNull();
+    expect(envOut.meta.source).toBe('none');
+    const plan = envOut.planned_changes[0];
+    expect(plan?.operation).toBe('add_users_to_workspace');
+    expect(plan?.workspace_id).toBe('12345');
+    expect(plan?.results).toEqual([
+      { user_id: '67890', would_apply: true },
+      { user_id: '67891', would_apply: true },
+    ]);
+    expect(out.requests).toBe(0);
+  });
+
+  it('--dry-run: ghost email surfaces per-record error with would_apply: false', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890,ghost@example.test', '--no-cache', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            response: { data: { users: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        results: readonly {
+          user_id: string;
+          would_apply: boolean;
+          error?: { code: string };
+        }[];
+      }[];
+    };
+    const plan = envOut.planned_changes[0];
+    expect(plan?.results[0]).toEqual({ user_id: '67890', would_apply: true });
+    expect(plan?.results[1]?.user_id).toBe('ghost@example.test');
+    expect(plan?.results[1]?.would_apply).toBe(false);
+    expect(plan?.results[1]?.error?.code).toBe('user_not_found');
+    // Resolver leg fired → source flips from 'none' to 'live'
+    // (the userByEmail call was a live `users(emails:)` lookup).
+    expect(envOut.meta.source).toBe('live');
+  });
+
+  it('live: surfaces forbidden when Monday rejects with PERMISSION_DENIED on first dispatch', async () => {
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            response: {
+              data: { add_users_to_workspace: null },
+              errors: [
+                {
+                  message: 'You do not have permission to add users',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    // Forbidden lands per-record per the partial-success contract
+    // ("dispatch ran and here are the per-target outcomes" — even
+    // when the call surfaces forbidden, the record carries the
+    // error and the envelope is ok: true).
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { results: readonly { user_id: string; ok: boolean; error?: { code: string } }[] };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.results[0]?.ok).toBe(false);
+    expect(envOut.data.results[0]?.error?.code).toBe('forbidden');
   });
 });
