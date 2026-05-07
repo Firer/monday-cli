@@ -47,6 +47,7 @@ import {
   boardProjectionSchema,
   type BoardProjection,
 } from '../../api/board-projection.js';
+import { projectMutationBoard } from '../../api/board-mutation-result.js';
 
 const CREATE_BOARD_MUTATION = `
   mutation BoardCreate(
@@ -231,7 +232,19 @@ export const boardCreateCommand: CommandModule<
             },
           );
         }
-        const projected = projectCreatedBoard(data.create_board, name);
+        // R43 lift (api/board-mutation-result.ts): null-payload
+        // guard + projection. Create's null path uses
+        // `internal_error` because the contract is "every successful
+        // call returns a Board"; the helper carries the agent-
+        // supplied `board_name` in `details` because the new id
+        // doesn't exist yet on the null path.
+        const projected = projectMutationBoard({
+          raw: data.create_board,
+          errorCode: 'internal_error',
+          errorMessage: `Monday returned no board payload from create_board for name ${JSON.stringify(name)}.`,
+          detailKey: 'board_name',
+          detailValue: name,
+        });
 
         emitMutation({
           ctx,
@@ -245,24 +258,4 @@ export const boardCreateCommand: CommandModule<
         });
       });
   },
-};
-
-const projectCreatedBoard = (
-  raw: unknown,
-  boardName: string,
-): BoardCreateOutput => {
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'internal_error',
-      `Monday returned no board payload from create_board for name ${JSON.stringify(boardName)}.`,
-      { details: { board_name: boardName } },
-    );
-  }
-  return unwrapOrThrow(
-    boardCreateOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed board payload for name ${JSON.stringify(boardName)}`,
-      details: { board_name: boardName },
-    },
-  );
 };

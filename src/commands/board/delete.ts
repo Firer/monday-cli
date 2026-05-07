@@ -50,6 +50,7 @@ import {
   boardProjectionSchema,
   type BoardProjection,
 } from '../../api/board-projection.js';
+import { projectMutationBoard } from '../../api/board-mutation-result.js';
 
 const DELETE_BOARD_MUTATION = `
   mutation BoardDelete($boardId: ID!) {
@@ -176,7 +177,17 @@ export const boardDeleteCommand: CommandModule<
             },
           );
         }
-        const projected = projectDeletedBoard(data.delete_board, parsed.boardId);
+        // R43 lift (api/board-mutation-result.ts): null-payload
+        // guard + projection. Delete's null path uses `not_found`
+        // (Monday's "id was bogus / already deleted" mapping) per
+        // M14 round-2 / round-3 missing-root vs null distinction.
+        const projected = projectMutationBoard({
+          raw: data.delete_board,
+          errorCode: 'not_found',
+          errorMessage: `Monday returned no board payload from delete_board for id ${parsed.boardId}`,
+          detailKey: 'board_id',
+          detailValue: parsed.boardId,
+        });
 
         emitMutation({
           ctx,
@@ -190,24 +201,4 @@ export const boardDeleteCommand: CommandModule<
         });
       });
   },
-};
-
-const projectDeletedBoard = (
-  raw: unknown,
-  boardId: string,
-): BoardDeleteOutput => {
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no board payload from delete_board for id ${boardId}`,
-      { details: { board_id: boardId } },
-    );
-  }
-  return unwrapOrThrow(
-    boardDeleteOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed board payload for id ${boardId}`,
-      details: { board_id: boardId },
-    },
-  );
 };

@@ -61,6 +61,7 @@ import {
   boardProjectionSchema,
   type BoardProjection,
 } from '../../api/board-projection.js';
+import { projectMutationBoard } from '../../api/board-mutation-result.js';
 
 const DUPLICATE_BOARD_MUTATION = `
   mutation BoardDuplicate(
@@ -295,8 +296,14 @@ export const boardDuplicateCommand: CommandModule<
 
         // BoardDuplication has two fields — `board` (the
         // duplicated board's projection) and `is_async`. Parse the
-        // wrapper, then validate the inner board against
-        // boardProjectionSchema.
+        // wrapper here (R43 only covers the inner-board projection,
+        // not the wrapped envelope unique to duplicate), then
+        // project the inner board through `projectMutationBoard`
+        // (api/board-mutation-result.ts). Inner-board null path
+        // uses `internal_error` because the wrapper succeeded
+        // server-side but the projection is empty — schema-drift /
+        // server-side glitch rather than the agent-recovery
+        // story `not_found` carries.
         const wrapper = unwrapOrThrow(
           duplicationPayloadSchema.safeParse(data.duplicate_board),
           {
@@ -304,20 +311,13 @@ export const boardDuplicateCommand: CommandModule<
             details: { board_id: parsed.boardId },
           },
         );
-        if (wrapper.board === null || wrapper.board === undefined) {
-          throw new ApiError(
-            'internal_error',
-            `Monday returned no board inside BoardDuplication for source id ${parsed.boardId}`,
-            { details: { board_id: parsed.boardId } },
-          );
-        }
-        const projectedBoard = unwrapOrThrow(
-          boardProjectionSchema.safeParse(wrapper.board),
-          {
-            context: `Monday returned a malformed duplicated board payload for source id ${parsed.boardId}`,
-            details: { board_id: parsed.boardId },
-          },
-        );
+        const projectedBoard = projectMutationBoard({
+          raw: wrapper.board,
+          errorCode: 'internal_error',
+          errorMessage: `Monday returned no board inside BoardDuplication for source id ${parsed.boardId}`,
+          detailKey: 'board_id',
+          detailValue: parsed.boardId,
+        });
 
         emitMutation({
           ctx,

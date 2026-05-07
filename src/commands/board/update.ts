@@ -69,6 +69,7 @@ import {
   boardProjectionSchema,
   type BoardProjection,
 } from '../../api/board-projection.js';
+import { projectMutationBoard } from '../../api/board-mutation-result.js';
 
 const UPDATE_BOARD_MUTATION = `
   mutation BoardUpdate(
@@ -335,26 +336,21 @@ export const boardUpdateCommand: CommandModule<
           },
         );
         const first: unknown = (finalData.boards ?? [])[0];
-        if (first === undefined || first === null) {
-          // Defensive: the per-field calls succeeded but the final
-          // read couldn't find the board. This would be very unusual
-          // (the board can't have been deleted between mutation and
-          // read in any normal flow); surface as internal_error per
-          // the M14 round-2 / round-3 missing-root vs null
-          // distinction.
-          throw new ApiError(
-            'internal_error',
-            `Monday returned no board for id ${parsed.boardId} on the final post-update read`,
-            { details: { board_id: parsed.boardId } },
-          );
-        }
-        const projected = unwrapOrThrow(
-          boardUpdateOutputSchema.safeParse(first),
-          {
-            context: `Monday returned a malformed board payload (final read) for id ${parsed.boardId}`,
-            details: { board_id: parsed.boardId },
-          },
-        );
+        // R43 lift (api/board-mutation-result.ts): null-payload
+        // guard + projection. Defensive `internal_error` per M14
+        // round-2 / round-3 missing-root vs null distinction —
+        // per-field calls succeeded but the final read couldn't
+        // find the board (very unusual — the board can't have
+        // been deleted between mutation and read in any normal
+        // flow), so surface contract anomaly rather than a no-op
+        // success.
+        const projected = projectMutationBoard({
+          raw: first,
+          errorCode: 'internal_error',
+          errorMessage: `Monday returned no board for id ${parsed.boardId} on the final post-update read`,
+          detailKey: 'board_id',
+          detailValue: parsed.boardId,
+        });
 
         emitMutation({
           ctx,

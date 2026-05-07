@@ -55,6 +55,7 @@ import {
   boardProjectionSchema,
   type BoardProjection,
 } from '../../api/board-projection.js';
+import { projectMutationBoard } from '../../api/board-mutation-result.js';
 
 const ARCHIVE_BOARD_MUTATION = `
   mutation BoardArchive($boardId: ID!) {
@@ -213,7 +214,17 @@ export const boardArchiveCommand: CommandModule<
             },
           );
         }
-        const projected = projectArchivedBoard(data.archive_board, parsed.boardId);
+        // R43 lift (api/board-mutation-result.ts): null-payload
+        // guard + projection. Archive's null path uses `not_found`
+        // (Monday's idiomatic missing-or-no-access response) per
+        // M14 round-2 / round-3 missing-root vs null distinction.
+        const projected = projectMutationBoard({
+          raw: data.archive_board,
+          errorCode: 'not_found',
+          errorMessage: `Monday returned no board payload from archive_board for id ${parsed.boardId}`,
+          detailKey: 'board_id',
+          detailValue: parsed.boardId,
+        });
 
         emitMutation({
           ctx,
@@ -227,24 +238,4 @@ export const boardArchiveCommand: CommandModule<
         });
       });
   },
-};
-
-const projectArchivedBoard = (
-  raw: unknown,
-  boardId: string,
-): BoardArchiveOutput => {
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no board payload from archive_board for id ${boardId}`,
-      { details: { board_id: boardId } },
-    );
-  }
-  return unwrapOrThrow(
-    boardArchiveOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed board payload for id ${boardId}`,
-      details: { board_id: boardId },
-    },
-  );
 };
