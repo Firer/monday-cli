@@ -15,30 +15,24 @@
  * call boundary (`user_not_found` when no dispatchable id remains;
  * `usage_error` for malformed `--users` syntax).
  *
- * R-class candidate for M14 close: the two verbs share ~90% of
- * their action body. If M15 `board add-users` reuses the same
- * shape (likely — same partial-success contract per cli-design
- * §6.4), the third consumer triggers a lift into a shared
- * resolver-fronted-fan-out helper. M14 close audits the trigger
- * state.
- *
  * **Idempotent: yes** — Monday is no-op on re-removing a non-
  * member. **Admin-permission-sensitive**.
+ *
+ * **R40 lift (post-M15).** The token parser, resolver loop,
+ * dispatch loop, and envelope assembly live in
+ * `src/api/users-fan-out-mutation.ts` — three M14 / M15 verbs
+ * (workspace add-users / workspace remove-users / board add-users)
+ * share the body modulo six per-verb parameters.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { dispatchSequential } from '../../api/partial-success-mutation.js';
-import { assertResponseFieldPresent } from '../../api/response-root.js';
-import { SourceAggregator } from '../../api/source-aggregator.js';
-import { userByEmail } from '../../api/resolvers.js';
-import type { MondayClient } from '../../api/client.js';
-import type { DataSource } from '../../utils/output/envelope.js';
+import {
+  dispatchUsersFanOut,
+  parseUsersArg,
+} from '../../api/users-fan-out-mutation.js';
 
 const REMOVE_USERS_FROM_WORKSPACE_MUTATION = `
   mutation WorkspaceRemoveUsers($workspaceId: ID!, $userIds: [ID!]!) {
@@ -47,16 +41,6 @@ const REMOVE_USERS_FROM_WORKSPACE_MUTATION = `
     }
   }
 `;
-
-const NUMERIC_TOKEN_PATTERN = /^\d+$/u;
-const EMAIL_TOKEN_PATTERN = /^[^@\s]+@[^@\s]+$/u;
-
-const dispatchResponseSchema = z
-  .object({
-    delete_users_from_workspace: z.unknown(),
-  })
-  .loose();
-
 
 const errorShape = z
   .object({
@@ -93,121 +77,6 @@ const inputSchema = z
   })
   .strict();
 
-interface ParsedToken {
-  readonly raw: string;
-  readonly kind: 'numeric' | 'email';
-}
-
-const parseUsersArg = (raw: string): readonly ParsedToken[] => {
-  const split = raw.split(',').map((t) => t.trim());
-  const malformed: string[] = [];
-  const tokens: ParsedToken[] = [];
-  for (const token of split) {
-    if (token.length === 0) {
-      malformed.push(token);
-      continue;
-    }
-    if (NUMERIC_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'numeric' });
-      continue;
-    }
-    if (EMAIL_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'email' });
-      continue;
-    }
-    malformed.push(token);
-  }
-  if (malformed.length > 0) {
-    throw new UsageError(
-      `--users contains malformed tokens: ${malformed.map((t) => JSON.stringify(t)).join(', ')}. Each token must be a numeric Monday user id or an email.`,
-      { details: { malformed_tokens: malformed } },
-    );
-  }
-  // Defensive: unreachable in practice.
-  // `inputSchema.users.min(1)` rejects empty `--users` strings,
-  // and any all-empty split (e.g. ",,,") fills `malformed[]`
-  // first which throws above.
-  /* c8 ignore next 3 */
-  if (tokens.length === 0) {
-    throw new UsageError('--users must contain at least one numeric id or email');
-  }
-  return tokens;
-};
-
-interface ResolvedRecord {
-  readonly user_id: string;
-  readonly ok: boolean;
-  readonly error?: { readonly code: string; readonly message: string };
-}
-
-interface ResolutionOutcome {
-  readonly records: readonly ResolvedRecord[];
-  readonly dispatchableIds: readonly string[];
-  readonly dispatchableIndices: readonly number[];
-  readonly failedTokens: readonly string[];
-  readonly resolverAggregator: SourceAggregator;
-  readonly anyResolverLegFired: boolean;
-}
-
-const resolveTokens = async (
-  client: MondayClient,
-  tokens: readonly ParsedToken[],
-  env: NodeJS.ProcessEnv,
-  noCache: boolean,
-): Promise<ResolutionOutcome> => {
-  const records: ResolvedRecord[] = [];
-  const dispatchableIds: string[] = [];
-  const dispatchableIndices: number[] = [];
-  const failedTokens: string[] = [];
-  const aggregator = new SourceAggregator();
-  let anyResolverLegFired = false;
-  for (const token of tokens) {
-    if (token.kind === 'numeric') {
-      const idx = records.length;
-      records.push({ user_id: token.raw, ok: true });
-      dispatchableIds.push(token.raw);
-      dispatchableIndices.push(idx);
-      continue;
-    }
-    try {
-      const resolved = await userByEmail({
-        client,
-        email: token.raw,
-        env,
-        noCache,
-      });
-      anyResolverLegFired = true;
-      aggregator.record(resolved.source, resolved.cacheAgeSeconds);
-      const idx = records.length;
-      records.push({ user_id: resolved.user.id, ok: true });
-      dispatchableIds.push(resolved.user.id);
-      dispatchableIndices.push(idx);
-    } catch (err: unknown) {
-      anyResolverLegFired = true;
-      aggregator.record('live', null);
-      if (err instanceof ApiError && err.code === 'user_not_found') {
-        records.push({
-          user_id: token.raw,
-          ok: false,
-          error: { code: err.code, message: err.message },
-        });
-        failedTokens.push(token.raw);
-        continue;
-      }
-      /* c8 ignore next — defensive: non-user_not_found re-throw. */
-      throw err;
-    }
-  }
-  return {
-    records,
-    dispatchableIds,
-    dispatchableIndices,
-    failedTokens,
-    resolverAggregator: aggregator,
-    anyResolverLegFired,
-  };
-};
-
 export const workspaceRemoveUsersCommand: CommandModule<
   z.infer<typeof inputSchema>,
   WorkspaceRemoveUsersOutput
@@ -239,140 +108,36 @@ export const workspaceRemoveUsersCommand: CommandModule<
           workspaceId,
           ...(opts as Readonly<Record<string, unknown>>),
         });
+        // parseUsersArg runs BEFORE resolveClient so a malformed
+        // `--users` surfaces as usage_error (exit 1) ahead of any
+        // missing-token config_error (exit 3).
         const tokens = parseUsersArg(parsed.users);
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
           program.opts(),
         );
 
-        const resolution = await resolveTokens(
+        await dispatchUsersFanOut({
           client,
-          tokens,
-          ctx.env,
-          globalFlags.noCache,
-        );
-
-        if (resolution.dispatchableIds.length === 0) {
-          throw new ApiError(
-            'user_not_found',
-            `No dispatchable user_id remains for workspace remove-users — every --users token failed lookup.`,
-            {
-              details: {
-                workspace_id: parsed.workspaceId,
-                failed_tokens: resolution.failedTokens,
-              },
-            },
-          );
-        }
-
-        if (globalFlags.dryRun) {
-          const source: DataSource = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().source
-            : 'none';
-          const cacheAgeSeconds = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().cacheAgeSeconds
-            : null;
-          const dryResults = resolution.records.map((r) => ({
-            user_id: r.user_id,
-            would_apply: r.ok,
-            ...(r.error === undefined ? {} : { error: r.error }),
-          }));
-          emitDryRun({
-            ctx,
-            programOpts: program.opts(),
-            plannedChanges: [
-              {
-                operation: 'delete_users_from_workspace',
-                workspace_id: parsed.workspaceId,
-                results: dryResults,
-              },
-            ],
-            source,
-            cacheAgeSeconds,
-            warnings: [],
-            apiVersion,
-          });
-          return;
-        }
-
-        const liveAggregator = resolution.resolverAggregator;
-        let lastResponse: Awaited<
-          ReturnType<typeof client.raw>
-        > | undefined;
-        const dispatchResults = await dispatchSequential(
-          resolution.dispatchableIds,
-          'user_id',
-          async ({ targetId }) => {
-            // Record dispatch leg as 'live' BEFORE the wire call —
-            // Codex M14 round-1 F1: per-target dispatch failures
-            // still count toward `meta.source` because the call
-            // DID fire (mirrors add-users fix).
-            liveAggregator.record('live', null);
-            const response = await client.raw<unknown>(
-              REMOVE_USERS_FROM_WORKSPACE_MUTATION,
-              {
-                workspaceId: parsed.workspaceId,
-                userIds: [targetId],
-              },
-              { operationName: 'WorkspaceRemoveUsers' },
-            );
-            lastResponse = response;
-            // Codex M14 round-1 F2: null mutation payload + no
-            // errors array → per-target `results[i].error`, not
-            // illusory success. Mirrors add-users fix.
-            const data = unwrapOrThrow(
-              dispatchResponseSchema.safeParse(response.data),
-              {
-                context:
-                  'Monday returned a malformed WorkspaceRemoveUsers response',
-                details: {
-                  workspace_id: parsed.workspaceId,
-                  user_id: targetId,
-                },
-              },
-            );
-            // R41 lift: assertResponseFieldPresent
-            // (api/response-root.ts) — see add-users for
-            // contract details.
-            assertResponseFieldPresent({
-              data,
-              key: 'delete_users_from_workspace',
-              operationLabel: 'WorkspaceRemoveUsers',
-              scopeKey: 'workspace_id',
-              scopeId: parsed.workspaceId,
-              targetKey: 'user_id',
-              targetId,
-            });
-          },
-        );
-
-        const finalResults: ResolvedRecord[] = [...resolution.records];
-        for (let i = 0; i < resolution.dispatchableIndices.length; i++) {
-          const idx = resolution.dispatchableIndices[i];
-          const dispatchResult = dispatchResults[i];
-          if (idx === undefined || dispatchResult === undefined) continue;
-          finalResults[idx] = {
-            user_id: resolution.records[idx]?.user_id ?? '',
-            ok: dispatchResult.ok,
-            ...(dispatchResult.error === undefined
-              ? {}
-              : { error: dispatchResult.error }),
-          };
-        }
-
-        emitMutation({
           ctx,
-          data: {
-            operation: 'delete_users_from_workspace' as const,
-            results: finalResults,
-          },
-          schema: workspaceRemoveUsersCommand.outputSchema,
           programOpts: program.opts(),
-          warnings: [],
-          ...(lastResponse === undefined
-            ? { apiVersion }
-            : toEmit(lastResponse)),
-          ...liveAggregator.result(),
+          globalFlags,
+          apiVersion,
+          toEmit,
+          tokens,
+          scope: {
+            id: parsed.workspaceId,
+            key: 'workspace_id',
+            variableKey: 'workspaceId',
+          },
+          mutation: {
+            query: REMOVE_USERS_FROM_WORKSPACE_MUTATION,
+            operationName: 'WorkspaceRemoveUsers',
+            rootKey: 'delete_users_from_workspace',
+          },
+          dataOperation: 'delete_users_from_workspace',
+          verbDescription: 'workspace remove-users',
+          outputSchema: workspaceRemoveUsersOutputSchema,
         });
       });
   },

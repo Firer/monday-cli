@@ -46,21 +46,22 @@
  *
  * **Idempotent: yes** — Monday is no-op on a re-add. **Admin-
  * permission-sensitive**.
+ *
+ * **R40 lift (post-M15).** The token parser, resolver loop,
+ * dispatch loop, and envelope assembly live in
+ * `src/api/users-fan-out-mutation.ts` — three M14 / M15 verbs
+ * (workspace add-users / workspace remove-users / board add-users)
+ * share the body modulo six per-verb parameters.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { dispatchSequential } from '../../api/partial-success-mutation.js';
-import { assertResponseFieldPresent } from '../../api/response-root.js';
-import { SourceAggregator } from '../../api/source-aggregator.js';
-import { userByEmail } from '../../api/resolvers.js';
-import type { MondayClient } from '../../api/client.js';
-import type { DataSource } from '../../utils/output/envelope.js';
+import {
+  dispatchUsersFanOut,
+  parseUsersArg,
+} from '../../api/users-fan-out-mutation.js';
 
 const ADD_USERS_TO_WORKSPACE_MUTATION = `
   mutation WorkspaceAddUsers($workspaceId: ID!, $userIds: [ID!]!) {
@@ -69,21 +70,6 @@ const ADD_USERS_TO_WORKSPACE_MUTATION = `
     }
   }
 `;
-
-// `--users` token validation. Numeric matches the same regex the
-// branded `UserId` schema uses (`/^\d+$/`); email is a deliberately
-// permissive shape (presence of `@` after a non-empty local-part —
-// Monday's `users(emails:)` will reject anything malformed at the
-// directory level, and we only need to distinguish "lookup this"
-// from "send this id verbatim").
-const NUMERIC_TOKEN_PATTERN = /^\d+$/u;
-const EMAIL_TOKEN_PATTERN = /^[^@\s]+@[^@\s]+$/u;
-
-const dispatchResponseSchema = z
-  .object({
-    add_users_to_workspace: z.unknown(),
-  })
-  .loose();
 
 const errorShape = z
   .object({
@@ -121,148 +107,6 @@ const inputSchema = z
   })
   .strict();
 
-interface ParsedToken {
-  readonly raw: string;
-  readonly kind: 'numeric' | 'email';
-}
-
-const parseUsersArg = (raw: string): readonly ParsedToken[] => {
-  const split = raw.split(',').map((t) => t.trim());
-  const malformed: string[] = [];
-  const tokens: ParsedToken[] = [];
-  for (const token of split) {
-    if (token.length === 0) {
-      malformed.push(token);
-      continue;
-    }
-    if (NUMERIC_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'numeric' });
-      continue;
-    }
-    if (EMAIL_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'email' });
-      continue;
-    }
-    malformed.push(token);
-  }
-  if (malformed.length > 0) {
-    throw new UsageError(
-      `--users contains malformed tokens: ${malformed.map((t) => JSON.stringify(t)).join(', ')}. Each token must be a numeric Monday user id or an email.`,
-      { details: { malformed_tokens: malformed } },
-    );
-  }
-  // Defensive: unreachable in practice.
-  // `inputSchema.users.min(1)` rejects empty `--users` strings,
-  // and any all-empty split (e.g. ",,,") fills `malformed[]`
-  // first which throws above.
-  /* c8 ignore next 3 */
-  if (tokens.length === 0) {
-    throw new UsageError('--users must contain at least one numeric id or email');
-  }
-  return tokens;
-};
-
-interface ResolvedRecord {
-  /** Branded numeric Monday user id when resolution succeeded; the
-   * input token verbatim (numeric string OR email) when it failed.
-   * Always non-empty.
-   */
-  readonly user_id: string;
-  readonly ok: boolean;
-  readonly error?: { readonly code: string; readonly message: string };
-}
-
-interface ResolutionOutcome {
-  readonly records: readonly ResolvedRecord[];
-  /** IDs the live dispatch loop should fire against (resolved,
-   * `ok: true` records). Order matches the input `--users` order
-   * with failed-resolution records skipped.
-   */
-  readonly dispatchableIds: readonly string[];
-  /** Mapping from a dispatchable id back to the original record
-   * index, so the live dispatch's per-target outcome can update
-   * the right slot. */
-  readonly dispatchableIndices: readonly number[];
-  /** Tokens that failed lookup. Used for the whole-call
-   * `details.failed_tokens` echo when no dispatchable id remains.
-   */
-  readonly failedTokens: readonly string[];
-  /** `meta.source` aggregator over resolver legs only. Live path
-   * folds dispatch legs into this externally. */
-  readonly resolverAggregator: SourceAggregator;
-  /** Whether any resolver leg fired (numeric-only paths fire none
-   * — the aggregator stays empty and `meta.source` reads `'none'`
-   * for dry-run). */
-  readonly anyResolverLegFired: boolean;
-}
-
-const resolveTokens = async (
-  client: MondayClient,
-  tokens: readonly ParsedToken[],
-  env: NodeJS.ProcessEnv,
-  noCache: boolean,
-): Promise<ResolutionOutcome> => {
-  const records: ResolvedRecord[] = [];
-  const dispatchableIds: string[] = [];
-  const dispatchableIndices: number[] = [];
-  const failedTokens: string[] = [];
-  const aggregator = new SourceAggregator();
-  let anyResolverLegFired = false;
-  for (const token of tokens) {
-    if (token.kind === 'numeric') {
-      const idx = records.length;
-      records.push({ user_id: token.raw, ok: true });
-      dispatchableIds.push(token.raw);
-      dispatchableIndices.push(idx);
-      continue;
-    }
-    // Email — flows through userByEmail. Catch resolution failure
-    // per-token rather than aborting (partial-success contract).
-    try {
-      const resolved = await userByEmail({
-        client,
-        email: token.raw,
-        env,
-        noCache,
-      });
-      anyResolverLegFired = true;
-      aggregator.record(resolved.source, resolved.cacheAgeSeconds);
-      const idx = records.length;
-      records.push({ user_id: resolved.user.id, ok: true });
-      dispatchableIds.push(resolved.user.id);
-      dispatchableIndices.push(idx);
-    } catch (err: unknown) {
-      anyResolverLegFired = true;
-      // userByEmail records the live `users(emails:)` lookup as
-      // 'live' — we lost the source signal in the throw path, but
-      // a resolver leg DID fire, so reflect it in the aggregate.
-      aggregator.record('live', null);
-      if (err instanceof ApiError && err.code === 'user_not_found') {
-        records.push({
-          user_id: token.raw,
-          ok: false,
-          error: { code: err.code, message: err.message },
-        });
-        failedTokens.push(token.raw);
-        continue;
-      }
-      // Non-`user_not_found` ApiError (e.g. `internal_error` on a
-      // malformed Monday response) is a whole-call failure that
-      // shouldn't be swallowed into a per-record slot — re-throw.
-      /* c8 ignore next */
-      throw err;
-    }
-  }
-  return {
-    records,
-    dispatchableIds,
-    dispatchableIndices,
-    failedTokens,
-    resolverAggregator: aggregator,
-    anyResolverLegFired,
-  };
-};
-
 export const workspaceAddUsersCommand: CommandModule<
   z.infer<typeof inputSchema>,
   WorkspaceAddUsersOutput
@@ -294,176 +138,36 @@ export const workspaceAddUsersCommand: CommandModule<
           workspaceId,
           ...(opts as Readonly<Record<string, unknown>>),
         });
+        // parseUsersArg runs BEFORE resolveClient so a malformed
+        // `--users` surfaces as usage_error (exit 1) ahead of any
+        // missing-token config_error (exit 3).
         const tokens = parseUsersArg(parsed.users);
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
           program.opts(),
         );
 
-        // Phase 1: per-token resolution (numeric IDs are argv-
-        // derived; emails flow through `userByEmail`). Failures
-        // land per-record rather than aborting the loop.
-        // `--no-cache` plumbs through so the directory cache is
-        // bypassed when the agent asked.
-        const resolution = await resolveTokens(
+        await dispatchUsersFanOut({
           client,
-          tokens,
-          ctx.env,
-          globalFlags.noCache,
-        );
-
-        // Whole-call boundary — no dispatchable user_id remains.
-        // Per cli-design §6.4 partial-success per-token-resolution-
-        // failures: surface as top-level `user_not_found` (NOT
-        // `usage_error` — directory miss is actionable distinct
-        // from malformed argv) carrying `details.failed_tokens`.
-        if (resolution.dispatchableIds.length === 0) {
-          throw new ApiError(
-            'user_not_found',
-            `No dispatchable user_id remains for workspace add-users — every --users token failed lookup.`,
-            {
-              details: {
-                workspace_id: parsed.workspaceId,
-                failed_tokens: resolution.failedTokens,
-              },
-            },
-          );
-        }
-
-        if (globalFlags.dryRun) {
-          // Dry-run: only resolver legs count toward `meta.source`.
-          // Numeric-only `--users` fires zero resolver legs → 'none'.
-          const source: DataSource = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().source
-            : 'none';
-          const cacheAgeSeconds = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().cacheAgeSeconds
-            : null;
-          // Per-record dry-run shape: `{user_id, would_apply, error?}`.
-          // Mirror `liveResultRecordSchema` minus the `ok` rename.
-          const dryResults = resolution.records.map((r) => ({
-            user_id: r.user_id,
-            would_apply: r.ok,
-            ...(r.error === undefined ? {} : { error: r.error }),
-          }));
-          emitDryRun({
-            ctx,
-            programOpts: program.opts(),
-            plannedChanges: [
-              {
-                operation: 'add_users_to_workspace',
-                workspace_id: parsed.workspaceId,
-                results: dryResults,
-              },
-            ],
-            source,
-            cacheAgeSeconds,
-            warnings: [],
-            apiVersion,
-          });
-          return;
-        }
-
-        // Phase 2: live dispatch — one wire call per dispatchable
-        // user. Per-target failures captured into `results[i].error`
-        // by `dispatchSequential`. Aggregator folds in the dispatch
-        // legs (always live) on top of the resolver legs.
-        const liveAggregator = resolution.resolverAggregator;
-        let lastResponse: Awaited<
-          ReturnType<typeof client.raw>
-        > | undefined;
-        const dispatchResults = await dispatchSequential(
-          resolution.dispatchableIds,
-          'user_id',
-          async ({ targetId }) => {
-            // Record the dispatch leg as 'live' BEFORE the wire
-            // call — Codex M14 round-1 F1: per-target dispatch
-            // failures must still count toward `meta.source`
-            // because the call DID fire. Without this, an all-
-            // email cache + dispatch-fails scenario would emit
-            // `source: "cache"` even though a live mutation was
-            // attempted.
-            liveAggregator.record('live', null);
-            const response = await client.raw<unknown>(
-              ADD_USERS_TO_WORKSPACE_MUTATION,
-              {
-                workspaceId: parsed.workspaceId,
-                userIds: [targetId],
-              },
-              { operationName: 'WorkspaceAddUsers' },
-            );
-            lastResponse = response;
-            // Codex M14 round-1 F2: a 200 response with
-            // `data.add_users_to_workspace: null` and no
-            // `errors[]` is NOT a per-target success — it's a
-            // null payload Monday returns when the membership
-            // can't be applied (rare server-side path; observed
-            // when the user id is a typo'd workspace id, etc.).
-            // Throw a typed ApiError so dispatchSequential lands
-            // it in `results[i].error` rather than reporting an
-            // illusory ok: true.
-            const data = unwrapOrThrow(
-              dispatchResponseSchema.safeParse(response.data),
-              {
-                context:
-                  'Monday returned a malformed WorkspaceAddUsers response',
-                details: {
-                  workspace_id: parsed.workspaceId,
-                  user_id: targetId,
-                },
-              },
-            );
-            // R41 lift: assertResponseFieldPresent
-            // (api/response-root.ts) — distinguishes
-            // missing-root-key (internal_error, whole-call
-            // re-thrown by dispatchSequential) from null payload
-            // (not_found, per-record).
-            assertResponseFieldPresent({
-              data,
-              key: 'add_users_to_workspace',
-              operationLabel: 'WorkspaceAddUsers',
-              scopeKey: 'workspace_id',
-              scopeId: parsed.workspaceId,
-              targetKey: 'user_id',
-              targetId,
-            });
-          },
-        );
-
-        // Merge dispatch outcomes back into the resolution records.
-        // Pre-loop resolution failures stay as-is; dispatchable
-        // records pick up the dispatch result (which may have
-        // flipped `ok: true` → `ok: false` on a Monday-side error).
-        const finalResults: ResolvedRecord[] = [...resolution.records];
-        for (let i = 0; i < resolution.dispatchableIndices.length; i++) {
-          const idx = resolution.dispatchableIndices[i];
-          const dispatchResult = dispatchResults[i];
-          if (idx === undefined || dispatchResult === undefined) continue;
-          // dispatchSequential builds a record with our id-field
-          // (`user_id`) plus `ok` + optional `error`. Lift the
-          // success/error info onto the resolution slot.
-          finalResults[idx] = {
-            user_id: resolution.records[idx]?.user_id ?? '',
-            ok: dispatchResult.ok,
-            ...(dispatchResult.error === undefined
-              ? {}
-              : { error: dispatchResult.error }),
-          };
-        }
-
-        emitMutation({
           ctx,
-          data: {
-            operation: 'add_users_to_workspace' as const,
-            results: finalResults,
-          },
-          schema: workspaceAddUsersCommand.outputSchema,
           programOpts: program.opts(),
-          warnings: [],
-          ...(lastResponse === undefined
-            ? { apiVersion }
-            : toEmit(lastResponse)),
-          ...liveAggregator.result(),
+          globalFlags,
+          apiVersion,
+          toEmit,
+          tokens,
+          scope: {
+            id: parsed.workspaceId,
+            key: 'workspace_id',
+            variableKey: 'workspaceId',
+          },
+          mutation: {
+            query: ADD_USERS_TO_WORKSPACE_MUTATION,
+            operationName: 'WorkspaceAddUsers',
+            rootKey: 'add_users_to_workspace',
+          },
+          dataOperation: 'add_users_to_workspace',
+          verbDescription: 'workspace add-users',
+          outputSchema: workspaceAddUsersOutputSchema,
         });
       });
   },

@@ -8,9 +8,9 @@
  * mirrors workspace-add-users near-verbatim modulo the wire
  * mutation name + target id field (`board_id` vs `workspace_id`).
  * Per v0.2-plan §22 R40, the shared resolver-fronted-fan-out
- * helper lift fires at M15 close once this third consumer's
- * parameter shape is empirically known — this file is the third
- * copy that triggers the lift.
+ * helper lift fired post-M15 once this third consumer's parameter
+ * shape was empirically known — the body now lives in
+ * `src/api/users-fan-out-mutation.ts`.
  *
  * **Wire shape.** Each per-user dispatch fires `add_users_to_
  * board(board_id, user_ids: [<single>], kind?: BoardSubscriberKind)`
@@ -39,18 +39,13 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
-import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { dispatchSequential } from '../../api/partial-success-mutation.js';
-import { assertResponseFieldPresent } from '../../api/response-root.js';
-import { SourceAggregator } from '../../api/source-aggregator.js';
-import { userByEmail } from '../../api/resolvers.js';
-import type { MondayClient } from '../../api/client.js';
-import type { DataSource } from '../../utils/output/envelope.js';
+import {
+  dispatchUsersFanOut,
+  parseUsersArg,
+} from '../../api/users-fan-out-mutation.js';
 
 const ADD_USERS_TO_BOARD_MUTATION = `
   mutation BoardAddUsers($boardId: ID!, $userIds: [ID!]!) {
@@ -59,16 +54,6 @@ const ADD_USERS_TO_BOARD_MUTATION = `
     }
   }
 `;
-
-// Token validation patterns mirror workspace add-users (M14).
-const NUMERIC_TOKEN_PATTERN = /^\d+$/u;
-const EMAIL_TOKEN_PATTERN = /^[^@\s]+@[^@\s]+$/u;
-
-const dispatchResponseSchema = z
-  .object({
-    add_users_to_board: z.unknown(),
-  })
-  .loose();
 
 const errorShape = z
   .object({
@@ -101,117 +86,6 @@ const inputSchema = z
   })
   .strict();
 
-interface ParsedToken {
-  readonly raw: string;
-  readonly kind: 'numeric' | 'email';
-}
-
-const parseUsersArg = (raw: string): readonly ParsedToken[] => {
-  const split = raw.split(',').map((t) => t.trim());
-  const malformed: string[] = [];
-  const tokens: ParsedToken[] = [];
-  for (const token of split) {
-    if (token.length === 0) {
-      malformed.push(token);
-      continue;
-    }
-    if (NUMERIC_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'numeric' });
-      continue;
-    }
-    if (EMAIL_TOKEN_PATTERN.test(token)) {
-      tokens.push({ raw: token, kind: 'email' });
-      continue;
-    }
-    malformed.push(token);
-  }
-  if (malformed.length > 0) {
-    throw new UsageError(
-      `--users contains malformed tokens: ${malformed.map((t) => JSON.stringify(t)).join(', ')}. Each token must be a numeric Monday user id or an email.`,
-      { details: { malformed_tokens: malformed } },
-    );
-  }
-  /* c8 ignore next 3 */
-  if (tokens.length === 0) {
-    throw new UsageError('--users must contain at least one numeric id or email');
-  }
-  return tokens;
-};
-
-interface ResolvedRecord {
-  readonly user_id: string;
-  readonly ok: boolean;
-  readonly error?: { readonly code: string; readonly message: string };
-}
-
-interface ResolutionOutcome {
-  readonly records: readonly ResolvedRecord[];
-  readonly dispatchableIds: readonly string[];
-  readonly dispatchableIndices: readonly number[];
-  readonly failedTokens: readonly string[];
-  readonly resolverAggregator: SourceAggregator;
-  readonly anyResolverLegFired: boolean;
-}
-
-const resolveTokens = async (
-  client: MondayClient,
-  tokens: readonly ParsedToken[],
-  env: NodeJS.ProcessEnv,
-  noCache: boolean,
-): Promise<ResolutionOutcome> => {
-  const records: ResolvedRecord[] = [];
-  const dispatchableIds: string[] = [];
-  const dispatchableIndices: number[] = [];
-  const failedTokens: string[] = [];
-  const aggregator = new SourceAggregator();
-  let anyResolverLegFired = false;
-  for (const token of tokens) {
-    if (token.kind === 'numeric') {
-      const idx = records.length;
-      records.push({ user_id: token.raw, ok: true });
-      dispatchableIds.push(token.raw);
-      dispatchableIndices.push(idx);
-      continue;
-    }
-    try {
-      const resolved = await userByEmail({
-        client,
-        email: token.raw,
-        env,
-        noCache,
-      });
-      anyResolverLegFired = true;
-      aggregator.record(resolved.source, resolved.cacheAgeSeconds);
-      const idx = records.length;
-      records.push({ user_id: resolved.user.id, ok: true });
-      dispatchableIds.push(resolved.user.id);
-      dispatchableIndices.push(idx);
-    } catch (err: unknown) {
-      anyResolverLegFired = true;
-      aggregator.record('live', null);
-      if (err instanceof ApiError && err.code === 'user_not_found') {
-        records.push({
-          user_id: token.raw,
-          ok: false,
-          error: { code: err.code, message: err.message },
-        });
-        failedTokens.push(token.raw);
-        continue;
-      }
-      /* c8 ignore next */
-      throw err;
-    }
-  }
-  return {
-    records,
-    dispatchableIds,
-    dispatchableIndices,
-    failedTokens,
-    resolverAggregator: aggregator,
-    anyResolverLegFired,
-  };
-};
-
 export const boardAddUsersCommand: CommandModule<
   z.infer<typeof inputSchema>,
   BoardAddUsersOutput
@@ -243,145 +117,36 @@ export const boardAddUsersCommand: CommandModule<
           boardId,
           ...(opts as Readonly<Record<string, unknown>>),
         });
+        // parseUsersArg runs BEFORE resolveClient so a malformed
+        // `--users` surfaces as usage_error (exit 1) ahead of any
+        // missing-token config_error (exit 3).
         const tokens = parseUsersArg(parsed.users);
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
           program.opts(),
         );
 
-        // Phase 1: per-token resolution.
-        const resolution = await resolveTokens(
+        await dispatchUsersFanOut({
           client,
-          tokens,
-          ctx.env,
-          globalFlags.noCache,
-        );
-
-        // Whole-call boundary: no dispatchable user_id remains.
-        // Surface as `user_not_found` (exit 2), NOT `usage_error`.
-        if (resolution.dispatchableIds.length === 0) {
-          throw new ApiError(
-            'user_not_found',
-            `No dispatchable user_id remains for board add-users — every --users token failed lookup.`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                failed_tokens: resolution.failedTokens,
-              },
-            },
-          );
-        }
-
-        if (globalFlags.dryRun) {
-          // Dry-run: only resolver legs count toward meta.source.
-          const source: DataSource = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().source
-            : 'none';
-          const cacheAgeSeconds = resolution.anyResolverLegFired
-            ? resolution.resolverAggregator.result().cacheAgeSeconds
-            : null;
-          const dryResults = resolution.records.map((r) => ({
-            user_id: r.user_id,
-            would_apply: r.ok,
-            ...(r.error === undefined ? {} : { error: r.error }),
-          }));
-          emitDryRun({
-            ctx,
-            programOpts: program.opts(),
-            plannedChanges: [
-              {
-                operation: 'add_users_to_board',
-                board_id: parsed.boardId,
-                results: dryResults,
-              },
-            ],
-            source,
-            cacheAgeSeconds,
-            warnings: [],
-            apiVersion,
-          });
-          return;
-        }
-
-        // Phase 2: live dispatch — one wire call per dispatchable
-        // user. Per-target failures captured into results[i].error
-        // by dispatchSequential. Aggregator folds in dispatch legs
-        // (always live) on top of resolver legs.
-        const liveAggregator = resolution.resolverAggregator;
-        let lastResponse: Awaited<ReturnType<typeof client.raw>> | undefined;
-        const dispatchResults = await dispatchSequential(
-          resolution.dispatchableIds,
-          'user_id',
-          async ({ targetId }) => {
-            // Record dispatch leg as 'live' BEFORE the wire call —
-            // M14 round-1 F1: per-target failures must still count
-            // toward meta.source because the call DID fire.
-            liveAggregator.record('live', null);
-            const response = await client.raw<unknown>(
-              ADD_USERS_TO_BOARD_MUTATION,
-              {
-                boardId: parsed.boardId,
-                userIds: [targetId],
-              },
-              { operationName: 'BoardAddUsers' },
-            );
-            lastResponse = response;
-            // M14 round-1 F2: a 200 with null payload + no errors
-            // is a per-target failure, not illusory success.
-            const data = unwrapOrThrow(
-              dispatchResponseSchema.safeParse(response.data),
-              {
-                context:
-                  'Monday returned a malformed BoardAddUsers response',
-                details: {
-                  board_id: parsed.boardId,
-                  user_id: targetId,
-                },
-              },
-            );
-            // R41 lift: assertResponseFieldPresent
-            // (api/response-root.ts) — see workspace add-users
-            // for contract details.
-            assertResponseFieldPresent({
-              data,
-              key: 'add_users_to_board',
-              operationLabel: 'BoardAddUsers',
-              scopeKey: 'board_id',
-              scopeId: parsed.boardId,
-              targetKey: 'user_id',
-              targetId,
-            });
-          },
-        );
-
-        // Merge dispatch outcomes back into resolution records.
-        const finalResults: ResolvedRecord[] = [...resolution.records];
-        for (let i = 0; i < resolution.dispatchableIndices.length; i++) {
-          const idx = resolution.dispatchableIndices[i];
-          const dispatchResult = dispatchResults[i];
-          if (idx === undefined || dispatchResult === undefined) continue;
-          finalResults[idx] = {
-            user_id: resolution.records[idx]?.user_id ?? '',
-            ok: dispatchResult.ok,
-            ...(dispatchResult.error === undefined
-              ? {}
-              : { error: dispatchResult.error }),
-          };
-        }
-
-        emitMutation({
           ctx,
-          data: {
-            operation: 'add_users_to_board' as const,
-            results: finalResults,
-          },
-          schema: boardAddUsersCommand.outputSchema,
           programOpts: program.opts(),
-          warnings: [],
-          ...(lastResponse === undefined
-            ? { apiVersion }
-            : toEmit(lastResponse)),
-          ...liveAggregator.result(),
+          globalFlags,
+          apiVersion,
+          toEmit,
+          tokens,
+          scope: {
+            id: parsed.boardId,
+            key: 'board_id',
+            variableKey: 'boardId',
+          },
+          mutation: {
+            query: ADD_USERS_TO_BOARD_MUTATION,
+            operationName: 'BoardAddUsers',
+            rootKey: 'add_users_to_board',
+          },
+          dataOperation: 'add_users_to_board',
+          verbDescription: 'board add-users',
+          outputSchema: boardAddUsersOutputSchema,
         });
       });
   },
