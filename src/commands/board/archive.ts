@@ -49,6 +49,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { invalidateBoard } from '../../api/cache.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   BOARD_FIELDS_FRAGMENT,
@@ -225,6 +226,19 @@ export const boardArchiveCommand: CommandModule<
           detailKey: 'board_id',
           detailValue: parsed.boardId,
         });
+
+        // M16 retrofit per cli-design §8 single-leg call-site
+        // contract: invalidate AFTER `data` projection, BEFORE
+        // emitMutation so a cache-unlink failure surfaces through
+        // the runner's catch-all rather than double-emitting after
+        // the success envelope hit stdout. Skipped on the error
+        // path (the projectMutationBoard throw above bypasses this
+        // line). Required because archive flips the cached
+        // `boardMetadataSchema.state` field from 'active' to
+        // 'archived'; without invalidation a same-process
+        // `board describe` after the archive would return
+        // stale `state: 'active'` until TTL eviction.
+        await invalidateBoard(parsed.boardId, ctx.env);
 
         emitMutation({
           ctx,

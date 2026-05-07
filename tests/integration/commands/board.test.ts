@@ -1793,6 +1793,123 @@ describe('monday board archive (integration, M15)', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
   });
+
+  // ---------------------------------------------------------------
+  // M16 retrofit — invalidateBoard post-success per cli-design §8
+  // ---------------------------------------------------------------
+
+  it('M16 retrofit: cache invalidation round-trip — board archive → board describe sees archived state with source: live + no stale_cache_refreshed warning', async () => {
+    // Per cli-design §8 single-leg call-site contract: invalidate
+    // AFTER `data` projection on success. Round-trip pins the three
+    // §8 invariants per cassette: post-mutation read sees live state
+    // (state: archived); meta.source: 'live'; no stale_cache_
+    // refreshed warning. Without the retrofit, a same-process
+    // describe after the archive would return state: 'active' until
+    // TTL eviction.
+    const archivedFixture = {
+      id: '111',
+      name: 'Tasks',
+      description: null,
+      state: 'archived',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: '5',
+      url: null,
+      hierarchy_type: 'top_level',
+      is_leaf: true,
+      updated_at: '2026-05-07T11:00:00Z',
+      groups: [],
+      columns: [],
+    };
+    // Seed cache with the active state.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Archive.
+    const archived = await drive(
+      ['board', 'archive', '111', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            response: {
+              data: {
+                archive_board: {
+                  id: '111',
+                  name: 'Tasks',
+                  description: null,
+                  state: 'archived',
+                  board_kind: 'public',
+                  board_folder_id: null,
+                  workspace_id: '5',
+                  url: null,
+                  items_count: 0,
+                  updated_at: '2026-05-07T11:00:00Z',
+                  permissions: 'everyone',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(archived.exitCode).toBe(0);
+    // Post-archive describe — clean cache miss → live fetch sees
+    // state: archived. Source: live; no stale_cache_refreshed
+    // warning.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        interactions: [
+          { ...metadataResponse([]), response: { data: { boards: [archivedFixture] } } },
+        ],
+      },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { state: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.state).toBe('archived');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('M16 retrofit: error path skips invalidation (failed archive didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on error path. A
+    // failed archive (Monday returns null = not_found) didn't
+    // change server state; the cache remains valid.
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Archive fails.
+    const archived = await drive(
+      ['board', 'archive', '111', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            response: { data: { archive_board: null } },
+          },
+        ],
+      },
+    );
+    expect(archived.exitCode).toBe(2);
+    // Post-failure describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: cache hit needs no live fetch.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
 });
 
 describe('monday board delete (integration, M15)', () => {
