@@ -24,47 +24,26 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
+import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { readUpdateBody } from './body-source.js';
+import {
+  projectMutationUpdate,
+  UPDATE_FIELDS_FRAGMENT,
+  updateProjectionSchema,
+} from '../../api/update-mutation-result.js';
 
 const CREATE_REPLY_MUTATION = `
   mutation UpdateReply($parentId: ID!, $body: String!) {
     create_update(parent_id: $parentId, body: $body) {
-      id
-      body
-      text_body
-      creator_id
-      creator { id name email }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-const creatorSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string(),
-    email: z.string(),
-  })
-  .strict();
-
-export const updateReplyOutputSchema = z
-  .object({
-    id: UpdateIdSchema,
-    body: z.string(),
-    text_body: z.string().nullable(),
-    creator_id: z.string().nullable(),
-    creator: creatorSchema.nullable(),
-    item_id: ItemIdSchema.nullable(),
-    parent_id: UpdateIdSchema,
-    created_at: z.string().nullable(),
-    updated_at: z.string().nullable(),
-  })
+export const updateReplyOutputSchema = updateProjectionSchema
+  .extend({ parent_id: UpdateIdSchema })
   .strict();
 
 export type UpdateReplyOutput = z.infer<typeof updateReplyOutputSchema>;
@@ -81,19 +60,6 @@ const responseSchema = z
     create_update: z.unknown(),
   })
   .loose();
-
-const replyPayloadSchema = z
-  .object({
-    id: UpdateIdSchema,
-    body: z.string(),
-    text_body: z.string().nullable(),
-    creator_id: z.string().nullable(),
-    creator: creatorSchema.nullable(),
-    item_id: ItemIdSchema.nullable(),
-    created_at: z.string().nullable(),
-    updated_at: z.string().nullable(),
-  })
-  .strict();
 
 export const updateReplyCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -184,7 +150,21 @@ export const updateReplyCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        const projected = projectReply(data.create_update, parsed.parentId);
+        // Lift R37 (v0.2-plan §20): null-payload + strict-parse seam
+        // shared with reply / edit / delete / toggle. `idKey: 'parent_id'`
+        // because the argv input is the parent (not the new update);
+        // the `parent_id` echo onto the success envelope stays at the
+        // call site, mirroring `item duplicate`'s `duplicated_from_id`.
+        const base = projectMutationUpdate({
+          raw: data.create_update,
+          updateId: parsed.parentId,
+          mutationName: 'create_update',
+          idKey: 'parent_id',
+        });
+        const projected: UpdateReplyOutput = {
+          ...base,
+          parent_id: UpdateIdSchema.parse(parsed.parentId),
+        };
 
         emitMutation({
           ctx,
@@ -198,36 +178,4 @@ export const updateReplyCommand: CommandModule<
         });
       });
   },
-};
-
-const projectReply = (raw: unknown, parentId: string): UpdateReplyOutput => {
-  if (raw === null || raw === undefined) {
-    // Monday returns `create_update: null` when the parent_id misses
-    // (deleted / no read access). M10's lifecycle siblings standardised
-    // null-payload → `not_found` for missing-ID mutations (R28
-    // `projectMutationItem({errorCode: 'not_found'})`); replies follow
-    // suit. `update create` (M5b) keeps `internal_error` for its own
-    // null path — there, item_id is validated by argv-parse + the
-    // dry-run shape, so a null payload is genuinely a Monday-side bug.
-    throw new ApiError(
-      'not_found',
-      `Monday returned no update from create_update for parent ${parentId}`,
-      { details: { parent_id: parentId } },
-    );
-  }
-  const payload = unwrapOrThrow(
-    replyPayloadSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed reply payload for parent ${parentId}`,
-      details: { parent_id: parentId },
-    },
-  );
-  // Echo the parent_id from argv into the projected envelope so an
-  // agent reading the response has the lineage without consulting
-  // `monday update get`. Mirrors `item duplicate`'s
-  // `duplicated_from_id` echo (cli-design §6.4 line 2227).
-  return {
-    ...payload,
-    parent_id: UpdateIdSchema.parse(parentId),
-  };
 };

@@ -23,34 +23,20 @@ import type { Command } from 'commander';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
+import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import {
+  projectMutationUpdate,
+  UPDATE_FIELDS_FRAGMENT,
+  updateProjectionSchema,
+  type UpdateProjection,
+} from '../../api/update-mutation-result.js';
 import type { RunContext } from '../../cli/run.js';
 
-const creatorSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string(),
-    email: z.string(),
-  })
-  .strict();
+export const toggleOutputSchema = updateProjectionSchema;
 
-export const toggleOutputSchema = z
-  .object({
-    id: UpdateIdSchema,
-    body: z.string(),
-    text_body: z.string().nullable(),
-    creator_id: z.string().nullable(),
-    creator: creatorSchema.nullable(),
-    item_id: ItemIdSchema.nullable(),
-    created_at: z.string().nullable(),
-    updated_at: z.string().nullable(),
-  })
-  .strict();
-
-export type ToggleOutput = z.infer<typeof toggleOutputSchema>;
+export type ToggleOutput = UpdateProjection;
 
 const toggleInputSchema = z.object({ updateId: UpdateIdSchema }).strict();
 
@@ -85,14 +71,7 @@ export interface UpdateToggleConfig {
 const buildMutationBody = (config: UpdateToggleConfig): string => `
   mutation ${config.operationName}($${config.idVariable}: ID!) {
     ${config.mutation}(${config.idVariable}: $${config.idVariable}) {
-      id
-      body
-      text_body
-      creator_id
-      creator { id name email }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
     }
   }
 `;
@@ -172,11 +151,16 @@ export const buildUpdateToggleCommand = (
               'Monday\'s contract has changed.',
           },
         );
-        const projected = projectToggle(
-          data[config.mutation],
-          parsed.updateId,
-          config.mutation,
-        );
+        // Lift R37 (v0.2-plan §20): null-payload + strict-parse seam
+        // shared with reply / edit / delete. The per-toggle
+        // `mutationName` threads through to the not_found error
+        // decoration so agents see `like_update` / `unlike_update` /
+        // `pin_to_top` / `unpin_from_top` in `error.message`.
+        const projected = projectMutationUpdate({
+          raw: data[config.mutation],
+          updateId: parsed.updateId,
+          mutationName: config.mutation,
+        });
 
         emitMutation({
           ctx,
@@ -192,26 +176,3 @@ export const buildUpdateToggleCommand = (
   },
 });
 
-const projectToggle = (
-  raw: unknown,
-  updateId: string,
-  mutation: UpdateToggleConfig['mutation'],
-): ToggleOutput => {
-  if (raw === null || raw === undefined) {
-    // Same null-payload → not_found shape every M13 mutation
-    // verb uses (M10 R28 lifecycle pattern). Monday returns
-    // null when the update id is missing / hidden / not yours.
-    throw new ApiError(
-      'not_found',
-      `Monday returned no update from ${mutation} for id ${updateId}`,
-      { details: { update_id: updateId } },
-    );
-  }
-  return unwrapOrThrow(
-    toggleOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed update payload for id ${updateId}`,
-      details: { update_id: updateId },
-    },
-  );
-};

@@ -9,22 +9,16 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { runByIdLookup } from '../run-by-id-lookup.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import { UPDATE_FIELDS_FRAGMENT } from '../../api/update-mutation-result.js';
 
+// R38 (v0.2-plan §20): the shared `UPDATE_FIELDS_FRAGMENT` covers the
+// scalar Update shape; `update get`'s read projection composes
+// `edited_at` + `replies { ... }` on top — same pattern `item subitems`
+// uses against `ITEM_FIELDS_FRAGMENT`.
 const UPDATE_GET_QUERY = `
   query UpdateGet($ids: [ID!]) {
     updates(ids: $ids) {
-      id
-      body
-      text_body
-      creator_id
-      creator {
-        id
-        name
-        email
-      }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
       edited_at
       replies {
         id

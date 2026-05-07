@@ -34,18 +34,12 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { readUpdateBody } from './body-source.js';
+import { UPDATE_FIELDS_FRAGMENT } from '../../api/update-mutation-result.js';
 
 const CREATE_UPDATE_MUTATION = `
   mutation UpdateCreate($itemId: ID!, $body: String!) {
     create_update(item_id: $itemId, body: $body) {
-      id
-      body
-      text_body
-      creator_id
-      creator { id name email }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
     }
   }
 `;

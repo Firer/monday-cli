@@ -64,6 +64,7 @@ import {
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { assertUpdateMutationPresent } from '../../api/update-mutation-result.js';
 import type { MondayClient } from '../../api/client.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
@@ -334,13 +335,15 @@ export const updateClearAllCommand: CommandModule<
                 details: { update_id: targetId },
               },
             );
-            if (data.delete_update === null || data.delete_update === undefined) {
-              throw new ApiError(
-                'not_found',
-                `Monday returned no update from delete_update for id ${targetId}`,
-                { details: { update_id: targetId } },
-              );
-            }
+            // Lift R37 (v0.2-plan §20): null-check-only seam shared
+            // with the four full-projection sites (reply / edit /
+            // delete / toggle). Clear-all stays narrow because the
+            // per-target `DELETE_UPDATE_MUTATION` selects only `{ id }`
+            // — projection would force widening the wire payload.
+            assertUpdateMutationPresent(data.delete_update, {
+              updateId: targetId,
+              mutationName: 'delete_update',
+            });
           },
         );
 

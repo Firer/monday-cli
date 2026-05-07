@@ -14,49 +14,28 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
+import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { readUpdateBody } from './body-source.js';
+import {
+  projectMutationUpdate,
+  UPDATE_FIELDS_FRAGMENT,
+  updateProjectionSchema,
+  type UpdateProjection,
+} from '../../api/update-mutation-result.js';
 
 const EDIT_UPDATE_MUTATION = `
   mutation UpdateEdit($id: ID!, $body: String!) {
     edit_update(id: $id, body: $body) {
-      id
-      body
-      text_body
-      creator_id
-      creator { id name email }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-const creatorSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string(),
-    email: z.string(),
-  })
-  .strict();
+export const updateEditOutputSchema = updateProjectionSchema;
 
-export const updateEditOutputSchema = z
-  .object({
-    id: UpdateIdSchema,
-    body: z.string(),
-    text_body: z.string().nullable(),
-    creator_id: z.string().nullable(),
-    creator: creatorSchema.nullable(),
-    item_id: ItemIdSchema.nullable(),
-    created_at: z.string().nullable(),
-    updated_at: z.string().nullable(),
-  })
-  .strict();
-
-export type UpdateEditOutput = z.infer<typeof updateEditOutputSchema>;
+export type UpdateEditOutput = UpdateProjection;
 
 const inputSchema = z
   .object({
@@ -159,7 +138,14 @@ export const updateEditCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        const projected = projectEdited(data.edit_update, parsed.updateId);
+        // Lift R37 (v0.2-plan §20): null-payload + strict-parse seam
+        // shared with reply / delete / toggle (mirrors R28's
+        // `projectMutationItem`).
+        const projected = projectMutationUpdate({
+          raw: data.edit_update,
+          updateId: parsed.updateId,
+          mutationName: 'edit_update',
+        });
 
         emitMutation({
           ctx,
@@ -173,24 +159,4 @@ export const updateEditCommand: CommandModule<
         });
       });
   },
-};
-
-const projectEdited = (raw: unknown, updateId: string): UpdateEditOutput => {
-  if (raw === null || raw === undefined) {
-    // Same null-payload → not_found shape `update reply` uses (M10
-    // R28 lifecycle pattern). Monday returns `edit_update: null` when
-    // the id is deleted / hidden / not yours.
-    throw new ApiError(
-      'not_found',
-      `Monday returned no update from edit_update for id ${updateId}`,
-      { details: { update_id: updateId } },
-    );
-  }
-  return unwrapOrThrow(
-    updateEditOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed update payload for id ${updateId}`,
-      details: { update_id: updateId },
-    },
-  );
 };

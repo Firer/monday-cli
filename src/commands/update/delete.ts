@@ -31,52 +31,29 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
+import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import {
-  ApiError,
-  ConfirmationRequiredError,
-} from '../../utils/errors.js';
+import { ConfirmationRequiredError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import {
+  projectMutationUpdate,
+  UPDATE_FIELDS_FRAGMENT,
+  updateProjectionSchema,
+  type UpdateProjection,
+} from '../../api/update-mutation-result.js';
 
 const DELETE_UPDATE_MUTATION = `
   mutation UpdateDelete($id: ID!) {
     delete_update(id: $id) {
-      id
-      body
-      text_body
-      creator_id
-      creator { id name email }
-      item_id
-      created_at
-      updated_at
+      ${UPDATE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-const creatorSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string(),
-    email: z.string(),
-  })
-  .strict();
+export const updateDeleteOutputSchema = updateProjectionSchema;
 
-export const updateDeleteOutputSchema = z
-  .object({
-    id: UpdateIdSchema,
-    body: z.string(),
-    text_body: z.string().nullable(),
-    creator_id: z.string().nullable(),
-    creator: creatorSchema.nullable(),
-    item_id: ItemIdSchema.nullable(),
-    created_at: z.string().nullable(),
-    updated_at: z.string().nullable(),
-  })
-  .strict();
-
-export type UpdateDeleteOutput = z.infer<typeof updateDeleteOutputSchema>;
+export type UpdateDeleteOutput = UpdateProjection;
 
 const inputSchema = z.object({ updateId: UpdateIdSchema }).strict();
 
@@ -181,7 +158,13 @@ export const updateDeleteCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        const projected = projectDeleted(data.delete_update, parsed.updateId);
+        // Lift R37 (v0.2-plan §20): null-payload + strict-parse seam
+        // shared with reply / edit / toggle.
+        const projected = projectMutationUpdate({
+          raw: data.delete_update,
+          updateId: parsed.updateId,
+          mutationName: 'delete_update',
+        });
 
         emitMutation({
           ctx,
@@ -195,28 +178,4 @@ export const updateDeleteCommand: CommandModule<
         });
       });
   },
-};
-
-const projectDeleted = (
-  raw: unknown,
-  updateId: string,
-): UpdateDeleteOutput => {
-  if (raw === null || raw === undefined) {
-    // Same null-payload → not_found shape `update reply` / `update
-    // edit` use (M10 R28 lifecycle pattern). Monday returns
-    // `delete_update: null` when the id is missing / hidden / not
-    // yours.
-    throw new ApiError(
-      'not_found',
-      `Monday returned no update from delete_update for id ${updateId}`,
-      { details: { update_id: updateId } },
-    );
-  }
-  return unwrapOrThrow(
-    updateDeleteOutputSchema.safeParse(raw),
-    {
-      context: `Monday returned a malformed update payload for id ${updateId}`,
-      details: { update_id: updateId },
-    },
-  );
 };
