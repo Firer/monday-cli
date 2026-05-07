@@ -1586,3 +1586,142 @@ describe('monday board archive (integration, M15)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 });
+
+describe('monday board delete (integration, M15)', () => {
+  const deletedBoard = {
+    id: '12345',
+    name: 'Engineering',
+    description: 'Eng team',
+    state: 'deleted',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/12345',
+    items_count: 0,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+
+  it('rejects without --yes — confirmation_required carries board_id', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; hint?: string } };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.hint).toMatch(/30 days/);
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('live: --yes fires delete_board and returns the projected board', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            match_variables: { boardId: '12345' },
+            match_query: /delete_board\(board_id: \$boardId\)/,
+            response: { data: { delete_board: deletedBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; state: string };
+    };
+    expect(env.data.id).toBe('12345');
+    expect(env.data.state).toBe('deleted');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: not_found when delete_board returns null payload', async () => {
+    const out = await drive(
+      ['board', 'delete', '99999', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            match_variables: { boardId: '99999' },
+            response: { data: { delete_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('99999');
+  });
+
+  it('live: surfaces internal_error when delete_board response is missing the root key', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('--dry-run: emits minimal delete_board planned change; no mutation fires', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; board_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    // Minimal shape — no `board: <snapshot>` slot, no `diff`. Same
+    // shape (modulo board_id) as workspace-delete dry-run.
+    expect(plan).toEqual({
+      operation: 'delete_board',
+      board_id: '12345',
+    });
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'delete', 'not-numeric', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+});
