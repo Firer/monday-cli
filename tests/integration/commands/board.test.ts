@@ -1057,3 +1057,333 @@ describe('monday board create (integration, M15)', () => {
     expect(env.error?.code).toBe('internal_error');
   });
 });
+
+describe('monday board update (integration, M15)', () => {
+  const currentBoard = {
+    id: '12345',
+    name: 'Engineering',
+    description: 'Eng team',
+    state: 'active',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/12345',
+    items_count: 7,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+  const renamedBoard = { ...currentBoard, name: 'Engineering — EU' };
+
+  // BoardMetadata fixture matches the loadBoardMetadata wire shape.
+  const boardMetadataInteraction: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: 'Eng team',
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: 'https://x.monday.com/boards/12345',
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [],
+            columns: [],
+          },
+        ],
+      },
+    },
+  };
+
+  it('live: --name fires update_board(name) then BoardUpdateFinalRead and emits the projected board', async () => {
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'Engineering — EU', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            // Wire-shape pin: per-attribute mutation, not multi-
+            // attribute attributes input. board_attribute is a
+            // BoardAttributes enum value sent verbatim as 'name'.
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'name',
+              newValue: 'Engineering — EU',
+            },
+            match_query: /update_board\(\s*board_id: \$boardId,\s*board_attribute: \$boardAttribute,\s*new_value: \$newValue/,
+            response: { data: { update_board: 'Engineering — EU' } },
+          },
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            match_variables: { ids: ['12345'] },
+            response: { data: { boards: [renamedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string };
+    };
+    expect(env.data.id).toBe('12345');
+    expect(env.data.name).toBe('Engineering — EU');
+    // Force-live final read pin: success envelope reflects post-
+    // mutation state, not stale cached metadata. meta.source: live.
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: multi-flag --name + --description fires two sequential update_board calls + final read', async () => {
+    const updatedBoard = {
+      ...currentBoard,
+      name: 'Renamed',
+      description: 'Updated',
+    };
+    const out = await drive(
+      [
+        'board', 'update', '12345',
+        '--name', 'Renamed',
+        '--description', 'Updated',
+        '--json',
+      ],
+      {
+        interactions: [
+          // Per-field fan-out — name first per FIELD_DISPATCH_ORDER.
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'name',
+              newValue: 'Renamed',
+            },
+            response: { data: { update_board: 'Renamed' } },
+          },
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'description',
+              newValue: 'Updated',
+            },
+            response: { data: { update_board: 'Updated' } },
+          },
+          // Single final read for the success envelope's data.
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            match_variables: { ids: ['12345'] },
+            response: { data: { boards: [updatedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { name: string; description: string };
+    };
+    expect(env.data.name).toBe('Renamed');
+    expect(env.data.description).toBe('Updated');
+  });
+
+  it('live: per-field failure surfaces whole-call error (no partial-success leak)', async () => {
+    // Per cli-design §6.4 board-update partial-application caveat:
+    // server-side state is non-transactional, so when call #1
+    // succeeds and call #2 fails the envelope is ok:false with
+    // call #2's error code (not a partial-success envelope).
+    // Earlier successful fields stay applied server-side.
+    const out = await drive(
+      [
+        'board', 'update', '12345',
+        '--name', 'Renamed',
+        '--description', 'Updated',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'name',
+              newValue: 'Renamed',
+            },
+            response: { data: { update_board: 'Renamed' } },
+          },
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'description',
+              newValue: 'Updated',
+            },
+            response: {
+              data: { update_board: null },
+              errors: [
+                {
+                  message: 'Description too long',
+                  extensions: { code: 'InvalidArgumentException' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    // Whole-call envelope is ok:false; agent re-reads to see
+    // what landed and retries the unapplied tail.
+    expect(env.ok).toBe(false);
+  });
+
+  it('rejects zero-flag invocation as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['board', 'update', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --name (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'update', '12345', '--name', '  ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'update', 'not-numeric', '--name', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: --name emits diff with from/to via BoardMetadata preflight', async () => {
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'Engineering — EU', '--dry-run', '--json'],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('update_board');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.diff).toEqual({
+      name: { from: 'Engineering', to: 'Engineering — EU' },
+    });
+  });
+
+  it('--dry-run: multi-flag emits combined diff with name + description from/to', async () => {
+    const out = await drive(
+      [
+        'board', 'update', '12345',
+        '--name', 'Renamed',
+        '--description', 'New description',
+        '--dry-run', '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.diff).toEqual({
+      name: { from: 'Engineering', to: 'Renamed' },
+      description: { from: 'Eng team', to: 'New description' },
+    });
+  });
+
+  it('--dry-run: surfaces not_found when preflight returns empty boards list', async () => {
+    const out = await drive(
+      ['board', 'update', '99999', '--name', 'X', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('surfaces internal_error when update_board response is missing the root key', async () => {
+    // Codex M14 round-2/round-3 distinction landed proactively for
+    // M15: missing-root-key is a schema-drift internal_error,
+    // distinct from a null per-attribute response value.
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('surfaces internal_error when final read returns no board for the just-updated id', async () => {
+    // Defensive: per-field calls succeeded but the final read
+    // can't find the board. Should NOT be silently swallowed —
+    // surfaces as internal_error so the agent sees a contract
+    // anomaly rather than a no-op success.
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'name',
+              newValue: 'X',
+            },
+            response: { data: { update_board: 'X' } },
+          },
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            match_variables: { ids: ['12345'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+});

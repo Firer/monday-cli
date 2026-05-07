@@ -98,6 +98,7 @@ import { workspaceRemoveUsersCommand } from './workspace/remove-users.js';
 // M15 (v0.2) — board lifecycle: create / update / archive / delete /
 // duplicate / add-users.
 import { boardCreateCommand } from './board/create.js';
+import { boardUpdateCommand } from './board/update.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -125,6 +126,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     workspaceAddUsersCommand,
     workspaceRemoveUsersCommand,
     boardCreateCommand,
+    boardUpdateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,
