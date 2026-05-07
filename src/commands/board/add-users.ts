@@ -46,6 +46,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { userByEmail } from '../../api/resolvers.js';
 import type { MondayClient } from '../../api/client.js';
@@ -68,40 +69,6 @@ const dispatchResponseSchema = z
     add_users_to_board: z.unknown(),
   })
   .loose();
-
-// Null-payload guard: distinguishes "key absent" (schema-drift →
-// internal_error, whole-call) from "value null" (per-record
-// not_found). Mirrors M14 round-2 F1 + round-3 F1 contract.
-const assertDispatchPayloadPresent = (
-  data: Readonly<Record<string, unknown>>,
-  userId: string,
-  boardId: string,
-): void => {
-  if (!('add_users_to_board' in data)) {
-    throw new ApiError(
-      'internal_error',
-      `Monday's BoardAddUsers response is missing the add_users_to_board root field`,
-      {
-        details: {
-          board_id: boardId,
-          user_id: userId,
-          hint:
-            'this is a schema-drift error in Monday\'s GraphQL response; ' +
-            'verify the mutation declaration and update the response ' +
-            'schema if Monday\'s contract has changed.',
-        },
-      },
-    );
-  }
-  const raw = data.add_users_to_board;
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no payload from add_users_to_board for user ${userId}`,
-      { details: { user_id: userId } },
-    );
-  }
-};
 
 const errorShape = z
   .object({
@@ -372,7 +339,18 @@ export const boardAddUsersCommand: CommandModule<
                 },
               },
             );
-            assertDispatchPayloadPresent(data, targetId, parsed.boardId);
+            // R41 lift: assertResponseFieldPresent
+            // (api/response-root.ts) — see workspace add-users
+            // for contract details.
+            assertResponseFieldPresent({
+              data,
+              key: 'add_users_to_board',
+              operationLabel: 'BoardAddUsers',
+              scopeKey: 'board_id',
+              scopeId: parsed.boardId,
+              targetKey: 'user_id',
+              targetId,
+            });
           },
         );
 

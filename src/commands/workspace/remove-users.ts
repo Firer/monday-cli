@@ -34,6 +34,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { userByEmail } from '../../api/resolvers.js';
 import type { MondayClient } from '../../api/client.js';
@@ -56,40 +57,6 @@ const dispatchResponseSchema = z
   })
   .loose();
 
-// Null-payload guard. Mirrors add-users (Codex M14 round-2 F1):
-// - Key ABSENT (response shape drift) → whole-call `internal_error`
-//   (dispatchSequential re-throws this code).
-// - Key PRESENT but value null → per-record `not_found`.
-const assertDispatchPayloadPresent = (
-  data: Readonly<Record<string, unknown>>,
-  userId: string,
-  workspaceId: string,
-): void => {
-  if (!('delete_users_from_workspace' in data)) {
-    throw new ApiError(
-      'internal_error',
-      `Monday's WorkspaceRemoveUsers response is missing the delete_users_from_workspace root field`,
-      {
-        details: {
-          workspace_id: workspaceId,
-          user_id: userId,
-          hint:
-            'this is a schema-drift error in Monday\'s GraphQL response; ' +
-            'verify the mutation declaration and update the response ' +
-            'schema if Monday\'s contract has changed.',
-        },
-      },
-    );
-  }
-  const raw = data.delete_users_from_workspace;
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no payload from delete_users_from_workspace for user ${userId}`,
-      { details: { user_id: userId } },
-    );
-  }
-};
 
 const errorShape = z
   .object({
@@ -364,11 +331,18 @@ export const workspaceRemoveUsersCommand: CommandModule<
                 },
               },
             );
-            assertDispatchPayloadPresent(
+            // R41 lift: assertResponseFieldPresent
+            // (api/response-root.ts) — see add-users for
+            // contract details.
+            assertResponseFieldPresent({
               data,
+              key: 'delete_users_from_workspace',
+              operationLabel: 'WorkspaceRemoveUsers',
+              scopeKey: 'workspace_id',
+              scopeId: parsed.workspaceId,
+              targetKey: 'user_id',
               targetId,
-              parsed.workspaceId,
-            );
+            });
           },
         );
 

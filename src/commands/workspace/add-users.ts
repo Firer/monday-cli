@@ -56,6 +56,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { userByEmail } from '../../api/resolvers.js';
 import type { MondayClient } from '../../api/client.js';
@@ -83,46 +84,6 @@ const dispatchResponseSchema = z
     add_users_to_workspace: z.unknown(),
   })
   .loose();
-
-// Null-payload guard for the per-target dispatch leg. Distinguishes
-// two cases per Codex M14 round-2 F1:
-// - `add_users_to_workspace` key ABSENT (response shape drift, e.g.
-//   Monday's GraphQL schema dropped the mutation field): surface as
-//   whole-call `internal_error` (dispatchSequential re-throws this
-//   code so it doesn't get papered over as per-record).
-// - `add_users_to_workspace` key PRESENT but value null: surface as
-//   per-record `not_found` (the documented per-target null-payload
-//   path Monday returns when the membership couldn't be applied).
-const assertDispatchPayloadPresent = (
-  data: Readonly<Record<string, unknown>>,
-  userId: string,
-  workspaceId: string,
-): void => {
-  if (!('add_users_to_workspace' in data)) {
-    throw new ApiError(
-      'internal_error',
-      `Monday's WorkspaceAddUsers response is missing the add_users_to_workspace root field`,
-      {
-        details: {
-          workspace_id: workspaceId,
-          user_id: userId,
-          hint:
-            'this is a schema-drift error in Monday\'s GraphQL response; ' +
-            'verify the mutation declaration and update the response ' +
-            'schema if Monday\'s contract has changed.',
-        },
-      },
-    );
-  }
-  const raw = data.add_users_to_workspace;
-  if (raw === null || raw === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no payload from add_users_to_workspace for user ${userId}`,
-      { details: { user_id: userId } },
-    );
-  }
-};
 
 const errorShape = z
   .object({
@@ -452,11 +413,20 @@ export const workspaceAddUsersCommand: CommandModule<
                 },
               },
             );
-            assertDispatchPayloadPresent(
+            // R41 lift: assertResponseFieldPresent
+            // (api/response-root.ts) — distinguishes
+            // missing-root-key (internal_error, whole-call
+            // re-thrown by dispatchSequential) from null payload
+            // (not_found, per-record).
+            assertResponseFieldPresent({
               data,
+              key: 'add_users_to_workspace',
+              operationLabel: 'WorkspaceAddUsers',
+              scopeKey: 'workspace_id',
+              scopeId: parsed.workspaceId,
+              targetKey: 'user_id',
               targetId,
-              parsed.workspaceId,
-            );
+            });
           },
         );
 
