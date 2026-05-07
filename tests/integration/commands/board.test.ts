@@ -1192,12 +1192,13 @@ describe('monday board update (integration, M15)', () => {
     expect(env.data.description).toBe('Updated');
   });
 
-  it('live: per-field failure surfaces whole-call error (no partial-success leak)', async () => {
+  it('live: per-field failure surfaces whole-call error (no partial-success leak; stable error code)', async () => {
     // Per cli-design §6.4 board-update partial-application caveat:
     // server-side state is non-transactional, so when call #1
     // succeeds and call #2 fails the envelope is ok:false with
-    // call #2's error code (not a partial-success envelope).
-    // Earlier successful fields stay applied server-side.
+    // call #2's mapped error code (not a partial-success envelope).
+    // Earlier successful fields stay applied server-side. Codex
+    // round-1 F3 pinned: assert the stable code, not just ok:false.
     const out = await drive(
       [
         'board', 'update', '12345',
@@ -1238,9 +1239,47 @@ describe('monday board update (integration, M15)', () => {
     );
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr);
-    // Whole-call envelope is ok:false; agent re-reads to see
-    // what landed and retries the unapplied tail.
     expect(env.ok).toBe(false);
+    // Stable mapped code — InvalidArgumentException re-maps per
+    // §6.5 to validation_failed. Agents key off this, not prose.
+    expect(env.error?.code).toBe('validation_failed');
+    // No final read fired — the per-field failure aborts before
+    // BoardUpdateFinalRead. Implicit: only 2 of 2 expected
+    // interactions consumed (no third final-read interaction).
+    expect(out.requests).toBe(2);
+  });
+
+  it('live: surfaces internal_error when update_board returns a null payload with no errors[]', async () => {
+    // Codex M15 implementation round-1 F1: a 200 response with
+    // `update_board: null` and no GraphQL errors[] is NOT a
+    // per-field success — Monday rare server-side path. Pre-fix,
+    // the per-field loop would have proceeded to the final read
+    // and emitted ok:true with stale pre-update data (the final
+    // read could even succeed). Fix: null-payload guard surfaces
+    // internal_error and aborts before the final read fires.
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: {
+              boardId: '12345',
+              boardAttribute: 'name',
+              newValue: 'X',
+            },
+            // Null payload with NO errors[] — the bug shape that
+            // would have papered over as illusory ok:true.
+            response: { data: { update_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    // No final read fired — only 1 of 1 interaction consumed.
+    expect(out.requests).toBe(1);
   });
 
   it('rejects zero-flag invocation as usage_error at argv parse', async () => {

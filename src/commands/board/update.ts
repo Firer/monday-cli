@@ -275,9 +275,12 @@ export const boardUpdateCommand: CommandModule<
             },
           );
           // Distinguish "root key absent" (schema-drift →
-          // internal_error) from "value null" (unknown — also
-          // internal_error here since update_board's per-attribute
-          // contract returns the new String value, not nullable).
+          // internal_error) from "value null" (Monday-side
+          // failure with no errors[] — Codex M15 implementation
+          // round-1 F1: a 200 response with `update_board: null`
+          // and no errors[] is NOT a per-field success; it's a
+          // null-payload failure that must abort the sequence
+          // BEFORE the final read fires false-success.
           if (!('update_board' in data)) {
             throw new ApiError(
               'internal_error',
@@ -290,6 +293,22 @@ export const boardUpdateCommand: CommandModule<
                     'this is a schema-drift error in Monday\'s GraphQL ' +
                     'response; verify the mutation declaration and update ' +
                     'the response schema if Monday\'s contract has changed.',
+                },
+              },
+            );
+          }
+          if (data.update_board === null || data.update_board === undefined) {
+            throw new ApiError(
+              'internal_error',
+              `Monday's BoardUpdate returned a null update_board payload for board_attribute ${attribute}`,
+              {
+                details: {
+                  board_id: parsed.boardId,
+                  board_attribute: attribute,
+                  hint:
+                    'a null payload with no GraphQL errors[] is a server-side ' +
+                    'failure path; agents should retry after re-reading the ' +
+                    'board to see what landed before this call.',
                 },
               },
             );

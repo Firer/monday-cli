@@ -59,6 +59,7 @@ import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   BOARD_FIELDS_FRAGMENT,
   boardProjectionSchema,
+  type BoardProjection,
 } from '../../api/board-projection.js';
 
 const DUPLICATE_BOARD_MUTATION = `
@@ -189,9 +190,12 @@ export const boardDuplicateCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           const current = preflight.metadata;
-          // Snapshot uses BoardMetadata's BoardProjection-overlapping
-          // subset (same shape as board-archive's dry-run snapshot).
-          const snapshot = {
+          // Project to the full BoardProjection shape — Codex M15
+          // implementation round-1 F2: cli-design pins the dry-run
+          // snapshot as the §6.2 single-resource projection
+          // (mirrors board archive's snapshot fix in the same
+          // round).
+          const snapshot: BoardProjection = {
             id: current.id,
             name: current.name,
             description: current.description,
@@ -200,7 +204,9 @@ export const boardDuplicateCommand: CommandModule<
             board_folder_id: current.board_folder_id,
             workspace_id: current.workspace_id,
             url: current.url,
+            items_count: current.items_count ?? null,
             updated_at: current.updated_at,
+            permissions: current.permissions ?? null,
           };
           const planned: Record<string, unknown> = {
             operation: 'duplicate_board',

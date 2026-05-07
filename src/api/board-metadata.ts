@@ -60,6 +60,8 @@ const BOARD_METADATA_QUERY = `
       url
       hierarchy_type
       is_leaf
+      items_count
+      permissions
       updated_at
       groups {
         id
@@ -117,6 +119,13 @@ export const boardMetadataSchema = z
     url: z.string().nullable(),
     hierarchy_type: z.string().nullable(),
     is_leaf: z.boolean().nullable(),
+    // Optional+nullable so existing pre-M15 cache entries (which
+    // didn't carry these fields) parse cleanly post-bump. New
+    // BOARD_METADATA_QUERY runs include the fields; the M15 board
+    // archive + duplicate dry-run snapshots project them through
+    // `?? null` to preserve the §6.2 board projection shape.
+    items_count: z.number().int().nullable().optional(),
+    permissions: z.string().nullable().optional(),
     updated_at: z.string().nullable(),
     groups: z.array(groupSchema),
     columns: z.array(columnSchema),

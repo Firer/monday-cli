@@ -137,11 +137,15 @@ export const boardArchiveCommand: CommandModule<
             noCache: globalFlags.noCache,
           });
           const current = preflight.metadata;
-          // Project to the BoardProjection-overlapping subset.
-          // items_count + permissions are omitted because
-          // BoardMetadata doesn't carry them; the live mutation
-          // envelope's data slot has them populated.
-          const snapshot = {
+          // Project to the full BoardProjection shape — Codex M15
+          // implementation round-1 F2: cli-design pins the dry-run
+          // snapshot as the §6.2 single-resource projection (which
+          // includes items_count + permissions). BoardMetadata now
+          // carries these fields (optional+nullable on the schema
+          // so pre-M15 cache entries don't break); coerce undefined
+          // → null for the snapshot so the shape is canonical
+          // BoardProjection.
+          const snapshot: BoardProjection = {
             id: current.id,
             name: current.name,
             description: current.description,
@@ -150,7 +154,9 @@ export const boardArchiveCommand: CommandModule<
             board_folder_id: current.board_folder_id,
             workspace_id: current.workspace_id,
             url: current.url,
+            items_count: current.items_count ?? null,
             updated_at: current.updated_at,
+            permissions: current.permissions ?? null,
           };
           emitDryRun({
             ctx,
