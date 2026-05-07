@@ -1387,3 +1387,202 @@ describe('monday board update (integration, M15)', () => {
     expect(env.error?.code).toBe('internal_error');
   });
 });
+
+describe('monday board archive (integration, M15)', () => {
+  const archivedBoard = {
+    id: '12345',
+    name: 'Engineering',
+    description: 'Eng team',
+    state: 'archived',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/12345',
+    items_count: 0,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+
+  // BoardMetadata fixture for the dry-run preflight read.
+  const boardMetadataInteraction: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: 'Eng team',
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: 'https://x.monday.com/boards/12345',
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [],
+            columns: [],
+          },
+        ],
+      },
+    },
+  };
+
+  it('rejects without --yes — confirmation_required carries board_id', async () => {
+    const out = await drive(
+      ['board', 'archive', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; hint?: string } };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.hint).toMatch(/30 days/);
+    // Gate fires before resolveClient — meta.source stays 'none'.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required, not config_error', async () => {
+    // R29 helper preserves the M10 round-1 P2 ordering: a missing
+    // --yes MUST surface as confirmation_required regardless of
+    // whether the token is present. Same regression test the M14
+    // workspace-delete pinned.
+    const out = await drive(
+      ['board', 'archive', '12345', '--json'],
+      { interactions: [] },
+      {
+        env: {
+          // No MONDAY_API_TOKEN — pre-fix this would have surfaced
+          // config_error instead of confirmation_required.
+          MONDAY_API_URL: 'https://api.monday.com/v2',
+        },
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('live: --yes fires archive_board and returns the projected board', async () => {
+    const out = await drive(
+      ['board', 'archive', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            match_variables: { boardId: '12345' },
+            match_query: /archive_board\(board_id: \$boardId\)/,
+            response: { data: { archive_board: archivedBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; state: string };
+    };
+    expect(env.data.id).toBe('12345');
+    expect(env.data.state).toBe('archived');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: --yes surfaces not_found when archive_board returns null', async () => {
+    const out = await drive(
+      ['board', 'archive', '99999', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            match_variables: { boardId: '99999' },
+            response: { data: { archive_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('99999');
+  });
+
+  it('live: surfaces internal_error when archive_board response is missing the root key', async () => {
+    // Schema-drift distinction landed proactively — missing-root-key
+    // is an internal_error, not a not_found.
+    const out = await drive(
+      ['board', 'archive', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('--dry-run: emits archive_board planned-change with snapshot via BoardMetadata preflight', async () => {
+    const out = await drive(
+      ['board', 'archive', '12345', '--dry-run', '--json'],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        board: { id: string; name: string; state: string };
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('archive_board');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.board.id).toBe('12345');
+    expect(plan?.board.name).toBe('Engineering');
+    // Snapshot reflects pre-archive state (state: 'active').
+    expect(plan?.board.state).toBe('active');
+  });
+
+  it('--dry-run: not_found when preflight returns empty boards list', async () => {
+    const out = await drive(
+      ['board', 'archive', '99999', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'archive', 'not-numeric', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+});
