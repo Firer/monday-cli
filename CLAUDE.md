@@ -38,18 +38,36 @@ post-mortem):
   acknowledge both this wrapper and the partial-success consumers'
   shape.
 
-**M15 → M16 cleanup window candidates** (full detail in §22):
-- **R40 — partial-success `--users` resolver-fronted-fan-out
-  helper** (3 consumers post-M15). The "wait for the third
-  consumer" guard cleared when `board add-users` shipped;
-  factory signature is fully characterised. ~250 LOC consolidation
-  across three files. Schedule: M15 → M16 cleanup window OR
-  bundle with M16 if calendar pressure dictates.
+**M15 → M16 cleanup window** (R40 + R43 shipped; R42 + R44
+remain — full detail in §22):
+- **R40 shipped** in `541e5e7 refactor(r40): lift partial-
+  success --users fan-out helper into api/users-fan-out-mutation`.
+  All 3 consumers (workspace add-users + workspace remove-users
+  + board add-users) migrate to `dispatchUsersFanOut` from
+  `src/api/users-fan-out-mutation.ts`. Helper exposes
+  `parseUsersArg` separately so each call site preserves the
+  `parseArgv → parseUsersArg → resolveClient` order pinning
+  `usage_error` (malformed `--users`) ahead of `config_error`
+  (missing token). Net –766 LOC across three call sites + ~+360
+  LOC in the new helper file.
+- **R43 shipped** in `6b45abf refactor(r43): lift board mutation
+  projection into api/board-mutation-result`. Five consumers
+  (board create / archive / delete / update / duplicate) migrate
+  to `projectMutationBoard` from
+  `src/api/board-mutation-result.ts`. Mirrors R28
+  (`projectMutationItem`) + R37 (`projectMutationUpdate`) — the
+  third per-noun projection helper. Net –29 LOC across five
+  board verbs + ~+50 LOC in the new helper.
 - **R42 — retroactive missing-root-key distinction across pre-
   M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 new M15
-  mutation sites). Schedule: post-M15 dedicated session — bundling
-  with the M15 sites lands the contract uniformly across the
-  codebase before R-class accounting drifts further.
+  mutation sites) — remaining backlog. Schedule: post-M15
+  dedicated session — bundling with the M15 sites lands the
+  contract uniformly across the codebase before R-class
+  accounting drifts further.
+- **R44 — generic `projectMutationResource` over R28/R37/R43**
+  stays deferred to v0.3 OR a fifth-noun trigger per §22 R44's
+  entry; touching R44 now would re-touch all three per-noun
+  helpers and scope-creep into a 4-noun refactor.
 
 The three binding documents — read in this order before writing code:
 
