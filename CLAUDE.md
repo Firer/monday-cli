@@ -33,16 +33,22 @@ post-mortem):
   signature itself. Byte-identical post-lift; +1 net new regression
   test (parallel empty-entries rejection on remove-users).
 
-**M14 → M15 cleanup window candidates** (logged in §21):
-- **R39 — workspace-projection schema lift** (4 consumers: get /
-  create / update / delete). Trigger fired; defer to M15 close so
-  the lift absorbs board's parallel split (3-4 more consumers).
+**M14 → M15 cleanup window candidates** (full detail in §22):
+- **R39 — `WORKSPACE_FIELDS_FRAGMENT` + projection schema lift**
+  (5 GraphQL strings + 4 schema imports). Trigger fired; ready to
+  ship. Recommendation: M14 → M15 cleanup window OR alongside M15's
+  board cluster.
 - **R40 — partial-success `--users` resolver-fronted-fan-out
-  helper** (2 consumers: workspace add-users / remove-users; M15
-  `board add-users` is the third). Defer until M15.
-- **R41 — `assertDispatchPayloadPresent` null-payload guard** (2
-  consumers; M13's `assertUpdateMutationPresent` adjacent). Defer
-  until M15's add-users adds the third consumer.
+  helper** (2 consumers; M15 `board add-users` is the third).
+  Defer until M15 close.
+- **R41 — `assertResponseFieldPresent` null-payload guard** (2
+  M14 consumers + adjacent to M13's `assertUpdateMutationPresent`).
+  Bundle with R40 at M15 close.
+- **R42 — retroactive missing-root-key distinction across pre-M14
+  mutation verbs** (~17 sites across M5b/M9-M13). Real semantic
+  gap (Codex M14 round-4 noted but scope-deferred). Recommendation:
+  post-M15 dedicated session — bundling with M15's new mutation
+  sites cuts the total review surface.
 
 The three binding documents — read in this order before writing code:
 
