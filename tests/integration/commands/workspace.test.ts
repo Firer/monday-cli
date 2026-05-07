@@ -1249,3 +1249,158 @@ describe('monday workspace add-users (integration, M14)', () => {
     expect(envOut.data.results[0]?.error?.code).toBe('forbidden');
   });
 });
+
+describe('monday workspace remove-users (integration, M14)', () => {
+  // Mirrors add-users; same cache isolation pattern.
+  const env = useCachedIntegrationEnv('monday-cli-workspace-removeusers-int-');
+  const drive = env.drive;
+
+  const userById = (id: string) => ({
+    id,
+    name: `User ${id}`,
+    email: `user${id}@example.test`,
+  });
+
+  it('live: all-numeric --users fires one wire call per user; data.operation reflects the verb', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            // Wire-shape pin: `delete_users_from_workspace` is the
+            // mutation root (not `add_users_to_workspace`).
+            match_query: /delete_users_from_workspace\(workspace_id: \$workspaceId, user_ids: \$userIds\)/,
+            match_variables: { workspaceId: '12345', userIds: ['67890'] },
+            response: {
+              data: { delete_users_from_workspace: [userById('67890')] },
+            },
+          },
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            match_variables: { workspaceId: '12345', userIds: ['67891'] },
+            response: {
+              data: { delete_users_from_workspace: [userById('67891')] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly { user_id: string; ok: boolean }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.operation).toBe('delete_users_from_workspace');
+    expect(envOut.data.results).toEqual([
+      { user_id: '67890', ok: true },
+      { user_id: '67891', ok: true },
+    ]);
+    expect(envOut.meta.source).toBe('live');
+    assertEnvelopeContract(envOut);
+  });
+
+  it('live: partial success — ghost email lands per-record while resolved email dispatches OK', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', 'alice@example.test,ghost@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['alice@example.test'] },
+            response: {
+              data: {
+                users: [{ id: '99001', name: 'Alice', email: 'alice@example.test' }],
+              },
+            },
+          },
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['ghost@example.test'] },
+            response: { data: { users: [] } },
+          },
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            match_variables: { workspaceId: '12345', userIds: ['99001'] },
+            response: {
+              data: { delete_users_from_workspace: [userById('99001')] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly {
+          user_id: string;
+          ok: boolean;
+          error?: { code: string };
+        }[];
+      };
+    };
+    expect(envOut.data.operation).toBe('delete_users_from_workspace');
+    expect(envOut.data.results).toHaveLength(2);
+    expect(envOut.data.results[0]).toEqual({ user_id: '99001', ok: true });
+    expect(envOut.data.results[1]?.user_id).toBe('ghost@example.test');
+    expect(envOut.data.results[1]?.ok).toBe(false);
+    expect(envOut.data.results[1]?.error?.code).toBe('user_not_found');
+  });
+
+  it('whole-call user_not_found when ALL email tokens fail resolution and no numeric remains', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', 'a@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            response: { data: { users: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { failed_tokens?: readonly string[] } };
+    };
+    expect(envOut.error?.code).toBe('user_not_found');
+    expect(envOut.error?.details?.failed_tokens).toEqual(['a@example.test']);
+  });
+
+  it('--dry-run: emits planned_changes with operation delete_users_from_workspace', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', '67890', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        workspace_id: string;
+        results: readonly { user_id: string; would_apply: boolean }[];
+      }[];
+    };
+    expect(envOut.data).toBeNull();
+    expect(envOut.meta.source).toBe('none');
+    const plan = envOut.planned_changes[0];
+    expect(plan?.operation).toBe('delete_users_from_workspace');
+    expect(plan?.workspace_id).toBe('12345');
+    expect(plan?.results).toEqual([{ user_id: '67890', would_apply: true }]);
+    expect(out.requests).toBe(0);
+  });
+
+  it('rejects malformed --users tokens as usage_error', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', 'bogus', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+});
