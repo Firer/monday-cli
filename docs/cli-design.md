@@ -1171,11 +1171,427 @@ monday board column-delete <bid> <cid> --yes [--dry-run]                     v0.
 
 # Groups (board-scoped)
 monday board groups <bid>                                                    v0.1
-monday board group-create <bid> --name <n> [--position top|bottom]           v0.2
-monday board group-update <bid> <gid> [--name <n>] [--color <c>]             v0.2
-monday board group-archive <bid> <gid>                                       v0.2
-monday board group-duplicate <bid> <gid>                                     v0.2
-monday board group-delete <bid> <gid> --yes                                  v0.2
+monday board group-create <bid> --name <n> [--color <c>] [--dry-run]         v0.2
+                                          # `create_group(board_id, group_name,
+                                          # position?, position_relative_method?,
+                                          # relative_to?, group_color?)` per SDK
+                                          # 14.0.0 `MutationCreate_GroupArgs`.
+                                          # Returns `Maybe<Group>`. The wire
+                                          # mutation accepts three placement
+                                          # arguments — `position: String?`
+                                          # (Monday's per-changelog deprecated
+                                          # numeric-string position; literal
+                                          # `top` / `bottom` strings have
+                                          # ambiguous wire semantics — non-
+                                          # numeric values historically default
+                                          # to top placement, and Monday's
+                                          # changelog flags this surface for
+                                          # removal), and the relative-position
+                                          # pair (`position_relative_method:
+                                          # PositionRelative` ∈ `after_at` |
+                                          # `before_at`, paired with `relative_
+                                          # to: String` naming the anchor group
+                                          # by ID). M17 deliberately OMITS all
+                                          # three placement surfaces — the v0.2
+                                          # CLI ships `group-create` without a
+                                          # `--position` flag, deferring
+                                          # placement control to v0.3 (where the
+                                          # CLI may surface `--before <gid>` /
+                                          # `--after <gid>` flags mapping to the
+                                          # non-deprecated `position_relative_
+                                          # method` + `relative_to` pair).
+                                          # Agents needing placement today call
+                                          # the wire mutation via M9's `dev
+                                          # mutate` escape hatch (mirrors M16
+                                          # column-create's omission of `id` +
+                                          # `after_column_id`). `--name <n>` is
+                                          # required; empty after trim →
+                                          # `usage_error` at argv-parse.
+                                          # `--color <c>` maps to wire
+                                          # `group_color`; validated at
+                                          # argv-parse against Monday's
+                                          # supported group-color names (M17
+                                          # implementation owns the specific
+                                          # zod string-enum field set — Monday's
+                                          # accepted colour names are documented
+                                          # outside the SDK's typed surface and
+                                          # evolve over time, so over-pinning
+                                          # them in the contract would force
+                                          # docs revisions on every Monday
+                                          # palette tweak; same rationale as
+                                          # M16 column-create's per-type
+                                          # `--settings` schema field-set
+                                          # ownership).
+                                          # Idempotent: NO — re-running creates
+                                          # a second group with the same name
+                                          # (Monday auto-generates a fresh group
+                                          # ID per call). NOT destructive (no
+                                          # --yes gate). Calls
+                                          # `invalidateBoard(boardId)` post-
+                                          # success per §8 eager-invalidation
+                                          # contract — the cached `groups: [...]`
+                                          # list is now stale. Single-leg per
+                                          # §8 call-site contract; M17 adopts
+                                          # M16's R46 `withBoardInvalidation
+                                          # SingleLeg` post-success projection
+                                          # wrapper from day one (mirrors
+                                          # R29's M14-close-then-M15-adopts
+                                          # pattern).
+                                          # Dry-run shape per §6.4 group-create
+                                          # variant: `{operation: "create_group",
+                                          # board_id, name, color?}`.
+                                          # `meta.source: "none"` (no API call
+                                          # fires).
+monday board group-update <bid> <gid> [--name <n>] [--color <c>] [--dry-run]                          v0.2
+                                          # Per-attribute fan-out across a single
+                                          # wire surface: `update_group(board_id,
+                                          # group_id, group_attribute:
+                                          # GroupAttributes!, new_value: String!)`
+                                          # per SDK 14.0.0
+                                          # `MutationUpdate_GroupArgs`. Returns
+                                          # `Maybe<Group>`. Both `group_attribute`
+                                          # and `new_value` are required at the
+                                          # wire (unlike column-update's
+                                          # `change_column_metadata` whose
+                                          # arguments are both optional). The
+                                          # `GroupAttributes` enum (SDK 14.0.0)
+                                          # carries five values: `title` /
+                                          # `color` / `position` (deprecated —
+                                          # Monday flagged for removal in
+                                          # favour of the relative-position
+                                          # pair) / `relative_position_after` /
+                                          # `relative_position_before`. CLI
+                                          # flag mapping: `--name` →
+                                          # `group_attribute: title`, `--color`
+                                          # → `group_attribute: color`. M17
+                                          # deliberately OMITS the position-
+                                          # related flags (the `--position
+                                          # top|bottom` projection from the
+                                          # pre-pre-flight v0.2-plan was wire-
+                                          # ambiguous — Monday's `position`
+                                          # attribute is per-changelog
+                                          # deprecated and the literal
+                                          # `top|bottom` semantics through
+                                          # `update_group` are unreliable);
+                                          # repositioning is deferred to v0.3
+                                          # where the CLI may surface
+                                          # `--before <gid>` / `--after <gid>`
+                                          # flags mapping to the non-
+                                          # deprecated `relative_position_
+                                          # after` / `relative_position_before`
+                                          # GroupAttributes values. Multi-flag
+                                          # invocations (`--name X --color Y`)
+                                          # fan out N sequential wire calls,
+                                          # sequential per §8 decision 8
+                                          # (parallel waits for v0.4
+                                          # `--concurrency`). At least one of
+                                          # --name / --color required — zero-
+                                          # flag invocation → `usage_error` at
+                                          # argv-parse.
+                                          # **Whole-call shape** mirrors
+                                          # `column-update`'s contract: single
+                                          # envelope on success (`data` = the
+                                          # group projection from the last
+                                          # successful per-attribute call's wire
+                                          # response — Monday's `update_group`
+                                          # returns `Maybe<Group>` post-mutation,
+                                          # so the trailing call's response is
+                                          # authoritative for every field and no
+                                          # separate force-live read leg fires);
+                                          # whole-call error envelope on any
+                                          # per-attribute failure. **Server-side
+                                          # state is NOT transactional** — per-
+                                          # attribute calls earlier in the
+                                          # sequence may have already committed
+                                          # when a later call fails. Shares
+                                          # `column-update`'s partial-application
+                                          # caveat (no transaction across
+                                          # `update_group` calls); diverges
+                                          # from `board update`'s force-live
+                                          # final read (board-update's per-
+                                          # attribute calls return the changed
+                                          # slice only, requiring a final
+                                          # whole-board read; group-update's
+                                          # per-attribute calls return a full
+                                          # `Group` projection so the trailing
+                                          # response is authoritative).
+                                          # Idempotent: yes — re-applying the
+                                          # same field values is a no-op on
+                                          # Monday's side (same input leaves
+                                          # same group metadata; per §9.1
+                                          # idempotency table). Dry-run shape
+                                          # per §6.4 group-update variant:
+                                          # field-level `from → to` diff per
+                                          # provided flag. The `from` state
+                                          # requires a preflight `board
+                                          # describe`-shaped read to locate the
+                                          # group by ID inside
+                                          # `boardMetadataSchema.groups: [...]`;
+                                          # that read can hit the v0.1 board-
+                                          # metadata cache — `meta.source:
+                                          # "live"` or `"cache"`. Calls
+                                          # `invalidateBoard(boardId)` post-
+                                          # success per §8 eager-invalidation
+                                          # contract. On partial-application
+                                          # failure (call N+1 fails after call
+                                          # N succeeded), invalidation tracks
+                                          # the wire-state high-water mark —
+                                          # the cache is invalidated as far as
+                                          # the successful legs reached, never
+                                          # further (§8 fan-out call-site
+                                          # contract). Fan-out per §8; M17
+                                          # adopts M16's R46
+                                          # `withBoardInvalidationFanOut`
+                                          # post-success projection wrapper
+                                          # (high-water-mark counter via
+                                          # `BoardFanOutTracker.recordLeg
+                                          # Success()` callback) from day one.
+                                          # Note the success-path `data`
+                                          # projection sources from the wire
+                                          # response directly (no force-live
+                                          # read leg), distinguishing group-
+                                          # update from board-update — this is
+                                          # the load-bearing M17-pre-flight
+                                          # finding (Monday's `update_group`
+                                          # returns the full Group projection,
+                                          # whereas `update_board` returns
+                                          # only the slice that changed).
+monday board group-archive <bid> <gid> --yes [--dry-run]                     v0.2
+                                          # `archive_group(board_id, group_id)`
+                                          # per SDK 14.0.0
+                                          # `MutationArchive_GroupArgs`. Returns
+                                          # `Maybe<Group>` (the group's last-
+                                          # look projection before archive —
+                                          # Monday convention). Destructive —
+                                          # --yes mandatory for live archive
+                                          # (without --yes AND without --dry-run
+                                          # → `confirmation_required`, exit 1)
+                                          # per §3.1 #7 + §8 decision 9
+                                          # (archive is consistently --yes-gated
+                                          # across nouns: item / board / M17
+                                          # group); the confirmation gate fires
+                                          # BEFORE `resolveClient()` so a
+                                          # missing-token call still surfaces
+                                          # `confirmation_required` (the M10
+                                          # round-1 P2 ordering invariant;
+                                          # R29's `assertConfirmation` helper
+                                          # preserves it via already-parsed
+                                          # `globalFlags`). The
+                                          # `confirmation_required` envelope
+                                          # carries the single-target
+                                          # destructive-gate `details` shape
+                                          # per §6.5: `{board_id, group_id,
+                                          # hint}` (the group-archive wire
+                                          # signature is two-tuple, so both
+                                          # IDs echo via R29's `extraDetails`
+                                          # slot — group-archive is the 9th
+                                          # destructive-gate helper consumer
+                                          # overall AND the 2nd two-tuple
+                                          # `extraDetails` consumer after M16
+                                          # column-delete's 1st). `--dry-run`
+                                          # bypasses
+                                          # the confirmation gate entirely
+                                          # (mirrors `item archive` / `item
+                                          # delete` / `board archive` / `board
+                                          # delete` / M16 column-delete
+                                          # precedent — dry-run is non-
+                                          # executing); `group-archive <bid>
+                                          # <gid> --dry-run` without --yes
+                                          # emits the dry-run envelope. Re-
+                                          # archiving an already-archived group
+                                          # is a no-op on Monday's side; CLI
+                                          # marks `idempotent: true` (per §9.1
+                                          # idempotency table — same row that
+                                          # covers `archive_item` / `archive_
+                                          # board`). Calls
+                                          # `invalidateBoard(boardId)` post-
+                                          # success per §8 eager-invalidation
+                                          # contract — the cached `groups[*]
+                                          # .archived` field flips false →
+                                          # true; without invalidation a same-
+                                          # process `board describe` /
+                                          # `monday board groups <bid>` would
+                                          # surface stale archived state until
+                                          # TTL eviction. Single-leg per §8
+                                          # call-site contract; adopts M16's
+                                          # R46 `withBoardInvalidationSingleLeg`
+                                          # post-success projection wrapper
+                                          # from day one. Dry-run shape per
+                                          # §6.4 group-archive variant: a
+                                          # source snapshot of the target
+                                          # group from a preflight
+                                          # `loadBoardMetadata` read (cache-
+                                          # allowed; `meta.source: "live"` |
+                                          # `"cache"`) plus the operation
+                                          # marker — mirrors `board archive`'s
+                                          # snapshot-bearing shape because the
+                                          # cached `boardMetadataSchema.groups
+                                          # [*]` projection covers the full
+                                          # Group metadata field set (`{id,
+                                          # title, color, position, archived,
+                                          # deleted}`); diverges from
+                                          # `board delete` / `column-delete` /
+                                          # `group-delete` which are
+                                          # destructive-no-read. Dry-run
+                                          # cache-staleness caveat: when
+                                          # preview freshness is critical
+                                          # (e.g. archiving after a recent
+                                          # rename), pass `--no-cache` to
+                                          # force a live preflight read.
+monday board group-duplicate <bid> <gid> [--name <n>] [--dry-run]            v0.2
+                                          # `duplicate_group(board_id, group_id,
+                                          # add_to_top?, group_title?)` per SDK
+                                          # 14.0.0 `MutationDuplicate_GroupArgs`.
+                                          # Returns `Maybe<Group>`. The wire
+                                          # mutation also accepts an optional
+                                          # `add_to_top: Boolean` (placement);
+                                          # M17 deliberately OMITS it — agents
+                                          # needing placement control call the
+                                          # wire mutation via M9's `dev mutate`
+                                          # escape hatch (mirrors M16 column-
+                                          # create's omission of `after_
+                                          # column_id`). **NOTE — load-bearing
+                                          # divergence from sibling duplicate
+                                          # verbs**: `monday item duplicate`
+                                          # and `monday board duplicate` both
+                                          # surface `--with-updates` (mapping
+                                          # to wire `with_updates: Boolean` on
+                                          # `duplicate_item` / `duplicate_
+                                          # board`); `monday board group-
+                                          # duplicate` does NOT, because
+                                          # Monday's `duplicate_group` wire
+                                          # signature has no equivalent
+                                          # argument. The v0.2-plan §3 M17
+                                          # entry's pre-pre-flight draft
+                                          # listed `[--with-updates]`; the
+                                          # M17 pre-flight pinned the wire
+                                          # truth and dropped the flag from
+                                          # both surfaces (cli-design §4.3 +
+                                          # v0.2-plan §3). `--name <n>` maps
+                                          # to wire `group_title`; when
+                                          # omitted, Monday's wire-side
+                                          # default naming applies (typically
+                                          # "<source name> (copy)" — the
+                                          # exact convention is server-side,
+                                          # not pinned by the CLI). Empty
+                                          # `--name` after trim → `usage_
+                                          # error` at argv-parse. Idempotent:
+                                          # NO — every call creates a new
+                                          # group with a fresh ID (mirrors
+                                          # `item duplicate` / `board
+                                          # duplicate`). NOT destructive (no
+                                          # --yes gate). Calls
+                                          # `invalidateBoard(boardId)` post-
+                                          # success per §8 eager-invalidation
+                                          # contract — the cached `groups:
+                                          # [...]` list grew by one entry.
+                                          # Single-leg per §8 call-site
+                                          # contract; adopts R46's
+                                          # `withBoardInvalidationSingleLeg`
+                                          # from day one. Dry-run shape per
+                                          # §6.4 group-duplicate variant:
+                                          # minimal `{operation:
+                                          # "duplicate_group", board_id,
+                                          # group_id, name?}`. No preflight
+                                          # read leg fires (Monday's
+                                          # `duplicate_group(board_id,
+                                          # group_id)` reports `not_found`
+                                          # if the IDs are bogus and the
+                                          # dry-run is purely argv-derived —
+                                          # mirrors `column-delete`'s no-
+                                          # read pattern, even though
+                                          # group-duplicate is non-
+                                          # destructive). `meta.source:
+                                          # "none"` (no API call fires).
+monday board group-delete <bid> <gid> --yes [--dry-run]                      v0.2
+                                          # `delete_group(board_id, group_id)`
+                                          # per SDK 14.0.0
+                                          # `MutationDelete_GroupArgs`. Returns
+                                          # `Maybe<Group>` (the group's last-
+                                          # look projection before deletion —
+                                          # Monday convention; mirrors
+                                          # `delete_column` / `delete_board` /
+                                          # `delete_item`). Destructive — --yes
+                                          # mandatory for live deletion
+                                          # (without --yes AND without --dry-
+                                          # run → `confirmation_required`,
+                                          # exit 1) per §3.1 #7 + §8 decision
+                                          # 9; the confirmation gate fires
+                                          # BEFORE `resolveClient()` (the M10
+                                          # round-1 P2 ordering invariant; R29
+                                          # `assertConfirmation` helper). The
+                                          # `confirmation_required` envelope
+                                          # carries the single-target
+                                          # destructive-gate `details` shape
+                                          # per §6.5: `{board_id, group_id,
+                                          # hint}` (group-delete's wire
+                                          # signature is two-tuple; both IDs
+                                          # echo via R29's `extraDetails`
+                                          # slot — group-delete is the 10th
+                                          # destructive-gate helper consumer
+                                          # overall AND the 3rd two-tuple
+                                          # `extraDetails` consumer after
+                                          # column-delete + group-archive).
+                                          # `--dry-run` bypasses the
+                                          # confirmation gate entirely
+                                          # (mirrors `item archive` / `item
+                                          # delete` / `board archive` /
+                                          # `board delete` / M16 column-
+                                          # delete / M17 group-archive
+                                          # precedent). Re-deleting an
+                                          # already-deleted group surfaces
+                                          # `not_found` past the mutation;
+                                          # the CLI marks `idempotent:
+                                          # false` (mirrors `item delete` /
+                                          # `update delete` / `workspace
+                                          # delete` / `board delete` /
+                                          # `column-delete` rationale —
+                                          # wire-level converges, CLI-level
+                                          # surfaces a different envelope).
+                                          # Calls `invalidateBoard(boardId)`
+                                          # post-success per §8 eager-
+                                          # invalidation contract — the
+                                          # group entry must drop from the
+                                          # cached `groups: [...]` list;
+                                          # without invalidation a same-
+                                          # process `board describe` /
+                                          # `monday board groups <bid>`
+                                          # would surface a phantom group
+                                          # until TTL eviction. Single-leg
+                                          # per §8 call-site contract;
+                                          # adopts R46's
+                                          # `withBoardInvalidationSingleLeg`
+                                          # from day one. Dry-run shape per
+                                          # §6.4 group-delete variant:
+                                          # minimal `{operation:
+                                          # "delete_group", board_id,
+                                          # group_id}`. No preflight read
+                                          # leg fires; the dry-run is
+                                          # purely argv-derived (Monday's
+                                          # `delete_group(board_id,
+                                          # group_id)` reports `not_found`
+                                          # if the IDs are bogus).
+                                          # `meta.source: "none"`. Mirrors
+                                          # the destructive-no-read pattern
+                                          # uniform across `item delete`,
+                                          # `update delete`, `workspace
+                                          # delete`, `board delete`, M16
+                                          # `column-delete`. Note the
+                                          # deliberate divergence from
+                                          # `group-archive`'s snapshot-
+                                          # bearing dry-run shape: archive
+                                          # carries the source snapshot
+                                          # (item-archive / board-archive
+                                          # precedent — recoverable
+                                          # destructive; preview shows what
+                                          # will be hidden), delete is
+                                          # minimal (workspace-delete /
+                                          # board-delete / column-delete
+                                          # precedent — irrecoverable
+                                          # destructive past Monday's
+                                          # retention window; the agent
+                                          # already knows what they're
+                                          # deleting via the positional).
 
 # === ITEM ===
 # All item commands take EITHER a positional <iid> OR can resolve the board
@@ -3692,6 +4108,291 @@ mutation verbs produce different planned-change shapes; the
   (column lifecycle is delete-only); the CLI doesn't surface
   one.
 
+- **Group-create shape** (`board group-create`; v0.2 M17).
+  Minimal: `operation: "create_group"`, `board_id`, `name`,
+  and optional `color`. No diff section (the group doesn't
+  exist yet, so there's no prior state to render). No read
+  leg fires; the dry-run is purely argv-derived.
+  `meta.source: "none"`. Mirrors column-create / workspace-
+  create / board-create shapes' preference for agent-
+  scannable surface fields rather than burying values inside
+  `diff`. The optional `color` slot mirrors the agent's
+  `--color <c>` argv input verbatim and maps to wire
+  `group_color: String?`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "create_group",
+        "board_id": "12345",
+        "name": "Sprint 42",
+        "color": "blue"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--color` is omitted, the `color` slot is omitted
+  from the planned change (mirrors workspace-create's rule
+  for `--description` and column-create's rule for
+  `--description` / `--settings`). All three of Monday's
+  placement surfaces (`position: String?` deprecated,
+  `position_relative_method: PositionRelative` +
+  `relative_to: String` non-deprecated pair) are not
+  surfaced in v0.2 — agents needing placement control use
+  M9's `dev mutate` escape hatch; v0.3 may surface
+  `--before <gid>` / `--after <gid>` flags mapping to the
+  non-deprecated relative-position pair.
+
+- **Group-update shape** (`board group-update`; v0.2 M17).
+  Single-leg dry-run with a preflight `board describe`-
+  shaped read to surface the `from` state per provided
+  field — the CLI loads `boardMetadataSchema` for the
+  target board, finds the group by ID inside `groups: [...]`,
+  and projects the `title` / `color` slots as `from` (the
+  cached projection covers the full Group metadata field
+  set, see §8). Carries `operation: "update_group"`,
+  `board_id`, `group_id`, and `diff: { <field>: { from, to },
+  ... }` keyed by the group fields the agent is changing
+  (`name` mapping to wire `group_attribute: title`; `color`
+  mapping to wire `group_attribute: color`). Only fields
+  present in the agent's flags appear in `diff` (omitting a
+  flag means "leave unchanged"; the wire shape fans out one
+  mutation per provided field). The wire-shape contract
+  differs from `update_workspace`, `update_board`, AND
+  `column-update`: Monday's `update_group(board_id, group_id,
+  group_attribute: GroupAttributes!, new_value: String!)` is
+  per-attribute fan-out across **a single** wire surface —
+  every per-attribute call routes through the same mutation
+  with a different `group_attribute` enum value (`title` /
+  `color`). The `GroupAttributes` enum carries five values
+  total in SDK 14.0.0 (`title` / `color` / `position` (the
+  `position` value is deprecated on Monday's roadmap) /
+  `relative_position_after` / `relative_position_before`);
+  v0.2 surfaces only the first two via `--name` / `--color`.
+  Repositioning verbs are deferred to v0.3 — see the
+  `--position` deferral in the §4.3 group-update annotation.
+  Multi-flag invocations fan out N sequential wire calls —
+  same pattern as `update_board` and `column-update`. The
+  dry-run shape stays single-envelope (no partial-success
+  leak). `meta.source: "live"` or `"cache"` (preflight read
+  hits the v0.1 board-metadata cache when fresh; M16's
+  eager-invalidation contract applies post-mutation, see §8):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 18, ... },
+    "planned_changes": [
+      {
+        "operation": "update_group",
+        "board_id": "12345",
+        "group_id": "topics",
+        "diff": {
+          "name": { "from": "Topics", "to": "Sprint 42" },
+          "color": { "from": "blue", "to": "purple" }
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When the preflight read returns `not_found` for the board
+  OR doesn't contain a group with the requested ID, the dry-
+  run surfaces `not_found` (exit 2) rather than emitting a
+  preview-of-failure (mirrors workspace-update / board-
+  update / column-update rules). The error carries
+  `details.group_id` when the board-level read succeeded
+  but the group ID was missing.
+
+  **Live-path partial-application caveat.** The multi-call
+  wire shape produces a single success envelope with `data:
+  <group projection>` from the trailing wire-call's
+  response when every per-attribute call succeeds. Unlike
+  `board update`, no separate force-live final read leg
+  fires — Monday's `update_group` returns `Maybe<Group>`
+  post-mutation, and the CLI's group-metadata projection
+  selects the full set the cached `boardMetadataSchema.
+  groups[*]` covers (`{id, title, color, position, archived,
+  deleted}` — every Group field except `items_page`, which
+  is the group's items rather than group metadata and is
+  out of scope for the mutation envelope's `data` slot), so
+  the trailing call's response is authoritative for every
+  group-metadata field. This mirrors `column-update`'s no-force-live shape
+  (Monday's column mutations also return `Maybe<Column>`)
+  and diverges from `board update`'s force-live shape
+  (board's per-attribute calls return only the changed
+  slice). If any per-attribute call fails, the whole-call
+  surfaces an error envelope with the failed call's code;
+  Monday has no transaction across `update_group` calls,
+  so per-attribute calls earlier in the sequence have
+  already committed server-side and **are not rolled back**.
+  The eager-invalidation contract (§8) tracks the wire-
+  state high-water mark — `invalidateBoard(boardId)` fires
+  once after the full per-attribute fan-out loop settles
+  (whole-call success OR whole-call error after partial
+  application), conditional on at least one per-attribute
+  call having succeeded. When zero legs succeeded (the
+  very first call failed before any state changed)
+  invalidation is skipped. See §8 fan-out call-site
+  contract for the full timing rule.
+
+  **Dry-run cache-staleness caveat.** The preflight `board
+  describe`-shaped read can hit the v0.1 board-metadata
+  cache; `from` values in the diff may lag live state up to
+  the cache TTL. `cache_age_seconds` reflects cache age and
+  is truthful, but the `from` snapshot reflects cache-write
+  time, not "now". When preview freshness is critical (e.g.
+  updating after a recent group rename), pass `--no-cache`
+  to force a live preflight read. Same caveat as
+  column-update / board-update.
+
+- **Group-archive shape** (`board group-archive`; v0.2 M17).
+  Snapshot-bearing: `operation: "archive_group"`, `board_id`,
+  `group_id`, plus `group: <projection>` carrying the source
+  snapshot loaded via a preflight `loadBoardMetadata` read.
+  The cached `boardMetadataSchema.groups[*]` projection
+  covers the full Group metadata field set (`{id, title,
+  color, position, archived, deleted}`), so the snapshot
+  carries every field agents need for "preview before
+  archive" without requiring a separate read query. Mirrors
+  `board archive`'s snapshot-bearing shape (recoverable
+  destructive; preview shows what will be hidden); diverges
+  from `column-delete` / `board-delete` / `group-delete`'s
+  destructive-no-read minimal shape. `meta.source: "live"`
+  or `"cache"` (preflight read hits the v0.1 board-metadata
+  cache when fresh):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 18, ... },
+    "planned_changes": [
+      {
+        "operation": "archive_group",
+        "board_id": "12345",
+        "group_id": "topics",
+        "group": {
+          "id": "topics",
+          "title": "Topics",
+          "color": "blue",
+          "position": "1.0",
+          "archived": false,
+          "deleted": false
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When the preflight read returns `not_found` for the board
+  OR doesn't contain a group with the requested ID, the
+  dry-run surfaces `not_found` (exit 2) rather than emitting
+  a preview-of-failure (mirrors `board archive`'s rule).
+  The error carries `details.group_id` when the board-level
+  read succeeded but the group ID was missing. Re-archiving
+  an already-archived group is a no-op on Monday's side
+  (per §9.1); the dry-run still emits the snapshot
+  (showing `archived: true`) so agents see the current
+  state before re-running idempotently.
+
+  **Dry-run cache-staleness caveat.** Same shape as group-
+  update / board-archive: cache-sourced snapshots may lag
+  live state up to TTL; `--no-cache` forces a live
+  preflight when freshness is critical (e.g. archiving
+  after a recent rename or color change).
+
+- **Group-duplicate shape** (`board group-duplicate`; v0.2
+  M17). Minimal: `operation: "duplicate_group"`, `board_id`,
+  `group_id`, and optional `name` (mapping to wire
+  `group_title?`). No diff section, no preflight read leg.
+  `meta.source: "none"`. Mirrors `column-delete`'s no-read
+  pattern even though group-duplicate is non-destructive —
+  the agent already knows what they're duplicating via the
+  positional, and the wire mutation reports `not_found` if
+  the IDs are bogus:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "duplicate_group",
+        "board_id": "12345",
+        "group_id": "topics",
+        "name": "Topics (copy)"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--name` is omitted, the `name` slot is omitted from
+  the planned change and Monday's wire-side default naming
+  applies at live time (typically `"<source name> (copy)"`,
+  but the exact convention is server-side and not pinned by
+  the CLI). The wire's optional `add_to_top: Boolean`
+  argument is not surfaced in v0.2 — agents needing
+  placement control use M9's `dev mutate` escape hatch.
+  **NOTE — load-bearing divergence from sibling duplicate
+  verbs**: `monday item duplicate` and `monday board
+  duplicate` both surface `--with-updates` (mapping to wire
+  `with_updates: Boolean`); `monday board group-duplicate`
+  does NOT, because Monday's `duplicate_group` wire
+  signature has no equivalent argument. The pre-pre-flight
+  v0.2-plan §3 M17 draft listed `[--with-updates]` for
+  group-duplicate; the M17 pre-flight pinned the wire truth
+  and dropped the flag from both surfaces.
+
+- **Group-delete shape** (`board group-delete`; v0.2 M17).
+  Minimal: `operation: "delete_group"`, `board_id`,
+  `group_id`. No diff, no preflight read leg (Monday's
+  `delete_group(board_id, group_id)` reports `not_found`
+  if the IDs are bogus and the dry-run is purely argv-
+  derived). `meta.source: "none"`. Same shape (modulo
+  `group_id` vs `column_id` / `update_id` / `workspace_id` /
+  `board_id`) as the destructive-no-read pattern uniform
+  across `item delete`, `update delete`, `workspace delete`,
+  `board delete`, M16 `column-delete`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "delete_group",
+        "board_id": "12345",
+        "group_id": "topics"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  Note the deliberate divergence from `group-archive`'s
+  preflight-read-bearing dry-run: archive carries the
+  source snapshot (item-archive / board-archive precedent
+  — recoverable destructive; preview shows what will be
+  hidden), delete is minimal (workspace-delete / board-
+  delete / column-delete precedent — irrecoverable
+  destructive past Monday's retention window; the agent
+  already knows what they're deleting via the positional).
+  The destructive-no-read pattern matches the uniform
+  shape across the delete cluster.
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
@@ -4160,19 +4861,21 @@ projection has run, but BEFORE the function returns. Two
 ordering invariants split by leg-count:
 
 - **Single-leg verbs** (`column-create` / `column-delete`; M17
-  group verbs). Invalidate AFTER the success envelope's `data`
-  is fully constructed — never before the wire mutation, never
-  between the wire mutation and `data` projection. Pre-mutation
-  invalidation would race with concurrent in-process reads that
-  hit the cache between invalidation and mutation; between-
-  mutation-and-projection invalidation would force the
-  projection to re-fetch even though the wire response is
-  authoritative. Skip invalidation on the error path — a failed
-  single-leg call didn't change board state.
+  `group-create` / `group-archive` / `group-duplicate` /
+  `group-delete`). Invalidate AFTER the success envelope's
+  `data` is fully constructed — never before the wire mutation,
+  never between the wire mutation and `data` projection.
+  Pre-mutation invalidation would race with concurrent in-
+  process reads that hit the cache between invalidation and
+  mutation; between-mutation-and-projection invalidation would
+  force the projection to re-fetch even though the wire
+  response is authoritative. Skip invalidation on the error
+  path — a failed single-leg call didn't change board state.
 - **Fan-out verbs** (`column-update` per-attribute; M15
-  retrofit's `board update`). Issue all per-attribute wire
-  calls first; AFTER the loop ends, invalidate IF at least one
-  per-attribute call succeeded. On whole-call success this is
+  retrofit's `board update`; M17 `group-update` per-attribute).
+  Issue all per-attribute wire calls first; AFTER the loop
+  ends, invalidate IF at least one per-attribute call
+  succeeded. On whole-call success this is
   the same trigger as the single-leg case (every leg
   succeeded); on whole-call error after partial application
   (call N+1 fails after call N succeeded), invalidation still
@@ -4359,7 +5062,8 @@ not the CLI's contract.
 |-----------|-------------|-------|
 | `change_column_value(s)` | Yes | Same input → same state |
 | `change_column_title`, `change_column_metadata` | Yes | Same input leaves same column metadata; the per-verb prose for `board column-update` marks `idempotent: yes` per this row |
-| `archive_item`, `archive_board` | Yes | Re-archiving is a no-op |
+| `update_group` | Yes | Same input leaves same group metadata; the per-verb prose for `board group-update` marks `idempotent: yes` per this row (M17) |
+| `archive_item`, `archive_board`, `archive_group` | Yes | Re-archiving is a no-op (M17 adds `archive_group` to the row) |
 | `move_item_to_group` | Yes | If already in target group, no-op |
 | `move_item_to_board` | **No** | Re-running on an item already on the target board is undefined SDK behaviour; the `monday item move` verb's `idempotent: false` is the conservative bound across same-board (idempotent) + cross-board (not) paths |
 | `create_item`, `create_board`, `create_column`, `create_group` | **No** | Use `upsert` variants |
@@ -4468,7 +5172,7 @@ to largest scope:
     §5.3 step 3 v0.2 expansion).
   - For `mirror` / `formula` / battery (rollup): the source
     column or formula text. (Read-only.)
-  - Groups (id, title, color, position).
+  - Groups (id, title, color, position, archived, deleted).
   - `hierarchy_type` and `is_leaf` (multi-level boards; via raw
     GraphQL — see §2.8).
   - For each writable column type, an **example `--set` value** in
