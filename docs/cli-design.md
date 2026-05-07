@@ -333,8 +333,12 @@ linked items. Two consequences:
    a `created` boolean (in `data` for upsert-style commands). Mutations
    carry a `--dry-run` that prints the planned change without executing.
 7. **No interactive prompts. Ever.** Confirmation flags (`--yes`)
-   short-circuit any "are you sure?" path. Without `--yes`, destructive
-   commands fail fast with `code: "confirmation_required"`.
+   short-circuit any "are you sure?" path. Live destructive
+   commands without `--yes` AND without `--dry-run` fail fast
+   with `code: "confirmation_required"`. `--dry-run` bypasses the
+   gate entirely (dry-run is non-executing — no wire mutation
+   fires, so there's nothing to confirm); the dry-run envelope
+   emits `meta.dry_run: true` regardless of `--yes` presence.
 8. **Deterministic ordering.** Lists default to ordered output (by ID,
    ascending) regardless of Monday's response order, unless
    `--order-by` is set.
@@ -480,8 +484,12 @@ monday workspace update <wid> [--name <n>] [--kind open|closed] [--description <
                                           # workspaces).
 monday workspace delete <wid> --yes [--dry-run]                              v0.2
                                           # `delete_workspace(workspace_id)`.
-                                          # Destructive: --yes mandatory (without
-                                          # --yes → confirmation_required, exit 1).
+                                          # Destructive: --yes mandatory for
+                                          # live deletion. Live without --yes
+                                          # AND without --dry-run →
+                                          # confirmation_required (exit 1)
+                                          # per §3.1 #7; --dry-run bypasses
+                                          # the gate.
                                           # Re-deleting an already-deleted workspace
                                           # surfaces `not_found`, so the CLI marks
                                           # `idempotent: false` (mirrors `item
@@ -700,10 +708,13 @@ monday board update <bid> [--name <n>] [--description <d>] [--dry-run]       v0.
                                           # invalidate the cache entry).
 monday board archive <bid> --yes [--dry-run]                                 v0.2
                                           # `archive_board(board_id)`. Destructive
-                                          # — --yes mandatory (without --yes →
-                                          # `confirmation_required`, exit 1) per §8
-                                          # decision 9 (archive is consistently
-                                          # --yes-gated across nouns). Idempotent:
+                                          # — --yes mandatory for live archive.
+                                          # Live without --yes AND without
+                                          # --dry-run → `confirmation_required`
+                                          # (exit 1) per §3.1 #7 + §8 decision
+                                          # 9 (archive is consistently --yes-
+                                          # gated across nouns); --dry-run
+                                          # bypasses the gate. Idempotent:
                                           # yes — re-archiving an already-archived
                                           # board is a no-op (per §9.1). Dry-run
                                           # shape per §6.4 board-archive variant:
@@ -714,10 +725,22 @@ monday board archive <bid> --yes [--dry-run]                                 v0.
                                           # the agent can verify the ID before re-
                                           # running with --yes. `meta.source: "live"`
                                           # or `"cache"` (preflight read leg can hit
-                                          # the v0.1 board-metadata cache).
+                                          # the v0.1 board-metadata cache). Calls
+                                          # `invalidateBoard(boardId)` post-success
+                                          # per §8 eager-invalidation contract — the
+                                          # board's `state` flips from `active` to
+                                          # `archived` at the wire and the cached
+                                          # `state` field would otherwise lag until
+                                          # TTL eviction. Lifted into the M16
+                                          # retrofit cluster alongside `board
+                                          # update` + `board delete`.
 monday board delete <bid> --yes [--dry-run]                                  v0.2
                                           # `delete_board(board_id)`. Destructive
-                                          # — --yes mandatory. Re-deleting an
+                                          # — --yes mandatory for live deletion.
+                                          # Live without --yes AND without
+                                          # --dry-run → `confirmation_required`
+                                          # (exit 1) per §3.1 #7; --dry-run
+                                          # bypasses the gate. Re-deleting an
                                           # already-deleted board surfaces
                                           # `not_found`, so the CLI marks
                                           # `idempotent: false` (mirrors `item
@@ -736,7 +759,18 @@ monday board delete <bid> --yes [--dry-run]                                  v0.
                                           # divergence from `board archive`: archive
                                           # carries the source snapshot (item-
                                           # archive precedent), delete is minimal
-                                          # (workspace-delete precedent).
+                                          # (workspace-delete precedent). Calls
+                                          # `invalidateBoard(boardId)` post-success
+                                          # per §8 eager-invalidation contract —
+                                          # the board no longer exists wire-side
+                                          # and the cached entry would otherwise
+                                          # serve a phantom board until TTL
+                                          # eviction (a same-process `board
+                                          # describe` reading right after the
+                                          # delete would surface stale metadata
+                                          # rather than `not_found`). Lifted into
+                                          # the M16 retrofit cluster alongside
+                                          # `board update` + `board archive`.
 monday board duplicate <bid> [--name <n>] [--workspace <wid>] [--with-updates] [--dry-run]   v0.2
                                           # `duplicate_board(board_id,
                                           # duplicate_type: DuplicateBoardType!,
@@ -838,9 +872,302 @@ monday board add-users <bid> --users <id|email>,... [--dry-run]              v0.
 
 # Columns (board-scoped)
 monday board columns <bid>                # list columns                     v0.1
-monday board column-create <bid> --type <type> --title <t> [--description <d>]   v0.2
-monday board column-update <bid> <cid> [--title <t>] [--description <d>]     v0.2
-monday board column-delete <bid> <cid> --yes                                 v0.2
+monday board column-create <bid> --type <type> --title <t> [--description <d>] [--settings <json>] [--dry-run]   v0.2
+                                          # `create_column(board_id,
+                                          # column_type, title, description?,
+                                          # defaults?, after_column_id?, id?)`.
+                                          # The wire mutation also accepts an
+                                          # optional `id: String` (agent-supplied
+                                          # custom column ID) and `after_column_id:
+                                          # ID` (placement); M16 deliberately OMITS
+                                          # both — no v0.2 surface decision blocks
+                                          # M16, and agents needing them call the
+                                          # wire mutation via M9's `dev mutate`
+                                          # escape hatch. Returns `Maybe<Column>`.
+                                          # `--type <type>` validates against the
+                                          # full ColumnType enum (~40 values per
+                                          # SDK 14.0.0; see §2.3). The set
+                                          # exceeds v0.2's writable allowlist
+                                          # (§5.3) — a warning fires when the
+                                          # requested type isn't in
+                                          # `WRITABLE_COLUMN_TYPES`, branched by
+                                          # category per the §5.3 escape-hatch
+                                          # contract:
+                                          #   - Raw-writable types (anything that
+                                          #     accepts `change_column_value` —
+                                          #     e.g. `country`, `hour`, `timeline`
+                                          #     in v0.2) → warning suggests
+                                          #     `--set-raw <col>=<json>` for
+                                          #     subsequent writes.
+                                          #   - Read-only-forever types (`mirror`,
+                                          #     `formula`, `auto_number`,
+                                          #     `creation_log`, `last_updated`,
+                                          #     `item_id`, `item_assignees`) →
+                                          #     warning notes there's no write
+                                          #     path; the column exists but
+                                          #     `--set` / `--set-raw` against it
+                                          #     surfaces `unsupported_column_type`.
+                                          #   - `files`-shaped (`file`) → warning
+                                          #     notes write path is
+                                          #     `add_file_to_column`, deferred to
+                                          #     v0.4 (asset upload).
+                                          # The command still proceeds in all
+                                          # cases — Monday accepts non-writable
+                                          # types and agents may legitimately want
+                                          # them for read-only display, mirror
+                                          # sources, etc. The warning surfaces in
+                                          # `warnings: [{ code:
+                                          # "noncanonical_column_type",
+                                          # message, details: {column_type,
+                                          # category, suggested_write_path}
+                                          # }]` so JSON consumers can branch
+                                          # on it. `category` is one of
+                                          # `"raw_writable"` (suggests
+                                          # `--set-raw <col>=<json>`) /
+                                          # `"read_only_forever"` (no write
+                                          # path; `suggested_write_path: null`)
+                                          # / `"files_shaped"` (suggests
+                                          # `add_file_to_column` deferred to
+                                          # v0.4). `category` is a stable
+                                          # enum — adding a value is
+                                          # SemVer-minor; removing is
+                                          # SemVer-major.
+                                          # `--title <t>` is required; empty
+                                          # after trim → `usage_error` at argv-
+                                          # parse. `--description <d>` is
+                                          # optional. `--settings <json>` is
+                                          # type-specific JSON for column config
+                                          # (status labels, dropdown options,
+                                          # date formats, etc.) — passes through
+                                          # as the wire `defaults: JSON`
+                                          # argument (NOT `settings_str` —
+                                          # `settings_str` is the READ-side
+                                          # serialisation of column settings;
+                                          # `defaults` is the WRITE-side input
+                                          # parameter). `--settings <json>` is
+                                          # parsed as JSON at argv-parse-time
+                                          # (malformed JSON → `usage_error`,
+                                          # exit 1, before any network call) and
+                                          # validated against a per-type zod
+                                          # schema for types in
+                                          # `WRITABLE_COLUMN_TYPES`. The
+                                          # contract pins the SHAPE
+                                          # (`--settings` is per-type JSON,
+                                          # validated at argv-parse against a
+                                          # per-type schema, before any
+                                          # network call); M16's
+                                          # implementation owns the per-
+                                          # schema field set (status's
+                                          # `labels`, dropdown's `labels`,
+                                          # date's `{}`, numbers' `{unit:
+                                          # ...}`, etc. — pre-flight doesn't
+                                          # enumerate them exhaustively
+                                          # because Monday's accepted shapes
+                                          # are documented outside the SDK's
+                                          # typed surface and evolve over
+                                          # time, and over-pinning here
+                                          # would force docs revisions every
+                                          # time Monday adds a setting key).
+                                          # Type-mismatched settings (e.g.
+                                          # `--type text --settings
+                                          # '{"labels":[]}'`) → `usage_error`
+                                          # with `details: {column_type,
+                                          # expected_keys?, actual_keys?,
+                                          # hint}` (the optional fields are
+                                          # populated when the per-type
+                                          # schema's expected key set is
+                                          # known; absent for raw-writable /
+                                          # read-only-forever / files-shaped
+                                          # types where validation is JSON-
+                                          # only). Raw-writable + read-only-
+                                          # forever + files-shaped types
+                                          # skip type-specific validation —
+                                          # `--settings` for these types
+                                          # only requires well-formed JSON
+                                          # (Monday validates server-side;
+                                          # the CLI can't model every type's
+                                          # settings exhaustively).
+                                          # Idempotent: NO — re-running creates
+                                          # a second column with the same title
+                                          # (Monday auto-generates a fresh
+                                          # column ID per call). NOT
+                                          # destructive (no --yes gate). Calls
+                                          # `invalidateBoard(boardId)` post-
+                                          # success per §8 eager-invalidation
+                                          # contract — the cached `columns:
+                                          # [...]` list is now stale.
+                                          # Dry-run shape per §6.4 column-create
+                                          # variant: `{operation: "create_column",
+                                          # board_id, type, title, description?,
+                                          # settings?}`. `meta.source: "none"`
+                                          # (no API call fires).
+monday board column-update <bid> <cid> [--title <t>] [--description <d>] [--dry-run]   v0.2
+                                          # Per-attribute fan-out across two
+                                          # wire mutations: `--title` calls
+                                          # `change_column_title(board_id,
+                                          # column_id, title)`; `--description`
+                                          # calls
+                                          # `change_column_metadata(board_id,
+                                          # column_id, column_property?:
+                                          # ColumnProperty, value?: String)`
+                                          # — both `column_property` and
+                                          # `value` are optional at the wire
+                                          # (SDK 14.0.0 `MutationChange_
+                                          # Column_MetadataArgs`); the CLI
+                                          # always supplies both whenever
+                                          # `--description` is provided
+                                          # (`column_property: description`,
+                                          # `value: <description>`). The
+                                          # `ColumnProperty` enum (SDK 14.0.0)
+                                          # carries only two values
+                                          # (`title` / `description`), so
+                                          # `change_column_metadata` could
+                                          # equivalently set the title; the CLI
+                                          # routes `--title` to
+                                          # `change_column_title` (the more
+                                          # specific Monday surface) and
+                                          # `--description` to
+                                          # `change_column_metadata`. Multi-
+                                          # flag invocations (`--title X
+                                          # --description Y`) fan out N
+                                          # sequential wire calls, sequential
+                                          # per §8 decision 8 (parallel waits
+                                          # for v0.4 `--concurrency`). At
+                                          # least one of --title /
+                                          # --description required — zero-flag
+                                          # invocation → `usage_error` at
+                                          # argv-parse. **Whole-call shape**
+                                          # mirrors `board update`'s contract:
+                                          # single envelope on success
+                                          # (`data` = the column projection
+                                          # from the last successful per-
+                                          # attribute call's wire response
+                                          # — Monday's column-mutation
+                                          # responses return `Maybe<Column>`
+                                          # post-mutation, so the trailing
+                                          # call's response is authoritative
+                                          # for both fields and no separate
+                                          # force-live read leg fires);
+                                          # whole-call error envelope on any
+                                          # per-field failure. **Server-
+                                          # side state is NOT transactional**
+                                          # — per-field calls earlier in the
+                                          # sequence may have already
+                                          # committed when a later call
+                                          # fails. This matches Monday's wire
+                                          # constraint (no transaction across
+                                          # column-mutation calls) and
+                                          # mirrors `board update`'s
+                                          # partial-application caveat. See
+                                          # §6.4 column-update variant for
+                                          # the partial-application contract.
+                                          # Idempotent: yes — re-applying
+                                          # the same field values is a no-op
+                                          # on Monday's side. Dry-run shape
+                                          # per §6.4 column-update variant:
+                                          # field-level `from → to` diff
+                                          # per provided flag. The `from`
+                                          # state requires a preflight
+                                          # `board describe`-shaped read to
+                                          # locate the column by ID inside
+                                          # `boardMetadataSchema.columns:
+                                          # [...]`; that read can hit the
+                                          # v0.1 board-metadata cache —
+                                          # `meta.source: "live"` or
+                                          # `"cache"`. Calls
+                                          # `invalidateBoard(boardId)`
+                                          # post-success per §8 eager-
+                                          # invalidation contract. On
+                                          # partial-application failure
+                                          # (call N+1 fails after call N
+                                          # succeeded), invalidation tracks
+                                          # the wire-state high-water mark
+                                          # — the cache is invalidated as
+                                          # far as the successful legs
+                                          # reached, never further (§8
+                                          # call-site contract). Note the
+                                          # success-path `data` projection
+                                          # CAN source from the wire
+                                          # response directly (no force-
+                                          # live read leg), distinguishing
+                                          # column-update from board-update
+                                          # (which forces-live because its
+                                          # wire response is per-attribute
+                                          # and a final whole-board read is
+                                          # needed for the projection).
+monday board column-delete <bid> <cid> --yes [--dry-run]                     v0.2
+                                          # `delete_column(board_id,
+                                          # column_id)`. Returns
+                                          # `Maybe<Column>` (the column's
+                                          # last-look projection before
+                                          # deletion — Monday convention).
+                                          # Destructive — --yes mandatory
+                                          # for live deletion (without
+                                          # --yes AND without --dry-run →
+                                          # `confirmation_required`, exit
+                                          # 1) per §3.1 #7 + §8 decision
+                                          # 9; the confirmation gate fires
+                                          # BEFORE `resolveClient()` so a
+                                          # missing-token call still
+                                          # surfaces `confirmation_required`
+                                          # (the M10 round-1 P2 ordering
+                                          # invariant; R29's
+                                          # `assertConfirmation` helper
+                                          # preserves it via already-parsed
+                                          # `globalFlags`). The
+                                          # `confirmation_required` envelope
+                                          # carries the single-target
+                                          # destructive-gate `details`
+                                          # shape per §6.5: `{board_id,
+                                          # column_id, hint}` (the column-
+                                          # delete wire signature is two-
+                                          # tuple, so both IDs echo).
+                                          # `--dry-run` bypasses the
+                                          # confirmation gate entirely
+                                          # (mirrors `item
+                                          # archive` / `item delete` /
+                                          # `board archive` / `board
+                                          # delete` precedent — dry-run is
+                                          # non-executing and the gate is
+                                          # for live destructive writes
+                                          # only); `column-delete <bid>
+                                          # <cid> --dry-run` without
+                                          # `--yes` emits the dry-run
+                                          # envelope with `meta.source:
+                                          # "none"`. Re-deleting an
+                                          # already-deleted column
+                                          # surfaces `not_found` past the
+                                          # mutation; the CLI marks
+                                          # `idempotent: false` (mirrors
+                                          # `item delete` / `update
+                                          # delete` / `workspace delete` /
+                                          # `board delete` rationale —
+                                          # wire-level converges, CLI-level
+                                          # surfaces a different envelope).
+                                          # Calls `invalidateBoard
+                                          # (boardId)` post-success per
+                                          # §8 eager-invalidation contract.
+                                          # Dry-run shape per §6.4
+                                          # column-delete variant: minimal
+                                          # `{operation: "delete_column",
+                                          # board_id, column_id}`. No
+                                          # preflight read leg fires; the
+                                          # dry-run is purely argv-derived
+                                          # (Monday's `delete_column
+                                          # (board_id, column_id)` reports
+                                          # `not_found` if the ids are
+                                          # bogus). `meta.source: "none"`.
+                                          # Mirrors the destructive-no-read
+                                          # pattern uniform across `item
+                                          # delete`, `update delete`,
+                                          # `workspace delete`, `board
+                                          # delete`. Note the deliberate
+                                          # divergence from a column-
+                                          # archive variant: Monday has no
+                                          # `archive_column` mutation —
+                                          # column lifecycle is delete-
+                                          # only, mirroring the underlying
+                                          # API surface.
 
 # Groups (board-scoped)
 monday board groups <bid>                                                    v0.1
@@ -975,20 +1302,29 @@ monday item duplicate <iid> [--with-updates]                                 v0.
                                           # `duplicated_from_id` (lineage
                                           # echo per §6.4 line 1827-1831's
                                           # upsert precedent).
-monday item archive <iid> --yes                                              v0.2
+monday item archive <iid> --yes [--dry-run]                                  v0.2
                                           # --yes mandatory for live archive
                                           # (destructive — Monday's 30-day
                                           # recovery window is the only way
                                           # back; no `unarchive` mutation
-                                          # exists, see §5.4). Without --yes
-                                          # → confirmation_required (exit 1).
-                                          # --dry-run previews the would-
-                                          # archive item without --yes.
+                                          # exists, see §5.4). Live without
+                                          # --yes AND without --dry-run →
+                                          # confirmation_required (exit 1)
+                                          # per §3.1 #7. --dry-run bypasses
+                                          # the gate (non-executing) and
+                                          # previews the would-archive
+                                          # item without --yes.
                                           # Idempotent: re-archiving an
                                           # already-archived item is a no-op
                                           # on Monday's side (§9.1 table).
-monday item delete <iid> --yes                                               v0.2
+monday item delete <iid> --yes [--dry-run]                                   v0.2
                                           # --yes mandatory for live delete.
+                                          # Live without --yes AND without
+                                          # --dry-run → confirmation_required
+                                          # (exit 1) per §3.1 #7. --dry-run
+                                          # bypasses the gate (non-executing)
+                                          # and previews the would-delete
+                                          # item without --yes.
                                           # Re-deleting an already-deleted
                                           # item surfaces `not_found` — the
                                           # mutation itself is idempotent
@@ -1046,8 +1382,11 @@ monday update edit <uid> --body <md> | --body-file <path> [--dry-run]        v0.
                                           # on Monday's side).
 monday update delete <uid> --yes [--dry-run]                                 v0.2
                                           # `delete_update`. Destructive: --yes
-                                          # mandatory (without --yes →
-                                          # confirmation_required, exit 1). Re-
+                                          # mandatory for live deletion. Live
+                                          # without --yes AND without --dry-run
+                                          # → confirmation_required (exit 1)
+                                          # per §3.1 #7; --dry-run bypasses
+                                          # the gate. Re-
                                           # deleting an already-deleted update
                                           # surfaces `not_found` so the CLI marks
                                           # `idempotent: false` (mirrors `item
@@ -1064,7 +1403,12 @@ monday update unpin <uid> [--dry-run]                                        v0.
                                           # `unpin_from_top`. Idempotent.
 monday update clear-all <iid> --yes [--limit-pages <n>] [--dry-run]          v0.2
                                           # delete all updates on item.
-                                          # Destructive: --yes mandatory. Page-walks
+                                          # Destructive: --yes mandatory for
+                                          # live deletion. Live without --yes
+                                          # AND without --dry-run →
+                                          # confirmation_required (exit 1)
+                                          # per §3.1 #7; --dry-run bypasses
+                                          # the gate. Page-walks
                                           # `updates(item_id)` via walkPages to
                                           # collect IDs, then sequential
                                           # `delete_update` per ID. **Partial-
@@ -2106,13 +2450,29 @@ or, on failure:
 
 `warnings` is an array of `{ code, message, details? }`. Always
 delivered as part of the stdout JSON envelope. Used for non-fatal
-degradations:
+degradations — see the stable warning-code registry below.
 
-- Cache served stale data because a refresh failed (`code: "stale_cache"`).
-- A bulk operation skipped some items (`code: "bulk_partial_skip"`,
-  details lists the unprocessed IDs).
-- A `--verbose` complexity hint suggesting a more efficient query.
-- Something the user should know but that didn't fail the command.
+**Stable warning codes** — agents key off these verbatim; same
+SemVer rules as error codes (adding a code is minor; removing or
+renaming is major). The table documents producer + `details`
+shape per code; some codes have multiple producers, in which
+case `details` is a per-producer union (the producer determines
+the shape, not the code alone — agents that switch on the code
+should accept any documented union member):
+
+| Code | Producer | `details` shape |
+|------|----------|-----------------|
+| `stale_cache_refreshed` | Cache-miss-refresh backstop fired (cache served the first attempt, then a refresh produced the resolution); see §8 backstop layer. Emitted by `src/api/columns.ts` resolvers | `{ board_id, token }` |
+| `column_token_collision` | A `--set` token matched a column ID *and* another column's title; the ID match wins deterministically and the warning surfaces the collision (§5.3 step 3). Emitted by `src/api/columns.ts` resolver | `{ via, resolved_id, candidates: [{id, title, type}] }` |
+| `pagination_cap_reached` | A walker stopped at the per-command page cap; more results may exist. Two producers: `src/api/walk-pages.ts`'s `buildCapWarning` (any verb that page-walks via the shared walker — list `--all` verbs AND `update clear-all` collecting IDs to delete) emits `{ pages_walked, hint }`; `src/commands/item/find.ts` (the find-by-name scan — uniqueness check truncated) emits `{ pages_scanned, items_scanned, cap_pages, hint }`. Agents switch on the code, accept either shape | `{ pages_walked, hint }` \| `{ pages_scanned, items_scanned, cap_pages, hint }` |
+| `first_of_many` | `find` matched multiple candidates and `--first` picked the lowest-ID one. Emitted by `src/commands/board/find.ts` / `src/commands/item/find.ts` | `{ candidates: [{id, name}] }` |
+| `noncanonical_column_type` | M16 `column-create --type` resolved to a column type outside `WRITABLE_COLUMN_TYPES`; agents pick the right write path from `category` (M16 forward-pin — implementation lands at M16 close) | `{ column_type, category: "raw_writable" \| "read_only_forever" \| "files_shaped", suggested_write_path: string \| null }` |
+
+Adding a new warning code, a new producer to an existing code
+(union extension), or a new field to a `details` shape is
+SemVer-minor; removing either, or removing a producer-shape
+union member, is SemVer-major. Adding a value to a stable enum
+field (`category`, etc.) is SemVer-minor.
 
 What `warnings` is **not** for: partial-success of a single
 `change_multiple_column_values` mutation. That mutation is atomic on
@@ -3151,6 +3511,187 @@ mutation verbs produce different planned-change shapes; the
   §22 R40 — the resolver-fronted-fan-out helper factoring out
   the ~200 LOC shared by the three verbs.
 
+- **Column-create shape** (`board column-create`; v0.2 M16).
+  Minimal: `operation: "create_column"`, `board_id`, `type`,
+  `title`, and optional `description`, `settings`. No diff
+  section (the column doesn't exist yet, so there's no prior
+  state to render). No read leg fires; the dry-run is purely
+  argv-derived. `meta.source: "none"`. Mirrors the workspace-
+  create / board-create shapes' preference for agent-scannable
+  surface fields rather than burying values inside `diff`. The
+  `settings` slot echoes the agent's `--settings <json>`
+  argument verbatim — argv-parse already validated it as
+  well-formed JSON and (where M16 ships a per-type schema)
+  type-shape-correct, so the dry-run's `settings` is the same
+  object the wire mutation would carry as its `defaults: JSON`
+  argument:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "create_column",
+        "board_id": "12345",
+        "type": "status",
+        "title": "Priority",
+        "settings": { "labels": ["Low", "Med", "High"] }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--description` / `--settings` are omitted, the
+  corresponding planned-change slots are omitted (mirrors the
+  workspace-create rule for `--description`). When `--type`
+  resolves to a non-writable column type per the §5.3
+  allowlist, the `warnings: [...]` array carries a
+  `noncanonical_column_type` entry per the §4.3 column-create
+  contract — agents see the warning shape on dry-run too so
+  the live call's behaviour is predictable. The `type` slot
+  carries the validated `ColumnType` enum value (string-
+  encoded; see §2.3). The wire argument name is `defaults:
+  JSON`, NOT `settings_str: String!` — `settings_str` is the
+  read-side serialisation of column settings (returned on
+  `Column.settings_str`); `defaults` is the write-side input
+  parameter on `create_column`. The CLI surfaces the read-
+  vs-write asymmetry as the flag-name choice (`--settings`)
+  hiding the wire mismatch from agents; the dry-run's
+  `settings` slot mirrors the input-side semantic, not the
+  output-side string serialisation.
+
+- **Column-update shape** (`board column-update`; v0.2 M16).
+  Single-leg dry-run with a preflight `board describe`-shaped
+  read to surface the `from` state per provided field — the
+  CLI loads `boardMetadataSchema` for the target board, finds
+  the column by ID inside `columns: [...]`, and projects the
+  `title` / `description` slots as `from`. Carries
+  `operation: "update_column"`, `board_id`, `column_id`, and
+  `diff: { <field>: { from, to }, ... }` keyed by the column
+  fields the agent is changing (`title`, `description`). Only
+  fields present in the agent's flags appear in `diff`
+  (omitting a flag means "leave unchanged"; the wire shape
+  fans out one mutation per provided field). The wire-shape
+  contract differs from `update_workspace` AND from
+  `update_board`: Monday's column mutations split across two
+  surfaces — `change_column_title(board_id, column_id, title)`
+  for `--title`, and `change_column_metadata(board_id,
+  column_id, column_property?: ColumnProperty, value?: String)`
+  for `--description` — both `column_property` and `value` are
+  optional at the wire (SDK 14.0.0); the CLI always supplies
+  both for `--description` (`column_property: description`,
+  `value: <description>`).
+  The `ColumnProperty` enum (SDK 14.0.0) carries only `title`
+  / `description` values; the CLI routes `--title` to
+  `change_column_title` (the more specific Monday surface)
+  rather than to `change_column_metadata({column_property:
+  title})`. Multi-flag invocations fan out N sequential wire
+  calls — same pattern as `update_board`. The dry-run shape
+  stays single-envelope (no partial-success leak). `meta.source:
+  "live"` or `"cache"` (preflight read hits the v0.1 board-
+  metadata cache when fresh; M16 adds the eager-invalidation
+  contract so post-mutation cache entries invalidate
+  immediately, see §8):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "update_column",
+        "board_id": "12345",
+        "column_id": "status_4",
+        "diff": {
+          "title": { "from": "Status", "to": "Priority" },
+          "description": { "from": null, "to": "Owner-set urgency" }
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When the preflight read returns `not_found` for the board
+  OR doesn't contain a column with the requested ID, the
+  dry-run surfaces `not_found` (exit 2) rather than emitting
+  a preview-of-failure (mirrors the workspace-update / board-
+  update rules). The error carries `details.column_id` when
+  the board-level read succeeded but the column ID was
+  missing.
+
+  **Live-path partial-application caveat.** The multi-call
+  wire shape produces a single success envelope with `data:
+  <column projection>` from the trailing wire-call's response
+  when every per-field call succeeds. Unlike `board update`,
+  no separate force-live final read leg fires — Monday's
+  column-mutation responses return `Maybe<Column>` post-
+  mutation, so the trailing call's response is authoritative
+  for both fields. If any per-field call fails, the whole-
+  call surfaces an error envelope with the failed call's
+  code; Monday has no transaction across column-mutation
+  calls, so per-field calls earlier in the sequence have
+  already committed server-side and **are not rolled back**.
+  The eager-invalidation contract (§8) tracks the wire-state
+  high-water mark — `invalidateBoard(boardId)` fires once after
+  the full per-attribute fan-out loop settles (whole-call
+  success OR whole-call error after partial application),
+  conditional on at least one per-attribute call having
+  succeeded. When zero legs succeeded (the very first call
+  failed before any state changed) invalidation is skipped.
+  See §8 fan-out call-site contract for the full timing rule.
+
+  **Dry-run cache-staleness caveat.** The preflight `board
+  describe`-shaped read can hit the v0.1 board-metadata
+  cache; `from` values in the diff may lag live state up to
+  the cache TTL. `cache_age_seconds` reflects cache age and
+  is truthful, but the `from` snapshot reflects cache-write
+  time, not "now". When preview freshness is critical (e.g.
+  updating after a recent column rename), pass `--no-cache`
+  to force a live preflight read.
+
+- **Column-delete shape** (`board column-delete`; v0.2 M16).
+  Minimal: `operation: "delete_column"`, `board_id`,
+  `column_id`. No diff, no preflight read leg (Monday's
+  `delete_column(board_id, column_id)` reports `not_found`
+  if the ids are bogus and the dry-run is purely argv-
+  derived). `meta.source: "none"`. Same shape (modulo
+  `column_id` vs `update_id` / `workspace_id` / `board_id`)
+  as the destructive-no-read pattern uniform across `item
+  delete`, `update delete`, `workspace delete`, `board
+  delete`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "delete_column",
+        "board_id": "12345",
+        "column_id": "status_4"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  Note the deliberate divergence from `column-update`'s
+  preflight-read-bearing dry-run: column-update needs the
+  `from` state to render a meaningful diff; column-delete is
+  a flag-bound operation where the agent already knows what
+  they're deleting (the column ID is the positional). The
+  destructive-no-read pattern matches the uniform shape
+  across the delete cluster. There is no `column-archive`
+  shape — Monday's API has no `archive_column` mutation
+  (column lifecycle is delete-only); the CLI doesn't surface
+  one.
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
@@ -3355,7 +3896,7 @@ removals are major bumps.
 | Code | Origin | Retryable? |
 |------|--------|------------|
 | `usage_error` | CLI parsing | No |
-| `confirmation_required` | Destructive op without `--yes` | No |
+| `confirmation_required` | Live destructive op without `--yes` (and without `--dry-run`); §3.1 #7 — dry-run bypasses the gate | No |
 | `not_found` | Item/board/etc. doesn't exist | No |
 | `ambiguous_name` | `find` matched multiple | No |
 | `ambiguous_column` | `--set` resolved to multiple columns | No |
@@ -3410,18 +3951,37 @@ slots that ship in v0.1 across multiple codes:
 
 **Per-code `details` schemas:**
 
-- `confirmation_required` (bulk mutations without `--yes` or
-  `--dry-run`):
-  - `matched_count: number` — count of items the filter
-    resolved against.
-  - `where_clauses: string[]` — always present. Carries the
-    raw `--where` clauses verbatim; empty array (`[]`) when
-    only `--filter-json` was passed.
-  - `filter_json: string` — present only when `--filter-json
-    <s>` was passed; absent otherwise. Carries the raw JSON
-    string the user supplied (not the parsed object).
-  - `board_id: string` — the `--board <bid>` the bulk runs
-    against.
+- `confirmation_required` — two producer shapes (per-producer
+  union; agents switch on the code, accept either):
+  - **Bulk filter-gated shape** (bulk mutations without
+    `--yes` and without `--dry-run` — `item update --where`,
+    `item clear --where`):
+    - `matched_count: number` — count of items the filter
+      resolved against.
+    - `where_clauses: string[]` — always present. Carries the
+      raw `--where` clauses verbatim; empty array (`[]`) when
+      only `--filter-json` was passed.
+    - `filter_json: string` — present only when `--filter-json
+      <s>` was passed; absent otherwise. Carries the raw JSON
+      string the user supplied (not the parsed object).
+    - `board_id: string` — the `--board <bid>` the bulk runs
+      against.
+  - **Single-target destructive-gate shape** (single-target
+    destructive verbs without `--yes` and without `--dry-run`
+    — `item archive` / `item delete` / `update delete` /
+    `workspace delete` / `board archive` / `board delete` /
+    M16 `board column-delete` / M17 `board group-archive` /
+    `group-delete`):
+    - `<resource_id_field>: string` — verb-specific
+      identifier echoing the positional the agent passed
+      (`item_id` for `item archive` / `delete`; `update_id`
+      for `update delete`; `workspace_id` for `workspace
+      delete`; `board_id` for `board archive` / `delete`;
+      `column_id` for M16 `column-delete` (paired with
+      `board_id` since the wire signature is two-tuple); same
+      pairing for M17 `group-archive` / `group-delete`).
+    - `hint: string` — actionable guidance ("re-run with
+      `--yes` to commit, or with `--dry-run` to preview").
 - `column_archived`:
   - `column_id: string`, `column_title: string` — the archived
     column the agent targeted.
@@ -3567,6 +4127,230 @@ served the first attempt, live served the retry) and a
 `warnings: [{ code: "stale_cache_refreshed", ... }]` entry is
 emitted so agents can see when the cache was misleading them.
 
+**Eager invalidation on board-structure mutations** (M16 / M17;
+v0.2-plan §8 decision 6). The TTL + auto-refresh paths above are
+backstops, not the primary freshness mechanism. When **this
+process** mutates a board's structure — column shape (M16
+`board column-create` / `column-update` / `column-delete`),
+group shape (M17 `board group-create` / `group-update` /
+`group-archive` / `group-duplicate` / `group-delete`), or board
+metadata (the M15 retrofit cluster — `board update` / `board
+archive` / `board delete` post-success) — the CLI
+**eagerly invalidates** the affected board's cache entry so
+**subsequent reads in the same process** see live state without
+having to wait for TTL eviction or having to dead-end into the
+cache-miss-refresh path.
+
+**Helper API.** `invalidateBoard(boardId, env?)` is exported from
+`src/api/cache.ts`. Implementation is a thin wrapper over
+`clearEntry(root, { kind: 'board', boardId })` (the precedent is
+the existing `evictBoardMetadata` helper in
+`src/api/board-metadata.ts`; M16 lifts the export to `cache.ts`
+under the `invalidateBoard` name so the call sites read as
+"invalidate" rather than "evict cache" — eviction is the
+mechanism, invalidation is the contract). The helper is
+idempotent — invalidating an already-absent entry is a no-op
+(matches `clearEntry`'s missing-file semantics).
+
+**Call-site contract.** Every command that mutates board
+structure calls `invalidateBoard(boardId)` **once**, AFTER the
+full wire-call sequence has settled (whole-call success OR
+whole-call error) and AFTER any success envelope's `data`
+projection has run, but BEFORE the function returns. Two
+ordering invariants split by leg-count:
+
+- **Single-leg verbs** (`column-create` / `column-delete`; M17
+  group verbs). Invalidate AFTER the success envelope's `data`
+  is fully constructed — never before the wire mutation, never
+  between the wire mutation and `data` projection. Pre-mutation
+  invalidation would race with concurrent in-process reads that
+  hit the cache between invalidation and mutation; between-
+  mutation-and-projection invalidation would force the
+  projection to re-fetch even though the wire response is
+  authoritative. Skip invalidation on the error path — a failed
+  single-leg call didn't change board state.
+- **Fan-out verbs** (`column-update` per-attribute; M15
+  retrofit's `board update`). Issue all per-attribute wire
+  calls first; AFTER the loop ends, invalidate IF at least one
+  per-attribute call succeeded. On whole-call success this is
+  the same trigger as the single-leg case (every leg
+  succeeded); on whole-call error after partial application
+  (call N+1 fails after call N succeeded), invalidation still
+  fires because the cache must reflect the partially-applied
+  server state. The check is "did the wire-state change?" —
+  cleanly generalised to N-leg fan-out by gating on the
+  loop's high-water-mark counter rather than per-call timing.
+  When zero legs succeeded (the very first call failed before
+  any state changed), invalidation is skipped — Monday's
+  per-attribute mutations are not transactional, but a
+  failed-first-call is server-state-unchanged just like a
+  single-leg error.
+
+In every case invalidation runs once, after `data` projection
+(or error projection) completes, before the function returns —
+so concurrent in-process readers see either the pre-mutation
+or post-mutation cache state, never an in-flight intermediate.
+
+**M15 retrofit cluster — three verbs, one contract.** M16
+retrofits **`board update`**, **`board archive`**, and **`board
+delete`** to call `invalidateBoard(boardId)` post-success.
+Background and rationale per verb:
+
+- **`board update`.** M15's pre-flight pinned the success-
+  envelope final read as **force-live** (cache-bypass,
+  `meta.source: "live"` on success) so the immediate envelope's
+  `data` reflects post-update state, not stale cache. Force-
+  live protects the immediate envelope; it does **not**
+  invalidate the cache entry, so subsequent reads in the same
+  process would hit the now-stale cache until TTL eviction or
+  auto-refresh kicked in. The retrofit fires invalidation
+  alongside the force-live read.
+- **`board archive`.** The mutation flips the board's `state`
+  from `active` to `archived` at the wire; the cached
+  `boardMetadataSchema.state` field would lag until TTL
+  eviction. Without retrofit, a same-process `board describe`
+  / `board list` reading after the archive returns
+  `state: "active"` until the cache expires.
+- **`board delete`.** The mutation removes the board entirely;
+  the cache entry would otherwise serve a phantom board until
+  TTL eviction (a same-process `board describe` would surface
+  stale metadata rather than the expected `not_found`). The
+  retrofit's invalidation deletes the cache file, so the next
+  read cleanly cache-misses to the live `not_found`.
+
+The other M15 verbs are excluded with explicit reasoning:
+
+- **`board create`.** No pre-existing cache entry to invalidate
+  — the new board's first `board describe` write seeds the
+  cache fresh.
+- **`board duplicate`.** The source board's metadata is not
+  mutated (cache stays valid); the new board's cache doesn't
+  exist yet (same as `board create`).
+- **`board add-users`.** The cached `boardMetadataSchema`
+  currently doesn't include `subscribers` — only `permissions`
+  (a coarse string) and `updated_at` shift, neither of which
+  agents key reads off. Marginal cache pressure deferred to a
+  follow-up if subscribers join the cached projection in v0.3.
+
+The two layers (force-live final read + eager invalidation)
+serve different freshness windows for `board update`:
+
+- **Force-live final read** — protects the immediate success
+  envelope's `data`. Required because the wire shape is
+  per-attribute fan-out and the envelope's projection cannot
+  source from a single wire response.
+- **Eager invalidation** — protects subsequent reads. Required
+  because in-process callers don't pass `--no-cache` between
+  commands; without invalidation the next `board describe` /
+  `--set` against the same board would hit a cache entry
+  written before the update committed.
+
+`board archive` and `board delete` are simpler — single-leg wire
+calls don't need force-live (the wire response IS authoritative
+when present) but DO need invalidation to protect subsequent
+reads.
+
+The same retrofit applies to M14 if `workspaces` joins the cache
+layer in v0.3 (no current cache pressure there — `workspaces(ids:)`
+isn't cached in v0.2).
+
+**Backstop layer.** The pre-existing TTL eviction +
+cache-miss-refresh paths stay in place. Eager invalidation is
+the **first** line of defence for in-process freshness; the TTL
++ refresh paths cover the cases eager invalidation misses:
+
+- A future mutation verb that forgets to call
+  `invalidateBoard` (the contract is documented per-verb in
+  §4.3 + per-shape in §6.4; integration tests assert no
+  refresh fires when invalidation fired correctly — the
+  refresh path is the backstop, not the path under test).
+- Out-of-band board structure changes — Monday's UI editing
+  the board, another integration's wire calls, a different
+  CLI process's mutation (see "cross-process" below).
+- Server-side state changes the CLI doesn't model — Monday-
+  driven retention sweeps, admin actions, etc.
+
+The `meta.source: "mixed"` + `warnings: [{ code:
+"stale_cache_refreshed" }]` surface is **only** the backstop
+signal — it fires when the cache-miss-refresh path saved the
+caller from a stale-cache dead-end. When eager invalidation
+worked correctly, the next read sees a clean cache miss → live
+fetch → write, so `meta.source: "live"` and no
+`stale_cache_refreshed` warning appears. The two paths are
+distinguishable from the agent's surface: invalidation success
+looks like a normal cache miss (`source: "live"`, no warning);
+backstop firing looks like a refresh-recovery (`source: "mixed"`,
+`stale_cache_refreshed` warning). Integration tests assert the
+"clean miss" shape on the eager-invalidation happy path so a
+silent regression to "backstop saved us" doesn't pass for the
+wrong reason.
+
+**Cross-process coordination — explicitly deferred to v0.3.**
+The on-disk cache file is **shared** between concurrent CLI
+processes (same `$XDG_CACHE_HOME/monday-cli/boards/<bid>.json`
+path); `invalidateBoard` deletes the shared file via
+`clearEntry`'s `unlink`, so process A's invalidation **does**
+remove process B's cache entry. The "process-local" framing is
+about **coordination**, not about cache-file ownership: there
+is **no inter-process locking** around the read / write /
+invalidate boundaries, so concurrent processes race in a few
+documented ways:
+
+- **Stale-after-unlink reads.** Process B's `loadBoardMetadata`
+  may have stat'd or opened the cache file before process A's
+  `unlink`, and read the pre-invalidation bytes from an open
+  handle even after process A's mutation committed. The
+  read-handle's contents are whatever was on disk at open
+  time, not at read time.
+- **Stale-write-after-invalidate.** Process B may have started
+  a cache-miss live read BEFORE process A's mutation and
+  invalidation, then `writeEntry` (atomic `tmp + rename`) the
+  pre-mutation snapshot AFTER process A's `unlink`. Process
+  B's snapshot lands as the post-invalidation cache entry —
+  semantically stale even though it was just written.
+- **Concurrent-mutation reorder.** Two processes both mutating
+  the same board's structure don't see each other's
+  invalidations as ordered events; whichever process writes
+  the cache last wins, regardless of wire-call ordering.
+
+The race window is widest between `clearEntry`'s `unlink` and
+the next live-fetch's `writeEntry` rename — typically
+sub-second, but unbounded under contention. Without a shared
+lock or version-stamp protocol, the CLI cannot guarantee
+post-mutation freshness across processes.
+
+Two reasons this is deferred rather than half-shipped:
+
+- The right primitive is per-entry version stamping with
+  inter-process coordination (advisory file-locking,
+  mtime-driven invalidation, or a shared inotify watcher) —
+  non-trivial and v0.4-shaped at minimum. v0.3 is the
+  earliest reasonable target.
+- Agent workflows the v0.2 surface targets are mostly
+  single-process (one `monday` invocation drives the whole
+  workflow); the multi-process case is a rare-enough
+  ergonomic concern to wait until the contract surface is
+  more settled.
+
+Documented limitation, not a bug — agents writing parallel
+scripts that share a Monday workspace should pass `--no-cache`
+on read paths that are sensitive to recent mutations from
+sibling processes (the `--no-cache` bypass skips both the
+on-disk read and the post-fetch write, sidestepping every race
+window above at the cost of one extra Monday round-trip per
+read).
+
+**Out of scope — Monday's server-side cache.** Eager
+invalidation operates on the CLI's on-disk cache. Monday's
+GraphQL API has its own internal caching layer beyond the
+CLI's reach (per-account complexity budget, materialised view
+freshness windows for board metadata, etc.). When a wire
+mutation succeeds but a subsequent live read returns stale
+state, the cause is server-side eventual consistency, not the
+CLI's cache. The CLI's `meta.source: "live"` is truthful — the
+read fired against Monday — but Monday's internal freshness is
+not the CLI's contract.
+
 ## 9. Idempotency, dry-run, and concurrency
 
 ### 9.1 Idempotency
@@ -3574,6 +4358,7 @@ emitted so agents can see when the cache was misleading them.
 | Operation | Idempotent? | Notes |
 |-----------|-------------|-------|
 | `change_column_value(s)` | Yes | Same input → same state |
+| `change_column_title`, `change_column_metadata` | Yes | Same input leaves same column metadata; the per-verb prose for `board column-update` marks `idempotent: yes` per this row |
 | `archive_item`, `archive_board` | Yes | Re-archiving is a no-op |
 | `move_item_to_group` | Yes | If already in target group, no-op |
 | `move_item_to_board` | **No** | Re-running on an item already on the target board is undefined SDK behaviour; the `monday item move` verb's `idempotent: false` is the conservative bound across same-board (idempotent) + cross-board (not) paths |
