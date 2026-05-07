@@ -108,6 +108,9 @@ import { boardAddUsersCommand } from './board/add-users.js';
 import { boardColumnCreateCommand } from './board/column-create.js';
 import { boardColumnUpdateCommand } from './board/column-update.js';
 import { boardColumnDeleteCommand } from './board/column-delete.js';
+// M17 (v0.2) — board groups: group-create / group-update /
+// group-archive / group-duplicate / group-delete.
+import { boardGroupCreateCommand } from './board/group-create.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -143,6 +146,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardColumnCreateCommand,
     boardColumnUpdateCommand,
     boardColumnDeleteCommand,
+    boardGroupCreateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

@@ -4473,3 +4473,358 @@ describe('monday board column-delete (integration, M16)', () => {
     expect(postEnv.meta.source).toBe('cache');
   });
 });
+
+// =============================================================================
+// M17 — board group-create (cli-design §4.3 + §6.4 + §8 eager invalidation)
+// =============================================================================
+
+describe('monday board group-create (integration, M17)', () => {
+  const createdGroup = {
+    id: 'sprint_42',
+    title: 'Sprint 42',
+    color: 'blue',
+    position: '1.0',
+    archived: false,
+    deleted: false,
+  };
+  const createdGroupNoColor = {
+    ...createdGroup,
+    id: 'topics',
+    title: 'Topics',
+    color: null,
+  };
+
+  it('live: --name fires create_group with required wire args + group_name', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'Topics', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            // Wire-shape pin: group_name maps to --name (NOT
+            // `name`); board_id to the positional. Pre-existing
+            // SDK 14.0.0 wire arg name.
+            match_variables: {
+              boardId: '12345',
+              groupName: 'Topics',
+            },
+            // Pin the GraphQL surface so a future regression that
+            // renames `group_name` → `name` (or moves the wire to
+            // a different mutation root) fails here.
+            match_query: /create_group\(\s*board_id: \$boardId,\s*group_name: \$groupName/,
+            response: { data: { create_group: createdGroupNoColor } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string; color: string | null };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('topics');
+    expect(env.data.title).toBe('Topics');
+    expect(env.data.color).toBeNull();
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: --name --color forwards group_color to the wire', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'Sprint 42', '--color', 'blue', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            match_variables: {
+              boardId: '12345',
+              groupName: 'Sprint 42',
+              groupColor: 'blue',
+            },
+            // Pin the wire arg name — `group_color` is what Monday
+            // accepts; a regression renaming to `color` would lose
+            // the colour on the wire.
+            match_query: /group_color: \$groupColor/,
+            response: { data: { create_group: createdGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; color: string | null };
+    };
+    expect(env.data.id).toBe('sprint_42');
+    expect(env.data.color).toBe('blue');
+  });
+
+  it('live: omits group_color from the wire when --color is absent (no null leak)', async () => {
+    // Pre-fix, an inadvertent `groupColor: undefined` in the
+    // variables map would have been serialised as `null` on the
+    // wire, explicitly clearing Monday's server-side default.
+    // Mirrors M16 column-create's omits-when-absent regression.
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'Bare', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            match_variables: {
+              boardId: '12345',
+              groupName: 'Bare',
+            },
+            response: {
+              data: { create_group: { ...createdGroupNoColor, title: 'Bare' } },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('rejects empty --name (after trim) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --name as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --color (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'X', '--color', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'group-create', 'abc', '--name', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_group; no mutation fires', async () => {
+    const out = await drive(
+      [
+        'board', 'group-create', '12345',
+        '--name', 'Sprint 42',
+        '--color', 'blue',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        name: string;
+        color?: string;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_group');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.name).toBe('Sprint 42');
+    expect(plan?.color).toBe('blue');
+  });
+
+  it('--dry-run: omits color from the planned change when --color is absent', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'Topics', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'create_group',
+      board_id: '12345',
+      name: 'Topics',
+    });
+  });
+
+  it('surfaces internal_error when Monday returns a missing create_group key (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string; board_id?: string; name?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.name).toBe('X');
+  });
+
+  it('surfaces internal_error when Monday returns a present-but-null create_group (no schema-drift hint)', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            response: { data: { create_group: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string; board_id?: string; name?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.name).toBe('X');
+    // No schema-drift hint — null payload is a different signal
+    // than missing-root-key. Mirrors M15 board-create / M16 column-
+    // create round-2 F1 distinction.
+    expect(env.error?.details?.hint ?? '').not.toMatch(/schema-drift/);
+  });
+
+  it('cache invalidation round-trip: group-create → board describe sees new group with source: live + no stale_cache_refreshed warning', async () => {
+    // Per cli-design §8 single-leg call-site contract: invalidate
+    // AFTER the success envelope's data projection. The round-trip
+    // MUST satisfy three pins per cassette to prove eager
+    // invalidation worked (rather than the cache-miss-refresh
+    // backstop saving us): post-mutation read sees live state;
+    // meta.source: 'live'; NO stale_cache_refreshed warning.
+    const preMutationGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    const newGroup = {
+      id: 'sprint_42',
+      title: 'Sprint 42',
+      color: 'red',
+      position: '2.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    const seed = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preMutationGroup])] },
+    );
+    expect(seed.exitCode).toBe(0);
+    // Now the cache holds the pre-mutation snapshot. Fire group-
+    // create — it MUST invalidate the cache file before returning.
+    const created = await drive(
+      [
+        'board', 'group-create', '111',
+        '--name', 'Sprint 42',
+        '--color', 'red',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            match_variables: { boardId: '111', groupName: 'Sprint 42' },
+            response: { data: { create_group: newGroup } },
+          },
+        ],
+      },
+    );
+    expect(created.exitCode).toBe(0);
+    // Post-mutation describe — clean cache miss → live fetch.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preMutationGroup, newGroup])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.map((g) => g.id)).toContain('sprint_42');
+    // The backstop emits stale_cache_refreshed when it fires.
+    // Eager invalidation should land in a clean miss instead.
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: error path skips invalidation (failed create didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on the error path.
+    // A create that returns null (internal_error) didn't change
+    // server state; the cache remains valid. Mirror M16 column-
+    // create's error-path test.
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Create fails (Monday returns null = internal_error).
+    const created = await drive(
+      ['board', 'group-create', '111', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            response: { data: { create_group: null } },
+          },
+        ],
+      },
+    );
+    expect(created.exitCode).toBe(2);
+    // Post-create describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: a cache hit needs no live fetch. If
+      // invalidation incorrectly fired, the test fails with an
+      // exhausted cassette.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
+});
