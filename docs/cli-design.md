@@ -655,7 +655,16 @@ monday board update <bid> [--name <n>] [--description <d>] [--dry-run]       v0.
                                           # `usage_error` at argv-parse. Whole-call
                                           # shape: single envelope on success
                                           # (`data` = full board projection from a
-                                          # final `boards(ids:)` read leg);
+                                          # final `boards(ids:)` read leg — this
+                                          # post-mutation read MUST bypass the
+                                          # board-metadata cache (force-live) so
+                                          # the success envelope reflects the
+                                          # post-update state, not stale cached
+                                          # metadata. `meta.source: "live"` for the
+                                          # success path. Cache-sourced reads are
+                                          # allowed only for the dry-run preflight
+                                          # preview, not the live-success final
+                                          # read);
                                           # whole-call error envelope on any per-
                                           # field failure (the multi-call wire
                                           # shape doesn't leak as partial-success —
@@ -2053,11 +2062,24 @@ Every command returns one of two top-level shapes:
 ```json
 {
   "ok": true,
-  "data": <resource | array>,
+  "data": <resource | array | verb-specific JSON>,
   "meta": { ... },
   "warnings": [ ... ]
 }
 ```
+
+`data` is most commonly a single-resource projection (§6.2) or
+an array of projections (§6.3), but a few mutation verbs return
+verb-specific JSON when Monday's wire shape carries fields the
+projection schema doesn't model. The current cases (M15) are
+`board duplicate` (`data: { board: <projection>, is_async }` —
+§6.4 wraps because `BoardDuplication` returns `is_async`) and
+the partial-success consumers `update clear-all` / `workspace
+add-users` / `workspace remove-users` / `board add-users`
+(`data: { operation?, results: [...] }` — §6.4 partial-success
+shape). Agents should switch on the verb's `data` schema as
+documented per-verb in §6.4 rather than assume `data` is always
+a §6.2 / §6.3 projection.
 
 or, on failure:
 
@@ -2938,6 +2960,16 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
+  **Cache-staleness caveat.** Cache-sourced snapshots may lag
+  live board metadata up to the cache TTL — the board's `name`
+  / `description` / `state` shown in the dry-run preview can
+  differ from current Monday state. `cache_age_seconds`
+  reflects the cache's age and is truthful, but the snapshot
+  itself reflects the cache-write moment, not "now". When
+  preview freshness is critical (e.g. archiving as part of a
+  workflow that just renamed the board), agents should pass
+  `--no-cache` to force a live preflight read.
+
 - **Board-delete shape** (`board delete`; v0.2 M15). Minimal:
   `operation: "delete_board"`, `board_id`. No diff, no
   preflight read leg (Monday's `delete_board(board_id)`
@@ -3001,6 +3033,13 @@ mutation verbs produce different planned-change shapes; the
     "warnings": []
   }
   ```
+
+  **Cache-staleness caveat.** Same rule as `board archive` —
+  cache-sourced snapshots may lag live board metadata up to
+  the cache TTL. Pass `--no-cache` to force a live preflight
+  read when preview freshness is critical (e.g. duplicating
+  as part of a workflow that just renamed or restructured the
+  source board).
 
   The `--with-updates` flag selects between Monday's
   `duplicate_board_with_pulses` (false; items without
@@ -3136,8 +3175,15 @@ schema bump) — the slot widens to accept `{ results: [...] }`
 or `{ operation, results: [...] }` for partial-success
 consumers (the optional `operation` slot is verb-specific; M14
 add-users / remove-users include it per §3 M14 decision, M13
-clear-all does not); single-target verbs continue to use the
-`<resource>` projection. `resolved_ids` and `side_effects`
+clear-all does not); single-target verbs typically use the
+`<resource>` projection directly, but verb-specific wrappers
+are allowed when Monday's wire shape carries fields the
+projection doesn't model. The current wrap is M15's `board
+duplicate` (`data: { board: <projection>, is_async }` per §6.4
+board-duplicate shape, because `BoardDuplication` carries
+`is_async`); future verbs may add similar wrappers — agents
+should switch on the verb's documented `data` schema rather
+than assume `<resource>` projection. `resolved_ids` and `side_effects`
 slots are absent on partial-success envelopes — when a verb
 performs per-token resolution (e.g. M14 `--users` tokens
 through `userByEmail`), the resolved IDs and any failed input
