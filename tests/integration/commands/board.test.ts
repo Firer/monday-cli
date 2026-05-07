@@ -1037,12 +1037,13 @@ describe('monday board create (integration, M15)', () => {
     expect(env.error?.code).toBe('internal_error');
   });
 
-  it('surfaces internal_error when Monday returns a missing create_board key (root-key absent)', async () => {
-    // Distinguishes missing-root-key (internal_error) from null
-    // payload (also internal_error here since create has no
-    // partial-success per-record envelope). Both surface as
-    // whole-call internal_error — verifies the responseSchema
-    // catches the missing-root-key shape.
+  it('surfaces internal_error when Monday returns a missing create_board key (root-key absent — schema-drift)', async () => {
+    // Codex M15 implementation round-2 F1: missing-root-key
+    // distinct from null payload. Both surface as
+    // internal_error, but the message + hint distinguish
+    // schema-drift from "Monday returned no board". The hint
+    // pin lets agents diagnose the root cause without reading
+    // implementation prose.
     const out = await drive(
       ['board', 'create', '--name', 'X', '--json'],
       {
@@ -1055,8 +1056,38 @@ describe('monday board create (integration, M15)', () => {
       },
     );
     expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string; board_name?: string } };
+    };
     expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+    expect(env.error?.details?.board_name).toBe('X');
+  });
+
+  it('surfaces internal_error when Monday returns a present-but-null create_board (no schema-drift hint)', async () => {
+    // Distinct from missing-root-key — the key is present but
+    // value null. Same code (internal_error since create's
+    // contract requires a Board), different hint.
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            response: { data: { create_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    // The schema-drift hint is for missing-root-key. A null-
+    // payload landed via projectCreatedBoard's null guard,
+    // which uses the default hint (no schema-drift wording).
+    expect(env.error?.details?.hint ?? '').not.toMatch(/schema-drift/);
   });
 });
 
@@ -1590,13 +1621,30 @@ describe('monday board archive (integration, M15)', () => {
     };
     expect(env.data).toBeNull();
     expect(env.planned_changes.length).toBe(1);
-    const plan = env.planned_changes[0];
+    const plan = env.planned_changes[0] as {
+      operation: string;
+      board_id: string;
+      board: {
+        id: string;
+        name: string;
+        state: string;
+        items_count: number | null;
+        permissions: string | null;
+      };
+    } | undefined;
     expect(plan?.operation).toBe('archive_board');
     expect(plan?.board_id).toBe('12345');
     expect(plan?.board.id).toBe('12345');
     expect(plan?.board.name).toBe('Engineering');
     // Snapshot reflects pre-archive state (state: 'active').
     expect(plan?.board.state).toBe('active');
+    // Codex round-2 F3: items_count + permissions must be
+    // present in the snapshot per cli-design §6.2 board
+    // projection shape. The fixture omits them so they coerce
+    // to null via `?? null` (regression test for the schema
+    // additions in round-1 F2).
+    expect(plan?.board.items_count).toBeNull();
+    expect(plan?.board.permissions).toBeNull();
   });
 
   it('--dry-run: not_found when preflight returns empty boards list', async () => {
@@ -2049,7 +2097,12 @@ describe('monday board duplicate (integration, M15)', () => {
         with_updates: boolean;
         target_workspace_id?: string;
         target_name?: string;
-        board: { id: string; name: string };
+        board: {
+          id: string;
+          name: string;
+          items_count: number | null;
+          permissions: string | null;
+        };
       }[];
     };
     expect(env.data).toBeNull();
@@ -2061,6 +2114,10 @@ describe('monday board duplicate (integration, M15)', () => {
     expect(plan?.target_name).toBe('Engineering — EU');
     expect(plan?.board.id).toBe('12345');
     expect(plan?.board.name).toBe('Engineering');
+    // Codex round-2 F3: items_count + permissions must be in
+    // the snapshot per cli-design §6.2 board projection shape.
+    expect(plan?.board.items_count).toBeNull();
+    expect(plan?.board.permissions).toBeNull();
   });
 
   it('--dry-run: omits target_workspace_id and target_name when flags are absent; defaults with_updates=false', async () => {
@@ -2268,7 +2325,12 @@ describe('monday board add-users (integration, M15)', () => {
     expect(envOut.ok).toBe(true);
     expect(envOut.data.results[0]?.ok).toBe(true);
     expect(envOut.data.results[1]?.ok).toBe(false);
-    expect(envOut.data.results[1]?.error).toBeDefined();
+    // Stable per-record code per cli-design §6.5 — the
+    // VALIDATION extension code re-maps to validation_failed.
+    // Codex round-2 F2: regression in Monday-error mapping
+    // would pass without this assertion while agents lose the
+    // stable code.
+    expect(envOut.data.results[1]?.error?.code).toBe('validation_failed');
   });
 
   it('live: surfaces internal_error when add_users_to_board response is missing the root key', async () => {

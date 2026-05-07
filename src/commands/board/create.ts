@@ -210,6 +210,27 @@ export const boardCreateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
+        // Distinguish missing-root-key (schema-drift → internal_error
+        // with schema-drift hint) from null payload (Monday returned
+        // no board → also internal_error here since create's contract
+        // is "every successful call returns a Board"). Codex M15
+        // implementation round-2 F3 lateral propagation: each M15
+        // mutation verb's response handler distinguishes the two.
+        if (!('create_board' in data)) {
+          throw new ApiError(
+            'internal_error',
+            `Monday's BoardCreate response is missing the create_board root field`,
+            {
+              details: {
+                board_name: name,
+                hint:
+                  'this is a schema-drift error in Monday\'s GraphQL ' +
+                  'response; verify the mutation declaration and update ' +
+                  'the response schema if Monday\'s contract has changed.',
+              },
+            },
+          );
+        }
         const projected = projectCreatedBoard(data.create_board, name);
 
         emitMutation({
