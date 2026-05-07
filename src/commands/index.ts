@@ -88,6 +88,9 @@ import { itemDuplicateCommand } from './item/duplicate.js';
 import { itemMoveCommand } from './item/move.js';
 // M12 (v0.2) — item upsert (idempotency-cluster verb).
 import { itemUpsertCommand } from './item/upsert.js';
+// M14 (v0.2) — workspace lifecycle: create / update / delete /
+// add-users / remove-users.
+import { workspaceCreateCommand } from './workspace/create.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -109,6 +112,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     workspaceListCommand,
     workspaceGetCommand,
     workspaceFoldersCommand,
+    workspaceCreateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

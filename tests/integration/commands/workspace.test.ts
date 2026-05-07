@@ -324,3 +324,208 @@ describe('monday workspace folders (integration)', () => {
     expect(env.warnings[0]?.code).toBe('pagination_cap_reached');
   });
 });
+
+describe('monday workspace create (integration, M14)', () => {
+  const createdWorkspace = {
+    id: '12345',
+    name: 'Marketing',
+    description: 'EU campaigns',
+    kind: 'open',
+    state: 'active',
+    is_default_workspace: false,
+    created_at: '2026-05-07T11:00:00Z',
+    settings: { icon: { color: '#0000FF', image: null } },
+  };
+
+  it('live: --name posts create_workspace with default kind=open and emits the projected workspace', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Marketing', '--description', 'EU campaigns', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            // Wire-shape pin: kind is always sent (Monday's signature
+            // pins kind: WorkspaceKind!), defaulting to "open" when
+            // the agent omits --kind. Description forwarded verbatim.
+            match_variables: { name: 'Marketing', kind: 'open', description: 'EU campaigns' },
+            // Pin the GraphQL surface so a future regression that
+            // drops `kind` from the mutation declaration would fail.
+            match_query: /create_workspace\(name: \$name, kind: \$kind, description: \$description\)/,
+            response: { data: { create_workspace: createdWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string; kind: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('12345');
+    expect(env.data.name).toBe('Marketing');
+    expect(env.data.kind).toBe('open');
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: --kind closed forwards kind through to the wire', async () => {
+    const closedWorkspace = { ...createdWorkspace, kind: 'closed' };
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Marketing — EU', '--kind', 'closed', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            match_variables: { name: 'Marketing — EU', kind: 'closed' },
+            response: { data: { create_workspace: closedWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { kind: string };
+    };
+    expect(env.data.kind).toBe('closed');
+  });
+
+  it('live: --description omitted does not send a description argument', async () => {
+    // Pre-fix, an inadvertent `description: undefined` in the
+    // variables map would have been serialised as `null` on the
+    // wire and explicitly cleared Monday's server-side default.
+    // The action body filters undefined out of the variables map;
+    // this fixture asserts the wire-side variables shape.
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Marketing', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            match_variables: { name: 'Marketing', kind: 'open' },
+            response: { data: { create_workspace: createdWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('rejects --kind unknown as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Marketing', '--kind', 'private', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --name as usage_error (after trim)', async () => {
+    // Whitespace-only --name trims to empty; agents that meant to
+    // pass a real name would hit Monday's downstream validation
+    // anyway. Reject at the boundary so the failure fires before
+    // the network round-trip.
+    const out = await drive(
+      ['workspace', 'create', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --name as usage_error (commander requiredOption)', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_workspace; no mutation fires', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Preview', '--description', 'x', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        name: string;
+        kind: string;
+        description?: string;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_workspace');
+    expect(plan?.name).toBe('Preview');
+    expect(plan?.kind).toBe('open');
+    expect(plan?.description).toBe('x');
+    expect(out.requests).toBe(0);
+  });
+
+  it('--dry-run: omits description slot when --description is not set', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Preview', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan).not.toHaveProperty('description');
+  });
+
+  it('surfaces internal_error when Monday returns a null create_workspace payload', async () => {
+    // Drives the projectCreatedWorkspace null-guard. Mirrors the
+    // null-payload regression test on update create.
+    const out = await drive(
+      ['workspace', 'create', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            response: { data: { create_workspace: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('surfaces forbidden when Monday rejects with PERMISSION_DENIED (admin-permission-sensitive)', async () => {
+    // M14 admin-permission-sensitive contract — non-admin callers
+    // surface `forbidden`, not `unauthorized`.
+    const out = await drive(
+      ['workspace', 'create', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            response: {
+              data: { create_workspace: null },
+              errors: [
+                {
+                  message: 'You do not have permission to create workspaces',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('forbidden');
+  });
+});
