@@ -1014,9 +1014,9 @@ export const unsupportedColumnTypeError = (
         hint:
           'use --set-raw <col>=<json> with the Monday wire shape if the ' +
           'type accepts change_column_value. Some types (time_tracking, ' +
-          'file) have dedicated verbs planned; others (battery, ' +
-          'item_assignees) are not yet scoped. See cli-design.md §5.3 ' +
-          'writer-expansion roadmap.',
+          'file) have dedicated verbs planned; others (battery, rating) ' +
+          'are not yet scoped. See cli-design.md §5.3 writer-expansion ' +
+          'roadmap.',
       },
     },
   );

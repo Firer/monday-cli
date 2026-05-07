@@ -452,6 +452,47 @@ export const clearEntry = async (
 };
 
 /**
+ * Eager invalidation of a board's metadata cache entry per
+ * `cli-design.md` §8 eager-invalidation contract (M16). Thin wrapper
+ * over `clearEntry(root, { kind: 'board', boardId })` that owns the
+ * cache-root resolution so call sites — every M16 column-mutation
+ * verb plus the M15 retrofit cluster (`board update` / `archive` /
+ * `delete`) — read as `invalidateBoard(boardId)` rather than
+ * `clearEntry(resolveCacheRoot({env}), {kind:'board',boardId})`.
+ *
+ * **Idempotent.** Invalidating an already-absent entry is a no-op
+ * (matches `clearEntry`'s missing-file semantics) — callers don't
+ * need to gate the call on "is this board cached?". Errors during
+ * unlink (permission flip, disk loss) bubble as `CacheError` per the
+ * underlying primitive.
+ *
+ * **Process-local.** The on-disk cache file IS shared across
+ * processes (same `$XDG_CACHE_HOME/monday-cli/boards/<bid>.json`
+ * path), so this `unlink` does remove peer processes' cache entries;
+ * the missing primitive is inter-process locking. Cross-process
+ * coordination is explicitly deferred to v0.3 per cli-design §8 —
+ * this helper does NOT add inter-process locking.
+ *
+ * Mirrors `evictBoardMetadata` in `board-metadata.ts` (the M3-era
+ * helper that predates the eager-invalidation contract); the two
+ * helpers are intentionally parallel — `evictBoardMetadata` lives
+ * next to the metadata loader and is consumed by tests + potential
+ * future `cache clear --board <bid>` flows; `invalidateBoard` lives
+ * here next to the underlying `clearEntry` primitive and is consumed
+ * by every M16+ board-structure mutation per the §8 contract. Lifting
+ * one over the other was rejected during M16 pre-flight to keep the
+ * existing test surface unchanged.
+ */
+export const invalidateBoard = async (
+  boardId: string,
+  /* c8 ignore next — defensive default; callers pass an explicit env. */
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ClearResult> => {
+  const root = resolveCacheRoot({ env });
+  return clearEntry(root, { kind: 'board', boardId });
+};
+
+/**
  * Removes the entire cache root. Used by `monday cache clear` (no
  * flag) and tests. Counts removed JSON files for reporting; the
  * directory tree itself goes too so a follow-up `cache list` reports

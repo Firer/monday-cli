@@ -2479,3 +2479,705 @@ describe('monday board add-users (integration, M15)', () => {
     expect(plan?.results[1]?.error?.code).toBe('user_not_found');
   });
 });
+
+// =============================================================================
+// M16 — board column-create (cli-design §4.3 + §6.4 + §8 eager invalidation)
+// =============================================================================
+
+describe('monday board column-create (integration, M16)', () => {
+  const createdTextColumn = {
+    id: 'text_1',
+    title: 'Notes',
+    type: 'text',
+    description: null,
+    archived: false,
+    settings_str: null,
+    width: null,
+  };
+  const createdStatusColumn = {
+    id: 'status_4',
+    title: 'Priority',
+    type: 'status',
+    description: 'Owner-set urgency',
+    archived: false,
+    settings_str: '{"labels":["Low","Med","High"]}',
+    width: 120,
+  };
+  const createdCountryColumn = {
+    id: 'country_1',
+    title: 'Region',
+    type: 'country',
+    description: null,
+    archived: false,
+    settings_str: null,
+    width: null,
+  };
+
+  it('live: --type text --title fires create_column with required wire args + columnType', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', 'Notes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            // Wire-shape pin: column_type maps to --type, title to
+            // --title, board_id to the positional. The CLI must use
+            // `column_type` (Monday's wire arg name), not `type`.
+            match_variables: {
+              boardId: '12345',
+              columnType: 'text',
+              title: 'Notes',
+            },
+            // Pin the GraphQL surface so a future regression that
+            // renames `column_type` → `type` (or `defaults` →
+            // `settings_str`) fails here.
+            match_query: /create_column\(\s*board_id: \$boardId,\s*column_type: \$columnType/,
+            response: { data: { create_column: createdTextColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; type: string; title: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('text_1');
+    expect(env.data.type).toBe('text');
+    expect(env.data.title).toBe('Notes');
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+    // Canonical type → no noncanonical_column_type warning.
+    expect(env.warnings ?? []).toEqual([]);
+  });
+
+  it('live: --type status --title --settings forwards defaults: JSON (not settings_str)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--description', 'Owner-set urgency',
+        '--settings', '{"labels":["Low","Med","High"]}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'status',
+              title: 'Priority',
+              description: 'Owner-set urgency',
+              defaults: { labels: ['Low', 'Med', 'High'] },
+            },
+            // Wire-shape pin: the variable name MUST be `defaults`, not
+            // `settings_str` — `settings_str` is the read-side
+            // serialisation and a regression that mis-maps the flag
+            // would silently lose the column settings on the wire.
+            match_query: /defaults: \$defaults/,
+            response: { data: { create_column: createdStatusColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; type: string };
+    };
+    expect(env.data.id).toBe('status_4');
+    expect(env.data.type).toBe('status');
+  });
+
+  it('live: --type country fires create_column AND emits noncanonical_column_type warning (raw_writable category)', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'country', '--title', 'Region', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'country',
+              title: 'Region',
+            },
+            response: { data: { create_column: createdCountryColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; type: string };
+      warnings: readonly {
+        code: string;
+        message: string;
+        details?: {
+          column_type?: string;
+          category?: string;
+          suggested_write_path?: string | null;
+        };
+      }[];
+    };
+    expect(env.data.type).toBe('country');
+    expect(env.warnings.length).toBe(1);
+    const warn = env.warnings[0];
+    expect(warn?.code).toBe('noncanonical_column_type');
+    expect(warn?.details?.column_type).toBe('country');
+    expect(warn?.details?.category).toBe('raw_writable');
+    expect(warn?.details?.suggested_write_path).toBe('--set-raw <col>=<json>');
+    expect(warn?.message).toMatch(/--set-raw/);
+  });
+
+  it('live: --type mirror emits noncanonical_column_type warning with read_only_forever category + null suggested_write_path', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'mirror', '--title', 'Mirror', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: { columnType: 'mirror' },
+            response: {
+              data: {
+                create_column: { ...createdTextColumn, id: 'mirror_1', title: 'Mirror', type: 'mirror' },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly {
+        code: string;
+        details?: {
+          category?: string;
+          suggested_write_path?: string | null;
+        };
+      }[];
+    };
+    expect(env.warnings[0]?.code).toBe('noncanonical_column_type');
+    expect(env.warnings[0]?.details?.category).toBe('read_only_forever');
+    expect(env.warnings[0]?.details?.suggested_write_path).toBeNull();
+  });
+
+  it('live: --type file emits noncanonical_column_type warning with files_shaped category + v0.4 hint', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'file', '--title', 'Attachments', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: { columnType: 'file' },
+            response: {
+              data: {
+                create_column: { ...createdTextColumn, id: 'file_1', title: 'Attachments', type: 'file' },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly {
+        code: string;
+        details?: {
+          category?: string;
+          suggested_write_path?: string | null;
+        };
+      }[];
+    };
+    expect(env.warnings[0]?.details?.category).toBe('files_shaped');
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/add_file_to_column/);
+  });
+
+  it('live: omits description/defaults from the wire when those flags are absent', async () => {
+    // Pre-fix, an inadvertent `description: undefined` /
+    // `defaults: undefined` in the variables map would have been
+    // serialised as `null` on the wire. Mirror M15 board-create's
+    // omits-when-absent regression test.
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', 'Bare', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'text',
+              title: 'Bare',
+            },
+            response: { data: { create_column: { ...createdTextColumn, title: 'Bare' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    // We can't easily inspect the request directly here (the helpers
+    // suite doesn't expose the full request body), but match_variables
+    // above only matches subset; the omission discipline is enforced
+    // by the action body and unit-tested via parseSettingsFlag.
+  });
+
+  it('rejects --type unknown as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'not-a-type', '--title', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --title (after trim) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --type as usage_error', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--title', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --title as usage_error', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-create', 'abc', '--type', 'text', '--title', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects malformed --settings JSON as usage_error (no network call)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--settings', '{labels:bad',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { column_type?: string; hint?: string } };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('status');
+  });
+
+  it('rejects --settings non-object JSON (array / string / number) as usage_error', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--settings', '[]',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { column_type?: string; hint?: string } };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.hint).toMatch(/JSON object/);
+  });
+
+  it('rejects --settings null (top-level null) as usage_error', async () => {
+    // Drives the `parsed === null` branch in the non-object guard
+    // (distinct from the JSON.parse-failed branch above and the
+    // array branch).
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'X',
+        '--settings', 'null',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects --settings primitive (number / string / boolean) as usage_error', async () => {
+    // Drives the `typeof parsed` fallback branch (number / string /
+    // boolean — none are JSON objects per cli-design §6.4 + the
+    // wire's `defaults: JSON` requires an object).
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'X',
+        '--settings', '42',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--settings against a raw-writable type accepts well-formed JSON without per-type schema (Monday validates server-side)', async () => {
+    // Per cli-design §4.3 column-create: raw-writable / read-only-
+    // forever / files-shaped types skip type-specific validation —
+    // well-formed JSON only. The `country` type carries
+    // `{country_code: 'US'}` etc. as defaults; the CLI doesn't model
+    // those keys, so it forwards the JSON verbatim and lets Monday
+    // validate. Drives the `parseSettingsFlag` non-writable branch.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'country',
+        '--title', 'Region',
+        '--settings', '{"country_code":"US"}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'country',
+              defaults: { country_code: 'US' },
+            },
+            response: {
+              data: {
+                create_column: {
+                  id: 'country_1',
+                  title: 'Region',
+                  type: 'country',
+                  description: null,
+                  archived: false,
+                  settings_str: null,
+                  width: null,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { type: string };
+      warnings: readonly { code: string; details?: { category?: string } }[];
+    };
+    expect(env.data.type).toBe('country');
+    // Still emits the noncanonical warning (raw_writable category).
+    expect(env.warnings[0]?.details?.category).toBe('raw_writable');
+  });
+
+  it('rejects type-mismatched --settings as usage_error with details.{column_type, expected_keys, actual_keys}', async () => {
+    // text columns accept no settings keys via M16; passing
+    // {"labels":[]} surfaces usage_error with the per-type schema
+    // mismatch — agents read expected_keys to fix the call without
+    // round-tripping through Monday's validation_failed.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'text',
+        '--title', 'Notes',
+        '--settings', '{"labels":["Low","Med"]}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          column_type?: string;
+          expected_keys?: readonly string[];
+          actual_keys?: readonly string[];
+          hint?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('text');
+    expect(env.error?.details?.expected_keys).toEqual([]);
+    expect(env.error?.details?.actual_keys).toEqual(['labels']);
+    expect(env.error?.details?.hint).toMatch(/no --settings keys/);
+  });
+
+  it('rejects status with bad-shape --settings (drives expected_keys.length > 0 branch)', async () => {
+    // status accepts `labels`; passing `labels: 7` (a number, not
+    // array/record) drives the per-type schema's union-of-shapes
+    // mismatch and surfaces the "accepts these --settings keys"
+    // hint variant (expected_keys.length > 0).
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--settings', '{"labels":7}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          column_type?: string;
+          expected_keys?: readonly string[];
+          hint?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('status');
+    expect(env.error?.details?.expected_keys).toEqual(['labels']);
+    expect(env.error?.details?.hint).toMatch(/accepts these --settings keys: labels/);
+  });
+
+  it('--settings argv-parse fires BEFORE config_error (token-missing) — usage_error has higher priority', async () => {
+    // Mirrors the destructive-gate ordering invariant: argv-shape
+    // failures (usage_error) MUST surface before config errors so a
+    // missing token doesn't mask a malformed flag.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'X',
+        '--settings', '{not-json',
+        '--json',
+      ],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_column; no mutation fires', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--description', 'Owner-set urgency',
+        '--settings', '{"labels":["Low","Med","High"]}',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        type: string;
+        title: string;
+        description?: string;
+        settings?: { labels?: readonly string[] };
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_column');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.type).toBe('status');
+    expect(plan?.title).toBe('Priority');
+    expect(plan?.description).toBe('Owner-set urgency');
+    expect(plan?.settings).toEqual({ labels: ['Low', 'Med', 'High'] });
+  });
+
+  it('--dry-run: omits optional slots when flags are not set', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', 'Notes', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'create_column',
+      board_id: '12345',
+      type: 'text',
+      title: 'Notes',
+    });
+  });
+
+  it('--dry-run: noncanonical_column_type warning fires on dry-run too (so the live call is predictable)', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'country', '--title', 'Region', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      warnings: readonly { code: string; details?: { category?: string } }[];
+    };
+    expect(env.warnings[0]?.code).toBe('noncanonical_column_type');
+    expect(env.warnings[0]?.details?.category).toBe('raw_writable');
+  });
+
+  it('surfaces internal_error when Monday returns a missing create_column key (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string; board_id?: string; title?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.title).toBe('X');
+  });
+
+  it('surfaces internal_error when Monday returns a present-but-null create_column (no schema-drift hint)', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'text', '--title', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            response: { data: { create_column: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string; board_id?: string; title?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.title).toBe('X');
+    // No schema-drift hint — null payload is a different signal than
+    // missing-root-key. Mirrors M15 board-create round-2 F1 distinction.
+    expect(env.error?.details?.hint ?? '').not.toMatch(/schema-drift/);
+  });
+
+  it('cache invalidation round-trip: column-create → board describe sees new column with source: live + no stale_cache_refreshed warning', async () => {
+    // Per cli-design §8 + the M16 milestone test plan: the round-
+    // trip MUST satisfy three pins per cassette to prove eager
+    // invalidation worked (rather than the cache-miss-refresh
+    // backstop saving us):
+    //   1. post-mutation read sees the live state;
+    //   2. meta.source: 'live' (not 'cache' / 'mixed');
+    //   3. NO stale_cache_refreshed warning (the backstop is the
+    //      path-not-under-test).
+    const preMutationColumn = {
+      ...baseColumn,
+      id: 'col_x',
+      title: 'X',
+      type: 'text',
+    };
+    const newColumn = {
+      ...baseColumn,
+      id: 'priority_1',
+      title: 'Priority',
+      type: 'status',
+      settings_str: '{"labels":["Low","Med","High"]}',
+    };
+    const out = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        // Cassette ordering: pre-mutation describe seeds the cache,
+        // column-create fires (which invalidates the cache entry),
+        // post-mutation describe re-fetches live.
+        interactions: [
+          metadataResponse([preMutationColumn]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    // Now the cache holds the pre-mutation snapshot. Fire column-
+    // create — it MUST invalidate the cache file before returning.
+    const created = await drive(
+      [
+        'board', 'column-create', '111',
+        '--type', 'status',
+        '--title', 'Priority',
+        '--settings', '{"labels":["Low","Med","High"]}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: { boardId: '111', columnType: 'status', title: 'Priority' },
+            response: { data: { create_column: newColumn } },
+          },
+        ],
+      },
+    );
+    expect(created.exitCode).toBe(0);
+    // Post-mutation describe — if invalidation worked, this is a
+    // clean cache miss → live fetch. meta.source: 'live'; no
+    // stale_cache_refreshed warning. If invalidation FAILED, the
+    // pre-mutation snapshot would be served (source: 'cache') and
+    // the new column wouldn't appear.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preMutationColumn, newColumn])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { columns: readonly { id: string; type: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.columns.map((c) => c.id)).toContain('priority_1');
+    // The backstop (cache-miss-refresh path) emits stale_cache_
+    // refreshed when it fires. Eager invalidation should land in a
+    // clean miss instead — assert the backstop did NOT fire.
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+});

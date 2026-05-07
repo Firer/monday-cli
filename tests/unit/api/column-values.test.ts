@@ -608,6 +608,9 @@ describe('translateColumnValue — read-only-forever types', () => {
   // blanket-deferred them to v0.2, falsely promising agents a
   // future write path that will never exist. cli-design.md §5.3
   // writer-expansion roadmap "read-only forever" row pins this.
+  // M16 pre-flight (cli-design §4.3 column-create) extended the row
+  // to include `item_assignees` (Monday computes it server-side from
+  // people columns; never writable via the API).
   it.each([
     'mirror',
     'formula',
@@ -615,6 +618,7 @@ describe('translateColumnValue — read-only-forever types', () => {
     'creation_log',
     'last_updated',
     'item_id',
+    'item_assignees',
   ])('%s → unsupported_column_type with read_only: true (no v0.2 promise)', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
       /computed by Monday|not.*writable.*via the API/u,
@@ -642,14 +646,15 @@ describe('translateColumnValue — read-only-forever types', () => {
 
 describe('translateColumnValue — future-roadmap types', () => {
   // Codex M5b cleanup re-review #1: types not in v0.1, not on the
-  // v0.2 roadmap, and not read-only-forever (battery /
-  // item_assignees / time_tracking / files / rating / etc.) fall
-  // into the generic "future" branch. The error advertises future
-  // coverage without committing to a specific version — the
-  // roadmap doesn't promise these for v0.2 yet.
+  // v0.2 roadmap, and not read-only-forever (battery / time_tracking /
+  // files / rating / etc.) fall into the generic "future" branch. The
+  // error advertises future coverage without committing to a specific
+  // version — the roadmap doesn't promise these for v0.2 yet.
+  // M16 pre-flight reclassified `item_assignees` as read-only-forever
+  // (cli-design §4.3 column-create) so it now lives in the read-only
+  // describe block above, not here.
   it.each([
     'battery',
-    'item_assignees',
     'time_tracking',
     'files',
     'rating',

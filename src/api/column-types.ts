@@ -136,6 +136,14 @@ export const READ_ONLY_FOREVER_TYPES = [
   'creation_log',
   'last_updated',
   'item_id',
+  // M16 pre-flight pin (cli-design §4.3 column-create): item_assignees
+  // is computed server-side from the board's people columns and has
+  // no direct write surface. M16 column-create's noncanonical_column_
+  // type warning categorises it as `read_only_forever`; the same
+  // membership check gates `--set-raw item_assignees=<json>` so the
+  // CLI rejects it ahead of Monday's server-side rejection rather
+  // than waiting for `validation_failed` to come back.
+  'item_assignees',
 ] as const;
 
 export type ReadOnlyForeverType = (typeof READ_ONLY_FOREVER_TYPES)[number];
@@ -229,4 +237,73 @@ export const getColumnRoadmapCategory = (
   if (V0_2_WRITER_EXPANSION_SET.has(type)) return 'v0_2_writer_expansion';
   if (READ_ONLY_FOREVER_SET.has(type)) return 'read_only_forever';
   return 'future';
+};
+
+/**
+ * Categorisation for the M16 `column-create` `noncanonical_column_
+ * type` warning (cli-design §4.3 column-create + §6 stable warning-
+ * code registry). Distinct from `getColumnRoadmapCategory` (which
+ * powers the `unsupported_column_type` write-time error builder)
+ * because the warning's audience is "agent created a column of a
+ * non-canonical type — here's how to write to it later", not
+ * "agent tried to write and Monday rejected it".
+ *
+ * The three categories — chosen to match the §6 warning shape's
+ * `category` enum verbatim — are:
+ *   - `'raw_writable'`: Monday accepts `change_column_value` against
+ *     the type, but the v0.2 friendly translator (§5.3) doesn't
+ *     model it. Agents reach for the `--set-raw <col>=<json>`
+ *     escape hatch. Default for any non-writable, non-read-only-
+ *     forever, non-files-shaped type (covers `country`, `hour`,
+ *     `timeline`, `tags`, `board_relation`, `dependency`, etc.).
+ *   - `'read_only_forever'`: Monday computes the type server-side
+ *     and never makes it writable via the API. `suggested_write_
+ *     path` is `null` (agents can't write at all; the column
+ *     exists for read-side display / mirror sources only).
+ *   - `'files_shaped'`: Monday writes the type via `add_file_to_
+ *     column` (multipart upload), pinned to v0.4 (asset upload).
+ *     Currently `file` only.
+ *
+ * Returns `null` for canonical types (membership in `WRITABLE_COLUMN_
+ * TYPES`) — `column-create` skips emitting the warning when the type
+ * is canonical.
+ *
+ * The `category` enum value is part of the §6 stable warning-code
+ * registry — adding a category is SemVer-minor; removing or renaming
+ * is SemVer-major.
+ */
+export type NoncanonicalColumnTypeCategory =
+  | 'raw_writable'
+  | 'read_only_forever'
+  | 'files_shaped';
+
+export interface NoncanonicalColumnTypeDetails {
+  readonly category: NoncanonicalColumnTypeCategory;
+  /**
+   * The path agents should use to write to the column post-creation,
+   * matching cli-design §5.3 escape-hatch contract — `--set-raw
+   * <col>=<json>` for raw-writable types, `add_file_to_column
+   * (deferred to v0.4)` for files-shaped types, `null` for read-
+   * only-forever types (no write path exists).
+   */
+  readonly suggestedWritePath: string | null;
+}
+
+export const categorizeNoncanonicalColumnType = (
+  type: string,
+): NoncanonicalColumnTypeDetails | null => {
+  if (isWritableColumnType(type)) return null;
+  if (isReadOnlyForeverType(type)) {
+    return { category: 'read_only_forever', suggestedWritePath: null };
+  }
+  if (isFilesShapedType(type)) {
+    return {
+      category: 'files_shaped',
+      suggestedWritePath: 'add_file_to_column (deferred to v0.4)',
+    };
+  }
+  return {
+    category: 'raw_writable',
+    suggestedWritePath: '--set-raw <col>=<json>',
+  };
 };

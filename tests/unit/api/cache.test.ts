@@ -8,6 +8,7 @@ import {
   cacheKeyToRelativePath,
   clearAll,
   clearEntry,
+  invalidateBoard,
   listEntries,
   readEntry,
   resolveCacheRoot,
@@ -406,6 +407,68 @@ describe('clearEntry / clearAll', () => {
     } finally {
       await chmod(sealed, 0o700);
     }
+  });
+});
+
+describe('invalidateBoard (M16 §8 eager-invalidation primitive)', () => {
+  // The helper is a thin wrapper over `clearEntry(root, {kind:'board',
+  // boardId})` that owns cache-root resolution via XDG_CACHE_HOME (or
+  // ~/.cache); resolveCacheRoot appends `monday-cli` to the XDG root,
+  // so the writes below target `${xdgRoot}/monday-cli/boards/<id>.json`.
+  // The underlying `clearEntry` semantics are already exhaustively
+  // tested above; the smoke tests here pin the wrapper's contract:
+  // env-driven root, post-call file removal, and idempotent missing-
+  // file no-op (every M16 column verb + the M15 retrofit cluster lean
+  // on the no-op semantics).
+  let xdgRoot: string;
+  let root: string;
+  beforeEach(async () => {
+    xdgRoot = await mkdtemp(join(tmpdir(), 'monday-cli-invalidate-board-'));
+    root = join(xdgRoot, 'monday-cli');
+  });
+  afterEach(async () => {
+    await rm(xdgRoot, { recursive: true, force: true });
+  });
+
+  it('removes the cache entry for the named board', async () => {
+    await writeEntry(root, { kind: 'board', boardId: '111' }, { v: 1 });
+    const before = await stat(join(root, 'boards/111.json'));
+    expect(before.size).toBeGreaterThan(0);
+    const result = await invalidateBoard('111', { XDG_CACHE_HOME: xdgRoot });
+    expect(result.removed).toBe(1);
+    expect(result.bytesFreed).toBeGreaterThan(0);
+    await expect(stat(join(root, 'boards/111.json'))).rejects.toThrow();
+  });
+
+  it('is a no-op when the board has no cache entry (idempotent — §8 contract pin)', async () => {
+    // M16 column verbs + M15 retrofits MUST be safe to call on
+    // boards with no cached entry. The contract pins this via
+    // `clearEntry`'s missing-file semantics; the wrapper preserves
+    // it.
+    const result = await invalidateBoard('999', { XDG_CACHE_HOME: xdgRoot });
+    expect(result).toEqual({ removed: 0, bytesFreed: 0 });
+  });
+
+  it('only removes the named board (other entries untouched)', async () => {
+    await writeEntry(root, { kind: 'board', boardId: '111' }, { v: 1 });
+    await writeEntry(root, { kind: 'board', boardId: '222' }, { v: 2 });
+    await writeEntry(root, { kind: 'users' }, { v: 3 });
+    await invalidateBoard('111', { XDG_CACHE_HOME: xdgRoot });
+    await expect(stat(join(root, 'boards/111.json'))).rejects.toThrow();
+    await expect(stat(join(root, 'boards/222.json'))).resolves.toBeDefined();
+    await expect(stat(join(root, 'users/index.json'))).resolves.toBeDefined();
+  });
+
+  it('routes through XDG_CACHE_HOME / monday-cli subdirectory (resolveCacheRoot path)', async () => {
+    // Sanity-check the cache-root resolution path so a future
+    // env-handling regression in invalidateBoard doesn't silently
+    // unlink files in `~/.cache/monday-cli/`. The wrapper resolves
+    // `${env.XDG_CACHE_HOME}/monday-cli` — invalidating against the
+    // resolved subdirectory removes the write at the same path.
+    await writeEntry(root, { kind: 'board', boardId: '777' }, {});
+    expect((await stat(join(root, 'boards/777.json'))).size).toBeGreaterThan(0);
+    await invalidateBoard('777', { XDG_CACHE_HOME: xdgRoot });
+    await expect(stat(join(root, 'boards/777.json'))).rejects.toThrow();
   });
 });
 

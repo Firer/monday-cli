@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  READ_ONLY_FOREVER_TYPES,
   WRITABLE_COLUMN_TYPES,
+  categorizeNoncanonicalColumnType,
+  isReadOnlyForeverType,
   isWritableColumnType,
   parseColumnSettings,
 } from '../../../src/api/column-types.js';
@@ -109,5 +112,99 @@ describe('parseColumnSettings', () => {
     expect(parseColumnSettings('42')).toBe(42);
     expect(parseColumnSettings('"hi"')).toBe('hi');
     expect(parseColumnSettings('true')).toBe(true);
+  });
+});
+
+describe('READ_ONLY_FOREVER_TYPES', () => {
+  it('matches the v0.1 set + the M16 pre-flight pin (item_assignees)', () => {
+    // Order is contract — `--set-raw` and column-create's
+    // noncanonical_column_type warning iterate this set. M16 added
+    // `item_assignees` per cli-design §4.3 column-create (Monday
+    // computes it server-side; no write surface).
+    expect(READ_ONLY_FOREVER_TYPES).toEqual([
+      'mirror',
+      'formula',
+      'auto_number',
+      'creation_log',
+      'last_updated',
+      'item_id',
+      'item_assignees',
+    ]);
+  });
+
+  it('isReadOnlyForeverType returns true for each entry', () => {
+    for (const type of READ_ONLY_FOREVER_TYPES) {
+      expect(isReadOnlyForeverType(type)).toBe(true);
+    }
+  });
+
+  it('isReadOnlyForeverType returns false for writable + raw-writable types', () => {
+    expect(isReadOnlyForeverType('text')).toBe(false);
+    expect(isReadOnlyForeverType('country')).toBe(false);
+    expect(isReadOnlyForeverType('hour')).toBe(false);
+    expect(isReadOnlyForeverType('file')).toBe(false);
+  });
+});
+
+describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning)', () => {
+  it('returns null for canonical types in WRITABLE_COLUMN_TYPES', () => {
+    for (const type of WRITABLE_COLUMN_TYPES) {
+      expect(categorizeNoncanonicalColumnType(type)).toBeNull();
+    }
+  });
+
+  it.each([
+    'mirror',
+    'formula',
+    'auto_number',
+    'creation_log',
+    'last_updated',
+    'item_id',
+    'item_assignees',
+  ])('%s → read_only_forever with suggested_write_path: null', (type) => {
+    expect(categorizeNoncanonicalColumnType(type)).toEqual({
+      category: 'read_only_forever',
+      suggestedWritePath: null,
+    });
+  });
+
+  it('file → files_shaped with the v0.4 add_file_to_column hint', () => {
+    expect(categorizeNoncanonicalColumnType('file')).toEqual({
+      category: 'files_shaped',
+      suggestedWritePath: 'add_file_to_column (deferred to v0.4)',
+    });
+  });
+
+  it.each([
+    'country',
+    'hour',
+    'timeline',
+    'tags',
+    'board_relation',
+    'dependency',
+    'rating',
+    'battery',
+    'time_tracking',
+    'checkbox',
+    'world_clock',
+    'week',
+    'unsupported',
+  ])('%s → raw_writable with --set-raw hint', (type) => {
+    expect(categorizeNoncanonicalColumnType(type)).toEqual({
+      category: 'raw_writable',
+      suggestedWritePath: '--set-raw <col>=<json>',
+    });
+  });
+
+  it('unknown future type → raw_writable (default branch)', () => {
+    // Forward-compat: a column type Monday adds tomorrow that the CLI
+    // doesn't know about should default to the raw_writable branch
+    // (agents reach for `--set-raw`). The contract treats absent
+    // membership as "Monday accepts change_column_value", which is
+    // the conservative-helpful assumption.
+    expect(categorizeNoncanonicalColumnType('not_a_real_type')).toEqual({
+      category: 'raw_writable',
+      suggestedWritePath: '--set-raw <col>=<json>',
+    });
   });
 });
