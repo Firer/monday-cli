@@ -45,7 +45,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
 import {
   BOARD_FIELDS_FRAGMENT,
   boardProjectionSchema,
@@ -143,66 +143,73 @@ export const boardDeleteCommand: CommandModule<
         }
 
         const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<unknown>(
-          DELETE_BOARD_MUTATION,
-          { boardId: parsed.boardId },
-          { operationName: 'BoardDelete' },
-        );
-        const data = unwrapOrThrow(
-          responseSchema.safeParse(response.data),
-          {
-            context: 'Monday returned a malformed BoardDelete response',
-            details: { board_id: parsed.boardId },
-            hint:
-              'this is a data-integrity error in Monday\'s response; ' +
-              'verify the response shape and update responseSchema if ' +
-              'Monday\'s contract has changed.',
-          },
-        );
-        // Distinguish missing-root-key (schema-drift →
-        // internal_error) from null payload (board missing →
-        // not_found). M14 round-2 / round-3 distinction landed
-        // proactively for M15.
-        if (!('delete_board' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's BoardDelete response is missing the delete_board root field`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
-        // R43 lift (api/board-mutation-result.ts): null-payload
-        // guard + projection. Delete's null path uses `not_found`
-        // (Monday's "id was bogus / already deleted" mapping) per
-        // M14 round-2 / round-3 missing-root vs null distinction.
-        const projected = projectMutationBoard({
-          raw: data.delete_board,
-          errorCode: 'not_found',
-          errorMessage: `Monday returned no board payload from delete_board for id ${parsed.boardId}`,
-          detailKey: 'board_id',
-          detailValue: parsed.boardId,
-        });
 
         // M16 retrofit per cli-design §8 single-leg call-site
-        // contract: invalidate AFTER `data` projection, BEFORE
-        // emitMutation so a cache-unlink failure surfaces through
-        // the runner's catch-all rather than double-emitting after
-        // the success envelope hit stdout. Skipped on the error
-        // path (the projectMutationBoard throw above bypasses this
-        // line). Required because the wire mutation removes the
-        // board entirely; without invalidation a same-process
-        // describe after delete would return stale metadata until
-        // TTL eviction. The retrofit's invalidation deletes the
-        // cache file so the next read cleanly cache-misses to the
-        // live `not_found`.
-        await invalidateBoard(parsed.boardId, ctx.env);
+        // contract via `withBoardInvalidationSingleLeg` (R46):
+        // invalidate AFTER the closure returns (i.e. after `data`
+        // projection completes), BEFORE emitMutation so a cache-
+        // unlink failure surfaces through the runner's catch-all.
+        // The closure's throws on schema drift / null payload
+        // bypass invalidation. Required because the wire mutation
+        // removes the board entirely; without invalidation a
+        // same-process describe after delete would return stale
+        // metadata until TTL eviction. The invalidation deletes
+        // the cache file so the next read cleanly cache-misses to
+        // the live `not_found`.
+        const { data: projected, response } = await withBoardInvalidationSingleLeg({
+          boardId: parsed.boardId,
+          env: ctx.env,
+          perform: async () => {
+            const wireResponse = await client.raw<unknown>(
+              DELETE_BOARD_MUTATION,
+              { boardId: parsed.boardId },
+              { operationName: 'BoardDelete' },
+            );
+            const data = unwrapOrThrow(
+              responseSchema.safeParse(wireResponse.data),
+              {
+                context: 'Monday returned a malformed BoardDelete response',
+                details: { board_id: parsed.boardId },
+                hint:
+                  'this is a data-integrity error in Monday\'s response; ' +
+                  'verify the response shape and update responseSchema if ' +
+                  'Monday\'s contract has changed.',
+              },
+            );
+            // Distinguish missing-root-key (schema-drift →
+            // internal_error) from null payload (board missing →
+            // not_found). M14 round-2 / round-3 distinction landed
+            // proactively for M15.
+            if (!('delete_board' in data)) {
+              throw new ApiError(
+                'internal_error',
+                `Monday's BoardDelete response is missing the delete_board root field`,
+                {
+                  details: {
+                    board_id: parsed.boardId,
+                    hint:
+                      'this is a schema-drift error in Monday\'s GraphQL ' +
+                      'response; verify the mutation declaration and update ' +
+                      'the response schema if Monday\'s contract has changed.',
+                  },
+                },
+              );
+            }
+            // R43 lift (api/board-mutation-result.ts): null-payload
+            // guard + projection. Delete's null path uses
+            // `not_found` (Monday's "id was bogus / already
+            // deleted" mapping) per M14 round-2 / round-3 missing-
+            // root vs null distinction.
+            const projection = projectMutationBoard({
+              raw: data.delete_board,
+              errorCode: 'not_found',
+              errorMessage: `Monday returned no board payload from delete_board for id ${parsed.boardId}`,
+              detailKey: 'board_id',
+              detailValue: parsed.boardId,
+            });
+            return { data: projection, response: wireResponse };
+          },
+        });
 
         emitMutation({
           ctx,

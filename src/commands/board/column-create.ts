@@ -86,7 +86,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
 import {
   COLUMN_FIELDS_FRAGMENT,
   columnProjectionSchema,
@@ -564,69 +564,76 @@ export const boardColumnCreateCommand: CommandModule<
         if (settings !== undefined) {
           variables.defaults = settings;
         }
-        const response = await client.raw<unknown>(
-          CREATE_COLUMN_MUTATION,
-          variables,
-          { operationName: 'ColumnCreate' },
-        );
-        const data = unwrapOrThrow(
-          responseSchema.safeParse(response.data),
-          {
-            context: 'Monday returned a malformed ColumnCreate response',
-            details: { board_id: parsed.boardId, title },
-            hint:
-              "this is a data-integrity error in Monday's response; " +
-              'verify the response shape and update responseSchema if ' +
-              "Monday's contract has changed.",
-          },
-        );
-        // Distinguish missing-root-key (schema-drift → internal_error
-        // with schema-drift hint) from null payload (Monday returned
-        // no column → also internal_error here since create's contract
-        // is "every successful call returns a Column"). Mirrors the
-        // M15 board-create / archive / delete missing-root-key vs
-        // null-payload split.
-        if (!('create_column' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's ColumnCreate response is missing the create_column root field`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                title,
-                hint:
-                  "this is a schema-drift error in Monday's GraphQL " +
-                  'response; verify the mutation declaration and update ' +
-                  "the response schema if Monday's contract has changed.",
-              },
-            },
-          );
-        }
-        // R45 lift (api/column-mutation-result.ts): null-payload guard
-        // + projection. Create's null path uses `internal_error`
-        // because the contract is "every successful call returns a
-        // Column"; the helper carries the agent-supplied `title` in
-        // `details` (paired with `board_id`) because the new column
-        // id doesn't exist yet on the null path.
-        const projected = projectMutationColumn({
-          raw: data.create_column,
-          errorCode: 'internal_error',
-          errorMessage: `Monday returned no column payload from create_column for board ${parsed.boardId} title ${JSON.stringify(title)}.`,
-          boardId: parsed.boardId,
-          columnIdKey: 'title',
-          columnIdValue: title,
-        });
 
-        // Eager invalidation per cli-design §8 single-leg call-site
-        // contract: AFTER `data` projection completes, BEFORE the
-        // function returns. Skipped on the error path (the throws
-        // above bypass this line). Ordered BEFORE emitMutation so a
-        // cache-unlink failure (e.g. permission flip) surfaces
-        // through the runner's catch-all error envelope rather than
-        // double-emitting after a success envelope already hit
-        // stdout. Idempotent — invalidating an already-absent entry
-        // is a no-op.
-        await invalidateBoard(parsed.boardId, ctx.env);
+        // §8 single-leg call-site contract via `withBoardInvalidation
+        // SingleLeg` (R46): the helper invalidates AFTER the closure
+        // returns (i.e. after `data` projection completes). On the
+        // error path the closure's throw bypasses invalidation —
+        // matching the §8 "skip on error" rule. Ordered BEFORE
+        // emitMutation so a cache-unlink failure surfaces through
+        // the runner's catch-all rather than double-emitting after
+        // a success envelope hit stdout.
+        const { data: projected, response } = await withBoardInvalidationSingleLeg({
+          boardId: parsed.boardId,
+          env: ctx.env,
+          perform: async () => {
+            const wireResponse = await client.raw<unknown>(
+              CREATE_COLUMN_MUTATION,
+              variables,
+              { operationName: 'ColumnCreate' },
+            );
+            const data = unwrapOrThrow(
+              responseSchema.safeParse(wireResponse.data),
+              {
+                context: 'Monday returned a malformed ColumnCreate response',
+                details: { board_id: parsed.boardId, title },
+                hint:
+                  "this is a data-integrity error in Monday's response; " +
+                  'verify the response shape and update responseSchema if ' +
+                  "Monday's contract has changed.",
+              },
+            );
+            // Distinguish missing-root-key (schema-drift →
+            // internal_error with schema-drift hint) from null
+            // payload (Monday returned no column → also
+            // internal_error here since create's contract is "every
+            // successful call returns a Column"). Mirrors the M15
+            // board-create / archive / delete missing-root-key vs
+            // null-payload split.
+            if (!('create_column' in data)) {
+              throw new ApiError(
+                'internal_error',
+                `Monday's ColumnCreate response is missing the create_column root field`,
+                {
+                  details: {
+                    board_id: parsed.boardId,
+                    title,
+                    hint:
+                      "this is a schema-drift error in Monday's GraphQL " +
+                      'response; verify the mutation declaration and update ' +
+                      "the response schema if Monday's contract has changed.",
+                  },
+                },
+              );
+            }
+            // R45 lift (api/column-mutation-result.ts): null-payload
+            // guard + projection. Create's null path uses
+            // `internal_error` because the contract is "every
+            // successful call returns a Column"; the helper carries
+            // the agent-supplied `title` in `details` (paired with
+            // `board_id`) because the new column id doesn't exist
+            // yet on the null path.
+            const projection = projectMutationColumn({
+              raw: data.create_column,
+              errorCode: 'internal_error',
+              errorMessage: `Monday returned no column payload from create_column for board ${parsed.boardId} title ${JSON.stringify(title)}.`,
+              boardId: parsed.boardId,
+              columnIdKey: 'title',
+              columnIdValue: title,
+            });
+            return { data: projection, response: wireResponse };
+          },
+        });
 
         emitMutation({
           ctx,

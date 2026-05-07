@@ -76,7 +76,7 @@ import { BoardIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationFanOut } from '../../api/board-mutation-invalidation.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   COLUMN_FIELDS_FRAGMENT,
@@ -292,160 +292,151 @@ export const boardColumnUpdateCommand: CommandModule<
           );
         }
 
-        // Fan-out: per-attribute calls in order. Track succeededLegs
-        // for the §8 invalidation high-water-mark counter. Track the
-        // most recent successful response (its `data.<root>` is the
-        // projection source) AND its raw `MondayResponse<unknown>`
-        // (for `meta.request_id` / complexity on the success
-        // envelope).
-        let succeededLegs = 0;
-        let lastProjected: ColumnProjection | undefined;
-        let lastResponse: Awaited<ReturnType<typeof client.raw<unknown>>> | undefined;
-        try {
-          for (const entry of dispatchPlan) {
-            if (entry.field === 'title') {
-              const response = await client.raw<unknown>(
-                CHANGE_COLUMN_TITLE_MUTATION,
-                {
-                  boardId: parsed.boardId,
-                  columnId: parsed.columnId,
-                  title: entry.value,
-                },
-                { operationName: 'ColumnChangeTitle' },
-              );
-              const data = unwrapOrThrow(
-                titleResponseSchema.safeParse(response.data),
-                {
-                  context: 'Monday returned a malformed ColumnChangeTitle response',
-                  details: {
-                    board_id: parsed.boardId,
-                    column_id: parsed.columnId,
-                  },
-                  hint:
-                    "this is a data-integrity error in Monday's response; " +
-                    'verify the mutation response shape and update the schema ' +
-                    "if Monday's contract has changed.",
-                },
-              );
-              if (!('change_column_title' in data)) {
+        // Fan-out: per-attribute calls in order. The R46 helper
+        // (`withBoardInvalidationFanOut`) owns the §8 high-water-
+        // mark counter and the post-loop invalidation gate; the
+        // closure here just calls `recordLegSuccess()` after each
+        // successful leg and returns `{data, response}` for the
+        // emitMutation step below. The trailing per-attribute
+        // call's response is authoritative for the projection AND
+        // for `meta.request_id` / complexity.
+        const { data: projected, response: lastResponse } =
+          await withBoardInvalidationFanOut({
+            boardId: parsed.boardId,
+            env: ctx.env,
+            runFanOut: async ({ recordLegSuccess }) => {
+              let lastProjected: ColumnProjection | undefined;
+              let trailingResponse:
+                | Awaited<ReturnType<typeof client.raw<unknown>>>
+                | undefined;
+              for (const entry of dispatchPlan) {
+                if (entry.field === 'title') {
+                  const response = await client.raw<unknown>(
+                    CHANGE_COLUMN_TITLE_MUTATION,
+                    {
+                      boardId: parsed.boardId,
+                      columnId: parsed.columnId,
+                      title: entry.value,
+                    },
+                    { operationName: 'ColumnChangeTitle' },
+                  );
+                  const data = unwrapOrThrow(
+                    titleResponseSchema.safeParse(response.data),
+                    {
+                      context: 'Monday returned a malformed ColumnChangeTitle response',
+                      details: {
+                        board_id: parsed.boardId,
+                        column_id: parsed.columnId,
+                      },
+                      hint:
+                        "this is a data-integrity error in Monday's response; " +
+                        'verify the mutation response shape and update the schema ' +
+                        "if Monday's contract has changed.",
+                    },
+                  );
+                  if (!('change_column_title' in data)) {
+                    throw new ApiError(
+                      'internal_error',
+                      `Monday's ColumnChangeTitle response is missing the change_column_title root field`,
+                      {
+                        details: {
+                          board_id: parsed.boardId,
+                          column_id: parsed.columnId,
+                          hint:
+                            "this is a schema-drift error in Monday's GraphQL " +
+                            'response; verify the mutation declaration and update ' +
+                            "the response schema if Monday's contract has changed.",
+                        },
+                      },
+                    );
+                  }
+                  // R45 lift: null-payload guard + projection.
+                  // column-update's null path uses `not_found`
+                  // (Monday's idiomatic missing-or-no-access
+                  // response).
+                  lastProjected = projectMutationColumn({
+                    raw: data.change_column_title,
+                    errorCode: 'not_found',
+                    errorMessage: `Monday returned no column payload from change_column_title for board ${parsed.boardId} column ${parsed.columnId}`,
+                    boardId: parsed.boardId,
+                    columnIdKey: 'column_id',
+                    columnIdValue: parsed.columnId,
+                  });
+                  trailingResponse = response;
+                  recordLegSuccess();
+                } else {
+                  const response = await client.raw<unknown>(
+                    CHANGE_COLUMN_METADATA_MUTATION,
+                    {
+                      boardId: parsed.boardId,
+                      columnId: parsed.columnId,
+                      columnProperty: 'description',
+                      value: entry.value,
+                    },
+                    { operationName: 'ColumnChangeMetadata' },
+                  );
+                  const data = unwrapOrThrow(
+                    metadataResponseSchema.safeParse(response.data),
+                    {
+                      context: 'Monday returned a malformed ColumnChangeMetadata response',
+                      details: {
+                        board_id: parsed.boardId,
+                        column_id: parsed.columnId,
+                      },
+                      hint:
+                        "this is a data-integrity error in Monday's response; " +
+                        'verify the mutation response shape and update the schema ' +
+                        "if Monday's contract has changed.",
+                    },
+                  );
+                  if (!('change_column_metadata' in data)) {
+                    throw new ApiError(
+                      'internal_error',
+                      `Monday's ColumnChangeMetadata response is missing the change_column_metadata root field`,
+                      {
+                        details: {
+                          board_id: parsed.boardId,
+                          column_id: parsed.columnId,
+                          hint:
+                            "this is a schema-drift error in Monday's GraphQL " +
+                            'response; verify the mutation declaration and update ' +
+                            "the response schema if Monday's contract has changed.",
+                        },
+                      },
+                    );
+                  }
+                  lastProjected = projectMutationColumn({
+                    raw: data.change_column_metadata,
+                    errorCode: 'not_found',
+                    errorMessage: `Monday returned no column payload from change_column_metadata for board ${parsed.boardId} column ${parsed.columnId}`,
+                    boardId: parsed.boardId,
+                    columnIdKey: 'column_id',
+                    columnIdValue: parsed.columnId,
+                  });
+                  trailingResponse = response;
+                  recordLegSuccess();
+                }
+              }
+              // Defensive — TS can't narrow that the success path
+              // always sets these (the loop only adds to dispatchPlan
+              // when at least one flag is set, and the .refine() on
+              // inputSchema enforces ≥1 flag, but the type system
+              // doesn't see the cross-block invariant).
+              /* c8 ignore next 6 */
+              if (lastProjected === undefined || trailingResponse === undefined) {
                 throw new ApiError(
                   'internal_error',
-                  `Monday's ColumnChangeTitle response is missing the change_column_title root field`,
-                  {
-                    details: {
-                      board_id: parsed.boardId,
-                      column_id: parsed.columnId,
-                      hint:
-                        "this is a schema-drift error in Monday's GraphQL " +
-                        'response; verify the mutation declaration and update ' +
-                        "the response schema if Monday's contract has changed.",
-                    },
-                  },
+                  'column update completed without a trailing wire response — this is a CLI bug',
+                  { details: { board_id: parsed.boardId, column_id: parsed.columnId } },
                 );
               }
-              // R45 lift: null-payload guard + projection. column-
-              // update's null path uses `not_found` (Monday's
-              // idiomatic missing-or-no-access response).
-              lastProjected = projectMutationColumn({
-                raw: data.change_column_title,
-                errorCode: 'not_found',
-                errorMessage: `Monday returned no column payload from change_column_title for board ${parsed.boardId} column ${parsed.columnId}`,
-                boardId: parsed.boardId,
-                columnIdKey: 'column_id',
-                columnIdValue: parsed.columnId,
-              });
-              lastResponse = response;
-              succeededLegs += 1;
-            } else {
-              const response = await client.raw<unknown>(
-                CHANGE_COLUMN_METADATA_MUTATION,
-                {
-                  boardId: parsed.boardId,
-                  columnId: parsed.columnId,
-                  columnProperty: 'description',
-                  value: entry.value,
-                },
-                { operationName: 'ColumnChangeMetadata' },
-              );
-              const data = unwrapOrThrow(
-                metadataResponseSchema.safeParse(response.data),
-                {
-                  context: 'Monday returned a malformed ColumnChangeMetadata response',
-                  details: {
-                    board_id: parsed.boardId,
-                    column_id: parsed.columnId,
-                  },
-                  hint:
-                    "this is a data-integrity error in Monday's response; " +
-                    'verify the mutation response shape and update the schema ' +
-                    "if Monday's contract has changed.",
-                },
-              );
-              if (!('change_column_metadata' in data)) {
-                throw new ApiError(
-                  'internal_error',
-                  `Monday's ColumnChangeMetadata response is missing the change_column_metadata root field`,
-                  {
-                    details: {
-                      board_id: parsed.boardId,
-                      column_id: parsed.columnId,
-                      hint:
-                        "this is a schema-drift error in Monday's GraphQL " +
-                        'response; verify the mutation declaration and update ' +
-                        "the response schema if Monday's contract has changed.",
-                    },
-                  },
-                );
-              }
-              lastProjected = projectMutationColumn({
-                raw: data.change_column_metadata,
-                errorCode: 'not_found',
-                errorMessage: `Monday returned no column payload from change_column_metadata for board ${parsed.boardId} column ${parsed.columnId}`,
-                boardId: parsed.boardId,
-                columnIdKey: 'column_id',
-                columnIdValue: parsed.columnId,
-              });
-              lastResponse = response;
-              succeededLegs += 1;
-            }
-          }
-        } catch (err) {
-          // §8 fan-out call-site contract — partial-application
-          // failure path: invalidate IF at least one leg succeeded
-          // (server state changed). Fires BEFORE re-throwing so the
-          // cache reflects the partially-applied state regardless
-          // of which leg failed.
-          if (succeededLegs > 0) {
-            await invalidateBoard(parsed.boardId, ctx.env);
-          }
-          throw err;
-        }
-
-        // §8 fan-out call-site contract — whole-call success path:
-        // invalidate ONCE after the loop settles (succeededLegs
-        // equals dispatchPlan.length here). Ordered BEFORE
-        // emitMutation so a cache-unlink failure surfaces through
-        // the runner's catch-all instead of double-emitting after
-        // the success envelope hit stdout.
-        await invalidateBoard(parsed.boardId, ctx.env);
-
-        // Defensive — TS can't narrow that the success path always
-        // sets lastProjected / lastResponse (the loop only adds to
-        // dispatchPlan when at least one flag is set, and the .refine()
-        // on inputSchema enforces ≥1 flag, but the type system doesn't
-        // see the cross-block invariant).
-        /* c8 ignore next 6 */
-        if (lastProjected === undefined || lastResponse === undefined) {
-          throw new ApiError(
-            'internal_error',
-            'column update completed without a trailing wire response — this is a CLI bug',
-            { details: { board_id: parsed.boardId, column_id: parsed.columnId } },
-          );
-        }
+              return { data: lastProjected, response: trailingResponse };
+            },
+          });
 
         emitMutation({
           ctx,
-          data: lastProjected,
+          data: projected,
           schema: boardColumnUpdateCommand.outputSchema,
           programOpts: program.opts(),
           warnings: [],

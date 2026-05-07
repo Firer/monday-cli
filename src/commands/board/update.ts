@@ -63,7 +63,7 @@ import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationFanOut } from '../../api/board-mutation-invalidation.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   BOARD_FIELDS_FRAGMENT,
@@ -252,154 +252,129 @@ export const boardUpdateCommand: CommandModule<
           );
         }
 
-        // §8 fan-out call-site contract: track succeededLegs so the
-        // post-loop invalidation can fire per the high-water-mark
-        // rule (invalidate iff ≥1 per-attribute call committed
-        // server-side state, regardless of whether the whole-call
-        // ultimately succeeded). M16 retrofit — pre-M16 the loop
-        // ran inline without invalidation; the §8 contract now
-        // requires the cache to reflect partially-applied state on
-        // partial-application failure too.
+        // §8 fan-out call-site contract via `withBoardInvalidation
+        // FanOut` (R46): the helper owns the high-water-mark counter
+        // and the partial-application invalidation gate; the closure
+        // here drives the per-attribute loop + the final force-live
+        // read + the projection, calling `recordLegSuccess()` after
+        // each successful per-attribute call.
         //
-        // Structure (matching column-update's shape per Codex M16
-        // round-1 F1): wrap the loop + final read + projection in a
-        // try/catch. The catch handles partial-application failure
-        // (invalidate iff succeededLegs > 0, then re-throw). The
-        // success path's invalidate + emit live OUTSIDE the
-        // try/catch so an emit-side throw doesn't fall back into
-        // the catch and double-invalidate.
-        let succeededLegs = 0;
-        let projected: BoardProjection;
-        let finalResponse: Awaited<ReturnType<typeof client.raw<unknown>>>;
-        try {
-          for (const { attribute, value } of dispatchPlan) {
-            const response = await client.raw<unknown>(
-              UPDATE_BOARD_MUTATION,
-              {
-                boardId: parsed.boardId,
-                boardAttribute: attribute,
-                newValue: value,
-              },
-              { operationName: 'BoardUpdate' },
-            );
-            const data = unwrapOrThrow(
-              updateMutationResponseSchema.safeParse(response.data),
-              {
-                context: 'Monday returned a malformed BoardUpdate response',
-                details: {
-                  board_id: parsed.boardId,
-                  board_attribute: attribute,
-                },
-                hint:
-                  'this is a data-integrity error in Monday\'s response; ' +
-                  'verify the mutation response shape and update the schema ' +
-                  'if Monday\'s contract has changed.',
-              },
-            );
-            // Distinguish "root key absent" (schema-drift →
-            // internal_error) from "value null" (Monday-side
-            // failure with no errors[] — Codex M15 implementation
-            // round-1 F1: a 200 response with `update_board: null`
-            // and no errors[] is NOT a per-field success; it's a
-            // null-payload failure that must abort the sequence
-            // BEFORE the final read fires false-success.
-            if (!('update_board' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's BoardUpdate response is missing the update_board root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    board_attribute: attribute,
-                    hint:
-                      'this is a schema-drift error in Monday\'s GraphQL ' +
-                      'response; verify the mutation declaration and update ' +
-                      'the response schema if Monday\'s contract has changed.',
+        // The final-read leg lives INSIDE `runFanOut` (matching
+        // pre-R46 structure per Codex M16 round-1 F1) so a final-
+        // read failure with succeededLegs > 0 still triggers
+        // invalidation — the per-attribute mutations already
+        // committed server-side state, so the cache must reflect
+        // them even if the trailing read couldn't surface the
+        // post-update snapshot.
+        const { data: projected, response: finalResponse } =
+          await withBoardInvalidationFanOut({
+            boardId: parsed.boardId,
+            env: ctx.env,
+            runFanOut: async ({ recordLegSuccess }) => {
+              for (const { attribute, value } of dispatchPlan) {
+                const response = await client.raw<unknown>(
+                  UPDATE_BOARD_MUTATION,
+                  {
+                    boardId: parsed.boardId,
+                    boardAttribute: attribute,
+                    newValue: value,
                   },
-                },
-              );
-            }
-            if (data.update_board === null || data.update_board === undefined) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's BoardUpdate returned a null update_board payload for board_attribute ${attribute}`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    board_attribute: attribute,
+                  { operationName: 'BoardUpdate' },
+                );
+                const data = unwrapOrThrow(
+                  updateMutationResponseSchema.safeParse(response.data),
+                  {
+                    context: 'Monday returned a malformed BoardUpdate response',
+                    details: {
+                      board_id: parsed.boardId,
+                      board_attribute: attribute,
+                    },
                     hint:
-                      'a null payload with no GraphQL errors[] is a server-side ' +
-                      'failure path; agents should retry after re-reading the ' +
-                      'board to see what landed before this call.',
+                      'this is a data-integrity error in Monday\'s response; ' +
+                      'verify the mutation response shape and update the schema ' +
+                      'if Monday\'s contract has changed.',
                   },
-                },
-              );
-            }
-            void response;
-            succeededLegs += 1;
-          }
+                );
+                // Distinguish "root key absent" (schema-drift →
+                // internal_error) from "value null" (Monday-side
+                // failure with no errors[] — Codex M15
+                // implementation round-1 F1: a 200 response with
+                // `update_board: null` and no errors[] is NOT a
+                // per-field success; it's a null-payload failure
+                // that must abort the sequence BEFORE the final
+                // read fires false-success.
+                if (!('update_board' in data)) {
+                  throw new ApiError(
+                    'internal_error',
+                    `Monday's BoardUpdate response is missing the update_board root field`,
+                    {
+                      details: {
+                        board_id: parsed.boardId,
+                        board_attribute: attribute,
+                        hint:
+                          'this is a schema-drift error in Monday\'s GraphQL ' +
+                          'response; verify the mutation declaration and update ' +
+                          'the response schema if Monday\'s contract has changed.',
+                      },
+                    },
+                  );
+                }
+                if (data.update_board === null || data.update_board === undefined) {
+                  throw new ApiError(
+                    'internal_error',
+                    `Monday's BoardUpdate returned a null update_board payload for board_attribute ${attribute}`,
+                    {
+                      details: {
+                        board_id: parsed.boardId,
+                        board_attribute: attribute,
+                        hint:
+                          'a null payload with no GraphQL errors[] is a server-side ' +
+                          'failure path; agents should retry after re-reading the ' +
+                          'board to see what landed before this call.',
+                      },
+                    },
+                  );
+                }
+                void response;
+                recordLegSuccess();
+              }
 
-          // Final force-live read for the success envelope's `data`
-          // slot. `client.raw` doesn't go through the cache, so this
-          // always fires fresh — pre-flight Codex round-2 F2 pinned
-          // this as load-bearing (a cached read could surface stale
-          // post-update name). Inside the try/catch so a final-read
-          // failure (very unusual — the board can't have been
-          // deleted between mutation and read in any normal flow)
-          // still triggers invalidation since the per-attribute
-          // mutations already committed server-side state.
-          finalResponse = await client.raw<unknown>(
-            BOARD_FINAL_READ_QUERY,
-            { ids: [parsed.boardId] },
-            { operationName: 'BoardUpdateFinalRead' },
-          );
-          const finalData = unwrapOrThrow(
-            finalReadResponseSchema.safeParse(finalResponse.data),
-            {
-              context:
-                'Monday returned a malformed BoardUpdateFinalRead response',
-              details: { board_id: parsed.boardId },
+              // Final force-live read for the success envelope's
+              // `data` slot. `client.raw` doesn't go through the
+              // cache, so this always fires fresh — pre-flight
+              // Codex round-2 F2 pinned this as load-bearing (a
+              // cached read could surface stale post-update name).
+              const finalReadResponse = await client.raw<unknown>(
+                BOARD_FINAL_READ_QUERY,
+                { ids: [parsed.boardId] },
+                { operationName: 'BoardUpdateFinalRead' },
+              );
+              const finalData = unwrapOrThrow(
+                finalReadResponseSchema.safeParse(finalReadResponse.data),
+                {
+                  context:
+                    'Monday returned a malformed BoardUpdateFinalRead response',
+                  details: { board_id: parsed.boardId },
+                },
+              );
+              const first: unknown = (finalData.boards ?? [])[0];
+              // R43 lift (api/board-mutation-result.ts): null-
+              // payload guard + projection. Defensive
+              // `internal_error` per M14 round-2 / round-3
+              // missing-root vs null distinction — per-field calls
+              // succeeded but the final read couldn't find the
+              // board, so surface contract anomaly rather than a
+              // no-op success.
+              const finalProjected = projectMutationBoard({
+                raw: first,
+                errorCode: 'internal_error',
+                errorMessage: `Monday returned no board for id ${parsed.boardId} on the final post-update read`,
+                detailKey: 'board_id',
+                detailValue: parsed.boardId,
+              });
+              return { data: finalProjected, response: finalReadResponse };
             },
-          );
-          const first: unknown = (finalData.boards ?? [])[0];
-          // R43 lift (api/board-mutation-result.ts): null-payload
-          // guard + projection. Defensive `internal_error` per M14
-          // round-2 / round-3 missing-root vs null distinction —
-          // per-field calls succeeded but the final read couldn't
-          // find the board, so surface contract anomaly rather
-          // than a no-op success.
-          projected = projectMutationBoard({
-            raw: first,
-            errorCode: 'internal_error',
-            errorMessage: `Monday returned no board for id ${parsed.boardId} on the final post-update read`,
-            detailKey: 'board_id',
-            detailValue: parsed.boardId,
           });
-        } catch (err) {
-          // M16 retrofit — §8 fan-out call-site contract partial-
-          // application failure path: invalidate IF at least one
-          // per-attribute call succeeded (the cache MUST reflect
-          // partially-applied server state). Zero-legs-succeeded
-          // (very first per-attribute call failed) skips
-          // invalidation — server state didn't change.
-          if (succeededLegs > 0) {
-            await invalidateBoard(parsed.boardId, ctx.env);
-          }
-          throw err;
-        }
-
-        // M16 retrofit — §8 fan-out call-site contract whole-call
-        // success path: invalidate ONCE after the trailing call's
-        // data projection, BEFORE emitMutation so a cache-unlink
-        // failure surfaces through the runner's catch-all rather
-        // than double-emitting after the success envelope hit
-        // stdout. Lives OUTSIDE the try/catch above (Codex M16
-        // round-1 F1) so an emit-side throw doesn't fall into the
-        // catch and double-invalidate. succeededLegs > 0 is
-        // guaranteed here (the loop body bumps it on every
-        // iteration; we can only reach this line with
-        // dispatchPlan.length > 0).
-        await invalidateBoard(parsed.boardId, ctx.env);
 
         emitMutation({
           ctx,

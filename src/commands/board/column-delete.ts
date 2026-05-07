@@ -64,7 +64,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
 import {
   COLUMN_FIELDS_FRAGMENT,
   columnProjectionSchema,
@@ -180,63 +180,69 @@ export const boardColumnDeleteCommand: CommandModule<
         }
 
         const { client, toEmit } = resolveClient(ctx, program.opts());
-        const response = await client.raw<unknown>(
-          DELETE_COLUMN_MUTATION,
-          { boardId: parsed.boardId, columnId: parsed.columnId },
-          { operationName: 'ColumnDelete' },
-        );
-        const data = unwrapOrThrow(
-          responseSchema.safeParse(response.data),
-          {
-            context: 'Monday returned a malformed ColumnDelete response',
-            details: { board_id: parsed.boardId, column_id: parsed.columnId },
-            hint:
-              "this is a data-integrity error in Monday's response; " +
-              'verify the response shape and update responseSchema if ' +
-              "Monday's contract has changed.",
-          },
-        );
-        // Distinguish missing-root-key (schema-drift → internal_error)
-        // from null payload (column missing → not_found). Mirrors the
-        // M15 board-delete + column-create distinction.
-        if (!('delete_column' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's ColumnDelete response is missing the delete_column root field`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                column_id: parsed.columnId,
-                hint:
-                  "this is a schema-drift error in Monday's GraphQL " +
-                  'response; verify the mutation declaration and update ' +
-                  "the response schema if Monday's contract has changed.",
-              },
-            },
-          );
-        }
-        // R45 lift: null-payload guard + projection. Delete's null
-        // path uses `not_found` (Monday's "id was bogus / already
-        // deleted" mapping) per the column-update / column-delete
-        // R45 mapping.
-        const projected = projectMutationColumn({
-          raw: data.delete_column,
-          errorCode: 'not_found',
-          errorMessage: `Monday returned no column payload from delete_column for board ${parsed.boardId} column ${parsed.columnId}`,
-          boardId: parsed.boardId,
-          columnIdKey: 'column_id',
-          columnIdValue: parsed.columnId,
-        });
 
-        // Eager invalidation per §8 single-leg call-site contract:
-        // AFTER `data` projection completes, BEFORE the function
-        // returns. Skipped on the error path (the throws above
-        // bypass this line). Ordered BEFORE emitMutation so a
-        // cache-unlink failure surfaces through the runner's catch-
-        // all rather than double-emitting after a success envelope
-        // hit stdout. Idempotent — invalidating an already-absent
-        // entry is a no-op.
-        await invalidateBoard(parsed.boardId, ctx.env);
+        // §8 single-leg call-site contract via `withBoardInvalidation
+        // SingleLeg` (R46): invalidate AFTER the closure returns
+        // (i.e. after `data` projection completes), BEFORE
+        // emitMutation so a cache-unlink failure surfaces through
+        // the runner's catch-all. The closure's throws on schema
+        // drift / null payload bypass invalidation — a failed call
+        // didn't change board state.
+        const { data: projected, response } = await withBoardInvalidationSingleLeg({
+          boardId: parsed.boardId,
+          env: ctx.env,
+          perform: async () => {
+            const wireResponse = await client.raw<unknown>(
+              DELETE_COLUMN_MUTATION,
+              { boardId: parsed.boardId, columnId: parsed.columnId },
+              { operationName: 'ColumnDelete' },
+            );
+            const data = unwrapOrThrow(
+              responseSchema.safeParse(wireResponse.data),
+              {
+                context: 'Monday returned a malformed ColumnDelete response',
+                details: { board_id: parsed.boardId, column_id: parsed.columnId },
+                hint:
+                  "this is a data-integrity error in Monday's response; " +
+                  'verify the response shape and update responseSchema if ' +
+                  "Monday's contract has changed.",
+              },
+            );
+            // Distinguish missing-root-key (schema-drift →
+            // internal_error) from null payload (column missing →
+            // not_found). Mirrors the M15 board-delete + column-
+            // create distinction.
+            if (!('delete_column' in data)) {
+              throw new ApiError(
+                'internal_error',
+                `Monday's ColumnDelete response is missing the delete_column root field`,
+                {
+                  details: {
+                    board_id: parsed.boardId,
+                    column_id: parsed.columnId,
+                    hint:
+                      "this is a schema-drift error in Monday's GraphQL " +
+                      'response; verify the mutation declaration and update ' +
+                      "the response schema if Monday's contract has changed.",
+                  },
+                },
+              );
+            }
+            // R45 lift: null-payload guard + projection. Delete's
+            // null path uses `not_found` (Monday's "id was bogus /
+            // already deleted" mapping) per the column-update /
+            // column-delete R45 mapping.
+            const projection = projectMutationColumn({
+              raw: data.delete_column,
+              errorCode: 'not_found',
+              errorMessage: `Monday returned no column payload from delete_column for board ${parsed.boardId} column ${parsed.columnId}`,
+              boardId: parsed.boardId,
+              columnIdKey: 'column_id',
+              columnIdValue: parsed.columnId,
+            });
+            return { data: projection, response: wireResponse };
+          },
+        });
 
         emitMutation({
           ctx,

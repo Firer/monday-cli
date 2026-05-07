@@ -49,7 +49,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { invalidateBoard } from '../../api/cache.js';
+import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   BOARD_FIELDS_FRAGMENT,
@@ -180,65 +180,72 @@ export const boardArchiveCommand: CommandModule<
 
         // Live path. archive_board returns the archived Board
         // directly; no preflight read needed.
-        const response = await client.raw<unknown>(
-          ARCHIVE_BOARD_MUTATION,
-          { boardId: parsed.boardId },
-          { operationName: 'BoardArchive' },
-        );
-        const data = unwrapOrThrow(
-          responseSchema.safeParse(response.data),
-          {
-            context: 'Monday returned a malformed BoardArchive response',
-            details: { board_id: parsed.boardId },
-            hint:
-              'this is a data-integrity error in Monday\'s response; ' +
-              'verify the response shape and update responseSchema if ' +
-              'Monday\'s contract has changed.',
-          },
-        );
-        // Distinguish missing-root-key (schema-drift →
-        // internal_error) from null payload (board missing →
-        // not_found). M14 round-2 / round-3 distinction landed
-        // proactively.
-        if (!('archive_board' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's BoardArchive response is missing the archive_board root field`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
-        // R43 lift (api/board-mutation-result.ts): null-payload
-        // guard + projection. Archive's null path uses `not_found`
-        // (Monday's idiomatic missing-or-no-access response) per
-        // M14 round-2 / round-3 missing-root vs null distinction.
-        const projected = projectMutationBoard({
-          raw: data.archive_board,
-          errorCode: 'not_found',
-          errorMessage: `Monday returned no board payload from archive_board for id ${parsed.boardId}`,
-          detailKey: 'board_id',
-          detailValue: parsed.boardId,
-        });
-
+        //
         // M16 retrofit per cli-design §8 single-leg call-site
-        // contract: invalidate AFTER `data` projection, BEFORE
-        // emitMutation so a cache-unlink failure surfaces through
-        // the runner's catch-all rather than double-emitting after
-        // the success envelope hit stdout. Skipped on the error
-        // path (the projectMutationBoard throw above bypasses this
-        // line). Required because archive flips the cached
-        // `boardMetadataSchema.state` field from 'active' to
-        // 'archived'; without invalidation a same-process
-        // `board describe` after the archive would return
-        // stale `state: 'active'` until TTL eviction.
-        await invalidateBoard(parsed.boardId, ctx.env);
+        // contract via `withBoardInvalidationSingleLeg` (R46): the
+        // helper invalidates AFTER the closure returns (i.e. after
+        // `data` projection completes), BEFORE emitMutation so a
+        // cache-unlink failure surfaces through the runner's
+        // catch-all. The closure's throws on schema drift / null
+        // payload bypass invalidation. Required because archive
+        // flips the cached `boardMetadataSchema.state` field from
+        // 'active' to 'archived'; without invalidation a same-
+        // process `board describe` would return stale state until
+        // TTL eviction.
+        const { data: projected, response } = await withBoardInvalidationSingleLeg({
+          boardId: parsed.boardId,
+          env: ctx.env,
+          perform: async () => {
+            const wireResponse = await client.raw<unknown>(
+              ARCHIVE_BOARD_MUTATION,
+              { boardId: parsed.boardId },
+              { operationName: 'BoardArchive' },
+            );
+            const data = unwrapOrThrow(
+              responseSchema.safeParse(wireResponse.data),
+              {
+                context: 'Monday returned a malformed BoardArchive response',
+                details: { board_id: parsed.boardId },
+                hint:
+                  'this is a data-integrity error in Monday\'s response; ' +
+                  'verify the response shape and update responseSchema if ' +
+                  'Monday\'s contract has changed.',
+              },
+            );
+            // Distinguish missing-root-key (schema-drift →
+            // internal_error) from null payload (board missing →
+            // not_found). M14 round-2 / round-3 distinction landed
+            // proactively.
+            if (!('archive_board' in data)) {
+              throw new ApiError(
+                'internal_error',
+                `Monday's BoardArchive response is missing the archive_board root field`,
+                {
+                  details: {
+                    board_id: parsed.boardId,
+                    hint:
+                      'this is a schema-drift error in Monday\'s GraphQL ' +
+                      'response; verify the mutation declaration and update ' +
+                      'the response schema if Monday\'s contract has changed.',
+                  },
+                },
+              );
+            }
+            // R43 lift (api/board-mutation-result.ts): null-payload
+            // guard + projection. Archive's null path uses
+            // `not_found` (Monday's idiomatic missing-or-no-access
+            // response) per M14 round-2 / round-3 missing-root vs
+            // null distinction.
+            const projection = projectMutationBoard({
+              raw: data.archive_board,
+              errorCode: 'not_found',
+              errorMessage: `Monday returned no board payload from archive_board for id ${parsed.boardId}`,
+              detailKey: 'board_id',
+              detailValue: parsed.boardId,
+            });
+            return { data: projection, response: wireResponse };
+          },
+        });
 
         emitMutation({
           ctx,
