@@ -5338,3 +5338,268 @@ describe('monday board group-update (integration, M17)', () => {
     expect(postEnv.meta.source).toBe('cache');
   });
 });
+
+// =============================================================================
+// M17 — board group-archive (cli-design §4.3 + §6.4 + §8 eager invalidation)
+// =============================================================================
+
+describe('monday board group-archive (integration, M17)', () => {
+  // Board metadata fixture for the dry-run preflight read — group
+  // `topics` exists on board 12345.
+  const groupArchiveBoardMetadata: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: null,
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: null,
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [
+              {
+                id: 'topics',
+                title: 'Topics',
+                color: 'blue',
+                position: '1.0',
+                archived: false,
+                deleted: false,
+              },
+            ],
+            columns: [],
+          },
+        ],
+      },
+    },
+  };
+
+  const archivedGroup = {
+    id: 'topics',
+    title: 'Topics',
+    color: 'blue',
+    position: '1.0',
+    archived: true,
+    deleted: false,
+  };
+
+  it('rejects without --yes — confirmation_required carries both board_id AND group_id (two-tuple shape)', async () => {
+    // Per cli-design §6.5 single-target shape: group-archive's
+    // wire signature is two-tuple, so the confirmation envelope
+    // echoes both ids. The R29 helper's `extraDetails` slot
+    // carries board_id alongside the canonical group_id detailKey.
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { board_id?: string; group_id?: string; hint?: string };
+      };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.group_id).toBe('topics');
+    expect(env.error?.details?.hint).toMatch(/no unarchive_group/);
+    // Gate fires before resolveClient — meta.source stays 'none'.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required (M10 round-1 P2 ordering)', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('--dry-run bypasses the confirmation gate and emits snapshot-bearing planned change via BoardMetadata preflight', async () => {
+    // dry-run is non-executing; the gate is for live destructive
+    // writes only. group-archive's dry-run is snapshot-bearing
+    // (mirrors `board archive`) — not minimal like column-delete /
+    // group-delete.
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--dry-run', '--json'],
+      { interactions: [groupArchiveBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        group_id: string;
+        group: { id: string; title: string; archived: boolean | null };
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('archive_group');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.group_id).toBe('topics');
+    // Snapshot carries the source group's full metadata field set.
+    expect(plan?.group.id).toBe('topics');
+    expect(plan?.group.title).toBe('Topics');
+    expect(plan?.group.archived).toBe(false);
+  });
+
+  it('--dry-run: not_found when the group ID is missing on the board (details.group_id pinned)', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'ghost_group', '--dry-run', '--json'],
+      { interactions: [groupArchiveBoardMetadata] },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { group_id?: string; board_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.group_id).toBe('ghost_group');
+    expect(env.error?.details?.board_id).toBe('12345');
+  });
+
+  it('--dry-run: not_found when the board itself is missing (preflight bubble)', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '99999', 'topics', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: --yes fires archive_group and returns the projected (archived) group', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            match_variables: { boardId: '12345', groupId: 'topics' },
+            // Pin the GraphQL surface — a regression renaming the
+            // mutation root would fail here.
+            match_query: /archive_group\(board_id: \$boardId, group_id: \$groupId\)/,
+            response: { data: { archive_group: archivedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; archived: boolean | null };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('topics');
+    expect(env.data.archived).toBe(true);
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: surfaces not_found when Monday returns null archive_group (group missing)', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'ghost_group', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            response: { data: { archive_group: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; group_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.group_id).toBe('ghost_group');
+  });
+
+  it('live: surfaces internal_error when the response is missing the archive_group root field (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('cache invalidation round-trip: group-archive → board describe sees archived flag flipped with source: live + no stale_cache_refreshed warning', async () => {
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    const archivedPostMutation = { ...preGroup, archived: true };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Archive the group.
+    const archived = await drive(
+      ['board', 'group-archive', '111', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            response: { data: { archive_group: archivedPostMutation } },
+          },
+        ],
+      },
+    );
+    expect(archived.exitCode).toBe(0);
+    // Post-archive describe — clean cache miss → live fetch.
+    // Default `board describe` filters archived groups, so we use
+    // --include-archived to surface the archived group.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--include-archived', '--json'],
+      { interactions: [metadataResponse([], [archivedPostMutation])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string; archived: boolean | null }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.find((g) => g.id === 'topics')?.archived).toBe(true);
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+});

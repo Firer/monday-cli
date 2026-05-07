@@ -112,6 +112,7 @@ import { boardColumnDeleteCommand } from './board/column-delete.js';
 // group-archive / group-duplicate / group-delete.
 import { boardGroupCreateCommand } from './board/group-create.js';
 import { boardGroupUpdateCommand } from './board/group-update.js';
+import { boardGroupArchiveCommand } from './board/group-archive.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -149,6 +150,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardColumnDeleteCommand,
     boardGroupCreateCommand,
     boardGroupUpdateCommand,
+    boardGroupArchiveCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

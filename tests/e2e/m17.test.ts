@@ -132,3 +132,49 @@ describe('M17 e2e — board group-update (live)', () => {
     expect(result.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('M17 e2e — board group-archive (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips archive_group with --yes; envelope carries the projected (archived) group', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'GroupArchive',
+          response: {
+            data: {
+              archive_group: {
+                id: 'topics',
+                title: 'Topics',
+                color: 'blue',
+                position: '1.0',
+                archived: true,
+                deleted: false,
+              },
+            },
+          },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: ['board', 'group-archive', '12345', 'topics', '--yes', '--json'],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: { id: string; archived: boolean | null };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('topics');
+    expect(env.data.archived).toBe(true);
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});
