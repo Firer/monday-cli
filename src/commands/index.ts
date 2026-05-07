@@ -91,6 +91,7 @@ import { itemUpsertCommand } from './item/upsert.js';
 // M14 (v0.2) — workspace lifecycle: create / update / delete /
 // add-users / remove-users.
 import { workspaceCreateCommand } from './workspace/create.js';
+import { workspaceUpdateCommand } from './workspace/update.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -113,6 +114,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     workspaceGetCommand,
     workspaceFoldersCommand,
     workspaceCreateCommand,
+    workspaceUpdateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

@@ -529,3 +529,227 @@ describe('monday workspace create (integration, M14)', () => {
     expect(env.error?.code).toBe('forbidden');
   });
 });
+
+describe('monday workspace update (integration, M14)', () => {
+  const currentWorkspace = {
+    id: '12345',
+    name: 'Marketing',
+    description: 'EU campaigns',
+    kind: 'open',
+    state: 'active',
+    is_default_workspace: false,
+    created_at: '2026-05-07T11:00:00Z',
+    settings: { icon: { color: '#0000FF', image: null } },
+  };
+  const renamedWorkspace = { ...currentWorkspace, name: 'Marketing — EU' };
+
+  it('live: --name fires update_workspace with attributes={name} and returns the projected workspace', async () => {
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', 'Marketing — EU', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            // Wire-shape pin: only the agent-provided field appears
+            // in `attributes`; omitted fields are absent (not null).
+            match_variables: {
+              id: '12345',
+              attributes: { name: 'Marketing — EU' },
+            },
+            match_query: /update_workspace\(id: \$id, attributes: \$attributes\)/,
+            response: { data: { update_workspace: renamedWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string; kind: string };
+    };
+    expect(env.data.id).toBe('12345');
+    expect(env.data.name).toBe('Marketing — EU');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: multi-flag bundles into one update_workspace call', async () => {
+    const updated = {
+      ...currentWorkspace,
+      name: 'Renamed',
+      description: 'Updated',
+    };
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', 'Renamed', '--description', 'Updated', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            match_variables: {
+              id: '12345',
+              attributes: { name: 'Renamed', description: 'Updated' },
+            },
+            response: { data: { update_workspace: updated } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { name: string; description: string };
+    };
+    expect(env.data.name).toBe('Renamed');
+    expect(env.data.description).toBe('Updated');
+    expect(out.requests).toBe(1);
+  });
+
+  it('rejects zero-flag invocation as usage_error at argv parse', async () => {
+    // Schema-level `.refine()`: at least one of --name / --kind /
+    // --description required. No network leg fires.
+    const out = await drive(
+      ['workspace', 'update', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error).toBeDefined();
+  });
+
+  it('rejects --kind unknown as usage_error', async () => {
+    const out = await drive(
+      ['workspace', 'update', '12345', '--kind', 'private', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects whitespace-only --name as usage_error (after trim)', async () => {
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric workspace id as usage_error', async () => {
+    const out = await drive(
+      ['workspace', 'update', 'abc', '--name', 'X', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: preflight reads then emits diff with from→to per provided field', async () => {
+    const out = await drive(
+      [
+        'workspace', 'update', '12345',
+        '--name', 'Marketing — EU',
+        '--kind', 'closed',
+        '--dry-run', '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdatePreflight',
+            match_variables: { ids: ['12345'] },
+            response: { data: { workspaces: [currentWorkspace] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        workspace_id: string;
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('live');
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('update_workspace');
+    expect(plan?.workspace_id).toBe('12345');
+    expect(plan?.diff).toEqual({
+      name: { from: 'Marketing', to: 'Marketing — EU' },
+      kind: { from: 'open', to: 'closed' },
+    });
+    // Only fields the agent provided appear in the diff.
+    expect(plan?.diff).not.toHaveProperty('description');
+  });
+
+  it('--dry-run: surfaces not_found when the preflight read returns []', async () => {
+    // Per cli-design §6.4 workspace-update variant: "When the
+    // preflight read returns not_found, the dry-run surfaces
+    // not_found (exit 2)" — not a would-fail dry-run shape.
+    const out = await drive(
+      ['workspace', 'update', '999', '--name', 'Renamed', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdatePreflight',
+            response: { data: { workspaces: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { workspace_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.workspace_id).toBe('999');
+  });
+
+  it('live: surfaces not_found when update_workspace returns null payload', async () => {
+    // Mirrors the M13 update edit / delete null-payload mapping —
+    // Monday returning `update_workspace: null` after a bogus id is
+    // the standard not_found path.
+    const out = await drive(
+      ['workspace', 'update', '999', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            response: { data: { update_workspace: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: surfaces forbidden when Monday rejects with PERMISSION_DENIED', async () => {
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            response: {
+              data: { update_workspace: null },
+              errors: [
+                {
+                  message: 'You do not have permission to update this workspace',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('forbidden');
+  });
+});

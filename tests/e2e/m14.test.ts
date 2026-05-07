@@ -39,6 +39,60 @@ interface EnvelopeShape {
 const parseEnvelope = (s: string): EnvelopeShape =>
   JSON.parse(s) as EnvelopeShape;
 
+describe('M14 e2e — workspace update (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips update_workspace; envelope carries the projected updated workspace', async () => {
+    const updatedWorkspace = {
+      id: '12345',
+      name: 'Marketing — EU',
+      description: 'EU campaigns',
+      kind: 'closed',
+      state: 'active',
+      is_default_workspace: false,
+      created_at: '2026-05-07T11:00:00Z',
+      settings: { icon: { color: '#0000FF', image: null } },
+    };
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'WorkspaceUpdate',
+          response: { data: { update_workspace: updatedWorkspace } },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: [
+        'workspace',
+        'update',
+        '12345',
+        '--name',
+        'Marketing — EU',
+        '--kind',
+        'closed',
+        '--json',
+      ],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: { id: string; name: string; kind: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.name).toBe('Marketing — EU');
+    expect(env.data.kind).toBe('closed');
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});
+
 describe('M14 e2e — workspace create (live)', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {
