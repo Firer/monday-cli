@@ -5603,3 +5603,236 @@ describe('monday board group-archive (integration, M17)', () => {
     expect(warningCodes).not.toContain('stale_cache_refreshed');
   });
 });
+
+// =============================================================================
+// M17 — board group-duplicate (cli-design §4.3 + §6.4 + §8 eager invalidation)
+// =============================================================================
+
+describe('monday board group-duplicate (integration, M17)', () => {
+  const duplicatedGroup = {
+    id: 'topics_1',
+    title: 'Topics (copy)',
+    color: 'blue',
+    position: '2.0',
+    archived: false,
+    deleted: false,
+  };
+  const renamedDuplicate = {
+    ...duplicatedGroup,
+    title: 'Sprint 42',
+  };
+
+  it('rejects empty <groupId> at argv parse', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', '', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --name (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('live: bare invocation fires duplicate_group without group_title', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            match_variables: { boardId: '12345', groupId: 'topics' },
+            // Pin the GraphQL surface — a regression renaming
+            // would fail here.
+            match_query: /duplicate_group\(\s*board_id: \$boardId,\s*group_id: \$groupId/,
+            response: { data: { duplicate_group: duplicatedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.data.id).toBe('topics_1');
+    expect(env.data.title).toBe('Topics (copy)');
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: --name forwards group_title to the wire (NOT --with-updates — Monday duplicate_group has no with_updates arg)', async () => {
+    // Per cli-design §4.3 group-duplicate: M17's load-bearing
+    // divergence from item-duplicate / board-duplicate. Monday's
+    // duplicate_group wire signature has no with_updates argument;
+    // the M17 pre-flight pinned the wire truth and dropped the
+    // flag. --name maps to wire group_title.
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            match_variables: {
+              boardId: '12345',
+              groupId: 'topics',
+              groupTitle: 'Sprint 42',
+            },
+            // Pin the wire arg name — `group_title` is what Monday
+            // accepts; a regression renaming to `name` / `title`
+            // would lose the rename on the wire.
+            match_query: /group_title: \$groupTitle/,
+            response: { data: { duplicate_group: renamedDuplicate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { title: string };
+    };
+    expect(env.data.title).toBe('Sprint 42');
+  });
+
+  it('live: surfaces not_found when Monday returns null duplicate_group (source missing)', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'ghost', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            response: { data: { duplicate_group: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; group_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.group_id).toBe('ghost');
+  });
+
+  it('live: surfaces internal_error when the response is missing the duplicate_group root field (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('--dry-run: emits planned_changes with operation duplicate_group; no mutation fires', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--name', 'Sprint 42', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        group_id: string;
+        name?: string;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'duplicate_group',
+      board_id: '12345',
+      group_id: 'topics',
+      name: 'Sprint 42',
+    });
+  });
+
+  it('--dry-run: omits name from the planned change when --name is absent', async () => {
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'duplicate_group',
+      board_id: '12345',
+      group_id: 'topics',
+    });
+  });
+
+  it('cache invalidation round-trip: group-duplicate → board describe sees new group with source: live + no stale_cache_refreshed warning', async () => {
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    const newGroup = {
+      id: 'topics_1',
+      title: 'Sprint 42',
+      color: 'blue',
+      position: '2.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Duplicate the group.
+    const duplicated = await drive(
+      ['board', 'group-duplicate', '111', 'topics', '--name', 'Sprint 42', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            match_variables: { boardId: '111', groupId: 'topics', groupTitle: 'Sprint 42' },
+            response: { data: { duplicate_group: newGroup } },
+          },
+        ],
+      },
+    );
+    expect(duplicated.exitCode).toBe(0);
+    // Post-duplicate describe — clean cache miss → live fetch.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup, newGroup])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.map((g) => g.id)).toContain('topics_1');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+});

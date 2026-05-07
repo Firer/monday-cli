@@ -178,3 +178,49 @@ describe('M17 e2e — board group-archive (live)', () => {
     expect(result.stderr).not.toContain(LEAK_CANARY);
   });
 });
+
+describe('M17 e2e — board group-duplicate (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips duplicate_group; envelope carries the projected (new) group', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'GroupDuplicate',
+          response: {
+            data: {
+              duplicate_group: {
+                id: 'topics_1',
+                title: 'Topics (copy)',
+                color: 'blue',
+                position: '2.0',
+                archived: false,
+                deleted: false,
+              },
+            },
+          },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: ['board', 'group-duplicate', '12345', 'topics', '--json'],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('topics_1');
+    expect(env.data.title).toBe('Topics (copy)');
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});
