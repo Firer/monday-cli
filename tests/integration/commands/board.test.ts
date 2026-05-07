@@ -5836,3 +5836,228 @@ describe('monday board group-duplicate (integration, M17)', () => {
     expect(warningCodes).not.toContain('stale_cache_refreshed');
   });
 });
+
+// =============================================================================
+// M17 — board group-delete (cli-design §4.3 + §6.4 + §8 single-leg invalidation)
+// =============================================================================
+
+describe('monday board group-delete (integration, M17)', () => {
+  const deletedGroup = {
+    id: 'topics',
+    title: 'Topics',
+    color: 'blue',
+    position: '1.0',
+    archived: false,
+    deleted: false,
+  };
+
+  it('rejects without --yes — confirmation_required carries both board_id AND group_id (two-tuple shape)', async () => {
+    // Per cli-design §6.5 single-target shape: group-delete's wire
+    // signature is two-tuple, so the confirmation envelope echoes
+    // both ids. The R29 helper's `extraDetails` slot carries
+    // board_id alongside the canonical group_id detailKey.
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { board_id?: string; group_id?: string; hint?: string };
+      };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.group_id).toBe('topics');
+    expect(env.error?.details?.hint).toMatch(/group-archive/);
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required (M10 round-1 P2 ordering)', async () => {
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('--dry-run bypasses the confirmation gate (per cli-design §3.1 #7) — minimal shape, no preflight read', async () => {
+    // dry-run is non-executing and the gate is for live destructive
+    // writes only — group-delete <bid> <gid> --dry-run without
+    // --yes emits the dry-run envelope. Minimal shape, no
+    // preflight read leg fires (mirrors `column-delete` /
+    // `board-delete` / `workspace-delete`'s destructive-no-read
+    // pattern; diverges from `group-archive`'s snapshot-bearing
+    // dry-run).
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; board_id: string; group_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'delete_group',
+      board_id: '12345',
+      group_id: 'topics',
+    });
+  });
+
+  it('live: --yes fires delete_group and returns the projected (last-look) group', async () => {
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            match_variables: { boardId: '12345', groupId: 'topics' },
+            match_query: /delete_group\(board_id: \$boardId, group_id: \$groupId\)/,
+            response: { data: { delete_group: deletedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.data.id).toBe('topics');
+    expect(env.data.title).toBe('Topics');
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: surfaces not_found when Monday returns null delete_group', async () => {
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'ghost', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            response: { data: { delete_group: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; group_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.group_id).toBe('ghost');
+  });
+
+  it('live: surfaces internal_error when the response is missing the delete_group root field (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('cache invalidation round-trip: group-delete → board describe sees no group with source: live + no stale_cache_refreshed warning', async () => {
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Delete the group.
+    const deleted = await drive(
+      ['board', 'group-delete', '111', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            response: { data: { delete_group: preGroup } },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(0);
+    // Post-delete describe — clean cache miss → live fetch sees no
+    // group.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { groups: readonly { id: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.groups.find((g) => g.id === 'topics')).toBeUndefined();
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: error path skips invalidation (failed delete didn\'t change board state)', async () => {
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Delete fails (Monday returns null = not_found).
+    const deleted = await drive(
+      ['board', 'group-delete', '111', 'ghost', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            response: { data: { delete_group: null } },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(2);
+    // Post-delete describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
+});

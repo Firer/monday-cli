@@ -2312,7 +2312,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 68,
+    "command_count": 69,
     "error_codes": [
       {
         "code": "usage_error",
