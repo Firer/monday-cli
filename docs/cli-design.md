@@ -2231,13 +2231,26 @@ Notes:
 ```json
 {
   "ok": true,
-  "data": <resource>,
+  "data": <resource | verb-specific JSON>,
   "meta": { ... },
   "warnings": [],
   "side_effects": [ ... ],
   "resolved_ids": { "status": "status_4", "due": "date4" }
 }
 ```
+
+`data` is a single-resource projection (§6.2) for most mutations,
+but verb-specific wrappers exist where Monday's wire shape carries
+fields the projection schema doesn't model. Current wrappers:
+- `board duplicate` → `data: { board: <projection>, is_async }`
+  (the `BoardDuplication` SDK type carries `is_async`).
+- Partial-success consumers (`update clear-all` / `workspace
+  add-users` / `workspace remove-users` / `board add-users`) →
+  `data: { operation?, results: [...] }` per the partial-success
+  shape below.
+
+Per-verb shapes are documented in their dedicated subsections; the
+above is a generic template.
 
 `resolved_ids` (optional) echoes the token → column-ID mapping
 that §5.3 step 2 promised. Present on every column-mutation
@@ -2924,15 +2937,29 @@ mutation verbs produce different planned-change shapes; the
   **Live-path partial-application caveat.** The multi-call
   wire shape produces a single success envelope with `data:
   <full board projection>` from a final `boards(ids:)` read
-  leg when every per-field call succeeds. If any per-field
-  call fails, the whole-call surfaces an error envelope with
-  the failed call's code; Monday has no transaction across
-  per-attribute mutations, so per-field calls earlier in the
-  sequence have already committed server-side and **are not
-  rolled back**. This is the strongest guarantee compatible
-  with Monday's wire shape — agents re-issuing after a
-  partial-application failure should re-read the board to see
-  what landed before retrying the unapplied tail.
+  leg when every per-field call succeeds. **The post-mutation
+  read MUST bypass the board-metadata cache (force-live)** so
+  the success envelope reflects post-update state, not stale
+  cached metadata; success-path `meta.source: "live"` for that
+  reason. Cache-sourced reads are allowed only for the dry-run
+  preflight preview, never for the live-success final read. If
+  any per-field call fails, the whole-call surfaces an error
+  envelope with the failed call's code; Monday has no
+  transaction across per-attribute mutations, so per-field
+  calls earlier in the sequence have already committed
+  server-side and **are not rolled back**. This is the
+  strongest guarantee compatible with Monday's wire shape —
+  agents re-issuing after a partial-application failure should
+  re-read the board to see what landed before retrying the
+  unapplied tail.
+
+  **Dry-run cache-staleness caveat.** The preflight `board
+  get` read can hit the v0.1 board-metadata cache; `from`
+  values in the diff may lag live state up to the cache TTL.
+  `cache_age_seconds` reflects cache age and is truthful, but
+  the `from` snapshot reflects cache-write time, not "now". When
+  preview freshness is critical (e.g. updating after a recent
+  rename), pass `--no-cache` to force a live preflight read.
 
 - **Board-archive shape** (`board archive`; v0.2 M15). Mirrors
   item-archive's preflight-read-for-snapshot pattern. Carries
