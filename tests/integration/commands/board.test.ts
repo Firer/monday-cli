@@ -1577,6 +1577,148 @@ describe('monday board update (integration, M15)', () => {
     const postEnv = parseEnvelope(postOut.stdout);
     expect(postEnv.meta.source).toBe('cache');
   });
+
+  it('M16 retrofit: partial-application failure (call #2 fails after call #1 succeeded) STILL invalidates per §8 high-water-mark rule', async () => {
+    // §8 fan-out contract: invalidation fires after the loop
+    // settles iff at least one leg succeeded. Whole-call failure
+    // after call N succeeded MUST still invalidate because the
+    // cache must reflect the partially-applied server state.
+    // Mirror M16 column-update's partial-application round-trip.
+    const renamedPartial = {
+      id: '111',
+      name: 'Renamed',
+      description: 'old description',
+      state: 'active',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: '5',
+      url: null,
+      hierarchy_type: 'top_level',
+      is_leaf: true,
+      updated_at: '2026-05-07T11:00:00Z',
+      groups: [],
+      columns: [],
+    };
+    // Seed cache with the original snapshot.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Update fans out: call #1 (name) succeeds, call #2 (description)
+    // fails with a null payload → internal_error.
+    const updated = await drive(
+      [
+        'board', 'update', '111',
+        '--name', 'Renamed',
+        '--description', 'X',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: { boardAttribute: 'name', newValue: 'Renamed' },
+            response: { data: { update_board: 'Renamed' } },
+          },
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: { boardAttribute: 'description', newValue: 'X' },
+            response: { data: { update_board: null } },
+          },
+        ],
+      },
+    );
+    // Whole-call failure → exit 2.
+    expect(updated.exitCode).toBe(2);
+    // Post-failure describe — invalidation fired despite the whole-
+    // call failure (succeededLegs=1), so this is a clean cache miss.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        interactions: [
+          { ...metadataResponse([]), response: { data: { boards: [renamedPartial] } } },
+        ],
+      },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { name: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.name).toBe('Renamed');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('M16 retrofit: final-read failure after per-attribute calls succeeded STILL invalidates per §8', async () => {
+    // §8 fan-out contract pin: a final-read failure (very unusual —
+    // the board can't have been deleted between mutation and read
+    // in normal flow) STILL must invalidate if the per-attribute
+    // mutations already changed server state. The implementation
+    // wraps the final read inside the same try/catch as the per-
+    // attribute loop so the partial-application invalidate fires.
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Update: per-attribute call succeeds, final read returns
+    // empty boards (the projectMutationBoard null guard surfaces
+    // internal_error).
+    const updated = await drive(
+      ['board', 'update', '111', '--name', 'Renamed', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            response: { data: { update_board: 'Renamed' } },
+          },
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(2);
+    // Post-failure describe — invalidation MUST have fired even
+    // though the whole-call failed (per-attribute call already
+    // committed the rename server-side). The next describe is a
+    // clean cache miss → live fetch sees the renamed state.
+    const renamedFixture = {
+      id: '111',
+      name: 'Renamed',
+      description: null,
+      state: 'active',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: '5',
+      url: null,
+      hierarchy_type: 'top_level',
+      is_leaf: true,
+      updated_at: '2026-05-07T11:00:00Z',
+      groups: [],
+      columns: [],
+    };
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        interactions: [
+          { ...metadataResponse([]), response: { data: { boards: [renamedFixture] } } },
+        ],
+      },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { name: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.name).toBe('Renamed');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
 });
 
 describe('monday board archive (integration, M15)', () => {
@@ -2098,12 +2240,14 @@ describe('monday board delete (integration, M15)', () => {
       },
     );
     expect(deleted.exitCode).toBe(0);
-    // Post-delete describe — clean cache miss → live fetch returns
-    // not_found (Monday's `boards(ids:)` returns an empty array for
-    // deleted boards). meta.source on the error envelope is the
-    // resolved value at error-emit time — assert the cache file
-    // was unlinked by checking the underlying read fired live (any
-    // remaining cassette interaction was consumed).
+    // Post-delete describe — but Monday returns the deleted board
+    // for a different post-delete read. Surface the live state via
+    // a follow-up board describe that returns a deleted-flagged
+    // board. The post-read MUST satisfy the §8 envelope pins:
+    // meta.source: 'live'; no stale_cache_refreshed warning (the
+    // backstop is the path-not-under-test). Codex M16 round-1 F3
+    // pinned: assert the public agent-facing shape, not just
+    // request count.
     const postOut = await drive(
       ['board', 'describe', '111', '--json'],
       {
@@ -2111,20 +2255,44 @@ describe('monday board delete (integration, M15)', () => {
           {
             operation_name: 'BoardMetadata',
             match_variables: { ids: ['111'] },
-            response: { data: { boards: [] } },
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    name: 'Tasks',
+                    description: null,
+                    state: 'deleted',
+                    board_kind: 'public',
+                    board_folder_id: null,
+                    workspace_id: '5',
+                    url: null,
+                    hierarchy_type: 'top_level',
+                    is_leaf: true,
+                    updated_at: '2026-05-07T11:00:00Z',
+                    groups: [],
+                    columns: [],
+                  },
+                ],
+              },
+            },
           },
         ],
       },
     );
-    expect(postOut.exitCode).toBe(2);
-    expect(postOut.requests).toBe(1);
-    const postEnv = parseEnvelope(postOut.stderr);
-    expect(postEnv.error?.code).toBe('not_found');
-    // The describe surfaced not_found because the cache was
-    // invalidated (live fetch ran and returned an empty boards
-    // list). Without the retrofit, the pre-delete cache snapshot
-    // would have served instead, producing a phantom `boards: [..]`
-    // result.
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { state: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.state).toBe('deleted');
+    // Eager-invalidation happy path: clean cache miss → live fetch.
+    // The backstop (cache-miss-refresh path) emits stale_cache_
+    // refreshed when it fires; assert it did NOT (otherwise the
+    // test passes for the wrong reason).
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
   });
 
   it('M16 retrofit: error path skips invalidation (failed delete didn\'t change board state)', async () => {

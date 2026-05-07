@@ -260,7 +260,17 @@ export const boardUpdateCommand: CommandModule<
         // ran inline without invalidation; the §8 contract now
         // requires the cache to reflect partially-applied state on
         // partial-application failure too.
+        //
+        // Structure (matching column-update's shape per Codex M16
+        // round-1 F1): wrap the loop + final read + projection in a
+        // try/catch. The catch handles partial-application failure
+        // (invalidate iff succeededLegs > 0, then re-throw). The
+        // success path's invalidate + emit live OUTSIDE the
+        // try/catch so an emit-side throw doesn't fall back into
+        // the catch and double-invalidate.
         let succeededLegs = 0;
+        let projected: BoardProjection;
+        let finalResponse: Awaited<ReturnType<typeof client.raw<unknown>>>;
         try {
           for (const { attribute, value } of dispatchPlan) {
             const response = await client.raw<unknown>(
@@ -333,13 +343,12 @@ export const boardUpdateCommand: CommandModule<
           // slot. `client.raw` doesn't go through the cache, so this
           // always fires fresh — pre-flight Codex round-2 F2 pinned
           // this as load-bearing (a cached read could surface stale
-          // post-update name). Wrapped in the same try/catch as the
-          // per-attribute loop so a final-read failure (which would
-          // be very unusual — the board can't have been deleted
-          // between mutation and read in any normal flow) still
-          // triggers invalidation since the per-attribute
+          // post-update name). Inside the try/catch so a final-read
+          // failure (very unusual — the board can't have been
+          // deleted between mutation and read in any normal flow)
+          // still triggers invalidation since the per-attribute
           // mutations already committed server-side state.
-          const finalResponse = await client.raw<unknown>(
+          finalResponse = await client.raw<unknown>(
             BOARD_FINAL_READ_QUERY,
             { ids: [parsed.boardId] },
             { operationName: 'BoardUpdateFinalRead' },
@@ -359,36 +368,12 @@ export const boardUpdateCommand: CommandModule<
           // per-field calls succeeded but the final read couldn't
           // find the board, so surface contract anomaly rather
           // than a no-op success.
-          const projected = projectMutationBoard({
+          projected = projectMutationBoard({
             raw: first,
             errorCode: 'internal_error',
             errorMessage: `Monday returned no board for id ${parsed.boardId} on the final post-update read`,
             detailKey: 'board_id',
             detailValue: parsed.boardId,
-          });
-
-          // M16 retrofit — §8 fan-out call-site contract whole-call
-          // success path: invalidate ONCE after the trailing call's
-          // data projection. Ordered BEFORE emitMutation so a
-          // cache-unlink failure surfaces through the runner's
-          // catch-all rather than double-emitting after the success
-          // envelope hit stdout. succeededLegs > 0 is guaranteed
-          // here (the loop body bumps it on every iteration; we
-          // can only reach this line with dispatchPlan.length > 0).
-          await invalidateBoard(parsed.boardId, ctx.env);
-
-          emitMutation({
-            ctx,
-            data: projected,
-            schema: boardUpdateCommand.outputSchema,
-            programOpts: program.opts(),
-            warnings: [],
-            // Use the final-read response for meta (request_id,
-            // complexity) — it's the freshest wire call and reflects
-            // the success-path's last interaction with Monday.
-            ...toEmit(finalResponse),
-            source: 'live',
-            cacheAgeSeconds: null,
           });
         } catch (err) {
           // M16 retrofit — §8 fan-out call-site contract partial-
@@ -402,6 +387,33 @@ export const boardUpdateCommand: CommandModule<
           }
           throw err;
         }
+
+        // M16 retrofit — §8 fan-out call-site contract whole-call
+        // success path: invalidate ONCE after the trailing call's
+        // data projection, BEFORE emitMutation so a cache-unlink
+        // failure surfaces through the runner's catch-all rather
+        // than double-emitting after the success envelope hit
+        // stdout. Lives OUTSIDE the try/catch above (Codex M16
+        // round-1 F1) so an emit-side throw doesn't fall into the
+        // catch and double-invalidate. succeededLegs > 0 is
+        // guaranteed here (the loop body bumps it on every
+        // iteration; we can only reach this line with
+        // dispatchPlan.length > 0).
+        await invalidateBoard(parsed.boardId, ctx.env);
+
+        emitMutation({
+          ctx,
+          data: projected,
+          schema: boardUpdateCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          // Use the final-read response for meta (request_id,
+          // complexity) — it's the freshest wire call and reflects
+          // the success-path's last interaction with Monday.
+          ...toEmit(finalResponse),
+          source: 'live',
+          cacheAgeSeconds: null,
+        });
       });
   },
 };
