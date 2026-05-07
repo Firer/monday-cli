@@ -35,9 +35,8 @@ post-mortem):
 
 **M14 → M15 cleanup window candidates** (full detail in §22):
 - **R39 — `WORKSPACE_FIELDS_FRAGMENT` + projection schema lift**
-  (5 GraphQL strings + 4 schema imports). Trigger fired; ready to
-  ship. Recommendation: M14 → M15 cleanup window OR alongside M15's
-  board cluster.
+  (5 GraphQL strings + 4 schema imports). **Shipped: ec1398b**
+  (M14 → M15 cleanup window).
 - **R40 — partial-success `--users` resolver-fronted-fan-out
   helper** (2 consumers; M15 `board add-users` is the third).
   Defer until M15 close.
