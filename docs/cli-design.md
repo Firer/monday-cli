@@ -497,15 +497,29 @@ monday workspace delete <wid> --yes [--dry-run]                              v0.
                                           # `meta.source: "none"`.
 monday workspace add-users <wid> --users <id|email>,... [--dry-run]          v0.2
                                           # `add_users_to_workspace(workspace_id,
-                                          # user_ids, kind?)` fanned out one wire
-                                          # call per user. `--users` accepts numeric
-                                          # IDs and emails mixed in one comma-
-                                          # separated list; emails resolve via M5a's
-                                          # `userByEmail` (directory cache + `users
-                                          # (emails:)` fallback). **Partial-success
-                                          # envelope** per §6.4 — emits one `ok:
-                                          # true` envelope with `data.results:
-                                          # [{user_id, ok, error?}]`. Per-user
+                                          # user_ids)` fanned out one wire call per
+                                          # user. The wire mutation also accepts an
+                                          # optional `kind: WorkspaceSubscriberKind`
+                                          # argument; M14 deliberately OMITS it and
+                                          # relies on Monday's server-side default
+                                          # (subscriber). Owner-tier and explicit
+                                          # subscriber-kind selection are deferred
+                                          # to a later milestone (no v0.2 surface
+                                          # decision blocking M14). `--users`
+                                          # accepts numeric IDs and emails mixed in
+                                          # one comma-separated list. Numeric IDs
+                                          # are argv-derived (no resolution leg
+                                          # fires); only email tokens flow through
+                                          # M5a's `userByEmail` (directory cache +
+                                          # `users(emails:)` fallback). **Partial-
+                                          # success envelope** per §6.4 — emits one
+                                          # `ok: true` envelope with `data: {
+                                          # operation: "add_users_to_workspace",
+                                          # results: [{user_id, ok, error?}] }`
+                                          # (`data.operation` per v0.2-plan §3 M14
+                                          # decision; `data.operation` lives on
+                                          # `data` not `meta` per the upsert
+                                          # precedent in §6.4 line 2331). Per-user
                                           # resolution failures (`user_not_found`)
                                           # AND per-user dispatch failures land in
                                           # the per-record `error` slot rather than
@@ -514,25 +528,42 @@ monday workspace add-users <wid> --users <id|email>,... [--dry-run]          v0.
                                           # token verbatim so agents can correlate.
                                           # Top-level `error` reserved for whole-
                                           # call failure (couldn't reach API; ALL
-                                          # `--users` tokens failed resolution
-                                          # before the loop began). Sequential per
-                                          # §8 decision 8 — parallel waits for v0.4
-                                          # `--concurrency`. Idempotent: yes —
-                                          # re-adding an existing member is a no-op
-                                          # on Monday's side. **Admin-permission-
-                                          # sensitive**. Dry-run resolves every
-                                          # `--users` token (so `user_not_found`
-                                          # surfaces ahead of the live call) and
-                                          # emits the same per-user record shape
-                                          # with `would_apply` substituted for `ok`
-                                          # (§6.4 workspace-add-users variant).
+                                          # email `--users` tokens failed
+                                          # resolution before the loop began →
+                                          # top-level `user_not_found`, exit 2).
+                                          # Malformed `--users` syntax (e.g. blank
+                                          # token, non-numeric and non-email) →
+                                          # top-level `usage_error`, exit 1.
+                                          # Sequential per §8 decision 8 — parallel
+                                          # waits for v0.4 `--concurrency`.
+                                          # Idempotent: yes — re-adding an existing
+                                          # member is a no-op on Monday's side.
+                                          # **Admin-permission-sensitive**. Dry-run
+                                          # resolves every email `--users` token
+                                          # (numeric IDs skip resolution) so
+                                          # `user_not_found` surfaces ahead of the
+                                          # live call; emits the same per-user
+                                          # record shape with `would_apply`
+                                          # substituted for `ok` (§6.4 workspace-
+                                          # add-users variant). `meta.source`
+                                          # aggregates over the resolution legs:
+                                          # all-numeric `--users` → `none` (no
+                                          # API/cache leg fires); all-email cache
+                                          # hits → `cache`; live `users(emails:)`
+                                          # → `live`; combinations → `mixed`.
 monday workspace remove-users <wid> --users <id|email>,... [--dry-run]       v0.2
                                           # `delete_users_from_workspace(workspace_id,
                                           # user_ids)`. Mirrors `add-users` shape
-                                          # exactly (one wire call per user; same
-                                          # partial-success envelope; same `--users`
-                                          # parser; same `userByEmail` resolution;
-                                          # same dry-run per-record shape).
+                                          # exactly: same fan-out (one wire call
+                                          # per user); same partial-success
+                                          # envelope including `data.operation:
+                                          # "delete_users_from_workspace"`; same
+                                          # `--users` parser (numeric argv-derived,
+                                          # email through `userByEmail`); same
+                                          # `meta.source` aggregation rule; same
+                                          # dry-run per-record shape with
+                                          # `would_apply`; same `usage_error` /
+                                          # `user_not_found` whole-call boundaries.
                                           # Idempotent: yes — re-removing a non-
                                           # member is a no-op. **Admin-permission-
                                           # sensitive**. Dry-run shape per §6.4
@@ -2458,21 +2489,23 @@ mutation verbs produce different planned-change shapes; the
   ```
 
 - **Workspace-add-users shape** (`workspace add-users`; v0.2
-  M14). Single-leg dry-run that resolves every `--users` token
-  through `userByEmail` so resolution failures (`user_not_found`)
-  surface ahead of the live call. Carries `operation:
-  "add_users_to_workspace"`, `workspace_id`, and `results: [...]`
-  — a per-user array mirroring the live envelope's `data.results`
-  shape with `would_apply` substituted for `ok`. Each record
-  carries `user_id: string` (the resolved Monday user ID for
-  resolved tokens; the input token verbatim when resolution
-  failed — agents correlate retries against the input string),
-  `would_apply: boolean` (true iff the live call would dispatch
-  for this user), and an optional `error: { code, message }`
-  populated on resolution failure. `meta.source: "live"` because
-  the resolution leg fires real `users(emails:)` reads (or
-  `cache` if every email hits the directory cache; aggregate
-  `mixed` when both legs apply):
+  M14). Single-leg dry-run that resolves every email `--users`
+  token through `userByEmail` (numeric IDs skip the resolver
+  entirely — they're argv-derived) so resolution failures
+  (`user_not_found`) surface ahead of the live call. Carries
+  `operation: "add_users_to_workspace"`, `workspace_id`, and
+  `results: [...]` — a per-user array mirroring the live
+  envelope's `data.results` shape with `would_apply` substituted
+  for `ok`. Each record carries `user_id: string` (the resolved
+  Monday user ID for resolved tokens; the input token verbatim
+  when resolution failed — agents correlate retries against the
+  input string), `would_apply: boolean` (true iff the live call
+  would dispatch for this user), and an optional `error: { code,
+  message }` populated on resolution failure. `meta.source`
+  aggregates over the resolution legs: all-numeric `--users` →
+  `"none"` (no API/cache leg fires); all-email cache hits →
+  `"cache"`; live `users(emails:)` → `"live"`; combinations →
+  `"mixed"`:
 
   ```json
   {
@@ -2496,20 +2529,51 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
-  When ALL `--users` tokens fail resolution, the dry-run
-  surfaces `usage_error` (exit 1) rather than emitting a
-  zero-would-apply preview — same rationale as the
-  workspace-update `not_found` rule (no point rendering a
-  guaranteed-failure dry-run).
+  The corresponding **live envelope** carries `data.operation`
+  alongside `data.results` (per v0.2-plan §3 M14 line 399 and
+  the upsert precedent that places verb-shape signals on `data`
+  rather than `meta`):
+
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "operation": "add_users_to_workspace",
+      "results": [
+        { "user_id": "67890", "ok": true },
+        { "user_id": "67891", "ok": true },
+        { "user_id": "ghost@example.com", "ok": false,
+          "error": { "code": "user_not_found",
+                     "message": "No Monday user matches email \"ghost@example.com\"" } }
+      ]
+    },
+    "meta": { ..., "source": "mixed" },
+    "warnings": []
+  }
+  ```
+
+  When ALL email `--users` tokens fail resolution before the
+  dispatch loop begins, the call surfaces top-level
+  `user_not_found` (exit 2) — both for live and dry-run. The
+  whole-call code is `user_not_found` (the actionable directory-
+  miss case), NOT `usage_error` (which is reserved for malformed
+  `--users` syntax — blank tokens, tokens that aren't numeric
+  AND aren't email-shaped). This matches §6.5's existing
+  `user_not_found` semantics and lets agents distinguish "your
+  argv was wrong" (exit 1) from "the directory doesn't have
+  these users" (exit 2). The error carries `details.failed_tokens:
+  [...]` listing every unresolved input.
 
 - **Workspace-remove-users shape** (`workspace remove-users`;
   v0.2 M14). Identical shape to workspace-add-users with
-  `operation` flipped to `"delete_users_from_workspace"`.
-  Same per-user `results` array, same `would_apply` /
-  `error` semantics, same `meta.source` aggregation. The two
-  verbs share their dry-run shape because their contract is
-  symmetric — fan out one wire call per user and capture per-
-  user outcomes.
+  `operation` flipped to `"delete_users_from_workspace"` in
+  both the dry-run `planned_changes[]` and the live
+  `data.operation`. Same per-user `results` array, same
+  `would_apply` / `ok` semantics, same `meta.source`
+  aggregation, same `user_not_found` / `usage_error` whole-call
+  boundary rules. The two verbs share their envelope shape
+  because their contract is symmetric — fan out one wire call
+  per user and capture per-user outcomes.
 
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
@@ -2523,10 +2587,11 @@ in `data.results: [...]`. Each per-target record carries
 `{<target_id_field>: string, ok: true | false, error?: { code,
 message }}` where the id-field name is verb-specific
 (`update_id` for `update clear-all`; `user_id` for the add/remove-
-users family). The shared envelope-builder
-(`buildPartialSuccessMutation`) takes the field name as a
-parameter so the per-verb shape is self-documenting in JSON
-without forcing every consumer to adopt a generic `target_id`.
+users family). The shared dispatch helper (`dispatchSequential`
+in `src/api/partial-success-mutation.ts`) takes the field name
+as a parameter so the per-verb shape is self-documenting in
+JSON without forcing every consumer to adopt a generic
+`target_id`.
 
 ```json
 {
@@ -2558,12 +2623,18 @@ across multi-target verbs (v0.2-plan §8 decision 3).
 
 The `data` slot reuses the existing `MutationEnvelope` (no §6.4
 schema bump) — the slot widens to accept `{ results: [...] }`
-for partial-success consumers; single-target verbs continue to
-use the `<resource>` projection. `resolved_ids` and
-`side_effects` slots are absent on partial-success envelopes
-(no token resolution, no implicit secondary operations — the
-secondary operations are exactly the per-target results, which
-live in `data.results`).
+or `{ operation, results: [...] }` for partial-success
+consumers (the optional `operation` slot is verb-specific; M14
+add-users / remove-users include it per §3 M14 decision, M13
+clear-all does not); single-target verbs continue to use the
+`<resource>` projection. `resolved_ids` and `side_effects`
+slots are absent on partial-success envelopes — when a verb
+performs per-token resolution (e.g. M14 `--users` tokens
+through `userByEmail`), the resolved IDs and any failed input
+tokens are represented per record inside `data.results` rather
+than as a top-level `resolved_ids` map. The implicit-side-
+effects slot stays absent because the partial-success per-
+target outcomes are themselves the work the call performed.
 
 The corresponding dry-run shape inverts: the dry-run's
 `planned_changes[]` lists the would-dispatch operations
@@ -2582,12 +2653,22 @@ run) and `error: { code: "user_not_found", message }` populated.
 The id-field carries the **input token verbatim** when
 resolution failed (agents need a string to correlate against
 their `--users` argument; the resolved Monday ID isn't known).
-This widens the contract slightly versus `update clear-all`'s
-"id-field always carries a Monday ID" rule and is documented
-per-verb in §4.3 + §6.4. Whole-call `error` (`ok: false`) still
-fires when ALL `--users` tokens fail resolution before the loop
-begins (the M14 / M15 verbs adopt this from §3 M14 line 399's
-"all `--users` tokens failed resolution" rule).
+Numeric IDs in `--users` skip the resolver entirely (they're
+argv-derived); only email tokens fire the directory lookup,
+which means a numeric-only `--users` invocation aggregates
+`meta.source: "none"` and an email-bearing invocation
+aggregates over the cache/live legs (`cache` / `live` /
+`mixed`) — same precedent as the M5b people-resolver
+aggregation. This widens the partial-success contract slightly
+versus `update clear-all`'s "id-field always carries a Monday
+ID" rule and is documented per-verb in §4.3 + §6.4. Whole-call
+`error` (`ok: false`) fires with code **`user_not_found`**
+(not `usage_error`) when ALL email `--users` tokens fail
+resolution before the loop begins — the directory-miss case is
+actionable distinct from malformed argv. Malformed `--users`
+syntax (blank tokens; tokens that aren't numeric AND aren't
+email-shaped) surfaces as `usage_error` (exit 1) at argv
+parse, before any resolution leg fires.
 
 For `monday item upsert` (M12), `data.operation` indicates which
 branch the wire mutation took:
