@@ -72,7 +72,7 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { BoardIdSchema } from '../../types/ids.js';
+import { BoardIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
@@ -117,12 +117,12 @@ export type BoardColumnUpdateOutput = ColumnProjection;
 const inputSchema = z
   .object({
     boardId: BoardIdSchema,
-    // Column ids are non-numeric strings (e.g. `status_4`,
-    // `text__1`) — different shape from board / item / etc. ids
-    // (which are numeric), so a generic numeric brand doesn't fit.
-    // Required-non-empty so an empty positional surfaces usage_error
-    // at the boundary rather than as a wire validation_failed.
-    columnId: z.string().min(1, { message: '<columnId> must be non-empty' }),
+    // Column ids are non-numeric slug strings (e.g. `status_4`,
+    // `text__1`); the branded `ColumnIdSchema` in `types/ids.ts`
+    // owns the slug-shape `min(1)` regex + the nominal brand so
+    // a future caller can't confuse a ColumnId with a GroupId at
+    // the type level.
+    columnId: ColumnIdSchema,
     title: z
       .string()
       .refine((s) => s.trim().length > 0, {

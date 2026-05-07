@@ -58,7 +58,7 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { BoardIdSchema } from '../../types/ids.js';
+import { BoardIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { ApiError } from '../../utils/errors.js';
@@ -86,10 +86,12 @@ export type BoardColumnDeleteOutput = ColumnProjection;
 const inputSchema = z
   .object({
     boardId: BoardIdSchema,
-    // Column ids are non-numeric strings (e.g. `status_4`,
-    // `text__1`); required-non-empty so an empty positional
-    // surfaces usage_error at the boundary.
-    columnId: z.string().min(1, { message: '<columnId> must be non-empty' }),
+    // Column ids are non-numeric slug strings (e.g. `status_4`,
+    // `text__1`); the branded `ColumnIdSchema` in `types/ids.ts`
+    // owns the slug-shape `min(1)` regex + the nominal brand so
+    // a future caller can't confuse a ColumnId with a GroupId at
+    // the type level.
+    columnId: ColumnIdSchema,
   })
   .strict();
 
