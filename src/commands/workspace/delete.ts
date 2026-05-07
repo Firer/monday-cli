@@ -51,33 +51,22 @@ import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
-  workspaceGetOutputSchema,
-  type WorkspaceGetOutput,
-} from './get.js';
+  WORKSPACE_FIELDS_FRAGMENT,
+  workspaceProjectionSchema,
+  type WorkspaceProjection,
+} from '../../api/workspace-projection.js';
 
 const DELETE_WORKSPACE_MUTATION = `
   mutation WorkspaceDelete($workspaceId: ID!) {
     delete_workspace(workspace_id: $workspaceId) {
-      id
-      name
-      description
-      kind
-      state
-      is_default_workspace
-      created_at
-      settings {
-        icon {
-          color
-          image
-        }
-      }
+      ${WORKSPACE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-export const workspaceDeleteOutputSchema = workspaceGetOutputSchema;
+export const workspaceDeleteOutputSchema = workspaceProjectionSchema;
 
-export type WorkspaceDeleteOutput = WorkspaceGetOutput;
+export type WorkspaceDeleteOutput = WorkspaceProjection;
 
 const inputSchema = z
   .object({ workspaceId: WorkspaceIdSchema })

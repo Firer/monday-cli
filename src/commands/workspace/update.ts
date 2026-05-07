@@ -44,26 +44,15 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
-  workspaceGetOutputSchema,
-  type WorkspaceGetOutput,
-} from './get.js';
+  WORKSPACE_FIELDS_FRAGMENT,
+  workspaceProjectionSchema,
+  type WorkspaceProjection,
+} from '../../api/workspace-projection.js';
 
 const WORKSPACE_UPDATE_PREFLIGHT_QUERY = `
   query WorkspaceUpdatePreflight($ids: [ID!]) {
     workspaces(ids: $ids) {
-      id
-      name
-      description
-      kind
-      state
-      is_default_workspace
-      created_at
-      settings {
-        icon {
-          color
-          image
-        }
-      }
+      ${WORKSPACE_FIELDS_FRAGMENT}
     }
   }
 `;
@@ -71,26 +60,14 @@ const WORKSPACE_UPDATE_PREFLIGHT_QUERY = `
 const UPDATE_WORKSPACE_MUTATION = `
   mutation WorkspaceUpdate($id: ID!, $attributes: UpdateWorkspaceAttributesInput!) {
     update_workspace(id: $id, attributes: $attributes) {
-      id
-      name
-      description
-      kind
-      state
-      is_default_workspace
-      created_at
-      settings {
-        icon {
-          color
-          image
-        }
-      }
+      ${WORKSPACE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-export const workspaceUpdateOutputSchema = workspaceGetOutputSchema;
+export const workspaceUpdateOutputSchema = workspaceProjectionSchema;
 
-export type WorkspaceUpdateOutput = WorkspaceGetOutput;
+export type WorkspaceUpdateOutput = WorkspaceProjection;
 
 const inputSchema = z
   .object({

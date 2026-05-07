@@ -13,54 +13,23 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { runByIdLookup } from '../run-by-id-lookup.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
+import {
+  WORKSPACE_FIELDS_FRAGMENT,
+  workspaceProjectionSchema,
+  type WorkspaceProjection,
+} from '../../api/workspace-projection.js';
 
 const WORKSPACE_GET_QUERY = `
   query WorkspaceGet($ids: [ID!]) {
     workspaces(ids: $ids) {
-      id
-      name
-      description
-      kind
-      state
-      is_default_workspace
-      created_at
-      settings {
-        icon {
-          color
-          image
-        }
-      }
+      ${WORKSPACE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-const iconSchema = z
-  .object({
-    color: z.string().nullable(),
-    image: z.string().nullable(),
-  })
-  .strict();
+export const workspaceGetOutputSchema = workspaceProjectionSchema;
 
-const settingsSchema = z
-  .object({
-    icon: iconSchema.nullable(),
-  })
-  .strict();
-
-export const workspaceGetOutputSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string(),
-    description: z.string().nullable(),
-    kind: z.string().nullable(),
-    state: z.string().nullable(),
-    is_default_workspace: z.boolean().nullable(),
-    created_at: z.string().nullable(),
-    settings: settingsSchema.nullable(),
-  })
-  .strict();
-
-export type WorkspaceGetOutput = z.infer<typeof workspaceGetOutputSchema>;
+export type WorkspaceGetOutput = WorkspaceProjection;
 
 const inputSchema = z
   .object({

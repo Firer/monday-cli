@@ -35,33 +35,22 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
-  workspaceGetOutputSchema,
-  type WorkspaceGetOutput,
-} from './get.js';
+  WORKSPACE_FIELDS_FRAGMENT,
+  workspaceProjectionSchema,
+  type WorkspaceProjection,
+} from '../../api/workspace-projection.js';
 
 const CREATE_WORKSPACE_MUTATION = `
   mutation WorkspaceCreate($name: String!, $kind: WorkspaceKind!, $description: String) {
     create_workspace(name: $name, kind: $kind, description: $description) {
-      id
-      name
-      description
-      kind
-      state
-      is_default_workspace
-      created_at
-      settings {
-        icon {
-          color
-          image
-        }
-      }
+      ${WORKSPACE_FIELDS_FRAGMENT}
     }
   }
 `;
 
-export const workspaceCreateOutputSchema = workspaceGetOutputSchema;
+export const workspaceCreateOutputSchema = workspaceProjectionSchema;
 
-export type WorkspaceCreateOutput = WorkspaceGetOutput;
+export type WorkspaceCreateOutput = WorkspaceProjection;
 
 // Argv schema. `name` carries the same min(1)-after-trim discipline
 // as `item create` — Monday accepts whitespace-only names but they
