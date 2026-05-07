@@ -8,6 +8,8 @@
  *   - board find — exact, ambiguous_name, --first warning, not_found.
  *   - board describe — example_set per writable column type.
  *   - board subscribers / columns / groups — happy + cache flow.
+ *   - M15 lifecycle: create / update / archive / delete / duplicate /
+ *     add-users (each in its own describe block).
  *
  * Each board describe / columns / groups test uses an isolated
  * tmp XDG cache so cache-write side effects don't bleed across tests.
@@ -2053,5 +2055,326 @@ describe('monday board duplicate (integration, M15)', () => {
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('not_found');
+  });
+});
+
+describe('monday board add-users (integration, M15)', () => {
+  // Cache-isolated drive() — the email resolution leg writes the
+  // user-directory cache; tests must not interfere across runs.
+  const addUsersEnv = useCachedIntegrationEnv('monday-cli-board-addusers-int-');
+  const driveAddUsers = addUsersEnv.drive;
+
+  const userById = (id: string) => ({
+    id,
+    name: `User ${id}`,
+    email: `user${id}@example.test`,
+  });
+
+  it('live: all-numeric --users fires one wire call per user; envelope carries data.operation: add_users_to_board', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardAddUsers',
+            // Wire-shape pin: per-user dispatch with single-element
+            // user_ids array; board_id (not workspace_id).
+            match_variables: { boardId: '12345', userIds: ['67890'] },
+            match_query: /add_users_to_board\(board_id: \$boardId, user_ids: \$userIds\)/,
+            response: { data: { add_users_to_board: [userById('67890')] } },
+          },
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['67891'] },
+            response: { data: { add_users_to_board: [userById('67891')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly { user_id: string; ok: boolean }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    // data.operation lives on `data` (not `meta`) — per cli-design
+    // §6.4 upsert precedent. M14 round-1 P1 caught the workspace
+    // version of this; M15 inherits the precedent verbatim.
+    expect(envOut.data.operation).toBe('add_users_to_board');
+    expect(envOut.data.results).toEqual([
+      { user_id: '67890', ok: true },
+      { user_id: '67891', ok: true },
+    ]);
+    // All-numeric live path: zero resolver legs + 2 dispatch legs
+    // = source 'live' (the dispatch leg counts).
+    expect(envOut.meta.source).toBe('live');
+    assertEnvelopeContract(envOut);
+  });
+
+  it('live: mixed numeric + email — email resolves through userByEmail, both dispatch', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,alice@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['alice@example.test'] },
+            response: {
+              data: {
+                users: [{ id: '99001', name: 'Alice', email: 'alice@example.test' }],
+              },
+            },
+          },
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_board: [userById('67890')] } },
+          },
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['99001'] },
+            response: { data: { add_users_to_board: [userById('99001')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { results: readonly { user_id: string; ok: boolean }[] };
+    };
+    expect(envOut.data.results).toEqual([
+      { user_id: '67890', ok: true },
+      { user_id: '99001', ok: true },
+    ]);
+  });
+
+  it('live: partial success — ghost email lands per-record while numeric dispatches OK', async () => {
+    // Mixed numeric + ghost-email stays partial-success (M14
+    // round-2 P1 boundary refinement: "no dispatchable user_id
+    // remains" not "ALL emails failed"). Numeric still dispatches
+    // even though one email resolution fails.
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,ghost@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['ghost@example.test'] },
+            response: { data: { users: [] } },
+          },
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_board: [userById('67890')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        results: readonly {
+          user_id: string;
+          ok: boolean;
+          error?: { code: string; message: string };
+        }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.operation).toBe('add_users_to_board');
+    expect(envOut.data.results).toHaveLength(2);
+    expect(envOut.data.results[0]).toEqual({ user_id: '67890', ok: true });
+    // Ghost email's user_id carries the input token verbatim so
+    // agents can correlate retries.
+    expect(envOut.data.results[1]?.user_id).toBe('ghost@example.test');
+    expect(envOut.data.results[1]?.ok).toBe(false);
+    expect(envOut.data.results[1]?.error?.code).toBe('user_not_found');
+  });
+
+  it('live: per-target dispatch failure lands per-record (envelope stays ok: true)', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['67890'] },
+            response: { data: { add_users_to_board: [userById('67890')] } },
+          },
+          {
+            operation_name: 'BoardAddUsers',
+            match_variables: { boardId: '12345', userIds: ['67891'] },
+            response: {
+              data: { add_users_to_board: null },
+              errors: [
+                {
+                  message: 'User 67891 cannot be added',
+                  extensions: { code: 'VALIDATION' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { user_id: string; ok: boolean; error?: { code: string } }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.results[0]?.ok).toBe(true);
+    expect(envOut.data.results[1]?.ok).toBe(false);
+    expect(envOut.data.results[1]?.error).toBeDefined();
+  });
+
+  it('live: surfaces internal_error when add_users_to_board response is missing the root key', async () => {
+    // M14 round-2 F1 / round-3 F1 distinction: missing-root-key is
+    // a schema-drift internal_error (whole-call), distinct from
+    // null payload (per-record not_found). dispatchSequential
+    // re-throws internal_error so it doesn't paper over.
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardAddUsers',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('internal_error');
+  });
+
+  it('whole-call user_not_found when ALL email tokens fail resolution and no numeric remains', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', 'a@example.test,b@example.test', '--no-cache', '--json'],
+      {
+        interactions: [
+          { operation_name: 'UsersByEmail', response: { data: { users: [] } } },
+          { operation_name: 'UsersByEmail', response: { data: { users: [] } } },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { board_id?: string; failed_tokens?: readonly string[] };
+      };
+    };
+    expect(envOut.error?.code).toBe('user_not_found');
+    expect(envOut.error?.details?.board_id).toBe('12345');
+    expect(envOut.error?.details?.failed_tokens).toEqual([
+      'a@example.test',
+      'b@example.test',
+    ]);
+  });
+
+  it('rejects malformed --users tokens as usage_error at argv-parse', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', 'not-a-real-token', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { malformed_tokens?: readonly string[] } };
+    };
+    expect(envOut.error?.code).toBe('usage_error');
+    expect(envOut.error?.details?.malformed_tokens).toEqual(['not-a-real-token']);
+  });
+
+  it('rejects empty --users entries as usage_error', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', ',67890', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --users as usage_error (commander requiredOption)', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', 'not-numeric', '--users', '67890', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: all-numeric → results with would_apply, source: "none" (no resolver leg fires)', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,67891', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        results: readonly { user_id: string; would_apply: boolean }[];
+      }[];
+    };
+    expect(envOut.data).toBeNull();
+    expect(envOut.meta.source).toBe('none');
+    const plan = envOut.planned_changes[0];
+    expect(plan?.operation).toBe('add_users_to_board');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.results).toEqual([
+      { user_id: '67890', would_apply: true },
+      { user_id: '67891', would_apply: true },
+    ]);
+  });
+
+  it('--dry-run: email resolution fires; ghost email lands as would_apply: false with error', async () => {
+    const out = await driveAddUsers(
+      ['board', 'add-users', '12345', '--users', '67890,ghost@example.test', '--no-cache', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UsersByEmail',
+            match_variables: { emails: ['ghost@example.test'] },
+            response: { data: { users: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly {
+        results: readonly {
+          user_id: string;
+          would_apply: boolean;
+          error?: { code: string };
+        }[];
+      }[];
+    };
+    // Resolver leg fired → meta.source: 'live'.
+    expect(envOut.meta.source).toBe('live');
+    const plan = envOut.planned_changes[0];
+    expect(plan?.results[0]).toEqual({ user_id: '67890', would_apply: true });
+    expect(plan?.results[1]?.would_apply).toBe(false);
+    expect(plan?.results[1]?.error?.code).toBe('user_not_found');
   });
 });
