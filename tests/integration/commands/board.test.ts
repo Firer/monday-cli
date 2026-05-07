@@ -1458,6 +1458,125 @@ describe('monday board update (integration, M15)', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('internal_error');
   });
+
+  // ---------------------------------------------------------------
+  // M16 retrofit — invalidateBoard post-success per cli-design §8
+  // ---------------------------------------------------------------
+
+  it('M16 retrofit: cache invalidation round-trip — board update → board describe sees renamed board with source: live + no stale_cache_refreshed warning', async () => {
+    // Per cli-design §8 fan-out call-site contract: invalidate ONCE
+    // after the per-attribute loop settles iff at least one leg
+    // succeeded. Round-trip pins the three §8 invariants:
+    // post-mutation read sees live state; meta.source: 'live'; no
+    // stale_cache_refreshed warning (the backstop is the path-not-
+    // under-test).
+    const renamedBoard = {
+      id: '111',
+      name: 'Renamed',
+      description: null,
+      state: 'active',
+      board_kind: 'public',
+      board_folder_id: null,
+      workspace_id: '5',
+      url: null,
+      hierarchy_type: 'top_level',
+      is_leaf: true,
+      updated_at: '2026-05-07T11:00:00Z',
+      groups: [],
+      columns: [],
+    };
+    // Seed cache via board describe.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Update the board name.
+    const updated = await drive(
+      ['board', 'update', '111', '--name', 'Renamed', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            match_variables: { boardId: '111', boardAttribute: 'name', newValue: 'Renamed' },
+            response: { data: { update_board: 'Renamed' } },
+          },
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    name: 'Renamed',
+                    description: null,
+                    state: 'active',
+                    board_kind: 'public',
+                    board_folder_id: null,
+                    workspace_id: '5',
+                    url: null,
+                    items_count: 0,
+                    updated_at: '2026-05-07T11:00:00Z',
+                    permissions: 'everyone',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(0);
+    // Post-update describe — clean cache miss → live fetch.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [{ ...metadataResponse([]), response: { data: { boards: [renamedBoard] } } }] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { name: string };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.name).toBe('Renamed');
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('M16 retrofit: zero-legs-succeeded (very first per-attribute call fails) does NOT invalidate per §8', async () => {
+    // §8 fan-out contract: zero-legs-succeeded skips invalidation
+    // because server state didn't change.
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Update fails on first per-attribute call (null payload →
+    // internal_error per the M15 round-1 F1 distinction).
+    const updated = await drive(
+      ['board', 'update', '111', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            response: { data: { update_board: null } },
+          },
+        ],
+      },
+    );
+    expect(updated.exitCode).toBe(2);
+    // Post-update describe — cache hit (source: 'cache') because
+    // invalidation was correctly skipped (server state didn't
+    // change). Empty interactions: a cache hit needs no live fetch;
+    // if invalidation incorrectly fired the test would fail with an
+    // exhausted cassette.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
 });
 
 describe('monday board archive (integration, M15)', () => {
