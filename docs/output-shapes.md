@@ -479,6 +479,289 @@ A populated diagnostic looks like:
               { "id": "status_b", "title": "STATUS" }] }
 ```
 
+### `board create --name <n> [--workspace <wid>] [--kind public|private|share] [--template <bid>] [--description <d>] [--dry-run]` (M15)
+
+Live envelope's `data` is the projected `Board` shape (same as
+`board get` post-M15 — the cluster shares `boardProjectionSchema`).
+`--kind` defaults to `public` when omitted (Monday's GraphQL signature
+pins `board_kind: BoardKind!`; the CLI fills the default rather than
+letting the wire reject). `--template <bid>` passes Monday's
+`template_id` arg — the CLI does NOT pre-validate template-ness
+(BoardKind has no `template` value; templates are managed via
+Monday's UI, and non-template IDs surface a wire `validation_failed`
+re-mapped per cli-design §6.5).
+
+```json
+{
+  "id": "67890", "name": "Engineering", "description": "Eng team board",
+  "state": "active", "board_kind": "public", "board_folder_id": null,
+  "workspace_id": "5", "url": "https://x.monday.com/boards/67890",
+  "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
+  "permissions": "everyone"
+}
+```
+
+Dry-run shape per cli-design §6.4 board-create variant —
+`{operation: "create_board", name, workspace_id?, kind, description?,
+template_id?}` with `data: null` and `meta.source: "none"`. Idempotent:
+false (re-running creates a duplicate board; agents needing dedupe
+call `board list` first).
+
+### `board update <bid> [--name <n>] [--description <d>] [--dry-run]` (M15)
+
+Live envelope's `data` is the projected `Board` shape post-update.
+At least one of `--name` / `--description` is required; zero-flag
+invocation surfaces as `usage_error` at argv-parse.
+
+**Wire shape divergence** from `update_workspace`: Monday's
+`update_board(board_id, board_attribute: BoardAttributes!,
+new_value: String!)` is **per-attribute**, so multi-flag invocation
+fans out N sequential `BoardUpdate` calls. The CLI keeps a single
+`ok: true` envelope on whole-call success and a single `ok: false`
+envelope on any per-field failure — the multi-call wire shape
+doesn't leak as partial-success. **Server-side state is NOT
+transactional**: per-field calls earlier in the sequence stay
+committed when a later call fails.
+
+**Force-live final read.** The post-mutation `boards(ids:)` read
+MUST bypass the v0.1 board-metadata cache so the success envelope
+reflects post-update state. The CLI fires the final read via
+`client.raw` directly rather than `loadBoardMetadata`;
+`meta.source: "live"` for the success path. M16's eager-
+invalidation contract additionally invalidates the cache entry
+post-success so downstream commands see fresh state too (see §3
+M16 retrofit clause).
+
+Dry-run shape per cli-design §6.4 board-update variant — a field-
+level `from → to` diff over the provided fields:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "update_board",
+      "board_id": "12345",
+      "diff": {
+        "name": { "from": "Engineering", "to": "Engineering — EU" },
+        "description": { "from": "Eng team board", "to": "EU region" }
+      }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Preflight `BoardMetadata` read goes through `loadBoardMetadata` so
+cache hits are observable; `meta.source: 'live' | 'cache'`. Cache-
+staleness caveat applies — agents pass `--no-cache` for force-live
+preview when freshness is critical. When the preflight returns no
+board, surfaces `not_found` (exit 2). Idempotent: yes.
+
+### `board archive <bid> --yes [--dry-run]` (M15)
+
+Live envelope's `data` is the projected (now-archived) `Board`
+shape. `--yes` mandatory (without it the gate fires
+`confirmation_required`, exit 1; gate fires BEFORE `resolveClient`
+so a missing token still surfaces `confirmation_required`, not
+`config_error`).
+
+```json
+{
+  "id": "12345", "name": "Engineering", "description": "Eng team",
+  "state": "archived", "board_kind": "public", "board_folder_id": null,
+  "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+  "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
+  "permissions": "everyone"
+}
+```
+
+Dry-run shape per cli-design §6.4 board-archive variant — carries
+the source snapshot via preflight `BoardMetadata` read (cache-able):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "archive_board",
+      "board_id": "12345",
+      "board": {
+        "id": "12345", "name": "Engineering", "description": "Eng team",
+        "state": "active", "board_kind": "public", "board_folder_id": null,
+        "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+        "items_count": null, "updated_at": "2026-05-07T11:00:00Z",
+        "permissions": null
+      }
+    }
+  ],
+  "warnings": []
+}
+```
+
+`items_count` and `permissions` may be `null` in the dry-run
+snapshot when the underlying cassette doesn't carry them (the
+live BOARD_METADATA_QUERY selection includes them post-M15;
+older cache entries serve null until refresh). Cache-staleness
+caveat applies — agents pass `--no-cache` for force-live
+preflight when freshness is critical (e.g. archiving after a
+recent rename).
+
+Re-archiving an already-archived board is a Monday-side no-op
+(idempotent: yes per cli-design §9.1). Missing mutation root key
+(schema drift) surfaces as `internal_error`, distinct from
+`not_found` (board missing).
+
+### `board delete <bid> --yes [--dry-run]` (M15)
+
+Live envelope's `data` is the projected (now-deleted) `Board` shape.
+Same gate ordering as `board archive`. **Note the deliberate
+divergence from `board archive`**: archive carries the source
+snapshot in dry-run (item-archive precedent — soft, reversible-
+via-30-day-window), delete is minimal in dry-run (workspace-delete
+precedent — hard, irrecoverable past Monday's 30-day window). Both
+patterns preserved.
+
+Dry-run shape per cli-design §6.4 board-delete variant — minimal
+`{operation: "delete_board", board_id}` with `data: null` and
+`meta.source: "none"`. No preflight read fires.
+
+```json
+{
+  "id": "12345", "name": "Engineering", "description": "Eng team",
+  "state": "deleted", "board_kind": "public", "board_folder_id": null,
+  "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+  "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
+  "permissions": "everyone"
+}
+```
+
+Re-deleting an already-deleted board surfaces `not_found` (the
+`delete_board: null` payload maps to a typed `not_found`). Missing
+mutation root key (schema drift) surfaces as `internal_error`,
+distinct from `not_found`. Idempotent: false.
+
+### `board duplicate <bid> [--name <n>] [--workspace <wid>] [--with-updates] [--dry-run]` (M15)
+
+**The M15-unique wrapped envelope shape.** Live envelope's `data`
+wraps because Monday's `duplicate_board` returns
+`BoardDuplication { board, is_async }` (SDK 14.0.0 type) — both
+fields are load-bearing for agents. cli-design §6.1 universal
+envelope widening (round-2 F3) acknowledged this case; the
+wrapper is M15's documented example.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "board": {
+      "id": "67890", "name": "Engineering (Copy)", "description": "Eng team",
+      "state": "active", "board_kind": "public", "board_folder_id": null,
+      "workspace_id": "5", "url": "https://x.monday.com/boards/67890",
+      "items_count": 7, "updated_at": "2026-05-07T11:00:00Z",
+      "permissions": "everyone"
+    },
+    "is_async": false
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+When `is_async: true`, Monday has queued the duplication server-
+side and the new board may not be fully populated by envelope
+time; agents needing to operate on the duplicated items / updates
+poll `boards(ids: [<new_id>]) { state }` until terminal state.
+When `is_async: false`, the duplication has fully landed and
+immediate follow-up reads are safe.
+
+`--with-updates` flag mapping (cli-design §4.3): false →
+`duplicate_board_with_pulses` (items WITHOUT updates); true →
+`duplicate_board_with_pulses_and_updates` (items WITH updates).
+The third DuplicateBoardType arm
+(`duplicate_board_with_structure` — skeleton without items) is
+deferred; `dev mutate` is the v0.2 escape hatch.
+
+`--name` and `--workspace` are optional; defaults to `<source
+name> (Copy)` and source's workspace respectively. Both filter
+undefined out of the variables map rather than send null.
+
+Dry-run shape per cli-design §6.4 board-duplicate variant —
+single-leg with preflight `BoardMetadata` read for the source-
+board snapshot:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "duplicate_board",
+      "board_id": "12345",
+      "with_updates": true,
+      "target_workspace_id": "99",
+      "target_name": "Engineering — EU",
+      "board": { "id": "12345", "name": "Engineering", ... }
+    }
+  ],
+  "warnings": []
+}
+```
+
+`target_workspace_id` and `target_name` slots appear only when the
+agent provided `--workspace` / `--name`. Cache-staleness caveat
+applies. Idempotent: false (re-running creates a second copy).
+
+### `board add-users <bid> --users <id|email>,... [--dry-run]` (M15)
+
+Mirrors `workspace add-users` exactly modulo the operation name —
+`add_users_to_board` instead of `add_users_to_workspace` in both
+`data.operation` and the dry-run `planned_changes[0].operation`
+slot, and `board_id` instead of `workspace_id` in
+`planned_changes[0]`. Same `--users` parser, same partial-success
+envelope, same `meta.source` aggregation rule, same whole-call
+error boundaries (top-level `user_not_found` when no dispatchable
+id remains; `usage_error` for malformed --users syntax;
+`internal_error` for missing mutation root key).
+
+Live envelope shape:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "add_users_to_board",
+    "results": [
+      { "user_id": "67890", "ok": true },
+      { "user_id": "67891", "ok": true },
+      { "user_id": "ghost@example.test", "ok": false,
+        "error": { "code": "user_not_found",
+                   "message": "No Monday user matches email \"ghost@example.test\"" } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": []
+}
+```
+
+M15 omits the SDK's `kind?: BoardSubscriberKind` argument; relies
+on Monday's server-side default (subscriber). Owner-tier and
+explicit subscriber-kind selection deferred to a later milestone.
+Idempotent: yes (re-adding an existing member is a Monday-side
+no-op).
+
+`board add-users` is the **third partial-success-fan-out
+consumer** (after M14's workspace add-users + remove-users); the
+shared null-payload guard `assertResponseFieldPresent`
+(`src/api/response-root.ts`) lifted at M15 close per §22 R41. The
+larger §22 R40 lift (`dispatchUsersFanOut` factory) stays
+deferred to the M15 → M16 cleanup window.
+
 ---
 
 ## user

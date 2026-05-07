@@ -11,43 +11,45 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M14 shipped;
-**M15 (board lifecycle) is next.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M15 shipped;
+**M16 (board columns + cache invalidation) is next.**
 
-**M14 closed** (see `docs/v0.2-plan.md` §3 M14 status block + §21
+**M15 closed** (see `docs/v0.2-plan.md` §3 M15 status block + §23
 post-mortem):
-- Five workspace lifecycle verbs (create / update / delete / add-
-  users / remove-users) shipped across **eleven** atomic commits:
-  one docs pre-flight (`3fe1d58`) + three pre-flight Codex rounds
-  + five feat commits (`ccd7f1e` … `6e77cc9`) + three implementation
-  Codex rounds + R29 lift (`2b74321`) + this docs close. Project
-  coverage 98.92 / 95.04 / 99.46 / 99.08 (above the 94/95/95/95
-  floor); 1957 tests passing.
-- **R29 shipped at M14 close** in `2b74321 refactor(r29): lift
-  destructive-verb confirmation gate into api/destructive-gate`.
-  All 5 destructive-verb sites (item archive + item delete + update
-  delete + update clear-all + workspace delete) migrate to the
-  shared `enforceDestructiveGate` helper; the signature accepts
-  already-parsed `globalFlags` to preserve the M10 round-1 P2
-  gate-before-`resolveClient` ordering invariant in the type
-  signature itself. Byte-identical post-lift; +1 net new regression
-  test (parallel empty-entries rejection on remove-users).
+- Six board lifecycle verbs (create / update / archive / delete /
+  duplicate / add-users) shipped across **fifteen** atomic commits:
+  one docs pre-flight (`a3b03c3`) + four pre-flight Codex rounds
+  + six feat commits (`d7c342a` … `0088283`) + two implementation
+  Codex rounds + R41 lift (`4756269`) + this docs close. Project
+  coverage 98.96 / 95.04 / 99.48 / 99.14 (above the 94/95/95/95
+  floor); 2023 tests passing.
+- **R41 shipped at M15 close** in `4756269 refactor(r41): lift
+  partial-success null-payload guard into api/response-root`.
+  All 3 partial-success-fan-out consumers (workspace add-users +
+  workspace remove-users + board add-users) migrate to the
+  shared `assertResponseFieldPresent` helper; byte-identical
+  post-lift; the assertion's signature pins the three parameter
+  divergences (mutation root key / operation label / scope-id
+  key+value) so future fan-out verbs adopt cleanly.
+- **`board duplicate` introduces the M15-unique wrapped envelope
+  shape** — `data: { board: <projection>, is_async }` per Monday's
+  `BoardDuplication` SDK type. cli-design §6.1 universal envelope
+  widened to `data: <resource | array | verb-specific JSON>` to
+  acknowledge both this wrapper and the partial-success consumers'
+  shape.
 
-**M14 → M15 cleanup window candidates** (full detail in §22):
-- **R39 — `WORKSPACE_FIELDS_FRAGMENT` + projection schema lift**
-  (5 GraphQL strings + 4 schema imports). **Shipped: ec1398b**
-  (M14 → M15 cleanup window).
+**M15 → M16 cleanup window candidates** (full detail in §22):
 - **R40 — partial-success `--users` resolver-fronted-fan-out
-  helper** (2 consumers; M15 `board add-users` is the third).
-  Defer until M15 close.
-- **R41 — `assertResponseFieldPresent` null-payload guard** (2
-  M14 consumers + adjacent to M13's `assertUpdateMutationPresent`).
-  Bundle with R40 at M15 close.
-- **R42 — retroactive missing-root-key distinction across pre-M14
-  mutation verbs** (~17 sites across M5b/M9-M13). Real semantic
-  gap (Codex M14 round-4 noted but scope-deferred). Recommendation:
-  post-M15 dedicated session — bundling with M15's new mutation
-  sites cuts the total review surface.
+  helper** (3 consumers post-M15). The "wait for the third
+  consumer" guard cleared when `board add-users` shipped;
+  factory signature is fully characterised. ~250 LOC consolidation
+  across three files. Schedule: M15 → M16 cleanup window OR
+  bundle with M16 if calendar pressure dictates.
+- **R42 — retroactive missing-root-key distinction across pre-
+  M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 new M15
+  mutation sites). Schedule: post-M15 dedicated session — bundling
+  with the M15 sites lands the contract uniformly across the
+  codebase before R-class accounting drifts further.
 
 The three binding documents — read in this order before writing code:
 
