@@ -11,63 +11,81 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M15 shipped;
-**M16 (board columns + cache invalidation) is next.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M16 shipped;
+**M17 (board groups) is next.**
 
-**M15 closed** (see `docs/v0.2-plan.md` §3 M15 status block + §23
+**M16 closed** (see `docs/v0.2-plan.md` §3 M16 status block + §24
 post-mortem):
-- Six board lifecycle verbs (create / update / archive / delete /
-  duplicate / add-users) shipped across **fifteen** atomic commits:
-  one docs pre-flight (`a3b03c3`) + four pre-flight Codex rounds
-  + six feat commits (`d7c342a` … `0088283`) + two implementation
-  Codex rounds + R41 lift (`4756269`) + this docs close. Project
-  coverage 98.96 / 95.04 / 99.48 / 99.14 (above the 94/95/95/95
-  floor); 2023 tests passing.
-- **R41 shipped at M15 close** in `4756269 refactor(r41): lift
-  partial-success null-payload guard into api/response-root`.
-  All 3 partial-success-fan-out consumers (workspace add-users +
-  workspace remove-users + board add-users) migrate to the
-  shared `assertResponseFieldPresent` helper; byte-identical
-  post-lift; the assertion's signature pins the three parameter
-  divergences (mutation root key / operation label / scope-id
-  key+value) so future fan-out verbs adopt cleanly.
-- **`board duplicate` introduces the M15-unique wrapped envelope
-  shape** — `data: { board: <projection>, is_async }` per Monday's
-  `BoardDuplication` SDK type. cli-design §6.1 universal envelope
-  widened to `data: <resource | array | verb-specific JSON>` to
-  acknowledge both this wrapper and the partial-success consumers'
-  shape.
+- Three column lifecycle verbs (column-create / column-update /
+  column-delete) PLUS three M15 retrofitted verbs (board update /
+  archive / delete now call `invalidateBoard(boardId)` post-success
+  per cli-design §8 eager-invalidation contract) shipped across
+  **ten** atomic commits: two docs prelude (`ea74d7a` + `c42b751`)
+  alongside the seven-round pre-flight (`c0efab5`, the heaviest
+  pre-flight to date — 22 contract bugs caught before any code
+  shipped) + six feat commits (`26aa821` column-create / R45 lift,
+  `08ef580` column-update, `565d5d3` column-delete, `4580af7`
+  board update retrofit, `15a353b` board archive retrofit,
+  `20bfeea` board delete retrofit) + two implementation Codex
+  rounds (`f94c2fa` round-1 P2 fix-ups + `95009ae` round-2 P3
+  diagnostic) + this docs close. Project coverage 99.01 / 95.43 /
+  99.49 / 99.14 (above the 94/95/95/95 floor); 2127 tests passing.
+- **R45 shipped at M16 implementation start** in `26aa821 feat(m16):
+  add board column-create — R45 column projection helper + first
+  column verb`. New `src/api/column-mutation-result.ts` exports
+  `projectMutationColumn` + `COLUMN_FIELDS_FRAGMENT` +
+  `columnProjectionSchema`; the three M16 column verbs adopt the
+  helper from day one (mirrors R39's M15-implementation timing).
+  The `columnIdKey: 'column_id' | 'title'` parameter pins the per-
+  noun divergence (column-create uses `title` for the pre-id throw
+  shape; column-update + column-delete use `column_id`); `boardId`
+  is always paired since the wire signature is two-tuple.
+- **`invalidateBoard(boardId, env?)` shipped in `src/api/cache.ts`**
+  as the §8 contract's exported primitive — a thin wrapper over
+  `clearEntry(root, { kind: 'board', boardId })` that owns cache-
+  root resolution. Idempotent (no-op on missing entry). Six call
+  sites adopt it: three M16 column verbs (single-leg + fan-out)
+  plus three M15 retrofitted verbs (board update fan-out, board
+  archive + delete single-leg). Coexists with the M3-era
+  `evictBoardMetadata` in `board-metadata.ts` (parallel re-export
+  rather than a rename, so the existing test surface stays
+  unchanged).
+- **R29 destructive-gate helper grew an `extraDetails` slot** in
+  `565d5d3` to support two-tuple destructive verbs (column-delete
+  echoes `{board_id, column_id, hint}` per cli-design §6.5 single-
+  target shape; the wire signature is two-tuple). The existing
+  seven single-id consumers stay byte-identical post-extension
+  (the canonical `[detailKey]: target` + `hint` always win on key
+  collision; `extraDetails` merges FIRST). M17's group-archive +
+  group-delete will reuse the same slot.
+- **`READ_ONLY_FOREVER_TYPES` reclassification.** M16 pre-flight
+  pinned `item_assignees` as read-only-forever (cli-design §4.3
+  column-create) — Monday computes it server-side from people
+  columns; never writable via the API. Extended the set in
+  `src/api/column-types.ts`; `--set-raw item_assignees=<json>`
+  now rejects at column-resolution time rather than waiting for
+  Monday's wire `validation_failed`.
 
-**M15 → M16 cleanup window** (R40 + R43 shipped; R42 + R44
+**M16 → M17 cleanup window** (no R-class shipped yet at the cleanup
+window — R45 shipped at implementation start; R46 + R42 + R44
 remain — full detail in §22):
-- **R40 shipped** in `541e5e7 refactor(r40): lift partial-
-  success --users fan-out helper into api/users-fan-out-mutation`.
-  All 3 consumers (workspace add-users + workspace remove-users
-  + board add-users) migrate to `dispatchUsersFanOut` from
-  `src/api/users-fan-out-mutation.ts`. Helper exposes
-  `parseUsersArg` separately so each call site preserves the
-  `parseArgv → parseUsersArg → resolveClient` order pinning
-  `usage_error` (malformed `--users`) ahead of `config_error`
-  (missing token). Net –766 LOC across three call sites + ~+360
-  LOC in the new helper file.
-- **R43 shipped** in `6b45abf refactor(r43): lift board mutation
-  projection into api/board-mutation-result`. Five consumers
-  (board create / archive / delete / update / duplicate) migrate
-  to `projectMutationBoard` from
-  `src/api/board-mutation-result.ts`. Mirrors R28
-  (`projectMutationItem`) + R37 (`projectMutationUpdate`) — the
-  third per-noun projection helper. Net –29 LOC across five
-  board verbs + ~+50 LOC in the new helper.
+- **R46 — `withBoardInvalidation` post-success projection wrapper**
+  stays deferred to the M16 → M17 cleanup window per §22 R46
+  timing recommendation. The four single-leg + two fan-out call
+  sites have stress-tested the §8 timing contract end-to-end
+  through the implementation review; the lift consolidates them
+  with a stable signature before M17's five new group verbs adopt
+  it from day one (mirrors R29's M14-close-then-M15-adopts
+  pattern).
 - **R42 — retroactive missing-root-key distinction across pre-
-  M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 new M15
-  mutation sites) — remaining backlog. Schedule: post-M15
-  dedicated session — bundling with the M15 sites lands the
-  contract uniformly across the codebase before R-class
-  accounting drifts further.
-- **R44 — generic `projectMutationResource` over R28/R37/R43**
+  M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 M15
+  mutation sites) — remaining backlog. Schedule: post-M16
+  dedicated session OR fold into the M16 → M17 cleanup window
+  alongside R46 if calendar pressure dictates.
+- **R44 — generic `projectMutationResource` over R28/R37/R43/R45**
   stays deferred to v0.3 OR a fifth-noun trigger per §22 R44's
-  entry; touching R44 now would re-touch all three per-noun
-  helpers and scope-creep into a 4-noun refactor.
+  entry; touching R44 now would re-touch four per-noun helpers
+  and scope-creep into a five-noun refactor.
 
 The three binding documents — read in this order before writing code:
 

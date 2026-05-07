@@ -762,6 +762,242 @@ shared null-payload guard `assertResponseFieldPresent`
 larger §22 R40 lift (`dispatchUsersFanOut` factory) stays
 deferred to the M15 → M16 cleanup window.
 
+### `board column-create <bid> --type <type> --title <t> [--description <d>] [--settings <json>] [--dry-run]` (M16)
+
+Live envelope's `data` is the projected `Column` shape (`{id,
+title, type, description, archived, settings_str, width}` —
+matches `boardMetadataSchema.columns[*]` so a follow-up `board
+describe` returns the same shape).
+
+```json
+{
+  "id": "status_4", "title": "Priority", "type": "status",
+  "description": "Owner-set urgency", "archived": false,
+  "settings_str": "{\"labels\":[\"Low\",\"Med\",\"High\"]}",
+  "width": 120
+}
+```
+
+**Wire shape pin**: `--settings <json>` maps to the wire's
+`defaults: JSON` argument (NOT `settings_str: String!` —
+`settings_str` is the read-side serialisation on `Column`;
+`defaults` is the write-side input on `create_column`). The CLI
+flag stays `--settings` for agent ergonomics.
+
+**`--type` validation**: argv-parses against the full Monday
+`ColumnType` enum (~40 values per SDK 14.0.0). Types outside
+`WRITABLE_COLUMN_TYPES` proceed (Monday accepts them) but emit a
+`noncanonical_column_type` warning per cli-design §6 stable
+warning-code registry:
+
+```json
+{
+  "code": "noncanonical_column_type",
+  "message": "Column type \"country\" was created successfully but is not in the v0.2 writable allowlist...",
+  "details": {
+    "column_type": "country",
+    "category": "raw_writable",
+    "suggested_write_path": "--set-raw <col>=<json>"
+  }
+}
+```
+
+`category` is a stable enum: `"raw_writable"` (suggests
+`--set-raw <col>=<json>`), `"read_only_forever"` (`suggested_
+write_path: null` — no write path; covers mirror / formula /
+auto_number / creation_log / last_updated / item_id /
+item_assignees), `"files_shaped"` (suggests `add_file_to_column`
+deferred to v0.4 — currently `file` only). Adding a category
+value is SemVer-minor; removing/renaming is SemVer-major. The
+warning fires on dry-run too so the live call's behaviour is
+predictable.
+
+**`--settings` per-type validation**: parsed at argv-parse-time
+(malformed JSON → `usage_error`, exit 1, before any network
+call). For types in `WRITABLE_COLUMN_TYPES`, validated against
+a per-type zod schema (status: `{labels?}`; dropdown:
+`{labels?}`; numbers: `{unit?}`; text / long_text / date /
+people / link / email / phone: empty `{}`). Type-mismatched
+settings (e.g. `--type text --settings '{"labels":[]}'`) →
+`usage_error` with `details: {column_type, expected_keys,
+actual_keys, hint}`. Raw-writable / read-only-forever / files-
+shaped types skip type-specific validation (well-formed JSON
+only; Monday validates server-side).
+
+Dry-run shape per cli-design §6.4 column-create variant —
+minimal `{operation: "create_column", board_id, type, title,
+description?, settings?}` with `data: null` and `meta.source:
+"none"`. No preflight read fires.
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "none", ... },
+  "planned_changes": [
+    {
+      "operation": "create_column",
+      "board_id": "12345",
+      "type": "status",
+      "title": "Priority",
+      "settings": { "labels": ["Low", "Med", "High"] }
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Eager invalidation** per cli-design §8 single-leg call-site
+contract: `invalidateBoard(boardId)` fires AFTER the success
+envelope's `data` projection completes, BEFORE emitMutation
+returns. Subsequent same-process reads see fresh state without
+waiting for TTL eviction.
+
+Re-running creates a SECOND column with the same title (Monday
+auto-generates a fresh column id per call). Idempotent: false.
+
+### `board column-update <bid> <cid> [--title <t>] [--description <d>] [--dry-run]` (M16)
+
+Live envelope's `data` is the projected `Column` shape — same
+fields as `column-create`, sourced from the **trailing per-
+attribute wire-call's response** (no force-live final read leg
+fires; Monday's column mutations return `Maybe<Column>` post-
+mutation, so the trailing call's response is authoritative for
+both fields).
+
+**Wire shape — per-attribute fan-out across two surfaces**:
+`--title` routes to `change_column_title(board_id, column_id,
+title)`; `--description` routes to `change_column_metadata(
+board_id, column_id, column_property: "description", value)`.
+The `ColumnProperty` enum (SDK 14.0.0) carries only `title` /
+`description`; the CLI routes `--title` to the more specific
+`change_column_title` surface (NOT
+`change_column_metadata({column_property: "title"})`). Multi-
+flag invocations fan out N sequential calls per cli-design §8
+decision 8.
+
+**Whole-call envelope — no partial-success leak.** `ok: true`
+only when EVERY per-field call succeeds; on any per-field
+failure the envelope is `ok: false` with the failed call's
+mapped error code. **Server-side state is NOT transactional**:
+per-field calls earlier in the sequence stay committed when a
+later call fails.
+
+At least one of `--title` / `--description` is required; zero-
+flag invocation surfaces as `usage_error` at argv-parse.
+
+Dry-run shape per cli-design §6.4 column-update variant — a
+field-level `from → to` diff per provided field. The `from`
+state requires a preflight `boards(ids:)` read (cache-able):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "update_column",
+      "board_id": "12345",
+      "column_id": "status_4",
+      "diff": {
+        "title": { "from": "Status", "to": "Priority" },
+        "description": { "from": null, "to": "Owner-set urgency" }
+      }
+    }
+  ],
+  "warnings": []
+}
+```
+
+When the preflight read returns no board → `not_found` (exit 2).
+When the column ID is missing on the board → `not_found` with
+`details: {board_id, column_id}`.
+
+**Eager invalidation** per cli-design §8 fan-out call-site
+contract: `invalidateBoard(boardId)` fires ONCE after the per-
+attribute loop settles iff at least one leg succeeded
+(`succeededLegs > 0` high-water-mark counter). Whole-call
+success path AND partial-application failure path both
+invalidate; zero-legs-succeeded skips. Idempotent: yes.
+
+### `board column-delete <bid> <cid> --yes [--dry-run]` (M16)
+
+Live envelope's `data` is the projected (now-deleted) `Column`
+shape — Monday's `delete_column(board_id, column_id)` returns
+`Maybe<Column>` carrying the column's last-look projection.
+
+**Confirmation gate** per cli-design §3.1 #7: `--yes` is
+mandatory for the live path. Without `--yes` AND without
+`--dry-run` the command fails fast with `confirmation_required`
+(exit 1). The envelope carries the **two-tuple** `details`
+shape per cli-design §6.5 single-target destructive-gate (the
+wire signature is two-tuple):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "confirmation_required",
+    "message": "monday board column-delete status_4 would delete column status_4 from board 12345...",
+    "details": {
+      "board_id": "12345",
+      "column_id": "status_4",
+      "hint": "delete is destructive — Monday has no archive_column / restore_column mutation..."
+    }
+  },
+  "meta": { ..., "source": "none" }
+}
+```
+
+Gate fires BEFORE `resolveClient` so a missing token still
+surfaces `confirmation_required`, not `config_error` (M10
+round-1 P2 ordering invariant; R29 helper preserves it via
+already-parsed `globalFlags`). `--dry-run` bypasses the gate
+entirely (per §3.1 #7 — dry-run is non-executing).
+
+Dry-run shape per cli-design §6.4 column-delete variant —
+minimal `{operation: "delete_column", board_id, column_id}` with
+`data: null` and `meta.source: "none"`. No preflight read; same
+destructive-no-read pattern as `item delete` / `update delete` /
+`workspace delete` / `board delete`.
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "none", ... },
+  "planned_changes": [
+    {
+      "operation": "delete_column",
+      "board_id": "12345",
+      "column_id": "status_4"
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Eager invalidation** per cli-design §8 single-leg call-site
+contract: `invalidateBoard(boardId)` fires AFTER `data`
+projection on success. Skipped on the error path (a failed
+delete didn't change board state).
+
+Re-deleting an already-deleted column surfaces `not_found` (the
+`delete_column: null` payload maps to a typed `not_found`).
+Missing mutation root key (schema drift) surfaces as
+`internal_error`, distinct from `not_found`. Idempotent: false.
+**Note**: Monday has no `archive_column` mutation — column
+lifecycle is delete-only; the CLI doesn't surface a `column-
+archive` verb.
+
+`board column-delete` is the first **two-tuple destructive
+verb** — R29's `enforceDestructiveGate` helper grew an
+`extraDetails` slot in M16 to support it (carrying `board_id`
+alongside the canonical `column_id` detailKey). The existing
+seven single-id consumers stay byte-identical post-extension;
+M17's group-archive + group-delete will reuse the same slot.
+
 ---
 
 ## user
