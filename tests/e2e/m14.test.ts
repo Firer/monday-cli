@@ -39,6 +39,50 @@ interface EnvelopeShape {
 const parseEnvelope = (s: string): EnvelopeShape =>
   JSON.parse(s) as EnvelopeShape;
 
+describe('M14 e2e — workspace delete --yes (live)', () => {
+  let server: FixtureServer | undefined;
+  afterEach(async () => {
+    if (server !== undefined) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  it('round-trips delete_workspace; envelope carries the projected workspace with state=deleted', async () => {
+    const deletedWorkspace = {
+      id: '12345',
+      name: 'Marketing',
+      description: 'EU campaigns',
+      kind: 'open',
+      state: 'deleted',
+      is_default_workspace: false,
+      created_at: '2026-05-07T11:00:00Z',
+      settings: { icon: { color: '#0000FF', image: null } },
+    };
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'WorkspaceDelete',
+          response: { data: { delete_workspace: deletedWorkspace } },
+        },
+      ],
+    };
+    server = await startFixtureServer({ cassette });
+    const result = await spawnCli({
+      args: ['workspace', 'delete', '12345', '--yes', '--json'],
+      env: fixtureEnv(server),
+    });
+    expect(result.exitCode).toBe(0);
+    const env = parseEnvelope(result.stdout) as EnvelopeShape & {
+      data: { id: string; state: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.state).toBe('deleted');
+    expect(result.stdout).not.toContain(LEAK_CANARY);
+    expect(result.stderr).not.toContain(LEAK_CANARY);
+  });
+});
+
 describe('M14 e2e — workspace update (live)', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {

@@ -753,3 +753,156 @@ describe('monday workspace update (integration, M14)', () => {
     expect(env.error?.code).toBe('forbidden');
   });
 });
+
+describe('monday workspace delete (integration, M14)', () => {
+  const deletedWorkspace = {
+    id: '12345',
+    name: 'Marketing',
+    description: 'EU campaigns',
+    kind: 'open',
+    state: 'deleted',
+    is_default_workspace: false,
+    created_at: '2026-05-07T11:00:00Z',
+    settings: { icon: { color: '#0000FF', image: null } },
+  };
+
+  it('live: --yes round-trips delete_workspace and returns the projected workspace with state=deleted', async () => {
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceDelete',
+            // Wire-shape pin: variable name `workspaceId` → `workspace_id`
+            // on the wire (Monday's `delete_workspace(workspace_id: ID!)`).
+            match_variables: { workspaceId: '12345' },
+            match_query: /delete_workspace\(workspace_id: \$workspaceId\)/,
+            response: { data: { delete_workspace: deletedWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; state: string };
+    };
+    expect(env.data.id).toBe('12345');
+    expect(env.data.state).toBe('deleted');
+    assertEnvelopeContract(env);
+  });
+
+  it('rejects missing --yes as confirmation_required (exit 1)', async () => {
+    // Gate fires BEFORE resolveClient — Codex M10 round-1 P2.
+    // No mutation interaction needed; the failure surfaces purely
+    // from argv state.
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { workspace_id?: string } };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.workspace_id).toBe('12345');
+  });
+
+  it('confirmation_required precedes config_error when no token is set (gate-before-resolveClient invariant)', async () => {
+    // M10 round-1 P2 invariant: `confirmation_required` must surface
+    // even when the runner can't reach the config layer. The gate
+    // ordering prevents `config_error` from masking the agent-
+    // observable destructive-gate signal.
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('rejects non-numeric workspace id as usage_error', async () => {
+    const out = await drive(
+      ['workspace', 'delete', 'abc', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation delete_workspace; no mutation fires', async () => {
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; workspace_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('delete_workspace');
+    expect(plan?.workspace_id).toBe('12345');
+    expect(out.requests).toBe(0);
+  });
+
+  it('--dry-run takes precedence over missing --yes (no confirmation gate fires)', async () => {
+    // Mirrors the M10 archive/delete + M13 update delete contract:
+    // --dry-run alone is a valid invocation and the gate doesn't
+    // fire. The combination `--dry-run` without `--yes` must NOT
+    // surface as `confirmation_required`.
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: surfaces not_found when delete_workspace returns null payload', async () => {
+    // Re-deleting an already-deleted workspace surfaces null on
+    // the wire; the projection's null-guard maps it to not_found.
+    const out = await drive(
+      ['workspace', 'delete', '999', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceDelete',
+            response: { data: { delete_workspace: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: surfaces forbidden when Monday rejects with PERMISSION_DENIED', async () => {
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceDelete',
+            response: {
+              data: { delete_workspace: null },
+              errors: [
+                {
+                  message: 'You do not have permission to delete this workspace',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('forbidden');
+  });
+});
