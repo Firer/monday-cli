@@ -12,7 +12,9 @@ humans are second-class. Built incrementally via Claude Code on top of
 ## Status
 
 **v0.1.0 published; v0.2.0 in development on `main`.** M0–M16 shipped;
-**M17 (board groups) is next.**
+**M17 (board groups) — pre-flight contract pinned in `bed75c6
+docs(m17): pre-flight cli-design contract for board groups`;
+implementation pending in the session-after.**
 
 **M16 closed** (see `docs/v0.2-plan.md` §3 M16 status block + §24
 post-mortem):
