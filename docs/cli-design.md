@@ -597,12 +597,213 @@ monday board subscribers <bid>                                               v0.
 monday board favorites                    # current user's starred boards   v0.3
                                           # natural scoping lever for v0.3
                                           # cross-board `item search`
-monday board create --name <n> [--workspace <wid>] [--kind public|private|share]  v0.2
-monday board update <bid> [--name <n>] [--description <d>]                   v0.2
-monday board archive <bid> --yes                                             v0.2
-monday board delete <bid> --yes                                              v0.2
-monday board duplicate <bid> [--name <n>] [--workspace <wid>]                v0.2
-monday board add-users <bid> --users <id|email>,...                          v0.2
+monday board create --name <n> [--workspace <wid>] [--kind public|private|share] [--template <bid>] [--description <d>] [--dry-run]   v0.2
+                                          # `create_board(board_name, board_kind,
+                                          # workspace_id?, template_id?,
+                                          # description?, ...)`. Monday's signature
+                                          # additionally accepts owner / subscriber
+                                          # lists at creation; M15 defers those to
+                                          # a follow-up `add-users` call so the
+                                          # creation surface stays narrow. Monday's
+                                          # GraphQL signature pins `board_kind:
+                                          # BoardKind!` (required at the wire); the
+                                          # CLI defaults to `public` when --kind is
+                                          # omitted so agents don't have to remember
+                                          # the wire constraint. `--workspace <wid>`
+                                          # is optional — Monday creates the board
+                                          # in the user's main workspace when the
+                                          # flag is omitted. `--template <bid>`
+                                          # clones from a template board (the source
+                                          # board must have `board_kind: template`);
+                                          # the new board's structure mirrors the
+                                          # template's columns and groups.
+                                          # `--description <d>` is optional;
+                                          # omitting it sends no `description`
+                                          # argument so Monday's server-side default
+                                          # applies. Idempotent: NO — re-running
+                                          # creates a second board with the same
+                                          # name. NOT destructive (no --yes gate).
+                                          # Dry-run shape per §6.4 board-create
+                                          # variant: `{operation: "create_board",
+                                          # name, workspace_id?, kind, description?,
+                                          # template_id?}`. `meta.source: "none"`
+                                          # (no API call fires).
+monday board update <bid> [--name <n>] [--description <d>] [--dry-run]       v0.2
+                                          # `update_board(board_id, board_attribute:
+                                          # BoardAttributes!, new_value: String!)`.
+                                          # Unlike `update_workspace`, Monday's
+                                          # `update_board` is **per-attribute** —
+                                          # each wire call updates exactly one of
+                                          # `name` / `description` / `communication`.
+                                          # The CLI fans out one wire call per
+                                          # provided flag: `board update <bid>
+                                          # --name X --description Y` fires two
+                                          # sequential `update_board` calls.
+                                          # Sequential per §8 decision 8 (parallel
+                                          # waits for v0.4 `--concurrency`). At
+                                          # least one of --name / --description
+                                          # required — zero-flag invocation →
+                                          # `usage_error` at argv-parse. Whole-call
+                                          # shape: single envelope on success
+                                          # (`data` = full board projection from a
+                                          # final `boards(ids:)` read leg);
+                                          # whole-call error envelope on any per-
+                                          # field failure (the multi-call wire
+                                          # shape doesn't leak as partial-success —
+                                          # the contract is "all fields applied or
+                                          # the call failed", consistent with
+                                          # `update_workspace`'s single-mutation
+                                          # shape from M14). Idempotent: yes — re-
+                                          # applying the same field values is a
+                                          # no-op on Monday's side. Dry-run shape
+                                          # per §6.4 board-update variant: a field-
+                                          # level `from → to` diff per provided
+                                          # flag (mirrors workspace-update shape
+                                          # with board fields substituted). The
+                                          # `from` state requires a preflight
+                                          # `board get` read — `meta.source: "live"`
+                                          # or `"cache"` (board metadata is cached
+                                          # per v0.1's board-metadata cache; M16
+                                          # adds the eager-invalidation contract
+                                          # so successful `board update` calls
+                                          # invalidate the cache entry).
+monday board archive <bid> --yes [--dry-run]                                 v0.2
+                                          # `archive_board(board_id)`. Destructive
+                                          # — --yes mandatory (without --yes →
+                                          # `confirmation_required`, exit 1) per §8
+                                          # decision 9 (archive is consistently
+                                          # --yes-gated across nouns). Idempotent:
+                                          # yes — re-archiving an already-archived
+                                          # board is a no-op (per §9.1). Dry-run
+                                          # shape per §6.4 board-archive variant:
+                                          # `{operation: "archive_board",
+                                          # board_id, board: <projected source
+                                          # snapshot>}` — mirrors item-archive's
+                                          # preflight-read-for-snapshot pattern so
+                                          # the agent can verify the ID before re-
+                                          # running with --yes. `meta.source: "live"`
+                                          # or `"cache"` (preflight read leg can hit
+                                          # the v0.1 board-metadata cache).
+monday board delete <bid> --yes [--dry-run]                                  v0.2
+                                          # `delete_board(board_id)`. Destructive
+                                          # — --yes mandatory. Re-deleting an
+                                          # already-deleted board surfaces
+                                          # `not_found`, so the CLI marks
+                                          # `idempotent: false` (mirrors `item
+                                          # delete` / `update delete` /
+                                          # `workspace delete` rationale). Dry-run
+                                          # shape per §6.4 board-delete variant:
+                                          # minimal `{operation: "delete_board",
+                                          # board_id}`. No preflight read fires;
+                                          # the dry-run is purely argv-derived
+                                          # (Monday's `delete_board(board_id)`
+                                          # reports `not_found` if the id is
+                                          # bogus). `meta.source: "none"`. Mirrors
+                                          # the destructive-no-read pattern uniform
+                                          # across `item delete`, `update delete`,
+                                          # `workspace delete`. Note the deliberate
+                                          # divergence from `board archive`: archive
+                                          # carries the source snapshot (item-
+                                          # archive precedent), delete is minimal
+                                          # (workspace-delete precedent).
+monday board duplicate <bid> [--name <n>] [--workspace <wid>] [--with-updates] [--dry-run]   v0.2
+                                          # `duplicate_board(board_id,
+                                          # duplicate_type: DuplicateBoardType!,
+                                          # board_name?, workspace_id?,
+                                          # folder_id?, keep_subscribers?)`. The
+                                          # DuplicateBoardType enum carries three
+                                          # values (`duplicate_board_with_structure`,
+                                          # `duplicate_board_with_pulses`,
+                                          # `duplicate_board_with_pulses_and_updates`);
+                                          # the CLI surfaces only the items-included
+                                          # branch. Without --with-updates, the wire
+                                          # call uses `duplicate_board_with_pulses`
+                                          # (items WITHOUT updates). With
+                                          # --with-updates, the wire call uses
+                                          # `duplicate_board_with_pulses_and_updates`
+                                          # (items WITH updates). Skeleton-only
+                                          # duplication (the `with_structure` arm)
+                                          # is deferred to a later v0.x surface;
+                                          # agents needing it call the wire mutation
+                                          # via M9's `dev mutate` escape hatch.
+                                          # `--workspace <wid>` is optional —
+                                          # defaults to the source board's
+                                          # workspace. `--name <n>` is optional;
+                                          # Monday's server-side default is "<source
+                                          # name> (Copy)" when omitted. Idempotent:
+                                          # NO — re-running creates a second copy.
+                                          # NOT destructive (no --yes gate). Dry-run
+                                          # shape per §6.4 board-duplicate variant:
+                                          # `{operation: "duplicate_board",
+                                          # board_id, with_updates,
+                                          # target_workspace_id?, target_name?,
+                                          # board: <projected source snapshot>}`.
+                                          # `meta.source: "live"` or `"cache"`
+                                          # (preflight read leg).
+monday board add-users <bid> --users <id|email>,... [--dry-run]              v0.2
+                                          # `add_users_to_board(board_id, user_ids,
+                                          # kind?: BoardSubscriberKind)` fanned out
+                                          # one wire call per user. The wire
+                                          # mutation also accepts an optional
+                                          # `kind: BoardSubscriberKind` argument;
+                                          # M15 deliberately OMITS it and relies
+                                          # on Monday's server-side default
+                                          # (subscriber). Owner-tier and explicit
+                                          # subscriber-kind selection are deferred
+                                          # to a later milestone (no v0.2 surface
+                                          # decision blocking M15). `--users`
+                                          # accepts numeric IDs and emails mixed in
+                                          # one comma-separated list. Numeric IDs
+                                          # are argv-derived (no resolution leg
+                                          # fires); only email tokens flow through
+                                          # M5a's `userByEmail` (directory cache +
+                                          # `users(emails:)` fallback). **Partial-
+                                          # success envelope** per §6.4 — emits one
+                                          # `ok: true` envelope with `data: {
+                                          # operation: "add_users_to_board",
+                                          # results: [{user_id, ok, error?}] }`
+                                          # (`data.operation` per the M14
+                                          # workspace-add-users / remove-users
+                                          # precedent; `data.operation` lives on
+                                          # `data` not `meta`). Per-user resolution
+                                          # failures (`user_not_found`) AND per-
+                                          # user dispatch failures land in the per-
+                                          # record `error` slot rather than aborting
+                                          # the loop; on a resolution failure
+                                          # `user_id` carries the input token
+                                          # verbatim so agents can correlate.
+                                          # Top-level `error` reserved for whole-
+                                          # call failure (couldn't reach API; OR
+                                          # **no dispatchable user_id remains
+                                          # after parsing/resolution** — every
+                                          # `--users` token was an email AND
+                                          # every email failed `userByEmail`
+                                          # lookup → top-level `user_not_found`,
+                                          # exit 2; carries `details.failed_tokens:
+                                          # [...]`). A mixed call where some
+                                          # numeric IDs OR some emails resolve
+                                          # successfully still gets the partial-
+                                          # success envelope. Malformed `--users`
+                                          # syntax (blank token, non-numeric AND
+                                          # non-email) → top-level `usage_error`,
+                                          # exit 1. Sequential per §8 decision 8.
+                                          # Idempotent: yes — re-adding an
+                                          # existing member is a no-op. Dry-run
+                                          # resolves every email `--users` token
+                                          # (numeric IDs skip resolution) so
+                                          # `user_not_found` surfaces ahead of the
+                                          # live call; emits the same per-user
+                                          # record shape with `would_apply`
+                                          # substituted for `ok` (§6.4 board-add-
+                                          # users variant). `meta.source` aggregates
+                                          # DIFFERENTLY between dry-run and live —
+                                          # see §6.4 `meta.source` aggregation rule
+                                          # under workspace-add-users for the table.
+                                          # `board add-users` is the third
+                                          # partial-success-fan-out consumer (after
+                                          # M14's workspace add-users / remove-
+                                          # users), triggering the R40 lift at M15
+                                          # close per v0.2-plan §22 R40.
 
 # Columns (board-scoped)
 monday board columns <bid>                # list columns                     v0.1
@@ -2599,6 +2800,238 @@ mutation verbs produce different planned-change shapes; the
   boundary rules. The two verbs share their envelope shape
   because their contract is symmetric — fan out one wire call
   per user and capture per-user outcomes.
+
+- **Board-create shape** (`board create`; v0.2 M15). Minimal:
+  `operation: "create_board"`, `name`, `kind`, and optional
+  `workspace_id`, `description`, `template_id`. No diff
+  section (the board doesn't exist yet, so there's no prior
+  state to render). No read leg fires; the dry-run is purely
+  argv-derived. `meta.source: "none"`. Mirrors the workspace-
+  create shape's preference for agent-scannable surface fields
+  rather than burying values inside `diff`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "create_board",
+        "name": "Engineering",
+        "kind": "public"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--workspace` / `--description` / `--template` are
+  provided, the planned change carries the corresponding
+  `workspace_id` / `description` / `template_id` slot. When
+  `--kind` is omitted, the CLI's default (`"public"`) appears
+  in the dry-run shape so the agent sees exactly what the live
+  mutation would send (Monday's signature pins `board_kind:
+  BoardKind!`; the CLI fills the default rather than letting
+  the wire reject).
+
+- **Board-update shape** (`board update`; v0.2 M15). Single-
+  leg dry-run with a preflight `board get` read to surface the
+  `from` state per provided field. Carries `operation:
+  "update_board"`, `board_id`, and `diff: { <field>: { from,
+  to }, ... }` keyed by the board fields the agent is changing
+  (`name`, `description`). Only fields present in the agent's
+  flags appear in `diff` (omitting a flag means "leave
+  unchanged"). The wire-shape contract differs from
+  `update_workspace`: Monday's `update_board(board_id,
+  board_attribute, new_value)` updates exactly one attribute
+  per call, so a multi-flag invocation fans out N sequential
+  wire calls. The dry-run shape stays single-envelope (no
+  partial-success leak) — every provided flag's `from → to`
+  pair appears as one diff entry, regardless of the per-call
+  fan-out. `meta.source: "live"` or `"cache"` (preflight read
+  hits the v0.1 board-metadata cache when fresh; M16 adds the
+  eager-invalidation contract so post-mutation cache entries
+  invalidate immediately):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "update_board",
+        "board_id": "12345",
+        "diff": {
+          "name": { "from": "Engineering", "to": "Engineering — EU" },
+          "description": { "from": "Eng team board", "to": "Eng team board, EU region" }
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When the preflight read returns `not_found`, the dry-run
+  surfaces `not_found` (exit 2) rather than emitting a
+  preview-of-failure (mirrors the workspace-update rule).
+
+  **Live-path partial-application caveat.** The multi-call
+  wire shape produces a single success envelope with `data:
+  <full board projection>` from a final `boards(ids:)` read
+  leg when every per-field call succeeds. If any per-field
+  call fails, the whole-call surfaces an error envelope with
+  the failed call's code; Monday has no transaction across
+  per-attribute mutations, so per-field calls earlier in the
+  sequence have already committed server-side and **are not
+  rolled back**. This is the strongest guarantee compatible
+  with Monday's wire shape — agents re-issuing after a
+  partial-application failure should re-read the board to see
+  what landed before retrying the unapplied tail.
+
+- **Board-archive shape** (`board archive`; v0.2 M15). Mirrors
+  item-archive's preflight-read-for-snapshot pattern. Carries
+  `operation: "archive_board"`, `board_id`, and `board:
+  <projected source snapshot>` (the §6.2 single-resource shape
+  the source board would have *before* archive — so an agent
+  can verify the ID before re-running with `--yes`). *Omits*
+  `diff` (no per-field changes). `meta.source: "live"` or
+  `"cache"` because the source-board read can hit the v0.1
+  board-metadata cache:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "archive_board",
+        "board_id": "12345",
+        "board": { "id": "12345", "name": "Engineering", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+- **Board-delete shape** (`board delete`; v0.2 M15). Minimal:
+  `operation: "delete_board"`, `board_id`. No diff, no
+  preflight read leg (Monday's `delete_board(board_id)`
+  reports `not_found` if the id is bogus and the dry-run is
+  purely argv-derived). `meta.source: "none"`. Same shape
+  (modulo `board_id` vs `workspace_id`) as the workspace-
+  delete variant — the destructive-no-read pattern is uniform
+  across `item delete`, `update delete`, `workspace delete`,
+  `board delete`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "delete_board",
+        "board_id": "12345"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  Note the deliberate divergence from `board archive`:
+  archive carries the source snapshot (mirroring item-
+  archive's recoverability-aware shape; archive is soft and
+  reversible), delete is minimal (mirroring workspace-
+  delete's destructive-no-read shape; delete is hard and
+  irrecoverable past Monday's 30-day window). Both patterns
+  are preserved rather than forcing one onto the other.
+
+- **Board-duplicate shape** (`board duplicate`; v0.2 M15).
+  Single-leg dry-run with a preflight `board get` read for
+  the source-board snapshot. Carries `operation:
+  "duplicate_board"`, `board_id`, `with_updates: true | false`
+  (echoes the agent's `--with-updates` flag; defaults
+  `false`), optional `target_workspace_id` (echoes
+  `--workspace <wid>`; absent when defaulting to source's
+  workspace), optional `target_name` (echoes `--name <n>`;
+  absent when defaulting to Monday's server-side `<source
+  name> (Copy)`), and `board: <projected source snapshot>`.
+  *Omits* `diff` (no per-field changes). `meta.source: "live"`
+  or `"cache"` (preflight read leg):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "cache", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "duplicate_board",
+        "board_id": "12345",
+        "with_updates": true,
+        "target_name": "Engineering — EU",
+        "board": { "id": "12345", "name": "Engineering", "state": "active", ... }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  The `--with-updates` flag selects between Monday's
+  `duplicate_board_with_pulses` (false; items without
+  updates) and `duplicate_board_with_pulses_and_updates`
+  (true; items with updates) DuplicateBoardType enum values.
+  The third arm (`duplicate_board_with_structure` — skeleton
+  without items) is deferred; agents needing it call the wire
+  mutation via M9's `dev mutate` escape hatch.
+
+- **Board-add-users shape** (`board add-users`; v0.2 M15).
+  Identical shape to workspace-add-users with `operation`
+  flipped to `"add_users_to_board"` in both the dry-run
+  `planned_changes[]` and the live `data.operation`, and
+  `workspace_id` substituted with `board_id`. Same per-user
+  `results` array, same `would_apply` / `ok` semantics, same
+  `meta.source` aggregation, same `user_not_found` /
+  `usage_error` whole-call boundary rules. The wire mutation
+  is `add_users_to_board(board_id, user_ids, kind?:
+  BoardSubscriberKind)` — M15 omits `kind` and relies on
+  Monday's server-side default (subscriber), mirroring M14's
+  workspace-add-users `kind?: WorkspaceSubscriberKind`
+  decision. The shape repeats verbatim because the contract
+  is symmetric across the workspace and board user-management
+  surfaces — fan out one wire call per user and capture per-
+  user outcomes:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "add_users_to_board",
+        "board_id": "12345",
+        "results": [
+          { "user_id": "67890", "would_apply": true },
+          { "user_id": "67891", "would_apply": true },
+          { "user_id": "ghost@example.com", "would_apply": false,
+            "error": { "code": "user_not_found",
+                       "message": "No Monday user matches email \"ghost@example.com\"" } }
+        ]
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  `board add-users` is the third partial-success-fan-out
+  consumer (after M14's workspace add-users and remove-
+  users), triggering the R40 lift at M15 close per v0.2-plan
+  §22 R40 — the resolver-fronted-fan-out helper factoring out
+  the ~200 LOC shared by the three verbs.
 
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
