@@ -69,6 +69,17 @@ export interface EnforceDestructiveGateInputs {
    */
   readonly detailKey: string;
   /**
+   * Optional extra `details.*` fields merged into the
+   * `confirmation_required` envelope alongside `[detailKey]: target`
+   * + `hint`. Used by verbs whose wire signature is two-tuple — M16
+   * `board column-delete` echoes `{board_id, column_id, hint}` per
+   * cli-design §6.5 single-target shape (the wire signature carries
+   * both ids); M17 `board group-archive` / `group-delete` will use
+   * the same shape. `[detailKey]: target` always wins on key
+   * collision (extraDetails is merged FIRST).
+   */
+  readonly extraDetails?: Readonly<Record<string, unknown>>;
+  /**
    * The action phrase that follows `would` in the message body.
    * Verb-specific:
    * - `'archive the item'` (item archive)
@@ -102,13 +113,18 @@ export const enforceDestructiveGate = (
 ): void => {
   if (inputs.globalFlags.dryRun || inputs.globalFlags.yes) return;
   const previewSuffix = inputs.previewSuffix ?? DEFAULT_PREVIEW_SUFFIX;
+  // `extraDetails` lands FIRST so the canonical `[detailKey]: target`
+  // + `hint` always win on key collision. Two-tuple verbs (M16
+  // column-delete, M17 group-archive / group-delete) populate
+  // extraDetails with the secondary id (board_id paired with
+  // column_id / group_id) per cli-design §6.5 single-target shape.
+  const details = {
+    ...(inputs.extraDetails ?? {}),
+    [inputs.detailKey]: inputs.target,
+    hint: inputs.hint,
+  };
   throw new ConfirmationRequiredError(
     `monday ${inputs.verb} ${inputs.target} would ${inputs.action}. Re-run with --yes to confirm, ${previewSuffix}`,
-    {
-      details: {
-        [inputs.detailKey]: inputs.target,
-        hint: inputs.hint,
-      },
-    },
+    { details },
   );
 };

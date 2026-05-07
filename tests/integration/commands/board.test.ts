@@ -3696,7 +3696,260 @@ describe('monday board column-update (integration, M16)', () => {
       { interactions: [] },
     );
     expect(postOut.exitCode).toBe(0);
-    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape;
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
+});
+
+// =============================================================================
+// M16 — board column-delete (cli-design §4.3 + §6.4 + §8 single-leg invalidation)
+// =============================================================================
+
+describe('monday board column-delete (integration, M16)', () => {
+  const deletedColumn = {
+    id: 'status_4',
+    title: 'Status',
+    type: 'status',
+    description: null,
+    archived: false,
+    settings_str: null,
+    width: 120,
+  };
+
+  it('rejects without --yes — confirmation_required carries both board_id AND column_id (two-tuple shape)', async () => {
+    // Per cli-design §6.5 single-target shape: column-delete's wire
+    // signature is two-tuple, so the confirmation envelope echoes
+    // both ids. The R29 helper's `extraDetails` slot carries
+    // board_id alongside the canonical column_id detailKey.
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'status_4', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { board_id?: string; column_id?: string; hint?: string };
+      };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.column_id).toBe('status_4');
+    expect(env.error?.details?.hint).toMatch(/delete-only/);
+    // Gate fires before resolveClient — meta.source stays 'none'.
+    expect(env.meta.source).toBe('none');
+  });
+
+  it('confirmation gate fires before resolveClient — missing token still surfaces confirmation_required (M10 round-1 P2 ordering)', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'status_4', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('--dry-run bypasses the confirmation gate (per cli-design §3.1 #7)', async () => {
+    // dry-run is non-executing and the gate is for live destructive
+    // writes only — the contract pin: column-delete <bid> <cid>
+    // --dry-run without --yes emits the dry-run envelope.
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'status_4', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { operation: string; board_id: string; column_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes[0]).toEqual({
+      operation: 'delete_column',
+      board_id: '12345',
+      column_id: 'status_4',
+    });
+  });
+
+  it('live: --yes fires delete_column and returns the projected (last-look) column', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'status_4', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            match_variables: { boardId: '12345', columnId: 'status_4' },
+            // Pin the wire surface so a future regression that
+            // dropped column_id from the mutation declaration would
+            // fail here.
+            match_query: /delete_column\(board_id: \$boardId, column_id: \$columnId\)/,
+            response: { data: { delete_column: deletedColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; title: string };
+    };
+    expect(env.data.id).toBe('status_4');
+    expect(env.data.title).toBe('Status');
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: not_found when delete_column returns null payload (Monday "id was bogus / already deleted")', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'ghost_col', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            response: { data: { delete_column: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { board_id?: string; column_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.board_id).toBe('12345');
+    expect(env.error?.details?.column_id).toBe('ghost_col');
+  });
+
+  it('live: surfaces internal_error when delete_column response is missing the root key (schema-drift)', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'status_4', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { hint?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.hint).toMatch(/schema-drift/);
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-delete', 'abc', 'status_4', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty <columnId> at argv parse', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', '', '--yes', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('cache invalidation round-trip: column-delete → board describe sees absent column with source: live + no stale_cache_refreshed warning', async () => {
+    // §8 single-leg call-site contract: invalidation fires AFTER
+    // data projection on success. Round-trip pins: post-mutation
+    // read sees live state (column absent); meta.source: 'live';
+    // no stale_cache_refreshed warning.
+    const preColumn = {
+      ...baseColumn,
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preColumn])] },
+    );
+    // Delete the column.
+    const deleted = await drive(
+      ['board', 'column-delete', '111', 'status_4', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            response: { data: { delete_column: preColumn } },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(0);
+    // Post-delete describe — clean cache miss → live fetch sees no
+    // status_4 column.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout) as EnvelopeShape & {
+      data: { columns: readonly { id: string }[] };
+      warnings?: readonly { code: string }[];
+    };
+    expect(postEnv.meta.source).toBe('live');
+    expect(postEnv.data.columns.find((c) => c.id === 'status_4')).toBeUndefined();
+    const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
+    expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: error path skips invalidation (failed delete didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on the error path.
+    // A delete that returns null (not_found) didn't change server
+    // state; the cache remains valid. Mirror M16's column-update
+    // zero-legs-succeeded test.
+    const preColumn = {
+      ...baseColumn,
+      id: 'status_4',
+      title: 'Status',
+      type: 'status',
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([preColumn])] },
+    );
+    // Delete fails (Monday returns null = not_found).
+    const deleted = await drive(
+      ['board', 'column-delete', '111', 'ghost_col', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            response: { data: { delete_column: null } },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(2);
+    // Post-delete describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: a cache hit needs no live fetch. If
+      // invalidation incorrectly fired, the test fails with an
+      // exhausted cassette.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
     expect(postEnv.meta.source).toBe('cache');
   });
 });

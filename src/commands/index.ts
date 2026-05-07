@@ -107,6 +107,7 @@ import { boardAddUsersCommand } from './board/add-users.js';
 // column-create / column-update / column-delete.
 import { boardColumnCreateCommand } from './board/column-create.js';
 import { boardColumnUpdateCommand } from './board/column-update.js';
+import { boardColumnDeleteCommand } from './board/column-delete.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -141,6 +142,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardAddUsersCommand,
     boardColumnCreateCommand,
     boardColumnUpdateCommand,
+    boardColumnDeleteCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,
