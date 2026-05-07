@@ -754,6 +754,31 @@ describe('monday workspace update (integration, M14)', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('forbidden');
   });
+
+  it('Codex round-3 F1: missing update_workspace root key surfaces as internal_error (distinct from not_found)', async () => {
+    // Round-3 F1 consistency fix: distinguish "schema drift"
+    // (root key absent → internal_error) from "workspace missing"
+    // (value null → not_found). Pre-fix both landed as not_found
+    // and agents couldn't tell a contract break from a normal
+    // resource absence.
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { workspace_id?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.workspace_id).toBe('12345');
+  });
 });
 
 describe('monday workspace delete (integration, M14)', () => {
@@ -906,6 +931,30 @@ describe('monday workspace delete (integration, M14)', () => {
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('forbidden');
+  });
+
+  it('Codex round-3 F1: missing delete_workspace root key surfaces as internal_error (distinct from not_found)', async () => {
+    // Mirrors the workspace update round-3 fix: schema drift
+    // (root key absent) → internal_error, distinct from
+    // not_found (value null = "workspace already deleted / id
+    // bogus").
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceDelete',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { workspace_id?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.workspace_id).toBe('12345');
   });
 });
 

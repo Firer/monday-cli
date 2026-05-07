@@ -280,6 +280,26 @@ export const workspaceUpdateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
+        // Codex M14 round-3 F1: distinguish "root key absent"
+        // (schema-drift → internal_error) from "value null"
+        // (workspace missing → not_found). Pre-fix, both landed
+        // as not_found and agents couldn't tell a CLI/API contract
+        // break from a normal resource absence.
+        if (!('update_workspace' in data)) {
+          throw new ApiError(
+            'internal_error',
+            `Monday's WorkspaceUpdate response is missing the update_workspace root field`,
+            {
+              details: {
+                workspace_id: parsed.workspaceId,
+                hint:
+                  'this is a schema-drift error in Monday\'s GraphQL ' +
+                  'response; verify the mutation declaration and update ' +
+                  'the response schema if Monday\'s contract has changed.',
+              },
+            },
+          );
+        }
         const projected = projectUpdatedWorkspace(
           data.update_workspace,
           parsed.workspaceId,

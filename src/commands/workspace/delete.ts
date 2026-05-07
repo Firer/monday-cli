@@ -186,6 +186,24 @@ export const workspaceDeleteCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
+        // Codex M14 round-3 F1: distinguish "root key absent"
+        // (schema-drift → internal_error) from "value null"
+        // (workspace already deleted / id bogus → not_found).
+        if (!('delete_workspace' in data)) {
+          throw new ApiError(
+            'internal_error',
+            `Monday's WorkspaceDelete response is missing the delete_workspace root field`,
+            {
+              details: {
+                workspace_id: parsed.workspaceId,
+                hint:
+                  'this is a schema-drift error in Monday\'s GraphQL ' +
+                  'response; verify the mutation declaration and update ' +
+                  'the response schema if Monday\'s contract has changed.',
+              },
+            },
+          );
+        }
         const projected = projectDeletedWorkspace(
           data.delete_workspace,
           parsed.workspaceId,
