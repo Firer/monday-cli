@@ -793,3 +793,267 @@ describe('monday board columns + groups', () => {
     expect(env.data).toEqual(groups);
   });
 });
+
+describe('monday board create (integration, M15)', () => {
+  const createdBoard = {
+    id: '67890',
+    name: 'Engineering',
+    description: 'Eng team board',
+    state: 'active',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/67890',
+    items_count: 0,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+
+  it('live: --name posts create_board with default kind=public and emits the projected board', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'Engineering', '--workspace', '5', '--description', 'Eng team board', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            // Wire-shape pin: kind is always sent (Monday's signature
+            // pins board_kind: BoardKind!), defaulting to "public" when
+            // the agent omits --kind. workspace_id + description
+            // forwarded verbatim.
+            match_variables: {
+              boardName: 'Engineering',
+              boardKind: 'public',
+              workspaceId: '5',
+              description: 'Eng team board',
+            },
+            // Pin the GraphQL surface so a future regression that
+            // drops `board_kind` from the mutation declaration would
+            // fail here.
+            match_query: /create_board\(\s*board_name: \$boardName,\s*board_kind: \$boardKind/,
+            response: { data: { create_board: createdBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string; board_kind: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('67890');
+    expect(env.data.name).toBe('Engineering');
+    expect(env.data.board_kind).toBe('public');
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: --kind private forwards kind through to the wire', async () => {
+    const privateBoard = { ...createdBoard, board_kind: 'private' };
+    const out = await drive(
+      ['board', 'create', '--name', 'Confidential', '--kind', 'private', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            match_variables: { boardName: 'Confidential', boardKind: 'private' },
+            response: { data: { create_board: privateBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { board_kind: string };
+    };
+    expect(env.data.board_kind).toBe('private');
+  });
+
+  it('live: --template forwards templateId through to the wire', async () => {
+    // The CLI doesn't pre-validate template-ness — Monday surfaces
+    // a validation_failed wire error if the ID isn't a template.
+    // This test pins the templateId variable lands on the wire.
+    const out = await drive(
+      ['board', 'create', '--name', 'Roadmap', '--template', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            match_variables: {
+              boardName: 'Roadmap',
+              boardKind: 'public',
+              templateId: '99999',
+            },
+            response: { data: { create_board: createdBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: --workspace, --description, --template all omitted → only required args sent', async () => {
+    // Pre-fix, an inadvertent `description: undefined` /
+    // `workspace_id: undefined` in the variables map would have been
+    // serialised as `null` on the wire. The action body filters
+    // undefined out; this fixture asserts the wire-side variables
+    // shape carries only the agent-provided fields.
+    const out = await drive(
+      ['board', 'create', '--name', 'Bare', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            match_variables: { boardName: 'Bare', boardKind: 'public' },
+            response: { data: { create_board: createdBoard } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('rejects --kind unknown as usage_error at argv parse', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--kind', 'open', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects empty --name as usage_error (after trim)', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects missing --name as usage_error (commander requiredOption)', async () => {
+    const out = await drive(
+      ['board', 'create', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric --workspace as usage_error (BoardId/WorkspaceId argv-parse)', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--workspace', 'not-numeric', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric --template as usage_error', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--template', 'not-numeric', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits planned_changes with operation create_board; no mutation fires', async () => {
+    const out = await drive(
+      [
+        'board', 'create', '--name', 'Preview',
+        '--workspace', '5',
+        '--kind', 'private',
+        '--description', 'Preview desc',
+        '--template', '99999',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        name: string;
+        kind: string;
+        workspace_id?: string;
+        description?: string;
+        template_id?: string;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.meta.source).toBe('none');
+    expect(env.planned_changes.length).toBe(1);
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_board');
+    expect(plan?.name).toBe('Preview');
+    expect(plan?.kind).toBe('private');
+    expect(plan?.workspace_id).toBe('5');
+    expect(plan?.description).toBe('Preview desc');
+    expect(plan?.template_id).toBe('99999');
+    expect(out.requests).toBe(0);
+  });
+
+  it('--dry-run: omits optional slots when flags are not set; defaults kind to public', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'Minimal', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan).toEqual({
+      operation: 'create_board',
+      name: 'Minimal',
+      kind: 'public',
+    });
+  });
+
+  it('surfaces internal_error when Monday returns a null create_board payload', async () => {
+    // Drives the projectCreatedBoard null-guard. Mirrors the
+    // null-payload regression test on workspace create.
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            response: { data: { create_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('surfaces internal_error when Monday returns a missing create_board key (root-key absent)', async () => {
+    // Distinguishes missing-root-key (internal_error) from null
+    // payload (also internal_error here since create has no
+    // partial-success per-record envelope). Both surface as
+    // whole-call internal_error — verifies the responseSchema
+    // catches the missing-root-key shape.
+    const out = await drive(
+      ['board', 'create', '--name', 'X', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+});
