@@ -45,6 +45,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { invalidateBoard } from '../../api/cache.js';
 import {
   BOARD_FIELDS_FRAGMENT,
   boardProjectionSchema,
@@ -188,6 +189,20 @@ export const boardDeleteCommand: CommandModule<
           detailKey: 'board_id',
           detailValue: parsed.boardId,
         });
+
+        // M16 retrofit per cli-design §8 single-leg call-site
+        // contract: invalidate AFTER `data` projection, BEFORE
+        // emitMutation so a cache-unlink failure surfaces through
+        // the runner's catch-all rather than double-emitting after
+        // the success envelope hit stdout. Skipped on the error
+        // path (the projectMutationBoard throw above bypasses this
+        // line). Required because the wire mutation removes the
+        // board entirely; without invalidation a same-process
+        // describe after delete would return stale metadata until
+        // TTL eviction. The retrofit's invalidation deletes the
+        // cache file so the next read cleanly cache-misses to the
+        // live `not_found`.
+        await invalidateBoard(parsed.boardId, ctx.env);
 
         emitMutation({
           ctx,

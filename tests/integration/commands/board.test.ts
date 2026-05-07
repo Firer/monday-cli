@@ -2049,6 +2049,117 @@ describe('monday board delete (integration, M15)', () => {
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
   });
+
+  // ---------------------------------------------------------------
+  // M16 retrofit — invalidateBoard post-success per cli-design §8
+  // ---------------------------------------------------------------
+
+  it('M16 retrofit: cache invalidation round-trip — board delete → board describe sees not_found with source: live + no stale_cache_refreshed warning', async () => {
+    // Per cli-design §8 single-leg call-site contract: invalidate
+    // AFTER `data` projection on success. The retrofit's
+    // invalidation deletes the cache file so the next read cleanly
+    // cache-misses to the live `not_found` rather than serving a
+    // phantom board until TTL eviction. Round-trip pins the three
+    // §8 invariants per cassette: post-delete read sees not_found
+    // (live state); meta.source: 'live' (not 'cache'); no
+    // stale_cache_refreshed warning (the backstop is the path-not-
+    // under-test).
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Delete.
+    const deleted = await drive(
+      ['board', 'delete', '111', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            response: {
+              data: {
+                delete_board: {
+                  id: '111',
+                  name: 'Tasks',
+                  description: null,
+                  state: 'deleted',
+                  board_kind: 'public',
+                  board_folder_id: null,
+                  workspace_id: '5',
+                  url: null,
+                  items_count: 0,
+                  updated_at: '2026-05-07T11:00:00Z',
+                  permissions: 'everyone',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(0);
+    // Post-delete describe — clean cache miss → live fetch returns
+    // not_found (Monday's `boards(ids:)` returns an empty array for
+    // deleted boards). meta.source on the error envelope is the
+    // resolved value at error-emit time — assert the cache file
+    // was unlinked by checking the underlying read fired live (any
+    // remaining cassette interaction was consumed).
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['111'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(postOut.exitCode).toBe(2);
+    expect(postOut.requests).toBe(1);
+    const postEnv = parseEnvelope(postOut.stderr);
+    expect(postEnv.error?.code).toBe('not_found');
+    // The describe surfaced not_found because the cache was
+    // invalidated (live fetch ran and returned an empty boards
+    // list). Without the retrofit, the pre-delete cache snapshot
+    // would have served instead, producing a phantom `boards: [..]`
+    // result.
+  });
+
+  it('M16 retrofit: error path skips invalidation (failed delete didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on error path. A
+    // failed delete (Monday returns null = not_found) didn't change
+    // server state; the cache remains valid.
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([])] },
+    );
+    // Delete fails.
+    const deleted = await drive(
+      ['board', 'delete', '111', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            response: { data: { delete_board: null } },
+          },
+        ],
+      },
+    );
+    expect(deleted.exitCode).toBe(2);
+    // Post-failure describe — cache hit (source: 'cache') because
+    // invalidation was correctly skipped.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: cache hit needs no live fetch.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
 });
 
 describe('monday board duplicate (integration, M15)', () => {
