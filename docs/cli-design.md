@@ -441,11 +441,104 @@ monday account complexity                 # remaining complexity budget      v0.
 monday workspace list                     # all visible workspaces           v0.1
 monday workspace get <wid>                                                   v0.1
 monday workspace folders <wid>            # folders inside workspace         v0.1
-monday workspace create --name <n> [--kind open|closed]                      v0.2
-monday workspace update <wid> [--name <n>] [--kind ...]                      v0.2
-monday workspace delete <wid> --yes                                          v0.2
-monday workspace add-users <wid> --users <id|email>,...                      v0.2
-monday workspace remove-users <wid> --users <id|email>,...                   v0.2
+monday workspace create --name <n> [--kind open|closed] [--description <d>] [--dry-run]   v0.2
+                                          # `create_workspace(name, kind, description?)`.
+                                          # Monday's GraphQL signature pins `kind:
+                                          # WorkspaceKind!` (required at the wire);
+                                          # the CLI defaults to `open` when --kind is
+                                          # omitted so agents don't have to remember
+                                          # the wire constraint. `--description <d>`
+                                          # is optional; omitting it sends no
+                                          # `description` argument so Monday's server-
+                                          # side default applies. Idempotent: NO —
+                                          # re-running creates a second workspace
+                                          # with the same name. Agents needing dedupe
+                                          # call `workspace list` first. NOT
+                                          # destructive (no --yes gate). Dry-run shape
+                                          # per §6.4 workspace-create variant:
+                                          # `{operation: "create_workspace", name,
+                                          # kind, description?}`. `meta.source:
+                                          # "none"` (no API call fires).
+monday workspace update <wid> [--name <n>] [--kind open|closed] [--description <d>] [--dry-run]   v0.2
+                                          # `update_workspace(id, attributes: {name?,
+                                          # kind?, description?})`. At least one of
+                                          # --name / --kind / --description required —
+                                          # zero-flag invocation → `usage_error` at
+                                          # argv-parse (no point firing a no-op
+                                          # mutation). Idempotent: yes — re-applying
+                                          # the same field values is a no-op on
+                                          # Monday's side. Dry-run shape per §6.4
+                                          # workspace-update variant: a field-level
+                                          # diff with `from → to` per provided field
+                                          # (mirrors the column-mutation shape with
+                                          # workspace fields substituted for column
+                                          # IDs). The `from` state requires a
+                                          # preflight `workspace get` read leg —
+                                          # `meta.source: "live"` (workspace
+                                          # metadata isn't cached in v0.2; M16's
+                                          # board-metadata cache doesn't extend to
+                                          # workspaces).
+monday workspace delete <wid> --yes [--dry-run]                              v0.2
+                                          # `delete_workspace(workspace_id)`.
+                                          # Destructive: --yes mandatory (without
+                                          # --yes → confirmation_required, exit 1).
+                                          # Re-deleting an already-deleted workspace
+                                          # surfaces `not_found`, so the CLI marks
+                                          # `idempotent: false` (mirrors `item
+                                          # delete` / `update delete` rationale).
+                                          # **Admin-permission-sensitive** — non-
+                                          # admin callers surface `forbidden` (§6.5)
+                                          # carrying Monday's PERMISSION_DENIED
+                                          # extension. Dry-run shape per §6.4
+                                          # workspace-delete variant: minimal
+                                          # `{operation: "delete_workspace",
+                                          # workspace_id}`. No preflight read fires;
+                                          # the dry-run is purely argv-derived.
+                                          # `meta.source: "none"`.
+monday workspace add-users <wid> --users <id|email>,... [--dry-run]          v0.2
+                                          # `add_users_to_workspace(workspace_id,
+                                          # user_ids, kind?)` fanned out one wire
+                                          # call per user. `--users` accepts numeric
+                                          # IDs and emails mixed in one comma-
+                                          # separated list; emails resolve via M5a's
+                                          # `userByEmail` (directory cache + `users
+                                          # (emails:)` fallback). **Partial-success
+                                          # envelope** per §6.4 — emits one `ok:
+                                          # true` envelope with `data.results:
+                                          # [{user_id, ok, error?}]`. Per-user
+                                          # resolution failures (`user_not_found`)
+                                          # AND per-user dispatch failures land in
+                                          # the per-record `error` slot rather than
+                                          # aborting the loop; on a resolution
+                                          # failure `user_id` carries the input
+                                          # token verbatim so agents can correlate.
+                                          # Top-level `error` reserved for whole-
+                                          # call failure (couldn't reach API; ALL
+                                          # `--users` tokens failed resolution
+                                          # before the loop began). Sequential per
+                                          # §8 decision 8 — parallel waits for v0.4
+                                          # `--concurrency`. Idempotent: yes —
+                                          # re-adding an existing member is a no-op
+                                          # on Monday's side. **Admin-permission-
+                                          # sensitive**. Dry-run resolves every
+                                          # `--users` token (so `user_not_found`
+                                          # surfaces ahead of the live call) and
+                                          # emits the same per-user record shape
+                                          # with `would_apply` substituted for `ok`
+                                          # (§6.4 workspace-add-users variant).
+monday workspace remove-users <wid> --users <id|email>,... [--dry-run]       v0.2
+                                          # `delete_users_from_workspace(workspace_id,
+                                          # user_ids)`. Mirrors `add-users` shape
+                                          # exactly (one wire call per user; same
+                                          # partial-success envelope; same `--users`
+                                          # parser; same `userByEmail` resolution;
+                                          # same dry-run per-record shape).
+                                          # Idempotent: yes — re-removing a non-
+                                          # member is a no-op. **Admin-permission-
+                                          # sensitive**. Dry-run shape per §6.4
+                                          # workspace-remove-users variant:
+                                          # `{operation: "delete_users_from_workspace",
+                                          # workspace_id, results: [...]}`.
 
 # === BOARD ===
 monday board list [--workspace <wid>] [--state active|archived|all]          v0.1
@@ -2268,6 +2361,156 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
+- **Workspace-create shape** (`workspace create`; v0.2 M14).
+  Minimal: `operation: "create_workspace"`, `name`, `kind`, and
+  optional `description`. No diff section (the workspace doesn't
+  exist yet, so there's no prior state to render). No read leg
+  fires; the dry-run is purely argv-derived. `meta.source:
+  "none"`. Mirrors the comment-create shape's preference for
+  agent-scannable surface fields rather than burying values
+  inside `diff`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "create_workspace",
+        "name": "Marketing",
+        "kind": "open"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When `--description` is provided, the planned change carries an
+  additional `description` slot. When `--kind` is omitted, the
+  CLI's default (`"open"`) appears in the dry-run shape so the
+  agent sees exactly what the live mutation would send (Monday's
+  signature pins `kind: WorkspaceKind!`; the CLI fills the
+  default rather than letting the wire reject).
+
+- **Workspace-update shape** (`workspace update`; v0.2 M14).
+  Single-leg dry-run with a preflight `workspace get` read to
+  surface the `from` state per provided field. Carries
+  `operation: "update_workspace"`, `workspace_id`, and `diff: {
+  <field>: { from, to }, ... }` keyed by the workspace fields
+  the agent is changing (`name`, `kind`, `description`). Only
+  fields present in the agent's flags appear in `diff` (omitting
+  a flag means "leave unchanged"; the wire mutation accepts
+  partial `UpdateWorkspaceAttributesInput`). `meta.source: "live"`
+  because the preflight read fires a real `workspaces(ids:)`
+  query (workspace metadata isn't cached in v0.2; the cache layer
+  may extend to it in v0.3 alongside §8's eager-invalidation
+  contract):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "live", ... },
+    "planned_changes": [
+      {
+        "operation": "update_workspace",
+        "workspace_id": "12345",
+        "diff": {
+          "name": { "from": "Marketing", "to": "Marketing — EU" },
+          "kind": { "from": "open", "to": "closed" }
+        }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When the preflight read returns `not_found`, the dry-run
+  surfaces `not_found` (exit 2) rather than emitting a
+  preview-of-failure — agents shouldn't have to interpret a
+  would-fail dry-run shape (mirrors the `item move --to-board`
+  unmatched-columns rule above).
+
+- **Workspace-delete shape** (`workspace delete`; v0.2 M14).
+  Minimal: `operation: "delete_workspace"`, `workspace_id`. No
+  diff, no preflight read leg (Monday's `delete_workspace
+  (workspace_id)` reports `not_found` if the id is bogus and
+  the dry-run is purely argv-derived). `meta.source: "none"`.
+  Same shape (modulo `workspace_id` vs `update_id`) as the
+  update-delete variant — the destructive-no-read pattern is
+  uniform across `item delete`, `update delete`, and
+  `workspace delete`:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "none", ... },
+    "planned_changes": [
+      {
+        "operation": "delete_workspace",
+        "workspace_id": "12345"
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+- **Workspace-add-users shape** (`workspace add-users`; v0.2
+  M14). Single-leg dry-run that resolves every `--users` token
+  through `userByEmail` so resolution failures (`user_not_found`)
+  surface ahead of the live call. Carries `operation:
+  "add_users_to_workspace"`, `workspace_id`, and `results: [...]`
+  — a per-user array mirroring the live envelope's `data.results`
+  shape with `would_apply` substituted for `ok`. Each record
+  carries `user_id: string` (the resolved Monday user ID for
+  resolved tokens; the input token verbatim when resolution
+  failed — agents correlate retries against the input string),
+  `would_apply: boolean` (true iff the live call would dispatch
+  for this user), and an optional `error: { code, message }`
+  populated on resolution failure. `meta.source: "live"` because
+  the resolution leg fires real `users(emails:)` reads (or
+  `cache` if every email hits the directory cache; aggregate
+  `mixed` when both legs apply):
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "add_users_to_workspace",
+        "workspace_id": "12345",
+        "results": [
+          { "user_id": "67890", "would_apply": true },
+          { "user_id": "67891", "would_apply": true },
+          { "user_id": "ghost@example.com", "would_apply": false,
+            "error": { "code": "user_not_found",
+                       "message": "No Monday user matches email \"ghost@example.com\"" } }
+        ]
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  When ALL `--users` tokens fail resolution, the dry-run
+  surfaces `usage_error` (exit 1) rather than emitting a
+  zero-would-apply preview — same rationale as the
+  workspace-update `not_found` rule (no point rendering a
+  guaranteed-failure dry-run).
+
+- **Workspace-remove-users shape** (`workspace remove-users`;
+  v0.2 M14). Identical shape to workspace-add-users with
+  `operation` flipped to `"delete_users_from_workspace"`.
+  Same per-user `results` array, same `would_apply` /
+  `error` semantics, same `meta.source` aggregation. The two
+  verbs share their dry-run shape because their contract is
+  symmetric — fan out one wire call per user and capture per-
+  user outcomes.
+
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than
 assume a fixed slot list.
@@ -2327,6 +2570,24 @@ The corresponding dry-run shape inverts: the dry-run's
 (operation-shape per §6.4 above; e.g. `clear_all_updates` with
 `update_ids: [...]`); the live envelope's `data.results` lists
 the actual per-target outcomes after the loop ran.
+
+**Per-token resolution failures** (M14 `workspace add-users` /
+`remove-users`; M15 `board add-users`). Verbs whose targets
+resolve through a runtime lookup (e.g. `--users` mixing numeric
+IDs with emails, where each email needs `userByEmail`
+resolution before the dispatch loop can fire) surface per-token
+resolution failures inside the same `data.results` array — a
+record with `ok: false` (live) / `would_apply: false` (dry-
+run) and `error: { code: "user_not_found", message }` populated.
+The id-field carries the **input token verbatim** when
+resolution failed (agents need a string to correlate against
+their `--users` argument; the resolved Monday ID isn't known).
+This widens the contract slightly versus `update clear-all`'s
+"id-field always carries a Monday ID" rule and is documented
+per-verb in §4.3 + §6.4. Whole-call `error` (`ok: false`) still
+fires when ALL `--users` tokens fail resolution before the loop
+begins (the M14 / M15 verbs adopt this from §3 M14 line 399's
+"all `--users` tokens failed resolution" rule).
 
 For `monday item upsert` (M12), `data.operation` indicates which
 branch the wire mutation took:
