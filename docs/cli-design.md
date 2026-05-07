@@ -613,9 +613,18 @@ monday board create --name <n> [--workspace <wid>] [--kind public|private|share]
                                           # is optional — Monday creates the board
                                           # in the user's main workspace when the
                                           # flag is omitted. `--template <bid>`
-                                          # clones from a template board (the source
-                                          # board must have `board_kind: template`);
-                                          # the new board's structure mirrors the
+                                          # clones from a Monday template — `<bid>`
+                                          # is the template board's ID. Templates
+                                          # are managed via Monday's UI; the
+                                          # `BoardKind` enum has no `template`
+                                          # value (only `public` / `private` /
+                                          # `share`), so the CLI doesn't validate
+                                          # template-ness ahead of the wire call.
+                                          # When the ID isn't a valid template,
+                                          # Monday surfaces a wire error which the
+                                          # CLI re-maps per §6.5
+                                          # (`validation_failed` typically). The
+                                          # new board's structure mirrors the
                                           # template's columns and groups.
                                           # `--description <d>` is optional;
                                           # omitting it sends no `description`
@@ -650,12 +659,25 @@ monday board update <bid> [--name <n>] [--description <d>] [--dry-run]       v0.
                                           # whole-call error envelope on any per-
                                           # field failure (the multi-call wire
                                           # shape doesn't leak as partial-success —
-                                          # the contract is "all fields applied or
-                                          # the call failed", consistent with
-                                          # `update_workspace`'s single-mutation
-                                          # shape from M14). Idempotent: yes — re-
-                                          # applying the same field values is a
-                                          # no-op on Monday's side. Dry-run shape
+                                          # the envelope is `ok: true` only when
+                                          # every per-field call succeeded; on any
+                                          # per-field failure the envelope is
+                                          # `ok: false`). **Server-side state is
+                                          # NOT transactional** — per-field calls
+                                          # earlier in the sequence may have
+                                          # already committed when a later call
+                                          # fails. This matches Monday's wire
+                                          # constraint (no transaction across
+                                          # per-attribute mutations) and is the
+                                          # strongest guarantee compatible with
+                                          # the wire shape; agents re-issuing
+                                          # after a failure should re-read the
+                                          # board to see what landed before
+                                          # retrying the unapplied tail. See
+                                          # §6.4 board-update partial-application
+                                          # caveat. Idempotent: yes — re-applying
+                                          # the same field values is a no-op on
+                                          # Monday's side. Dry-run shape
                                           # per §6.4 board-update variant: a field-
                                           # level `from → to` diff per provided
                                           # flag (mirrors workspace-update shape
@@ -2988,6 +3010,36 @@ mutation verbs produce different planned-change shapes; the
   without items) is deferred; agents needing it call the wire
   mutation via M9's `dev mutate` escape hatch.
 
+  **Live envelope.** Unlike the other M15 mutation verbs whose
+  `data` is the full board projection directly, `board
+  duplicate`'s `data` slot wraps because Monday's
+  `duplicate_board` returns `BoardDuplication { board,
+  is_async }` (SDK 14.0.0 / `BoardDuplication` type) — both
+  fields are load-bearing for agents:
+
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "board": { "id": "67890", "name": "Engineering — EU", "state": "active", ... },
+      "is_async": false
+    },
+    "meta": { ..., "source": "live" },
+    "warnings": []
+  }
+  ```
+
+  When `is_async: true`, Monday has queued the duplication
+  server-side and the new board may not be fully populated by
+  the time the envelope returns; immediately following reads
+  against `data.board.id` may race completion. Agents needing
+  to operate on the duplicated items / updates should poll
+  `boards(ids: [<new_id>]) { state }` (or a similar readiness
+  check) until the board reports its terminal state, or use
+  workflows that tolerate partial-completion. When `is_async:
+  false`, the duplication has fully landed by envelope time
+  and immediate follow-up reads are safe.
+
 - **Board-add-users shape** (`board add-users`; v0.2 M15).
   Identical shape to workspace-add-users with `operation`
   flipped to `"add_users_to_board"` in both the dry-run
@@ -3454,7 +3506,7 @@ emitted so agents can see when the cache was misleading them.
 | `move_item_to_board` | **No** | Re-running on an item already on the target board is undefined SDK behaviour; the `monday item move` verb's `idempotent: false` is the conservative bound across same-board (idempotent) + cross-board (not) paths |
 | `create_item`, `create_board`, `create_column`, `create_group` | **No** | Use `upsert` variants |
 | `item upsert` | Sequential-retry yes; concurrent no | Re-running with the same args from the same agent is safe (second call branches to `update_item`); two concurrent agents observing zero matches both branch to `create_item`. Recovery: the next call surfaces the duplicate as `ambiguous_match`. v0.4 candidate: lock-resource semantics (§9.3). |
-| `delete_*` | Yes (after first call) | Item already deleted → returns `not_found` |
+| `delete_*` (wire) | Yes (after first call) | Wire-level: re-deleting converges (the thing is already gone). CLI-level the per-verb prose (`item delete` / `update delete` / `workspace delete` / `board delete`) marks `idempotent: false` because re-running surfaces a different envelope (`not_found`) instead of success — same end state, different envelope. Use the per-verb prose for retry semantics; this row is the wire-state classification. |
 | `add_users_to_*` | Yes | Adding a user already a member is a no-op |
 | `create_update` (comment) | **No** | Two calls = two comments |
 
