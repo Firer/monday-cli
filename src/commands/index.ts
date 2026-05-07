@@ -101,6 +101,7 @@ import { boardCreateCommand } from './board/create.js';
 import { boardUpdateCommand } from './board/update.js';
 import { boardArchiveCommand } from './board/archive.js';
 import { boardDeleteCommand } from './board/delete.js';
+import { boardDuplicateCommand } from './board/duplicate.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -131,6 +132,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardUpdateCommand,
     boardArchiveCommand,
     boardDeleteCommand,
+    boardDuplicateCommand,
     boardListCommand,
     boardGetCommand,
     boardFindCommand,

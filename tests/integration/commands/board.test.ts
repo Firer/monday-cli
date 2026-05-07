@@ -1725,3 +1725,333 @@ describe('monday board delete (integration, M15)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 });
+
+describe('monday board duplicate (integration, M15)', () => {
+  // Source board (existing); duplicated board returns a fresh id.
+  const duplicatedBoard = {
+    id: '67890',
+    name: 'Engineering (Copy)',
+    description: 'Eng team',
+    state: 'active',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/67890',
+    items_count: 7,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+
+  const boardMetadataInteraction: Interaction = {
+    operation_name: 'BoardMetadata',
+    match_variables: { ids: ['12345'] },
+    response: {
+      data: {
+        boards: [
+          {
+            id: '12345',
+            name: 'Engineering',
+            description: 'Eng team',
+            state: 'active',
+            board_kind: 'public',
+            board_folder_id: null,
+            workspace_id: '5',
+            url: 'https://x.monday.com/boards/12345',
+            hierarchy_type: 'top_level',
+            is_leaf: true,
+            updated_at: '2026-05-07T11:00:00Z',
+            groups: [],
+            columns: [],
+          },
+        ],
+      },
+    },
+  };
+
+  it('live: defaults to duplicate_board_with_pulses (no --with-updates) and emits the wrapped envelope', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            // Wire-shape pin: duplicate_type: 'duplicate_board_with_pulses'
+            // when --with-updates is absent.
+            match_variables: {
+              boardId: '12345',
+              duplicateType: 'duplicate_board_with_pulses',
+            },
+            match_query: /duplicate_board\(\s*board_id: \$boardId,\s*duplicate_type: \$duplicateType/,
+            response: {
+              data: {
+                duplicate_board: {
+                  board: duplicatedBoard,
+                  is_async: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { board: { id: string; name: string }; is_async: boolean };
+    };
+    // §6.4 board-duplicate variant: data wraps because BoardDuplication
+    // carries is_async — the only M15 verb whose data isn't a flat
+    // projection.
+    expect(env.data.board.id).toBe('67890');
+    expect(env.data.board.name).toBe('Engineering (Copy)');
+    expect(env.data.is_async).toBe(false);
+    expect(env.meta.source).toBe('live');
+    assertEnvelopeContract(env);
+  });
+
+  it('live: --with-updates flips duplicate_type to duplicate_board_with_pulses_and_updates', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--with-updates', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            match_variables: {
+              boardId: '12345',
+              duplicateType: 'duplicate_board_with_pulses_and_updates',
+            },
+            response: {
+              data: {
+                duplicate_board: {
+                  board: duplicatedBoard,
+                  is_async: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: --name and --workspace forward through to the wire variables', async () => {
+    const out = await drive(
+      [
+        'board', 'duplicate', '12345',
+        '--name', 'Engineering — EU',
+        '--workspace', '99',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            match_variables: {
+              boardId: '12345',
+              duplicateType: 'duplicate_board_with_pulses',
+              boardName: 'Engineering — EU',
+              workspaceId: '99',
+            },
+            response: {
+              data: {
+                duplicate_board: {
+                  board: { ...duplicatedBoard, name: 'Engineering — EU', workspace_id: '99' },
+                  is_async: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('live: is_async=true is preserved in the envelope (agents poll for terminal state)', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--with-updates', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            response: {
+              data: {
+                duplicate_board: {
+                  board: duplicatedBoard,
+                  is_async: true,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { is_async: boolean };
+    };
+    expect(env.data.is_async).toBe(true);
+  });
+
+  it('live: not_found when duplicate_board returns null payload', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            match_variables: {
+              boardId: '99999',
+              duplicateType: 'duplicate_board_with_pulses',
+            },
+            response: { data: { duplicate_board: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+
+  it('live: surfaces internal_error when BoardDuplicate response is missing the root key', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('live: surfaces internal_error when BoardDuplication has null inner board', async () => {
+    // Defensive: response says duplicate_board returned a wrapper
+    // but the wrapper's board field is null. Should NOT silently
+    // emit an envelope with no board projection.
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            response: {
+              data: {
+                duplicate_board: {
+                  board: null,
+                  is_async: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('rejects empty --name (whitespace-only) as usage_error', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--name', '   ', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric boardId at argv parse', async () => {
+    const out = await drive(
+      ['board', 'duplicate', 'not-numeric', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects non-numeric --workspace at argv parse', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--workspace', 'not-numeric', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('--dry-run: emits duplicate_board planned change with snapshot + with_updates flag', async () => {
+    const out = await drive(
+      [
+        'board', 'duplicate', '12345',
+        '--name', 'Engineering — EU',
+        '--workspace', '99',
+        '--with-updates',
+        '--dry-run', '--json',
+      ],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        board_id: string;
+        with_updates: boolean;
+        target_workspace_id?: string;
+        target_name?: string;
+        board: { id: string; name: string };
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('duplicate_board');
+    expect(plan?.board_id).toBe('12345');
+    expect(plan?.with_updates).toBe(true);
+    expect(plan?.target_workspace_id).toBe('99');
+    expect(plan?.target_name).toBe('Engineering — EU');
+    expect(plan?.board.id).toBe('12345');
+    expect(plan?.board.name).toBe('Engineering');
+  });
+
+  it('--dry-run: omits target_workspace_id and target_name when flags are absent; defaults with_updates=false', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--dry-run', '--json'],
+      { interactions: [boardMetadataInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes: readonly Record<string, unknown>[];
+    };
+    const plan = env.planned_changes[0];
+    expect(plan?.with_updates).toBe(false);
+    expect(plan).not.toHaveProperty('target_workspace_id');
+    expect(plan).not.toHaveProperty('target_name');
+  });
+
+  it('--dry-run: not_found when preflight returns empty boards list', async () => {
+    const out = await drive(
+      ['board', 'duplicate', '99999', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['99999'] },
+            response: { data: { boards: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+});
