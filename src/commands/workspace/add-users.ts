@@ -190,10 +190,13 @@ const parseUsersArg = (raw: string): readonly ParsedToken[] => {
       { details: { malformed_tokens: malformed } },
     );
   }
+  // Defensive: unreachable in practice.
+  // `inputSchema.users.min(1)` rejects empty `--users` strings,
+  // and any all-empty split (e.g. ",,,") fills `malformed[]`
+  // first which throws above.
+  /* c8 ignore next 3 */
   if (tokens.length === 0) {
-    throw new UsageError(
-      '--users must contain at least one numeric id or email',
-    );
+    throw new UsageError('--users must contain at least one numeric id or email');
   }
   return tokens;
 };
@@ -285,6 +288,7 @@ const resolveTokens = async (
       // Non-`user_not_found` ApiError (e.g. `internal_error` on a
       // malformed Monday response) is a whole-call failure that
       // shouldn't be swallowed into a per-record slot — re-throw.
+      /* c8 ignore next */
       throw err;
     }
   }

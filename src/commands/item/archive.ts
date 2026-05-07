@@ -50,7 +50,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ConfirmationRequiredError } from '../../utils/errors.js';
+import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
@@ -127,22 +127,21 @@ export const itemArchiveCommand: CommandModule<
         // `ctx.meta.setSource('live')` — agents reading provenance
         // see `'none'` because no wire call fired (cli-design §6.1).
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (!globalFlags.dryRun && !globalFlags.yes) {
-          throw new ConfirmationRequiredError(
-            `monday item archive ${parsed.itemId} would archive the ` +
-              `item. Re-run with --yes to confirm, or --dry-run to ` +
-              `preview.`,
-            {
-              details: {
-                item_id: parsed.itemId,
-                hint:
-                  'archive is destructive — Monday retains archived ' +
-                  'items for 30 days but exposes no unarchive mutation ' +
-                  '(cli-design §5.4).',
-              },
-            },
-          );
-        }
+        // R29 lift (v0.2-plan §20): the parsed flags + the gate
+        // helper preserve the M10 round-1 P2 ordering — gate fires
+        // before any `resolveClient()` call so a missing token
+        // doesn't mask `confirmation_required` as `config_error`.
+        enforceDestructiveGate({
+          globalFlags,
+          verb: 'item archive',
+          target: parsed.itemId,
+          detailKey: 'item_id',
+          action: 'archive the item',
+          hint:
+            'archive is destructive — Monday retains archived ' +
+            'items for 30 days but exposes no unarchive mutation ' +
+            '(cli-design §5.4).',
+        });
 
         // Gate cleared — now resolve the client. Both the dry-run
         // read and the live mutation need a `MondayClient`, so a

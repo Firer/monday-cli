@@ -47,7 +47,8 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ApiError, ConfirmationRequiredError } from '../../utils/errors.js';
+import { ApiError } from '../../utils/errors.js';
+import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   workspaceGetOutputSchema,
@@ -123,27 +124,23 @@ export const workspaceDeleteCommand: CommandModule<
         // A missing `--yes` must surface as `confirmation_required`
         // per cli-design §3.1 #7's unconditional contract, never
         // masked by `config_error` when no token is configured.
-        // R29 lift (v0.2-plan §20) consolidates this + the four
-        // prior destructive-verb sites into a shared helper after
-        // M14 implementation lands.
+        // R29 lift (v0.2-plan §20): the helper accepts already-
+        // parsed globalFlags so the ordering invariant is visible
+        // in the call signature. Workspace delete was the 5th
+        // consumer that triggered the lift.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (!globalFlags.dryRun && !globalFlags.yes) {
-          throw new ConfirmationRequiredError(
-            `monday workspace delete ${parsed.workspaceId} would delete the ` +
-              `workspace. Re-run with --yes to confirm, or --dry-run to ` +
-              `preview.`,
-            {
-              details: {
-                workspace_id: parsed.workspaceId,
-                hint:
-                  'delete is destructive — Monday retains deleted workspaces ' +
-                  'in the trash for ~30 days but exposes no restore mutation; ' +
-                  'agents needing reversal must recreate via `monday workspace ' +
-                  'create` (lossy: new id, no boards / users / folders state).',
-              },
-            },
-          );
-        }
+        enforceDestructiveGate({
+          globalFlags,
+          verb: 'workspace delete',
+          target: parsed.workspaceId,
+          detailKey: 'workspace_id',
+          action: 'delete the workspace',
+          hint:
+            'delete is destructive — Monday retains deleted workspaces ' +
+            'in the trash for ~30 days but exposes no restore mutation; ' +
+            'agents needing reversal must recreate via `monday workspace ' +
+            'create` (lossy: new id, no boards / users / folders state).',
+        });
 
         if (globalFlags.dryRun) {
           // Minimal dry-run shape — no preflight read fires. Per

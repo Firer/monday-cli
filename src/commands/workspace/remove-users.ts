@@ -156,10 +156,13 @@ const parseUsersArg = (raw: string): readonly ParsedToken[] => {
       { details: { malformed_tokens: malformed } },
     );
   }
+  // Defensive: unreachable in practice.
+  // `inputSchema.users.min(1)` rejects empty `--users` strings,
+  // and any all-empty split (e.g. ",,,") fills `malformed[]`
+  // first which throws above.
+  /* c8 ignore next 3 */
   if (tokens.length === 0) {
-    throw new UsageError(
-      '--users must contain at least one numeric id or email',
-    );
+    throw new UsageError('--users must contain at least one numeric id or email');
   }
   return tokens;
 };
@@ -224,6 +227,7 @@ const resolveTokens = async (
         failedTokens.push(token.raw);
         continue;
       }
+      /* c8 ignore next — defensive: non-user_not_found re-throw. */
       throw err;
     }
   }

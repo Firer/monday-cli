@@ -1566,6 +1566,19 @@ describe('monday workspace remove-users (integration, M14)', () => {
     expect(envOut.error?.code).toBe('usage_error');
   });
 
+  it('rejects empty --users entries as usage_error', async () => {
+    // `--users ,67890` has a leading empty token — usage_error.
+    // Mirrors the add-users coverage so the empty-entry branch in
+    // the parser is exercised on both verbs.
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', ',67890', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const envOut = parseEnvelope(out.stderr);
+    expect(envOut.error?.code).toBe('usage_error');
+  });
+
   it('Codex round-1 F2: null per-target payload (no errors[]) lands as not_found in results[i].error', async () => {
     // Mirrors add-users F2 fix — a 200 response with
     // `delete_users_from_workspace: null` and no GraphQL

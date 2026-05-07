@@ -34,7 +34,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ConfirmationRequiredError } from '../../utils/errors.js';
+import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import {
   projectMutationUpdate,
@@ -97,25 +97,22 @@ export const updateDeleteCommand: CommandModule<
         // A missing `--yes` must surface as `confirmation_required`
         // per cli-design §3.1 #7's unconditional contract, never
         // masked by `config_error` when no token is configured.
+        // R29 lift (v0.2-plan §20): the helper preserves this
+        // ordering by accepting already-parsed globalFlags.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (!globalFlags.dryRun && !globalFlags.yes) {
-          throw new ConfirmationRequiredError(
-            `monday update delete ${parsed.updateId} would delete the ` +
-              `update. Re-run with --yes to confirm, or --dry-run to ` +
-              `preview.`,
-            {
-              details: {
-                update_id: parsed.updateId,
-                hint:
-                  'delete is destructive — Monday retains deleted ' +
-                  'updates in the trash for ~30 days but exposes no ' +
-                  'restore mutation; agents needing reversal must ' +
-                  'recreate via `monday update create` (lossy: new id, ' +
-                  'no like / pin / reply state).',
-              },
-            },
-          );
-        }
+        enforceDestructiveGate({
+          globalFlags,
+          verb: 'update delete',
+          target: parsed.updateId,
+          detailKey: 'update_id',
+          action: 'delete the update',
+          hint:
+            'delete is destructive — Monday retains deleted ' +
+            'updates in the trash for ~30 days but exposes no ' +
+            'restore mutation; agents needing reversal must ' +
+            'recreate via `monday update create` (lossy: new id, ' +
+            'no like / pin / reply state).',
+        });
 
         if (globalFlags.dryRun) {
           // Minimal dry-run shape — no preflight read fires. Per

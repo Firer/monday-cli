@@ -52,10 +52,8 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema, UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import {
-  ApiError,
-  ConfirmationRequiredError,
-} from '../../utils/errors.js';
+import { ApiError } from '../../utils/errors.js';
+import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import {
   buildCapWarning,
   DEFAULT_MAX_PAGES,
@@ -229,25 +227,25 @@ export const updateClearAllCommand: CommandModule<
         });
 
         // Gate BEFORE `resolveClient()` — Codex M10 round-1 P2.
+        // R29 lift (v0.2-plan §20): clear-all uses the
+        // `previewSuffix` override because its preview shape
+        // ("the would-delete IDs") differs from the single-target
+        // verbs' boilerplate "preview." trailing.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (!globalFlags.dryRun && !globalFlags.yes) {
-          throw new ConfirmationRequiredError(
-            `monday update clear-all ${parsed.itemId} would delete every ` +
-              `update on the item. Re-run with --yes to confirm, or ` +
-              `--dry-run to preview the would-delete IDs.`,
-            {
-              details: {
-                item_id: parsed.itemId,
-                hint:
-                  'destructive — clears the entire comment thread. ' +
-                  'Monday retains deleted updates in the trash for ~30 ' +
-                  'days but exposes no bulk-restore mutation. Per-update ' +
-                  'failures land in `data.results[i].error` rather than ' +
-                  'aborting the whole call.',
-              },
-            },
-          );
-        }
+        enforceDestructiveGate({
+          globalFlags,
+          verb: 'update clear-all',
+          target: parsed.itemId,
+          detailKey: 'item_id',
+          action: 'delete every update on the item',
+          previewSuffix: 'or --dry-run to preview the would-delete IDs.',
+          hint:
+            'destructive — clears the entire comment thread. ' +
+            'Monday retains deleted updates in the trash for ~30 ' +
+            'days but exposes no bulk-restore mutation. Per-update ' +
+            'failures land in `data.results[i].error` rather than ' +
+            'aborting the whole call.',
+        });
 
         const { client, apiVersion, toEmit } = resolveClient(
           ctx,

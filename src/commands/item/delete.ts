@@ -51,7 +51,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ConfirmationRequiredError } from '../../utils/errors.js';
+import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
@@ -122,23 +122,20 @@ export const itemDeleteCommand: CommandModule<
         // `'none'` default because no wire call fires (cli-design
         // §6.1). See archive.ts for the full rationale.
         const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        if (!globalFlags.dryRun && !globalFlags.yes) {
-          throw new ConfirmationRequiredError(
-            `monday item delete ${parsed.itemId} would delete the ` +
-              `item. Re-run with --yes to confirm, or --dry-run to ` +
-              `preview.`,
-            {
-              details: {
-                item_id: parsed.itemId,
-                hint:
-                  'delete is destructive — Monday retains deleted ' +
-                  'items in the trash for 30 days but exposes no ' +
-                  'restore mutation; agents needing reversal must ' +
-                  'recreate from a prior snapshot (cli-design §5.4).',
-              },
-            },
-          );
-        }
+        // R29 lift (v0.2-plan §20): see archive.ts comment for the
+        // M10 round-1 P2 ordering rationale the helper preserves.
+        enforceDestructiveGate({
+          globalFlags,
+          verb: 'item delete',
+          target: parsed.itemId,
+          detailKey: 'item_id',
+          action: 'delete the item',
+          hint:
+            'delete is destructive — Monday retains deleted ' +
+            'items in the trash for 30 days but exposes no ' +
+            'restore mutation; agents needing reversal must ' +
+            'recreate from a prior snapshot (cli-design §5.4).',
+        });
 
         // Gate cleared — resolve the client now. Both dry-run + live
         // need `MondayClient`; a missing token here legitimately
