@@ -84,16 +84,37 @@ const dispatchResponseSchema = z
   })
   .loose();
 
-// Null-payload guard for the per-target dispatch leg. Mirrors the
-// M13 `assertUpdateMutationPresent` shape — when Monday returns a
-// 200 with `data.add_users_to_workspace: null` and no errors
-// array, the per-target dispatch should land in `results[i].error`
-// rather than be reported as illusory success. `dispatchSequential`
-// catches the thrown ApiError and decorates the per-record slot.
+// Null-payload guard for the per-target dispatch leg. Distinguishes
+// two cases per Codex M14 round-2 F1:
+// - `add_users_to_workspace` key ABSENT (response shape drift, e.g.
+//   Monday's GraphQL schema dropped the mutation field): surface as
+//   whole-call `internal_error` (dispatchSequential re-throws this
+//   code so it doesn't get papered over as per-record).
+// - `add_users_to_workspace` key PRESENT but value null: surface as
+//   per-record `not_found` (the documented per-target null-payload
+//   path Monday returns when the membership couldn't be applied).
 const assertDispatchPayloadPresent = (
-  raw: unknown,
+  data: Readonly<Record<string, unknown>>,
   userId: string,
+  workspaceId: string,
 ): void => {
+  if (!('add_users_to_workspace' in data)) {
+    throw new ApiError(
+      'internal_error',
+      `Monday's WorkspaceAddUsers response is missing the add_users_to_workspace root field`,
+      {
+        details: {
+          workspace_id: workspaceId,
+          user_id: userId,
+          hint:
+            'this is a schema-drift error in Monday\'s GraphQL response; ' +
+            'verify the mutation declaration and update the response ' +
+            'schema if Monday\'s contract has changed.',
+        },
+      },
+    );
+  }
+  const raw = data.add_users_to_workspace;
   if (raw === null || raw === undefined) {
     throw new ApiError(
       'not_found',
@@ -428,8 +449,9 @@ export const workspaceAddUsersCommand: CommandModule<
               },
             );
             assertDispatchPayloadPresent(
-              data.add_users_to_workspace,
+              data,
               targetId,
+              parsed.workspaceId,
             );
           },
         );

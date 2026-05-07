@@ -56,14 +56,32 @@ const dispatchResponseSchema = z
   })
   .loose();
 
-// Null-payload guard for the per-target dispatch leg. Mirrors
-// add-users (Codex M14 round-1 F2): a 200 response with
-// `delete_users_from_workspace: null` and no errors array lands
-// in `results[i].error`, not as illusory success.
+// Null-payload guard. Mirrors add-users (Codex M14 round-2 F1):
+// - Key ABSENT (response shape drift) → whole-call `internal_error`
+//   (dispatchSequential re-throws this code).
+// - Key PRESENT but value null → per-record `not_found`.
 const assertDispatchPayloadPresent = (
-  raw: unknown,
+  data: Readonly<Record<string, unknown>>,
   userId: string,
+  workspaceId: string,
 ): void => {
+  if (!('delete_users_from_workspace' in data)) {
+    throw new ApiError(
+      'internal_error',
+      `Monday's WorkspaceRemoveUsers response is missing the delete_users_from_workspace root field`,
+      {
+        details: {
+          workspace_id: workspaceId,
+          user_id: userId,
+          hint:
+            'this is a schema-drift error in Monday\'s GraphQL response; ' +
+            'verify the mutation declaration and update the response ' +
+            'schema if Monday\'s contract has changed.',
+        },
+      },
+    );
+  }
+  const raw = data.delete_users_from_workspace;
   if (raw === null || raw === undefined) {
     throw new ApiError(
       'not_found',
@@ -343,8 +361,9 @@ export const workspaceRemoveUsersCommand: CommandModule<
               },
             );
             assertDispatchPayloadPresent(
-              data.delete_users_from_workspace,
+              data,
               targetId,
+              parsed.workspaceId,
             );
           },
         );

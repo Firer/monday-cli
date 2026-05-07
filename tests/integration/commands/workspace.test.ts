@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Interaction } from '../../fixtures/load.js';
+import { resolveCacheRoot, writeEntry } from '../../../src/api/cache.js';
 import {
   assertEnvelopeContract,
   drive,
@@ -1280,29 +1281,36 @@ describe('monday workspace add-users (integration, M14)', () => {
     expect(envOut.data.results[0]?.error?.code).toBe('not_found');
   });
 
-  it('Codex round-1 F1: failed dispatch leg still records as live in meta.source aggregation', async () => {
-    // Pre-fix, `liveAggregator.record('live', null)` ran AFTER
-    // `await client.raw(...)`. A dispatch failure (Monday 5xx etc.)
-    // skipped the live leg, so an all-email-cache + dispatch-fails
-    // scenario would emit `source: 'cache'` even though a live
-    // mutation was attempted. Post-fix, the record happens before
-    // the await — failure-paths fold into the aggregate.
-    //
-    // Exercise: numeric `--users` (skips resolver entirely, so
-    // resolver legs = 0) + Monday returns a `forbidden` GraphQL
-    // error (caught per-target by dispatchSequential). Result:
-    // resolver=0 + dispatch=1 → `meta.source: 'live'` (post-fix).
-    // Pre-fix, would emit `source: 'live'` too via the SourceAggregator
-    // fallback default — but combining a CACHED resolver with a
-    // failing dispatch would have shown the bug. The combo test
-    // would be cleaner; absent it, this assertion at least pins
-    // the fix doesn't regress the all-numeric path.
+  it('Codex round-2 F2: cache-resolved email + failed dispatch → meta.source: "mixed" (proper regression pin)', async () => {
+    // Round-1 F1 pinned the contract via an all-numeric scenario
+    // where SourceAggregator's fallback default already emitted
+    // `live`; the test passed pre-fix and post-fix and didn't
+    // actually exercise the bug. Round-2 F2 corrects this by
+    // seeding the user-directory cache with a known email so
+    // the resolver leg lands as `cache`, then making the
+    // dispatch fail. Pre-fix: `record('live', null)` runs AFTER
+    // the failing await and never fires; aggregate would emit
+    // `source: "cache"`. Post-fix: record fires BEFORE the await,
+    // so combined: cache + live → "mixed".
+    const cacheRoot = resolveCacheRoot({ env: { XDG_CACHE_HOME: env.xdgRoot() } });
+    await writeEntry(
+      cacheRoot,
+      { kind: 'users' },
+      [
+        { id: '99001', name: 'Alice', email: 'alice@example.test' },
+      ],
+    );
     const out = await drive(
-      ['workspace', 'add-users', '12345', '--users', '67890', '--json'],
+      ['workspace', 'add-users', '12345', '--users', 'alice@example.test', '--json'],
       {
         interactions: [
           {
             operation_name: 'WorkspaceAddUsers',
+            // Dispatch fails — Monday returns null + PERMISSION_DENIED.
+            // The dispatch leg DID fire (we attempted the mutation);
+            // post-fix the leg is recorded as `live` regardless of
+            // success/failure.
+            match_variables: { workspaceId: '12345', userIds: ['99001'] },
             response: {
               data: { add_users_to_workspace: null },
               errors: [
@@ -1318,9 +1326,40 @@ describe('monday workspace add-users (integration, M14)', () => {
     );
     expect(out.exitCode).toBe(0);
     const envOut = parseEnvelope(out.stdout);
-    // Failure-path dispatch still counts as a live leg: resolver=0
-    // + dispatch=1 → `live`.
-    expect(envOut.meta.source).toBe('live');
+    // Cache resolver leg + live dispatch leg → mixed.
+    expect(envOut.meta.source).toBe('mixed');
+  });
+
+  it('Codex round-2 F1: missing add_users_to_workspace root key surfaces as whole-call internal_error', async () => {
+    // Round-2 F1 distinction: response with the mutation root key
+    // ABSENT (e.g. {data: {}} — schema-drift case) is NOT the same
+    // as null per-target payload. Per the new assertDispatchPayload
+    // Present contract:
+    // - Key absent → internal_error (whole-call; dispatchSequential
+    //   re-throws the code so it doesn't get papered over per-record).
+    // - Key present, value null → not_found (per-record).
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            // Empty data object — root key absent.
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { workspace_id?: string; user_id?: string };
+      };
+    };
+    expect(envOut.error?.code).toBe('internal_error');
+    expect(envOut.error?.details?.workspace_id).toBe('12345');
+    expect(envOut.error?.details?.user_id).toBe('67890');
   });
 });
 
@@ -1502,5 +1541,28 @@ describe('monday workspace remove-users (integration, M14)', () => {
     expect(envOut.ok).toBe(true);
     expect(envOut.data.results[0]?.ok).toBe(false);
     expect(envOut.data.results[0]?.error?.code).toBe('not_found');
+  });
+
+  it('Codex round-2 F1: missing delete_users_from_workspace root key surfaces as whole-call internal_error', async () => {
+    // Mirrors add-users round-2 F1: response with mutation root key
+    // ABSENT → whole-call internal_error (dispatchSequential re-
+    // throws). Distinguishes schema-drift from per-target null.
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const envOut = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { user_id?: string } };
+    };
+    expect(envOut.error?.code).toBe('internal_error');
+    expect(envOut.error?.details?.user_id).toBe('67890');
   });
 });

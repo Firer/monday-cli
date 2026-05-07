@@ -72,6 +72,14 @@ export const dispatchSequential = async <TargetId extends string>(
       results.push(ok);
     } catch (err: unknown) {
       if (err instanceof MondayCliError) {
+        // Codex M14 round-2 F1: `internal_error` codes signal CLI
+        // bugs or Monday-side schema drift (e.g. response missing
+        // the mutation root key). Those are whole-call failures
+        // — papering over them with a per-record slot would hide
+        // the malformed-response signal that agents need to know
+        // about. Re-throw so the runner's catch-all surfaces it
+        // as the documented internal_error envelope.
+        if (err.code === 'internal_error') throw err;
         const failed: PartialSuccessResult = {
           [idField]: targetId,
           ok: false,
