@@ -54,6 +54,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
+import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { userByEmail } from '../../api/resolvers.js';
@@ -76,6 +77,31 @@ const ADD_USERS_TO_WORKSPACE_MUTATION = `
 // from "send this id verbatim").
 const NUMERIC_TOKEN_PATTERN = /^\d+$/u;
 const EMAIL_TOKEN_PATTERN = /^[^@\s]+@[^@\s]+$/u;
+
+const dispatchResponseSchema = z
+  .object({
+    add_users_to_workspace: z.unknown(),
+  })
+  .loose();
+
+// Null-payload guard for the per-target dispatch leg. Mirrors the
+// M13 `assertUpdateMutationPresent` shape — when Monday returns a
+// 200 with `data.add_users_to_workspace: null` and no errors
+// array, the per-target dispatch should land in `results[i].error`
+// rather than be reported as illusory success. `dispatchSequential`
+// catches the thrown ApiError and decorates the per-record slot.
+const assertDispatchPayloadPresent = (
+  raw: unknown,
+  userId: string,
+): void => {
+  if (raw === null || raw === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from add_users_to_workspace for user ${userId}`,
+      { details: { user_id: userId } },
+    );
+  }
+};
 
 const errorShape = z
   .object({
@@ -364,6 +390,14 @@ export const workspaceAddUsersCommand: CommandModule<
           resolution.dispatchableIds,
           'user_id',
           async ({ targetId }) => {
+            // Record the dispatch leg as 'live' BEFORE the wire
+            // call — Codex M14 round-1 F1: per-target dispatch
+            // failures must still count toward `meta.source`
+            // because the call DID fire. Without this, an all-
+            // email cache + dispatch-fails scenario would emit
+            // `source: "cache"` even though a live mutation was
+            // attempted.
+            liveAggregator.record('live', null);
             const response = await client.raw<unknown>(
               ADD_USERS_TO_WORKSPACE_MUTATION,
               {
@@ -373,7 +407,30 @@ export const workspaceAddUsersCommand: CommandModule<
               { operationName: 'WorkspaceAddUsers' },
             );
             lastResponse = response;
-            liveAggregator.record('live', null);
+            // Codex M14 round-1 F2: a 200 response with
+            // `data.add_users_to_workspace: null` and no
+            // `errors[]` is NOT a per-target success — it's a
+            // null payload Monday returns when the membership
+            // can't be applied (rare server-side path; observed
+            // when the user id is a typo'd workspace id, etc.).
+            // Throw a typed ApiError so dispatchSequential lands
+            // it in `results[i].error` rather than reporting an
+            // illusory ok: true.
+            const data = unwrapOrThrow(
+              dispatchResponseSchema.safeParse(response.data),
+              {
+                context:
+                  'Monday returned a malformed WorkspaceAddUsers response',
+                details: {
+                  workspace_id: parsed.workspaceId,
+                  user_id: targetId,
+                },
+              },
+            );
+            assertDispatchPayloadPresent(
+              data.add_users_to_workspace,
+              targetId,
+            );
           },
         );
 

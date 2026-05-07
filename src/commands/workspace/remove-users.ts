@@ -32,6 +32,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
+import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { dispatchSequential } from '../../api/partial-success-mutation.js';
 import { SourceAggregator } from '../../api/source-aggregator.js';
 import { userByEmail } from '../../api/resolvers.js';
@@ -48,6 +49,29 @@ const REMOVE_USERS_FROM_WORKSPACE_MUTATION = `
 
 const NUMERIC_TOKEN_PATTERN = /^\d+$/u;
 const EMAIL_TOKEN_PATTERN = /^[^@\s]+@[^@\s]+$/u;
+
+const dispatchResponseSchema = z
+  .object({
+    delete_users_from_workspace: z.unknown(),
+  })
+  .loose();
+
+// Null-payload guard for the per-target dispatch leg. Mirrors
+// add-users (Codex M14 round-1 F2): a 200 response with
+// `delete_users_from_workspace: null` and no errors array lands
+// in `results[i].error`, not as illusory success.
+const assertDispatchPayloadPresent = (
+  raw: unknown,
+  userId: string,
+): void => {
+  if (raw === null || raw === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from delete_users_from_workspace for user ${userId}`,
+      { details: { user_id: userId } },
+    );
+  }
+};
 
 const errorShape = z
   .object({
@@ -290,6 +314,11 @@ export const workspaceRemoveUsersCommand: CommandModule<
           resolution.dispatchableIds,
           'user_id',
           async ({ targetId }) => {
+            // Record dispatch leg as 'live' BEFORE the wire call —
+            // Codex M14 round-1 F1: per-target dispatch failures
+            // still count toward `meta.source` because the call
+            // DID fire (mirrors add-users fix).
+            liveAggregator.record('live', null);
             const response = await client.raw<unknown>(
               REMOVE_USERS_FROM_WORKSPACE_MUTATION,
               {
@@ -299,7 +328,24 @@ export const workspaceRemoveUsersCommand: CommandModule<
               { operationName: 'WorkspaceRemoveUsers' },
             );
             lastResponse = response;
-            liveAggregator.record('live', null);
+            // Codex M14 round-1 F2: null mutation payload + no
+            // errors array → per-target `results[i].error`, not
+            // illusory success. Mirrors add-users fix.
+            const data = unwrapOrThrow(
+              dispatchResponseSchema.safeParse(response.data),
+              {
+                context:
+                  'Monday returned a malformed WorkspaceRemoveUsers response',
+                details: {
+                  workspace_id: parsed.workspaceId,
+                  user_id: targetId,
+                },
+              },
+            );
+            assertDispatchPayloadPresent(
+              data.delete_users_from_workspace,
+              targetId,
+            );
           },
         );
 

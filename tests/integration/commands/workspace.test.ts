@@ -1248,6 +1248,80 @@ describe('monday workspace add-users (integration, M14)', () => {
     expect(envOut.data.results[0]?.ok).toBe(false);
     expect(envOut.data.results[0]?.error?.code).toBe('forbidden');
   });
+
+  it('Codex round-1 F2: null per-target payload (no errors[]) lands as not_found in results[i].error', async () => {
+    // A 200 response with `add_users_to_workspace: null` and no
+    // GraphQL errors[] is NOT a per-target success — it's a null
+    // payload Monday returns when the membership can't be applied.
+    // Pre-fix, the action body never inspected the response and
+    // reported illusory ok: true. Post-fix, the dispatch callback
+    // throws ApiError('not_found') which dispatchSequential lands
+    // in `results[i].error`.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            response: { data: { add_users_to_workspace: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { user_id: string; ok: boolean; error?: { code: string } }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.results[0]?.user_id).toBe('67890');
+    expect(envOut.data.results[0]?.ok).toBe(false);
+    expect(envOut.data.results[0]?.error?.code).toBe('not_found');
+  });
+
+  it('Codex round-1 F1: failed dispatch leg still records as live in meta.source aggregation', async () => {
+    // Pre-fix, `liveAggregator.record('live', null)` ran AFTER
+    // `await client.raw(...)`. A dispatch failure (Monday 5xx etc.)
+    // skipped the live leg, so an all-email-cache + dispatch-fails
+    // scenario would emit `source: 'cache'` even though a live
+    // mutation was attempted. Post-fix, the record happens before
+    // the await — failure-paths fold into the aggregate.
+    //
+    // Exercise: numeric `--users` (skips resolver entirely, so
+    // resolver legs = 0) + Monday returns a `forbidden` GraphQL
+    // error (caught per-target by dispatchSequential). Result:
+    // resolver=0 + dispatch=1 → `meta.source: 'live'` (post-fix).
+    // Pre-fix, would emit `source: 'live'` too via the SourceAggregator
+    // fallback default — but combining a CACHED resolver with a
+    // failing dispatch would have shown the bug. The combo test
+    // would be cleaner; absent it, this assertion at least pins
+    // the fix doesn't regress the all-numeric path.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            response: {
+              data: { add_users_to_workspace: null },
+              errors: [
+                {
+                  message: 'Forbidden',
+                  extensions: { code: 'PERMISSION_DENIED' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout);
+    // Failure-path dispatch still counts as a live leg: resolver=0
+    // + dispatch=1 → `live`.
+    expect(envOut.meta.source).toBe('live');
+  });
 });
 
 describe('monday workspace remove-users (integration, M14)', () => {
@@ -1402,5 +1476,31 @@ describe('monday workspace remove-users (integration, M14)', () => {
     expect(out.exitCode).toBe(1);
     const envOut = parseEnvelope(out.stderr);
     expect(envOut.error?.code).toBe('usage_error');
+  });
+
+  it('Codex round-1 F2: null per-target payload (no errors[]) lands as not_found in results[i].error', async () => {
+    // Mirrors add-users F2 fix — a 200 response with
+    // `delete_users_from_workspace: null` and no GraphQL
+    // errors[] lands per-record as not_found (not illusory ok).
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', '67890', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            response: { data: { delete_users_from_workspace: null } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const envOut = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { user_id: string; ok: boolean; error?: { code: string } }[];
+      };
+    };
+    expect(envOut.ok).toBe(true);
+    expect(envOut.data.results[0]?.ok).toBe(false);
+    expect(envOut.data.results[0]?.error?.code).toBe('not_found');
   });
 });
