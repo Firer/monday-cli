@@ -52,7 +52,7 @@ no `data`); see the **Errors** section at the bottom.
 | Noun | Verbs |
 |------|-------|
 | [account](#account) | whoami, info, version, complexity |
-| [workspace](#workspace) | list, get, folders |
+| [workspace](#workspace) | list, get, folders, create, update, delete, add-users, remove-users |
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor |
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create |
@@ -166,6 +166,180 @@ Collection of folders within the given workspace.
     "children": [{ "id": "500", "name": "Q2 plan" }] }
 ]
 ```
+
+### `workspace create --name <n> [--kind open|closed] [--description <d>] [--dry-run]` (M14)
+
+Live envelope's `data` is the projected `Workspace` shape (same as
+`workspace get`). `--kind` defaults to `open` when omitted (Monday's
+GraphQL signature pins `kind: WorkspaceKind!`; the CLI fills the
+default rather than letting the wire reject).
+
+```json
+{
+  "id": "12345", "name": "Marketing", "description": "EU campaigns",
+  "kind": "open", "state": "active", "is_default_workspace": false,
+  "created_at": "2026-05-07T11:00:00Z",
+  "settings": { "icon": { "color": "#0000FF", "image": null } }
+}
+```
+
+Dry-run shape per cli-design §6.4 workspace-create variant —
+`{operation: "create_workspace", name, kind, description?}` with
+`data: null` and `meta.source: "none"`. Idempotent: false (re-running
+creates a duplicate workspace; agents needing dedupe call
+`workspace list` first).
+
+### `workspace update <wid> [--name <n>] [--kind open|closed] [--description <d>] [--dry-run]` (M14)
+
+Live envelope's `data` is the projected `Workspace` shape post-update.
+At least one of `--name` / `--kind` / `--description` is required;
+zero-flag invocation surfaces as `usage_error` at argv-parse.
+
+Dry-run shape per cli-design §6.4 workspace-update variant — a field-
+level `from → to` diff over the provided fields:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "live", ... },
+  "planned_changes": [
+    {
+      "operation": "update_workspace",
+      "workspace_id": "12345",
+      "diff": {
+        "name": { "from": "Marketing", "to": "Marketing — EU" },
+        "kind": { "from": "open", "to": "closed" }
+      }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Preflight `WorkspaceUpdatePreflight` read fires for the `from` state
+(workspace metadata isn't cached in v0.2) — `meta.source: "live"`. When
+the preflight returns `[]`, surfaces `not_found` (exit 2) rather than
+emitting a would-fail dry-run shape. Idempotent: yes.
+
+### `workspace delete <wid> --yes [--dry-run]` (M14)
+
+Live envelope's `data` is the projected (now-deleted) `Workspace`
+shape. `--yes` mandatory (without it the gate fires
+`confirmation_required`, exit 1). Dry-run shape per cli-design §6.4
+workspace-delete variant — minimal `{operation: "delete_workspace",
+workspace_id}` with `meta.source: "none"`.
+
+```json
+{
+  "id": "12345", "name": "Marketing", "description": "EU campaigns",
+  "kind": "open", "state": "deleted", "is_default_workspace": false,
+  "created_at": "2026-05-07T11:00:00Z",
+  "settings": { "icon": { "color": "#0000FF", "image": null } }
+}
+```
+
+Re-deleting an already-deleted workspace surfaces `not_found` (the
+`delete_workspace: null` payload maps to a typed `not_found`). Missing
+mutation root key (schema drift) surfaces as `internal_error`,
+distinct from `not_found`. Admin-permission-sensitive — non-admin
+callers surface `forbidden` carrying Monday's PERMISSION_DENIED
+extension. Idempotent: false.
+
+### `workspace add-users <wid> --users <id|email>,... [--dry-run]` (M14)
+
+**Partial-success envelope** — one wire call per user via
+`dispatchSequential`. `--users` accepts numeric IDs and emails mixed
+in one comma-separated list; numeric IDs are argv-derived (skip the
+resolver), emails flow through M5a's `userByEmail`. M14 omits the
+SDK's `kind?: WorkspaceSubscriberKind` argument; relies on Monday's
+server-side default (subscriber).
+
+Live envelope shape (cli-design §6.4 partial-success-envelope):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "add_users_to_workspace",
+    "results": [
+      { "user_id": "67890", "ok": true },
+      { "user_id": "67891", "ok": true },
+      { "user_id": "ghost@example.test", "ok": false,
+        "error": { "code": "user_not_found",
+                   "message": "No Monday user matches email \"ghost@example.test\"" } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": []
+}
+```
+
+`data.operation` lives on `data` (not `meta`) per the upsert
+precedent; agents key off it to identify the verb. Per-user records:
+`user_id` is plain string (not branded `UserId`) because resolution
+failures preserve the input token verbatim — emails aren't valid
+`UserId` values. `data.results` always present even when every per-
+user dispatch failed (envelope is `ok: true` whenever dispatch ran).
+
+Dry-run shape — same per-record array under
+`planned_changes[0].results` with `would_apply` substituted for `ok`:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "mixed", ... },
+  "planned_changes": [
+    {
+      "operation": "add_users_to_workspace",
+      "workspace_id": "12345",
+      "results": [
+        { "user_id": "67890", "would_apply": true },
+        { "user_id": "ghost@example.test", "would_apply": false,
+          "error": { "code": "user_not_found", "message": "..." } }
+      ]
+    }
+  ],
+  "warnings": []
+}
+```
+
+**`meta.source` aggregation** splits dry-run vs live (cli-design §6.4):
+
+- Dry-run sees only resolver legs: all-numeric → `none`; all-email
+  cache hits → `cache`; live `users(emails:)` → `live`; combinations
+  → `mixed`.
+- Live folds in every per-target mutation dispatch leg too (always
+  `live`): all-numeric → `live` (dispatch is the only source-bearing
+  leg); all-email cache + dispatch → `mixed`; live + dispatch →
+  `live`; mixed cache/live + dispatch → `mixed`.
+
+**Whole-call error boundaries:**
+
+- All email `--users` tokens fail resolution AND no numeric remains →
+  top-level `user_not_found` (exit 2) carrying
+  `details.failed_tokens: [...]`. Mixed calls (numeric + ghost email)
+  stay partial-success.
+- Malformed `--users` syntax (blank token, non-numeric AND non-email)
+  → top-level `usage_error` (exit 1) with
+  `details.malformed_tokens: [...]`.
+- Missing mutation root key (schema drift) → `internal_error`
+  whole-call (`dispatchSequential` re-throws this code so it
+  doesn't get papered over per-record).
+
+Idempotent: yes (re-adding an existing member is a Monday-side
+no-op). Admin-permission-sensitive.
+
+### `workspace remove-users <wid> --users <id|email>,... [--dry-run]` (M14)
+
+Mirrors `add-users` exactly modulo the operation name —
+`delete_users_from_workspace` instead of `add_users_to_workspace` in
+both `data.operation` and the dry-run `planned_changes[0].operation`
+slot. Same `--users` parser, same partial-success envelope, same
+`meta.source` aggregation rule, same whole-call error boundaries.
+Idempotent: yes (re-removing a non-member is a no-op). Admin-
+permission-sensitive.
 
 ---
 

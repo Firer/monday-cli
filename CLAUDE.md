@@ -11,25 +11,38 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M13 shipped;
-**M14 (workspace lifecycle — admin-permission-sensitive) is next.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M14 shipped;
+**M15 (board lifecycle) is next.**
 
-**M13 → M14 cleanup window — R37 + R38 shipped** (see
-`docs/v0.2-plan.md` §20):
-- **R37 + R38 shipped** in `2182ded refactor(r37+r38): lift Update
-  projection helper + UPDATE_FIELDS_FRAGMENT`. Helper at
-  `src/api/update-mutation-result.ts` exports
-  `projectMutationUpdate` + `assertUpdateMutationPresent` (the
-  two-export seam handles clear-all's `{ id }`-only
-  `DELETE_UPDATE_MUTATION` without breaking the strict-projection
-  fixtures the four full-projection sites depend on) and
-  `UPDATE_FIELDS_FRAGMENT` (the shared GraphQL selection across the
-  six M13/M5b/M3 sites). 1900 tests pass byte-identical; helper at
-  100/100/100; project branches at 95.43%.
-- **R29 (reactivated)** schedules into M14's docs sweep — workspace
-  delete arrives as the 5th destructive-verb gate consumer; lifting
-  then means M14 adopts the helper from day one rather than copying
-  the M10 round-1 P2 ordering block.
+**M14 closed** (see `docs/v0.2-plan.md` §3 M14 status block + §21
+post-mortem):
+- Five workspace lifecycle verbs (create / update / delete / add-
+  users / remove-users) shipped across **eleven** atomic commits:
+  one docs pre-flight (`3fe1d58`) + three pre-flight Codex rounds
+  + five feat commits (`ccd7f1e` … `6e77cc9`) + three implementation
+  Codex rounds + R29 lift (`2b74321`) + this docs close. Project
+  coverage 98.92 / 95.04 / 99.46 / 99.08 (above the 94/95/95/95
+  floor); 1957 tests passing.
+- **R29 shipped at M14 close** in `2b74321 refactor(r29): lift
+  destructive-verb confirmation gate into api/destructive-gate`.
+  All 5 destructive-verb sites (item archive + item delete + update
+  delete + update clear-all + workspace delete) migrate to the
+  shared `enforceDestructiveGate` helper; the signature accepts
+  already-parsed `globalFlags` to preserve the M10 round-1 P2
+  gate-before-`resolveClient` ordering invariant in the type
+  signature itself. Byte-identical post-lift; +1 net new regression
+  test (parallel empty-entries rejection on remove-users).
+
+**M14 → M15 cleanup window candidates** (logged in §21):
+- **R39 — workspace-projection schema lift** (4 consumers: get /
+  create / update / delete). Trigger fired; defer to M15 close so
+  the lift absorbs board's parallel split (3-4 more consumers).
+- **R40 — partial-success `--users` resolver-fronted-fan-out
+  helper** (2 consumers: workspace add-users / remove-users; M15
+  `board add-users` is the third). Defer until M15.
+- **R41 — `assertDispatchPayloadPresent` null-payload guard** (2
+  consumers; M13's `assertUpdateMutationPresent` adjacent). Defer
+  until M15's add-users adds the third consumer.
 
 The three binding documents — read in this order before writing code:
 
