@@ -527,13 +527,22 @@ monday workspace add-users <wid> --users <id|email>,... [--dry-run]          v0.
                                           # failure `user_id` carries the input
                                           # token verbatim so agents can correlate.
                                           # Top-level `error` reserved for whole-
-                                          # call failure (couldn't reach API; ALL
-                                          # email `--users` tokens failed
-                                          # resolution before the loop began →
-                                          # top-level `user_not_found`, exit 2).
-                                          # Malformed `--users` syntax (e.g. blank
-                                          # token, non-numeric and non-email) →
-                                          # top-level `usage_error`, exit 1.
+                                          # call failure (couldn't reach API; OR
+                                          # **no dispatchable user_id remains
+                                          # after parsing/resolution** — every
+                                          # `--users` token was an email AND
+                                          # every email failed `userByEmail`
+                                          # lookup → top-level `user_not_found`,
+                                          # exit 2; carries `details.failed_tokens:
+                                          # [...]`). A mixed call where some
+                                          # numeric IDs OR some emails resolve
+                                          # successfully still gets the partial-
+                                          # success envelope — failed-resolution
+                                          # records land per-`results` slot, not
+                                          # whole-call. Malformed `--users` syntax
+                                          # (blank token, non-numeric AND non-
+                                          # email) → top-level `usage_error`,
+                                          # exit 1.
                                           # Sequential per §8 decision 8 — parallel
                                           # waits for v0.4 `--concurrency`.
                                           # Idempotent: yes — re-adding an existing
@@ -546,11 +555,18 @@ monday workspace add-users <wid> --users <id|email>,... [--dry-run]          v0.
                                           # record shape with `would_apply`
                                           # substituted for `ok` (§6.4 workspace-
                                           # add-users variant). `meta.source`
-                                          # aggregates over the resolution legs:
-                                          # all-numeric `--users` → `none` (no
-                                          # API/cache leg fires); all-email cache
-                                          # hits → `cache`; live `users(emails:)`
-                                          # → `live`; combinations → `mixed`.
+                                          # aggregates DIFFERENTLY between dry-run
+                                          # and live — dry-run sees only resolver
+                                          # legs (all-numeric → `none`; cache →
+                                          # `cache`; live `users(emails:)` →
+                                          # `live`; combos → `mixed`); live also
+                                          # folds in every per-target mutation
+                                          # dispatch leg (always `live`), so
+                                          # all-numeric live aggregates to `live`
+                                          # (not `none`), all-email-cache live
+                                          # aggregates to `mixed` (cache
+                                          # resolver + live dispatch). See §6.4
+                                          # `meta.source` aggregation rule.
 monday workspace remove-users <wid> --users <id|email>,... [--dry-run]       v0.2
                                           # `delete_users_from_workspace(workspace_id,
                                           # user_ids)`. Mirrors `add-users` shape
@@ -2501,11 +2517,14 @@ mutation verbs produce different planned-change shapes; the
   when resolution failed — agents correlate retries against the
   input string), `would_apply: boolean` (true iff the live call
   would dispatch for this user), and an optional `error: { code,
-  message }` populated on resolution failure. `meta.source`
-  aggregates over the resolution legs: all-numeric `--users` →
-  `"none"` (no API/cache leg fires); all-email cache hits →
-  `"cache"`; live `users(emails:)` → `"live"`; combinations →
-  `"mixed"`:
+  message }` populated on resolution failure. `meta.source` for
+  the dry-run aggregates ONLY the resolver legs: all-numeric
+  `--users` → `"none"` (no resolver fires); all-email cache hits
+  → `"cache"`; live `users(emails:)` → `"live"`; combinations →
+  `"mixed"`. The live envelope folds in every per-target
+  mutation dispatch leg too — see the `meta.source` aggregation
+  rule under "Per-token resolution failures" below for the
+  live-path table:
 
   ```json
   {
@@ -2552,17 +2571,23 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
-  When ALL email `--users` tokens fail resolution before the
-  dispatch loop begins, the call surfaces top-level
-  `user_not_found` (exit 2) — both for live and dry-run. The
-  whole-call code is `user_not_found` (the actionable directory-
-  miss case), NOT `usage_error` (which is reserved for malformed
-  `--users` syntax — blank tokens, tokens that aren't numeric
-  AND aren't email-shaped). This matches §6.5's existing
-  `user_not_found` semantics and lets agents distinguish "your
-  argv was wrong" (exit 1) from "the directory doesn't have
-  these users" (exit 2). The error carries `details.failed_tokens:
-  [...]` listing every unresolved input.
+  When **no dispatchable user_id remains after parsing /
+  resolution** (every `--users` token was an email AND every
+  email failed `userByEmail` lookup), the call surfaces top-
+  level `user_not_found` (exit 2) — both for live and dry-run.
+  A mixed call where some numeric IDs OR some emails resolved
+  successfully still gets the partial-success envelope — failed-
+  resolution records land in the per-record `error` slot, not
+  whole-call (the partial-success contract holds whenever there
+  is at least one user to dispatch against). The whole-call code
+  is `user_not_found` (the actionable directory-miss case), NOT
+  `usage_error` (which is reserved for malformed `--users`
+  syntax — blank tokens, tokens that aren't numeric AND aren't
+  email-shaped). This matches §6.5's existing `user_not_found`
+  semantics and lets agents distinguish "your argv was wrong"
+  (exit 1) from "the directory doesn't have these users" (exit
+  2). The error carries `details.failed_tokens: [...]` listing
+  every unresolved input (per the §6.5 schema below).
 
 - **Workspace-remove-users shape** (`workspace remove-users`;
   v0.2 M14). Identical shape to workspace-add-users with
@@ -2654,21 +2679,46 @@ The id-field carries the **input token verbatim** when
 resolution failed (agents need a string to correlate against
 their `--users` argument; the resolved Monday ID isn't known).
 Numeric IDs in `--users` skip the resolver entirely (they're
-argv-derived); only email tokens fire the directory lookup,
-which means a numeric-only `--users` invocation aggregates
-`meta.source: "none"` and an email-bearing invocation
-aggregates over the cache/live legs (`cache` / `live` /
-`mixed`) — same precedent as the M5b people-resolver
-aggregation. This widens the partial-success contract slightly
+argv-derived); only email tokens fire the directory lookup. The
+`meta.source` aggregation rule splits between dry-run and live
+(see below). This widens the partial-success contract slightly
 versus `update clear-all`'s "id-field always carries a Monday
 ID" rule and is documented per-verb in §4.3 + §6.4. Whole-call
 `error` (`ok: false`) fires with code **`user_not_found`**
-(not `usage_error`) when ALL email `--users` tokens fail
-resolution before the loop begins — the directory-miss case is
-actionable distinct from malformed argv. Malformed `--users`
-syntax (blank tokens; tokens that aren't numeric AND aren't
-email-shaped) surfaces as `usage_error` (exit 1) at argv
-parse, before any resolution leg fires.
+(not `usage_error`) when **no dispatchable user_id remains
+after parsing / resolution** — every `--users` token was an
+email AND every email failed lookup. A mixed call with even
+one numeric ID OR one resolved email still gets the partial-
+success envelope; failed-resolution records land per-record.
+Malformed `--users` syntax (blank tokens; tokens that aren't
+numeric AND aren't email-shaped) surfaces as `usage_error`
+(exit 1) at argv parse, before any resolution leg fires.
+
+**`meta.source` aggregation for resolver-fronted partial-
+success verbs.** The aggregation differs between dry-run and
+live because dry-run has only resolver legs while live also
+fires per-target mutation legs (each Monday mutation counts as
+a `live` leg in `SourceAggregator`'s precedent at
+`src/api/source-aggregator.ts`):
+
+- **Dry-run** — aggregate only resolver legs:
+  - all-numeric `--users` (no resolver fires) → `"none"`;
+  - all-email cache hits → `"cache"`;
+  - any live `users(emails:)` lookup → `"live"`;
+  - cache + live combinations → `"mixed"`.
+- **Live** — aggregate resolver legs + every per-target
+  mutation dispatch leg (which is always `live`):
+  - all-numeric `--users` (no resolver) + dispatch → `"live"`
+    (dispatch is the only source-bearing leg);
+  - all-email cache hits + dispatch → `"mixed"` (cache
+    resolver + live dispatch);
+  - all-email live lookup + dispatch → `"live"`;
+  - mixed cache/live resolver + dispatch → `"mixed"`.
+
+The split mirrors the M11 `item move` aggregation precedent
+(read-leg + mutation-leg fold) — never collapse all-numeric
+live to `"none"` (the dispatch leg already happened) and never
+infer `"none"` for any live path that fired a mutation.
 
 For `monday item upsert` (M12), `data.operation` indicates which
 branch the wire mutation took:
@@ -2822,6 +2872,19 @@ slots that ship in v0.1 across multiple codes:
 - `ambiguous_column`:
   - `candidates: [{ id, title, type }, ...]` — the matching
     columns. Agents retry with explicit `id:<column_id>` prefix.
+- `user_not_found`:
+  - `email: string` — present on single-lookup failures (M5a's
+    `userByEmail` path: `--set people=<email>`, `--match-by`
+    people resolution, etc.).
+  - `failed_tokens: string[]` — present on multi-token whole-
+    call failures (M14 `workspace add-users` / `remove-users`,
+    M15 `board add-users`) when no dispatchable user_id remains
+    after parsing/resolution. Carries every email `--users` token
+    that failed lookup, in input order; numeric IDs that passed
+    argv-parse don't appear here. Per-record per-target failures
+    inside a partial-success envelope land in
+    `data.results[i].error` instead — `failed_tokens` is reserved
+    for the whole-call boundary.
 - `ambiguous_match` (M12 — `item upsert` matched 2+ items):
   - `board_id: string` — the `--board <bid>` the upsert ran against.
   - `match_by: string[]` — the resolved `--match-by` tokens (the
