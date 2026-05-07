@@ -66,22 +66,29 @@ post-mortem):
   now rejects at column-resolution time rather than waiting for
   Monday's wire `validation_failed`.
 
-**M16 → M17 cleanup window** (no R-class shipped yet at the cleanup
-window — R45 shipped at implementation start; R46 + R42 + R44
-remain — full detail in §22):
+**M16 → M17 cleanup window** (R46 shipped at the cleanup window;
+R45 shipped at M16 implementation start; R42 + R44 remain — full
+detail in §22):
 - **R46 — `withBoardInvalidation` post-success projection wrapper**
-  stays deferred to the M16 → M17 cleanup window per §22 R46
-  timing recommendation. The four single-leg + two fan-out call
-  sites have stress-tested the §8 timing contract end-to-end
-  through the implementation review; the lift consolidates them
-  with a stable signature before M17's five new group verbs adopt
-  it from day one (mirrors R29's M14-close-then-M15-adopts
-  pattern).
+  shipped at the M16 → M17 cleanup window in `5b06d53 refactor(r46):
+  lift withBoardInvalidation post-success projection wrapper into
+  api/board-mutation-invalidation` (mirrors R40 + R43's M15 → M16
+  cleanup-window cadence). New `src/api/board-mutation-
+  invalidation.ts` exports two wrappers that pin the §8 leg-count
+  split in the type system: `withBoardInvalidationSingleLeg`
+  (4 consumers: column-create / column-delete + M15-retrofit
+  board archive / board delete) and `withBoardInvalidationFanOut`
+  (2 consumers: column-update + M15-retrofit board update; high-
+  water-mark counter exposed via a `BoardFanOutTracker.record
+  LegSuccess()` callback so the count survives a thrown closure).
+  M17's five group verbs (single-leg + fan-out mix) adopt the
+  helpers from day one (mirrors R29's M14-close-then-M15-adopts
+  pattern). Tests 2127 → 2139; coverage held at 99.01 / 95.43 /
+  99.49 / 99.14.
 - **R42 — retroactive missing-root-key distinction across pre-
   M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 M15
   mutation sites) — remaining backlog. Schedule: post-M16
-  dedicated session OR fold into the M16 → M17 cleanup window
-  alongside R46 if calendar pressure dictates.
+  dedicated session.
 - **R44 — generic `projectMutationResource` over R28/R37/R43/R45**
   stays deferred to v0.3 OR a fifth-noun trigger per §22 R44's
   entry; touching R44 now would re-touch four per-noun helpers
