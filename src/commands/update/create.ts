@@ -21,9 +21,8 @@
  * computed and a sanity-check pass is cheap.
  *
  * Idempotent: NO — re-running creates a duplicate comment. Agents
- * that want idempotency should either dedupe by `update.body`
- * via `monday update list <iid>` first, or use a future
- * `update upsert` (deferred to v0.2).
+ * that want idempotency should dedupe by `update.body` via
+ * `monday update list <iid>` first.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';

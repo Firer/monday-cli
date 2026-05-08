@@ -31,10 +31,8 @@ cli-design §5.3 writer-expansion roadmap + §13 v0.3 entry).
   returned 0 P1 / 3 P2 / 1 P3; two findings (P2-1 + P3-1)
   addressed inline, two (P2-3 + P2-4) deferred to the contract
   diff that followed in this same session.
-- **M19 contract diff landed in this same session** (one
-  commit, lands after this CLAUDE.md flip — the SHA isn't
-  knowable until the commit lands; reference it via
-  `git log --oneline | head -1` post-push). The
+- **M19 contract diff landed in `d822982`** (this same
+  session, one commit). The
   diff lands tag-directory + board-relation-validation module
   signatures (stub bodies — runtime lands at M19 implementation
   alongside the friendly translator cases) + `src/utils/errors.ts`
