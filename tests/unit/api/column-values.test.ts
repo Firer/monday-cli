@@ -647,17 +647,17 @@ describe('translateColumnValue — read-only-forever types', () => {
 
 describe('translateColumnValue — future-roadmap types', () => {
   // Codex M5b cleanup re-review #1: types not in v0.1, not on the
-  // v0.2 roadmap, and not read-only-forever (battery / time_tracking /
-  // files / rating / etc.) fall into the generic "future" branch. The
-  // error advertises future coverage without committing to a specific
-  // version — the roadmap doesn't promise these for v0.2 yet.
-  // M16 pre-flight reclassified `item_assignees` as read-only-forever
-  // (cli-design §4.3 column-create) so it now lives in the read-only
-  // describe block above, not here.
+  // v0.2/v0.3 writer-expansion roadmap, and not read-only-forever
+  // (battery / rating / etc.) fall into the generic "future" branch.
+  // The error advertises future coverage without committing to a
+  // specific version. Pinned column types from cli-design §5.3
+  // writer-expansion roadmap have their own branches:
+  //   - `time_tracking` → `deferred_to: "v0.3"` (start/stop verbs)
+  //   - `file` (files-shaped) → `deferred_to: "v0.4"` (asset upload)
+  // Both are tested in the dedicated describe blocks below.
+  // M16 pre-flight reclassified `item_assignees` as read-only-forever.
   it.each([
     'battery',
-    'time_tracking',
-    'files',
     'rating',
   ])('%s → unsupported_column_type with deferred_to: future', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
@@ -677,6 +677,49 @@ describe('translateColumnValue — future-roadmap types', () => {
       expect(err.details).not.toHaveProperty('set_raw_example');
       expect(err.details).not.toHaveProperty('read_only');
       expect(err.message).not.toMatch(/Use --set-raw/u);
+    }
+  });
+
+  it('time_tracking → unsupported_column_type with deferred_to: "v0.3" (Codex M18 round-2 P2)', () => {
+    // cli-design §5.3 writer-expansion roadmap row: time_tracking
+    // uses start/stop verbs, not value writes. Pinned as a v0.3
+    // candidate. Pre-fix the runtime sent it through the generic
+    // `future` branch; the M18 round-2 fix special-cased it.
+    expect(() => translate('time_tracking', 'whatever', 'col_z')).toThrow(
+      /start\/stop verbs/u,
+    );
+    try {
+      translate('time_tracking', 'whatever', 'col_z');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('unsupported_column_type');
+      expect(err.details).toMatchObject({
+        column_id: 'col_z',
+        type: 'time_tracking',
+        deferred_to: 'v0.3',
+      });
+    }
+  });
+
+  it('file (files-shaped) → unsupported_column_type with deferred_to: "v0.4" (Codex M18 round-2 P2)', () => {
+    // cli-design §5.3 writer-expansion roadmap row: files-shaped
+    // types use add_file_to_column (multipart upload). Pinned as
+    // a v0.4 deferral. Pre-fix the runtime sent it through the
+    // generic `future` branch; the M18 round-2 fix special-cased
+    // it via isFilesShapedType.
+    expect(() => translate('file', 'whatever', 'col_z')).toThrow(
+      /add_file_to_column/u,
+    );
+    try {
+      translate('file', 'whatever', 'col_z');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('unsupported_column_type');
+      expect(err.details).toMatchObject({
+        column_id: 'col_z',
+        type: 'file',
+        deferred_to: 'v0.4',
+      });
     }
   });
 

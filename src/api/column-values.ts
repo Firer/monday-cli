@@ -103,6 +103,7 @@ import { ApiError, UsageError } from '../utils/errors.js';
 import type { JsonObject } from '../types/json.js';
 import {
   getColumnRoadmapCategory,
+  isFilesShapedType,
   isWritableColumnType,
   type WritableColumnType,
 } from './column-types.js';
@@ -997,12 +998,71 @@ export const unsupportedColumnTypeError = (
     );
   }
   // category === 'future'
+
+  // Files-shaped types are pinned to `deferred_to: "v0.4"` per
+  // cli-design.md §5.3 writer-expansion roadmap (the "files" row).
+  // Monday writes these via `add_file_to_column` (multipart upload)
+  // rather than `change_column_value`, so the friendly translator
+  // can't translate them at all and `--set-raw` also rejects them
+  // (different code path; raw-write.ts emits the same v0.4
+  // deferral). Without this branch, files-shaped types would fall
+  // through to the generic `future` branch and contradict the
+  // contract — Codex M18 round-2 P2.
+  if (isFilesShapedType(type)) {
+    return new ApiError(
+      'unsupported_column_type',
+      `Column "${columnId}" has type "${type}", which Monday writes ` +
+        `via add_file_to_column (multipart upload) rather than ` +
+        `change_column_value. The friendly --set translator can't ` +
+        `reach this surface; --set-raw <col>=<json> can't either. ` +
+        `Asset upload is pinned to v0.4 per cli-design.md §13.`,
+      {
+        details: {
+          column_id: columnId,
+          type,
+          deferred_to: 'v0.4',
+          hint:
+            'asset upload is a v0.4 deferral; the underlying mutation ' +
+            '(add_file_to_column) requires multipart wire shape that ' +
+            'the column-value path does not model.',
+        },
+      },
+    );
+  }
+
+  // `time_tracking` is pinned to `deferred_to: "v0.3"` per
+  // cli-design.md §5.3 writer-expansion roadmap row. It's a v0.3
+  // deferral because the semantics are start/stop verbs (not value
+  // writes), so the friendly translator can't represent it without
+  // a verb-shaped extension. `--set-raw` rejects similarly.
+  if (type === 'time_tracking') {
+    return new ApiError(
+      'unsupported_column_type',
+      `Column "${columnId}" has type "time_tracking", which Monday ` +
+        `mutates via start/stop verbs rather than column-value writes. ` +
+        `The friendly --set translator and --set-raw both target ` +
+        `change_column_value-shaped types; time_tracking needs a ` +
+        `verb-shaped extension pinned for v0.3.`,
+      {
+        details: {
+          column_id: columnId,
+          type,
+          deferred_to: 'v0.3',
+          hint:
+            'time_tracking uses start/stop verbs, not column-value ' +
+            'writes. v0.3 plans a dedicated surface; until then there ' +
+            'is no friendly or raw write path.',
+        },
+      },
+    );
+  }
+
   return new ApiError(
     'unsupported_column_type',
     `Column "${columnId}" has type "${type}", which is not in the ` +
       `friendly --set translator allowlist (text, long_text, numbers, ` +
       `status, dropdown, date, people, link, email, phone) and is not ` +
-      `on the v0.2 writer-expansion roadmap. Try --set-raw <col>=<json> ` +
+      `pinned to a specific roadmap version. Try --set-raw <col>=<json> ` +
       `with the documented Monday wire shape — that path accepts any ` +
       `type Monday writes via change_column_value. Files-shaped types ` +
       `(file) and read-only-forever types (mirror / formula / etc.) are ` +
@@ -1014,10 +1074,9 @@ export const unsupportedColumnTypeError = (
         deferred_to: 'future',
         hint:
           'use --set-raw <col>=<json> with the Monday wire shape if the ' +
-          'type accepts change_column_value. Some types (time_tracking, ' +
-          'file) have dedicated verbs planned; others (battery, rating) ' +
-          'are not yet scoped. See cli-design.md §5.3 writer-expansion ' +
-          'roadmap.',
+          'type accepts change_column_value. Examples in this bucket ' +
+          '(battery, rating) are not yet scoped on the writer-expansion ' +
+          'roadmap. See cli-design.md §5.3.',
       },
     },
   );

@@ -178,7 +178,12 @@ const normaliseTitle = (raw: string): string =>
  * `item set` errors agree. Pre-fix the writer-expansion split (Codex
  * M5b cleanup re-review #1), this diagnostic would have called every
  * non-allowlisted type "deferred to v0.2", which doctor faithfully
- * preserves now via the category-keyed switch.
+ * preserved via the category-keyed switch. M18 close (Codex round-2
+ * P2): the tentative writer-expansion row slipped from v0.2 to v0.3,
+ * so the `v0_2_writer_expansion` category's message now references
+ * v0.3. The category constant name retains its M8-era spelling for
+ * stability — renaming would churn every consumer with no wire-shape
+ * change.
  */
 const messageForCategory = (
   type: string,
@@ -194,14 +199,14 @@ const messageForCategory = (
   if (category === 'v0_2_writer_expansion') {
     return (
       `Column type "${type}" is not yet in the friendly --set ` +
-      `translator allowlist. Friendly support remains deferred to a ` +
-      `later v0.2 milestone; use --set-raw <col>=<json> in the ` +
-      `meantime.`
+      `translator allowlist. The tentative writer-expansion row ` +
+      `slipped from v0.2 to v0.3 at v0.2.0 release; use --set-raw ` +
+      `<col>=<json> in the meantime.`
     );
   }
   return (
     `Column type "${type}" is not in the friendly --set allowlist or ` +
-    `the v0.2 writer-expansion roadmap. Track cli-design.md §5.3 for ` +
+    `the writer-expansion roadmap. Track cli-design.md §5.3 for ` +
     `future coverage; --set-raw works for any type Monday writes via ` +
     `change_column_value.`
   );

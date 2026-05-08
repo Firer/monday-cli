@@ -5181,10 +5181,12 @@ to largest scope:
   - Duplicate column titles (would cause `ambiguous_column` on
     title-based `--set`).
   - Columns of types not in the friendly-translator allowlist
-    (not writable via `--set` in v0.1; v0.2 widens coverage by
-    up to six new types — three firm + three tentative — plus
-    `--set-raw` for everything else the API will write to via
-    `change_column_value`).
+    (not writable via `--set` in v0.1; v0.2 added the M8 firm row —
+    `link`, `email`, `phone` — and `--set-raw` for everything
+    else the API will write to via `change_column_value`. The
+    tentative writer-expansion row — `tags`, `board_relation`,
+    `dependency` — slipped to v0.3 at the v0.2.0 release; doctor's
+    diagnostic message names v0.3 for those types).
   - Stale cache entries vs. live state.
   - Missing/broken `board_relation` targets (linked board archived).
   - For `dev`-mapped boards: missing expected columns
