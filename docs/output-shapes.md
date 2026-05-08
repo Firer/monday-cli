@@ -52,12 +52,12 @@ no `data`); see the **Errors** section at the bottom.
 | Noun | Verbs |
 |------|-------|
 | [account](#account) | whoami, info, version, complexity |
-| [workspace](#workspace) | list, get, folders, create, update, delete, add-users, remove-users |
-| [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor |
+| [workspace](#workspace) | list, get, folders, create (M14), update (M14), delete (M14), add-users (M14), remove-users (M14) |
+| [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
-| [update](#update) | list, get, create |
+| [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
 | [item (reads)](#item-reads) | list, get, find, search, subitems |
-| [item (mutations)](#item-mutations) | set, clear, update (single + bulk), create, archive, delete |
+| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk), create, archive, delete, duplicate, move, upsert (M12) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
