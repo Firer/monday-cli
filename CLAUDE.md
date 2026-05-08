@@ -11,10 +11,71 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M16 shipped;
-**M17 (board groups) — pre-flight contract pinned in `bed75c6
-docs(m17): pre-flight cli-design contract for board groups`;
-implementation pending in the session-after.**
+**v0.1.0 published; v0.2.0 in development on `main`.** M0–M17 shipped;
+**M18 (NDJSON streaming + 0.2.0 release prep) is next.**
+
+**M17 closed** (see `docs/v0.2-plan.md` §3 M17 status block + §25
+post-mortem):
+- Five group lifecycle verbs (group-create / group-update /
+  group-archive / group-duplicate / group-delete) shipped across
+  **eight** atomic commits since the M17 pre-flight contract
+  `bed75c6` landed: five feat (`df5a2ae` group-create / R48 lift,
+  `c44a899` group-update, `b25b20a` group-archive, `7019868`
+  group-duplicate, `32965bd` group-delete) + two implementation
+  Codex round fix-ups (`c056c11` round-1 P2 fix-ups + `c8a1288`
+  round-2 P3 stale-comment fix-up) + this docs close. Project
+  coverage 99.04 / 95.51 / 99.51 / 99.17 (above the 94/95/95/95
+  floor); 2218 tests passing.
+- **R48 shipped at M17 implementation start** in `df5a2ae feat(m17):
+  add board group-create — R48 group projection helper + first
+  group verb`. New `src/api/group-mutation-result.ts` exports
+  `projectMutationGroup` + `GROUP_FIELDS_FRAGMENT` +
+  `groupProjectionSchema`; all five M17 group verbs adopt the
+  helper from day one (mirrors R45's M16-implementation + R39's
+  M15-implementation timing — third milestone running this
+  pattern). The `idKey: 'group_id' | 'name'` parameter pins the
+  per-noun divergence (group-create uses `name` for the pre-id
+  throw shape; group-update / group-archive / group-duplicate /
+  group-delete use `group_id`); `boardId` is always paired since
+  every group wire signature is two-tuple.
+- **`GROUP_COLOR_VALUES` palette shipped in `src/api/group-color.ts`**
+  at the round-1 P2 fix in `c056c11`. 41-name palette covering
+  Monday's documented group colours; both `group-create` and
+  `group-update` consume it via `z.enum(GROUP_COLOR_VALUES)` so
+  invalid colour names surface as `usage_error` (exit 1) BEFORE
+  any network call. The M17 implementation owns the field set per
+  cli-design §4.3 — the contract pins the SHAPE, the implementation
+  owns the values (mirrors M16 column-types.ts).
+- **R29 destructive-gate `extraDetails` slot consumer-count rises
+  1 → 3.** M16 column-delete shipped the slot extension; M17
+  group-archive + group-delete are the 2nd + 3rd two-tuple
+  consumers. All three echo `{board_id, <noun>_id, hint}` per
+  cli-design §6.5 single-target shape.
+- **R46 `withBoardInvalidation*` consumer-count rises 6 → 11.**
+  M17 adds five new consumers: group-create + group-archive +
+  group-duplicate + group-delete adopt
+  `withBoardInvalidationSingleLeg` (4 new single-leg, total 8);
+  group-update adopts `withBoardInvalidationFanOut` (3rd fan-out
+  consumer after column-update + board-update).
+
+**M17 → M18 cleanup window** (no R-class lifts scheduled — both
+M17-surfaced candidates deferred to v0.3; full detail in §22):
+- **R49 candidate** (snapshot-bearing destructive-archive dry-run
+  helper) — evaluated at M17 close and deferred to v0.3. The three
+  archive verbs (item-archive / board-archive / group-archive)
+  diverge enough on snapshot-loading semantics that a unified
+  helper signature exceeds the >4-parameter heuristic. Inline
+  duplication-cost stays acceptable for v0.2.
+- **R50 candidate** (1-surface attribute fan-out helper) — deferred
+  to v0.3. Two consumers post-M17 (board-update + group-update);
+  below the 3-consumer trigger.
+- **R42** (retroactive missing-root-key sweep across ~32 sites
+  including the 5 new M17 mutation sites) — stays deferred to a
+  focused post-M17 dedicated cleanup session.
+- **R44** (generic `projectMutationResource` over R28/R37/R43/R45/R48)
+  stays deferred to v0.3 OR a sixth-noun trigger; touching R44 now
+  would re-touch five per-noun helpers and scope-creep into a
+  six-noun refactor.
 
 **M16 closed** (see `docs/v0.2-plan.md` §3 M16 status block + §24
 post-mortem):
@@ -69,32 +130,17 @@ post-mortem):
   Monday's wire `validation_failed`.
 
 **M16 → M17 cleanup window** (R46 shipped at the cleanup window;
-R45 shipped at M16 implementation start; R42 + R44 remain — full
-detail in §22):
+R45 shipped at M16 implementation start):
 - **R46 — `withBoardInvalidation` post-success projection wrapper**
-  shipped at the M16 → M17 cleanup window in `5b06d53 refactor(r46):
-  lift withBoardInvalidation post-success projection wrapper into
-  api/board-mutation-invalidation` (mirrors R40 + R43's M15 → M16
-  cleanup-window cadence). New `src/api/board-mutation-
-  invalidation.ts` exports two wrappers that pin the §8 leg-count
-  split in the type system: `withBoardInvalidationSingleLeg`
-  (4 consumers: column-create / column-delete + M15-retrofit
-  board archive / board delete) and `withBoardInvalidationFanOut`
-  (2 consumers: column-update + M15-retrofit board update; high-
-  water-mark counter exposed via a `BoardFanOutTracker.record
-  LegSuccess()` callback so the count survives a thrown closure).
-  M17's five group verbs (single-leg + fan-out mix) adopt the
-  helpers from day one (mirrors R29's M14-close-then-M15-adopts
-  pattern). Tests 2127 → 2139; coverage held at 99.01 / 95.43 /
-  99.49 / 99.14.
-- **R42 — retroactive missing-root-key distinction across pre-
-  M14 mutation verbs** (~23 sites across M5b/M9-M13 + 6 M15
-  mutation sites) — remaining backlog. Schedule: post-M16
-  dedicated session.
-- **R44 — generic `projectMutationResource` over R28/R37/R43/R45**
-  stays deferred to v0.3 OR a fifth-noun trigger per §22 R44's
-  entry; touching R44 now would re-touch four per-noun helpers
-  and scope-creep into a five-noun refactor.
+  shipped in `5b06d53 refactor(r46): lift withBoardInvalidation
+  post-success projection wrapper into api/board-mutation-
+  invalidation` (mirrors R40 + R43's M15 → M16 cleanup-window
+  cadence). New `src/api/board-mutation-invalidation.ts` exports
+  two wrappers that pin the §8 leg-count split in the type system:
+  `withBoardInvalidationSingleLeg` and
+  `withBoardInvalidationFanOut`. M17's five group verbs (single-
+  leg + fan-out mix) adopted the helpers from day one — total
+  consumer count post-M17 is 11 (8 single-leg + 3 fan-out).
 
 The three binding documents — read in this order before writing code:
 
