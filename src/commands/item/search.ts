@@ -57,7 +57,10 @@ import {
   resolveMeFactory,
   titleMap,
 } from '../../api/item-helpers.js';
-import type { Warning } from '../../utils/output/envelope.js';
+import { buildMeta, type Warning } from '../../utils/output/envelope.js';
+import { selectOutput } from '../../utils/output/select.js';
+import { startNdjsonStream } from '../../utils/output/ndjson.js';
+import { collectSecrets } from '../../cli/envelope-out.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
 const ITEMS_PAGE_BY_COLUMN_VALUES_QUERY = `
@@ -262,6 +265,7 @@ export const itemSearchCommand: CommandModule<
     "monday item search --board 12345 --where 'status=Done'",
     "monday item search --board 12345 --where 'status=Done' --where 'status=Backlog'",
     'monday item search --board 12345 --where owner=me --json',
+    'monday item search --board 12345 --where status=Done --all --output ndjson',
   ],
   idempotent: true,
   inputSchema,
@@ -287,7 +291,10 @@ export const itemSearchCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         const parsed = parseArgv(itemSearchCommand.inputSchema, opts);
-        const { client, globalFlags, toEmit } = resolveClient(ctx, program.opts());
+        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
+          ctx,
+          program.opts(),
+        );
 
         const meta = await loadBoardMetadata({
           client,
@@ -322,6 +329,63 @@ export const itemSearchCommand: CommandModule<
         const effectiveSource: 'live' | 'cache' | 'mixed' =
           meta.source === 'live' && !queryResult.refreshed ? 'live' : 'mixed';
         const effectiveCacheAge = meta.cacheAgeSeconds;
+
+        const format = selectOutput({
+          json: globalFlags.json,
+          table: globalFlags.table,
+          ...(globalFlags.output === undefined ? {} : { output: globalFlags.output }),
+          env: ctx.env,
+          isTTY: ctx.isTTY,
+        });
+
+        // Streaming NDJSON path — emit per-arrival, then the §6.3
+        // trailer (matches item list's shape; both go through
+        // `paginate.onItem` and project through the same
+        // `projectFromRaw` callback). Bypasses emitSuccess because
+        // the streaming contract requires items hitting stdout
+        // before the walk completes. M18.
+        if (format === 'ndjson') {
+          const stream = startNdjsonStream<unknown>({
+            stream: ctx.stdout,
+            secrets: collectSecrets(ctx.env),
+            project: (raw) => projectFromRaw(raw, titles, { omitColumnTitles: true }),
+          });
+          const result = await paginate<unknown, InitialResponse | NextResponse>({
+            fetchInitial: initialFetcher(client, parsed.board, columns),
+            fetchNext: nextFetcher(client),
+            now: ctx.clock,
+            extractPage: (r): PaginatedPage<unknown> => {
+              if ('next_items_page' in r.data) return extractNext(r as MondayResponse<NextResponse>);
+              return extractInitial(r as MondayResponse<InitialResponse>);
+            },
+            getId: idFromRawItem,
+            all: parsed.all === true,
+            ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+            pageSize,
+            onItem: stream.onItem,
+          });
+          // §6.3 trailer-warnings pin: filterWarnings live on the
+          // success envelope when the caller picks JSON; in NDJSON
+          // they're dropped per the §6.3 "no warnings in trailer"
+          // rule. Same shape as item list's streaming branch.
+          void filterWarnings;
+          stream.writeTrailer(
+            buildMeta({
+              api_version: apiVersion,
+              cli_version: ctx.cliVersion,
+              request_id: ctx.requestId,
+              source: effectiveSource,
+              retrieved_at: ctx.clock().toISOString(),
+              cache_age_seconds: effectiveCacheAge,
+              complexity: result.complexity,
+              next_cursor: result.nextCursor,
+              has_more: result.hasMore,
+              total_returned: result.totalReturned,
+              columns: columnHeads,
+            }),
+          );
+          return;
+        }
 
         const result = await paginate<unknown, InitialResponse | NextResponse>({
           fetchInitial: initialFetcher(client, parsed.board, columns),
