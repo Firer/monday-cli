@@ -77,6 +77,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationFanOut } from '../../api/board-mutation-invalidation.js';
+import { findBoardChildOrThrow } from '../../api/board-child-finder.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   COLUMN_FIELDS_FRAGMENT,
@@ -219,26 +220,16 @@ export const boardColumnUpdateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
-          const current = preflight.metadata.columns.find(
-            (c) => c.id === parsed.columnId,
-          );
-          if (current === undefined) {
-            // Board-level read succeeded but the column ID isn't on
-            // the board — surface not_found with details.column_id
-            // so agents distinguish "wrong board id" from "wrong
-            // column id" without re-reading. Mirrors `column-update`
-            // §6.4 dry-run carve-out.
-            throw new ApiError(
-              'not_found',
-              `Monday returned no column with id ${parsed.columnId} on board ${parsed.boardId}`,
-              {
-                details: {
-                  board_id: parsed.boardId,
-                  column_id: parsed.columnId,
-                },
-              },
-            );
-          }
+          // R51 lift — `findBoardChildOrThrow` consolidates the
+          // board-level read succeeded but the column ID isn't on
+          // the board → not_found-with-details.column_id carve-out
+          // shared with `group-update` + `group-archive`.
+          const current = findBoardChildOrThrow({
+            metadata: preflight.metadata,
+            kind: 'columns',
+            id: parsed.columnId,
+            boardId: parsed.boardId,
+          });
 
           const diff: Record<string, FieldDiff> = {};
           if (trimmedTitle !== undefined) {

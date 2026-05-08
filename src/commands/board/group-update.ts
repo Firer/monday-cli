@@ -88,6 +88,7 @@ import { parseArgv } from '../parse-argv.js';
 import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationFanOut } from '../../api/board-mutation-invalidation.js';
+import { findBoardChildOrThrow } from '../../api/board-child-finder.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { GROUP_COLOR_VALUES } from '../../api/group-color.js';
 import {
@@ -231,26 +232,16 @@ export const boardGroupUpdateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
-          const current = preflight.metadata.groups.find(
-            (g) => g.id === parsed.groupId,
-          );
-          if (current === undefined) {
-            // Board-level read succeeded but the group ID isn't on
-            // the board — surface not_found with details.group_id
-            // so agents distinguish "wrong board id" from "wrong
-            // group id" without re-reading. Mirrors `column-update`
-            // §6.4 dry-run carve-out.
-            throw new ApiError(
-              'not_found',
-              `Monday returned no group with id ${parsed.groupId} on board ${parsed.boardId}`,
-              {
-                details: {
-                  board_id: parsed.boardId,
-                  group_id: parsed.groupId,
-                },
-              },
-            );
-          }
+          // R51 lift — `findBoardChildOrThrow` consolidates the
+          // board-level read succeeded but the group ID isn't on
+          // the board → not_found-with-details.group_id carve-out
+          // shared with `column-update` + `group-archive`.
+          const current = findBoardChildOrThrow({
+            metadata: preflight.metadata,
+            kind: 'groups',
+            id: parsed.groupId,
+            boardId: parsed.boardId,
+          });
 
           const diff: Record<string, FieldDiff> = {};
           if (trimmedName !== undefined) {
