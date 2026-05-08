@@ -120,6 +120,140 @@ exports[`envelope snapshot — account > account whoami 1`] = `
 }
 `;
 
+exports[`envelope snapshot — board > board add-users (M15 — partial-success envelope) 1`] = `
+{
+  "data": {
+    "operation": "add_users_to_board",
+    "results": [
+      {
+        "ok": true,
+        "user_id": "7",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board archive (M15) 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "description": "Eng team",
+    "id": "12345",
+    "items_count": 0,
+    "name": "Engineering",
+    "permissions": "everyone",
+    "state": "archived",
+    "updated_at": "2026-05-07T11:00:00Z",
+    "url": "https://x.monday.com/boards/12345",
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board column-create (M16) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "description": null,
+    "id": "priority_42",
+    "settings_str": "{}",
+    "title": "Priority",
+    "type": "status",
+    "width": null,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board column-delete (M16) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "description": null,
+    "id": "priority_42",
+    "settings_str": "{}",
+    "title": "Priority",
+    "type": "status",
+    "width": null,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board column-update (M16) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "description": null,
+    "id": "priority_42",
+    "settings_str": "{}",
+    "title": "Severity",
+    "type": "status",
+    "width": null,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — board > board columns 1`] = `
 {
   "data": [
@@ -153,6 +287,66 @@ exports[`envelope snapshot — board > board columns 1`] = `
     "schema_version": "1",
     "source": "live",
     "total_returned": 2,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board create (M15) 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "description": "Eng team",
+    "id": "12345",
+    "items_count": 0,
+    "name": "Engineering",
+    "permissions": "everyone",
+    "state": "active",
+    "updated_at": "2026-05-07T11:00:00Z",
+    "url": "https://x.monday.com/boards/12345",
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board delete (M15) 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "description": "Eng team",
+    "id": "12345",
+    "items_count": 0,
+    "name": "Engineering",
+    "permissions": "everyone",
+    "state": "deleted",
+    "updated_at": "2026-05-07T11:00:00Z",
+    "url": "https://x.monday.com/boards/12345",
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
   },
   "ok": true,
   "warnings": [],
@@ -244,6 +438,39 @@ exports[`envelope snapshot — board > board doctor (healthy) 1`] = `
 }
 `;
 
+exports[`envelope snapshot — board > board duplicate (M15 — wrapped envelope with is_async) 1`] = `
+{
+  "data": {
+    "board": {
+      "board_folder_id": null,
+      "board_kind": "public",
+      "description": "Eng team",
+      "id": "99999",
+      "items_count": 0,
+      "name": "Engineering (dup)",
+      "permissions": "everyone",
+      "state": "active",
+      "updated_at": "2026-05-07T11:00:00Z",
+      "url": "https://x.monday.com/boards/12345",
+      "workspace_id": "5",
+    },
+    "is_async": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — board > board find 1`] = `
 {
   "data": {
@@ -284,6 +511,131 @@ exports[`envelope snapshot — board > board get 1`] = `
     "updated_at": "2026-04-30T10:00:00Z",
     "url": "https://x.monday.com/boards/111",
     "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board group-archive (M17 — destructive single-target) 1`] = `
+{
+  "data": {
+    "archived": true,
+    "color": "#9D99B9",
+    "deleted": false,
+    "id": "topics",
+    "position": "1",
+    "title": "Topics",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board group-create (M17) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "color": "#9D99B9",
+    "deleted": false,
+    "id": "topics",
+    "position": "1",
+    "title": "Topics",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board group-delete (M17 — destructive single-target) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "color": "#9D99B9",
+    "deleted": true,
+    "id": "topics",
+    "position": "1",
+    "title": "Topics",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board group-duplicate (M17) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "color": "#9D99B9",
+    "deleted": false,
+    "id": "topics_dup",
+    "position": "1",
+    "title": "Topics (dup)",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board group-update (M17) 1`] = `
+{
+  "data": {
+    "archived": false,
+    "color": "#9D99B9",
+    "deleted": false,
+    "id": "topics",
+    "position": "1",
+    "title": "In progress",
   },
   "meta": {
     "api_version": "2026-01",
@@ -384,6 +736,36 @@ exports[`envelope snapshot — board > board subscribers 1`] = `
     "schema_version": "1",
     "source": "live",
     "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board > board update (M15) 1`] = `
+{
+  "data": {
+    "board_folder_id": null,
+    "board_kind": "public",
+    "description": "Eng team",
+    "id": "12345",
+    "items_count": 0,
+    "name": "Engineering — EU",
+    "permissions": "everyone",
+    "state": "active",
+    "updated_at": "2026-05-07T11:00:00Z",
+    "url": "https://x.monday.com/boards/12345",
+    "workspace_id": "5",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
   },
   "ok": true,
   "warnings": [],
@@ -2913,6 +3295,35 @@ exports[`envelope snapshot — schema > schema config.show — single-command na
 }
 `;
 
+exports[`envelope snapshot — update > update clear-all (M13 — partial-success envelope) 1`] = `
+{
+  "data": {
+    "results": [
+      {
+        "ok": true,
+        "update_id": "101",
+      },
+      {
+        "ok": true,
+        "update_id": "102",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — update > update create 1`] = `
 {
   "data": {
@@ -2928,6 +3339,68 @@ exports[`envelope snapshot — update > update create 1`] = `
     "item_id": "12345",
     "text_body": "Done — moved to QA.",
     "updated_at": "2026-04-30T11:00:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update delete (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update edit (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Edited body</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Edited body",
+    "updated_at": "2026-04-30T11:45:00Z",
   },
   "meta": {
     "api_version": "2026-01",
@@ -2977,6 +3450,117 @@ exports[`envelope snapshot — update > update get 1`] = `
 }
 `;
 
+exports[`envelope snapshot — update > update like (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update list --board (M13 per-board variant) 1`] = `
+{
+  "data": [
+    {
+      "body": "<p>Looks good</p>",
+      "created_at": "2026-04-30T09:00:00Z",
+      "creator": {
+        "email": "alice@example.test",
+        "id": "1",
+        "name": "Alice",
+      },
+      "creator_id": "1",
+      "edited_at": "2026-04-30T09:01:00Z",
+      "id": "77",
+      "replies": [],
+      "text_body": "Looks good",
+      "updated_at": "2026-04-30T09:01:00Z",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update list --with-replies (M13 opt-in nested shape) 1`] = `
+{
+  "data": [
+    {
+      "body": "<p>Looks good</p>",
+      "created_at": "2026-04-30T09:00:00Z",
+      "creator": {
+        "email": "alice@example.test",
+        "id": "1",
+        "name": "Alice",
+      },
+      "creator_id": "1",
+      "edited_at": "2026-04-30T09:01:00Z",
+      "id": "77",
+      "replies": [
+        {
+          "body": "<p>reply</p>",
+          "created_at": "2026-04-30T09:30:00Z",
+          "creator_id": "2",
+          "id": "88",
+          "text_body": "reply",
+        },
+      ],
+      "text_body": "Looks good",
+      "updated_at": "2026-04-30T09:01:00Z",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — update > update list 1`] = `
 {
   "data": [
@@ -3007,6 +3591,131 @@ exports[`envelope snapshot — update > update list 1`] = `
     "schema_version": "1",
     "source": "live",
     "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update pin (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update reply (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Acknowledged.</p>",
+    "created_at": "2026-04-30T11:30:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "88",
+    "item_id": "12345",
+    "parent_id": "77",
+    "text_body": "Acknowledged.",
+    "updated_at": "2026-04-30T11:30:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update unlike (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — update > update unpin (M13) 1`] = `
+{
+  "data": {
+    "body": "<p>Looks good</p>",
+    "created_at": "2026-04-30T09:00:00Z",
+    "creator": {
+      "email": "alice@example.test",
+      "id": "1",
+      "name": "Alice",
+    },
+    "creator_id": "1",
+    "id": "77",
+    "item_id": "12345",
+    "text_body": "Looks good",
+    "updated_at": "2026-04-30T09:01:00Z",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
   },
   "ok": true,
   "warnings": [],
@@ -3096,6 +3805,100 @@ exports[`envelope snapshot — user > user me 1`] = `
       "id": "1",
       "name": "Alice",
     },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace add-users (M14 — partial-success envelope) 1`] = `
+{
+  "data": {
+    "operation": "add_users_to_workspace",
+    "results": [
+      {
+        "ok": true,
+        "user_id": "7",
+      },
+      {
+        "ok": true,
+        "user_id": "8",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace create (M14) 1`] = `
+{
+  "data": {
+    "created_at": "2026-05-07T11:00:00Z",
+    "description": "EU campaigns",
+    "id": "12345",
+    "is_default_workspace": false,
+    "kind": "open",
+    "name": "Marketing",
+    "settings": {
+      "icon": {
+        "color": "#0000FF",
+        "image": null,
+      },
+    },
+    "state": "active",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace delete (M14) 1`] = `
+{
+  "data": {
+    "created_at": "2026-05-07T11:00:00Z",
+    "description": "EU campaigns",
+    "id": "12345",
+    "is_default_workspace": false,
+    "kind": "open",
+    "name": "Marketing",
+    "settings": {
+      "icon": {
+        "color": "#0000FF",
+        "image": null,
+      },
+    },
+    "state": "active",
   },
   "meta": {
     "api_version": "2026-01",
@@ -3203,6 +4006,64 @@ exports[`envelope snapshot — workspace > workspace list 1`] = `
     "schema_version": "1",
     "source": "live",
     "total_returned": 1,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace remove-users (M14 — partial-success envelope) 1`] = `
+{
+  "data": {
+    "operation": "delete_users_from_workspace",
+    "results": [
+      {
+        "ok": true,
+        "user_id": "7",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — workspace > workspace update (M14) 1`] = `
+{
+  "data": {
+    "created_at": "2026-05-07T11:00:00Z",
+    "description": "EU campaigns",
+    "id": "12345",
+    "is_default_workspace": false,
+    "kind": "open",
+    "name": "Marketing — EU",
+    "settings": {
+      "icon": {
+        "color": "#0000FF",
+        "image": null,
+      },
+    },
+    "state": "active",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
   },
   "ok": true,
   "warnings": [],

@@ -282,6 +282,128 @@ describe('envelope snapshot — workspace', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  // M14 workspace lifecycle (5 verbs).
+  // ─────────────────────────────────────────────────────────────────
+
+  const m14Workspace = {
+    ...sampleWorkspace,
+    id: '12345',
+    name: 'Marketing',
+    description: 'EU campaigns',
+    kind: 'open',
+    is_default_workspace: false,
+    created_at: '2026-05-07T11:00:00Z',
+    settings: { icon: { color: '#0000FF', image: null } },
+  };
+
+  it('workspace create (M14)', async () => {
+    const out = await drive(
+      ['workspace', 'create', '--name', 'Marketing', '--description', 'EU campaigns', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceCreate',
+            response: { data: { create_workspace: m14Workspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace update (M14)', async () => {
+    const renamedWorkspace = { ...m14Workspace, name: 'Marketing — EU' };
+    const out = await drive(
+      ['workspace', 'update', '12345', '--name', 'Marketing — EU', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdate',
+            response: { data: { update_workspace: renamedWorkspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace delete (M14)', async () => {
+    const out = await drive(
+      ['workspace', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceDelete',
+            response: { data: { delete_workspace: m14Workspace } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace add-users (M14 — partial-success envelope)', async () => {
+    // All-numeric input fans out one WorkspaceAddUsers call per
+    // user — the partial-success envelope's `data.results` carries
+    // per-user outcomes. Mixed numeric+email is exercised in the
+    // dedicated integration tests; the snapshot here pins the
+    // simplest happy-path shape.
+    const out = await drive(
+      ['workspace', 'add-users', '12345', '--users', '7,8', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceAddUsers',
+            response: {
+              data: {
+                add_users_to_workspace: [
+                  { id: '7', name: 'Alice', email: 'alice@example.test' },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'WorkspaceAddUsers',
+            response: {
+              data: {
+                add_users_to_workspace: [
+                  { id: '8', name: 'Bob', email: 'bob@example.test' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('workspace remove-users (M14 — partial-success envelope)', async () => {
+    const out = await drive(
+      ['workspace', 'remove-users', '12345', '--users', '7', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceRemoveUsers',
+            response: {
+              data: {
+                delete_users_from_workspace: [
+                  { id: '7', name: 'Alice', email: 'alice@example.test' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — board', () => {
@@ -455,6 +577,312 @@ describe('envelope snapshot — board', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  // M15 board lifecycle (6 verbs).
+  // ─────────────────────────────────────────────────────────────────
+
+  const m15Board = {
+    id: '12345',
+    name: 'Engineering',
+    description: 'Eng team',
+    state: 'active',
+    board_kind: 'public',
+    board_folder_id: null,
+    workspace_id: '5',
+    url: 'https://x.monday.com/boards/12345',
+    items_count: 0,
+    updated_at: '2026-05-07T11:00:00Z',
+    permissions: 'everyone',
+  };
+
+  it('board create (M15)', async () => {
+    const out = await drive(
+      ['board', 'create', '--name', 'Engineering', '--workspace', '5', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardCreate',
+            response: { data: { create_board: m15Board } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board update (M15)', async () => {
+    // Per-attribute fan-out: BoardUpdate → BoardUpdateFinalRead.
+    // Force-live final read because Monday's per-attribute mutation
+    // returns only the changed slice.
+    const renamedBoard = { ...m15Board, name: 'Engineering — EU' };
+    const out = await drive(
+      ['board', 'update', '12345', '--name', 'Engineering — EU', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardUpdate',
+            response: { data: { update_board: 'Engineering — EU' } },
+          },
+          {
+            operation_name: 'BoardUpdateFinalRead',
+            response: { data: { boards: [renamedBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board archive (M15)', async () => {
+    const out = await drive(
+      ['board', 'archive', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardArchive',
+            response: { data: { archive_board: { ...m15Board, state: 'archived' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board delete (M15)', async () => {
+    const out = await drive(
+      ['board', 'delete', '12345', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDelete',
+            response: { data: { delete_board: { ...m15Board, state: 'deleted' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board duplicate (M15 — wrapped envelope with is_async)', async () => {
+    // M15 introduced the wrapped envelope: data: { board, is_async }
+    // because Monday's BoardDuplication carries an is_async slot the
+    // projection schema doesn't model.
+    const duplicatedBoard = { ...m15Board, id: '99999', name: 'Engineering (dup)' };
+    const out = await drive(
+      ['board', 'duplicate', '12345', '--name', 'Engineering (dup)', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardDuplicate',
+            response: {
+              data: {
+                duplicate_board: {
+                  board: duplicatedBoard,
+                  is_async: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board add-users (M15 — partial-success envelope)', async () => {
+    const out = await drive(
+      ['board', 'add-users', '12345', '--users', '7', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardAddUsers',
+            response: {
+              data: {
+                add_users_to_board: [
+                  { id: '7', name: 'Alice', email: 'alice@example.test' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  // M16 board column lifecycle (3 verbs).
+  // ─────────────────────────────────────────────────────────────────
+
+  const m16Column = {
+    id: 'priority_42',
+    title: 'Priority',
+    type: 'status',
+    description: null,
+    archived: false,
+    settings_str: '{}',
+    width: null,
+  };
+
+  it('board column-create (M16)', async () => {
+    const out = await drive(
+      ['board', 'column-create', '12345', '--type', 'status', '--title', 'Priority', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            response: { data: { create_column: m16Column } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board column-update (M16)', async () => {
+    // Live path: ColumnChangeTitle fires directly for --title (no
+    // preflight — only --dry-run preflights via loadBoardMetadata).
+    // ColumnChangeMetadata fires for --description; this snapshot
+    // pins the simplest --title-only case so only one fan-out leg
+    // fires.
+    const renamedColumn = { ...m16Column, title: 'Severity' };
+    const out = await drive(
+      ['board', 'column-update', '12345', 'priority_42', '--title', 'Severity', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnChangeTitle',
+            response: { data: { change_column_title: renamedColumn } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board column-delete (M16)', async () => {
+    const out = await drive(
+      ['board', 'column-delete', '12345', 'priority_42', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnDelete',
+            response: { data: { delete_column: m16Column } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  // M17 board group lifecycle (5 verbs).
+  // ─────────────────────────────────────────────────────────────────
+
+  const m17Group = {
+    id: 'topics',
+    title: 'Topics',
+    color: '#9D99B9',
+    archived: false,
+    deleted: false,
+    position: '1',
+  };
+
+  it('board group-create (M17)', async () => {
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'Topics', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupCreate',
+            response: { data: { create_group: m17Group } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board group-update (M17)', async () => {
+    // Live path: GroupUpdate fires directly (no preflight — only
+    // --dry-run preflights via loadBoardMetadata). update_group
+    // returns the full Group projection post-mutation (no force-
+    // live final read leg, distinguishing group-update from
+    // board-update).
+    const renamedGroup = { ...m17Group, title: 'In progress' };
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--name', 'In progress', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupUpdate',
+            response: { data: { update_group: renamedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board group-archive (M17 — destructive single-target)', async () => {
+    const archivedGroup = { ...m17Group, archived: true };
+    const out = await drive(
+      ['board', 'group-archive', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            response: { data: { archive_group: archivedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board group-duplicate (M17)', async () => {
+    const duplicatedGroup = { ...m17Group, id: 'topics_dup', title: 'Topics (dup)' };
+    const out = await drive(
+      ['board', 'group-duplicate', '12345', 'topics', '--name', 'Topics (dup)', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            response: { data: { duplicate_group: duplicatedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board group-delete (M17 — destructive single-target)', async () => {
+    const deletedGroup = { ...m17Group, deleted: true };
+    const out = await drive(
+      ['board', 'group-delete', '12345', 'topics', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDelete',
+            response: { data: { delete_group: deletedGroup } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
 });
 
 describe('envelope snapshot — user', () => {
@@ -592,6 +1020,237 @@ describe('envelope snapshot — update', () => {
                   updated_at: '2026-04-30T11:00:00Z',
                 },
               },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  // M13 update mutation surface (8 verbs).
+  // ─────────────────────────────────────────────────────────────────
+
+  it('update reply (M13)', async () => {
+    const out = await drive(
+      ['update', 'reply', '77', '--body', 'Acknowledged.', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateReply',
+            response: {
+              data: {
+                create_update: {
+                  id: '88',
+                  body: '<p>Acknowledged.</p>',
+                  text_body: 'Acknowledged.',
+                  creator_id: '1',
+                  creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+                  item_id: '12345',
+                  created_at: '2026-04-30T11:30:00Z',
+                  updated_at: '2026-04-30T11:30:00Z',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  // Monday's edit/delete/like/unlike/pin/unpin mutations all
+  // return the full Update projection (id + body + text_body +
+  // creator + item_id + timestamps) — the M13 mutation envelopes
+  // share the shape pinned by `updateProjectionSchema`.
+  const m13MutationUpdate = {
+    id: '77',
+    body: '<p>Looks good</p>',
+    text_body: 'Looks good',
+    creator_id: '1',
+    creator: { id: '1', name: 'Alice', email: 'alice@example.test' },
+    item_id: '12345',
+    created_at: '2026-04-30T09:00:00Z',
+    updated_at: '2026-04-30T09:01:00Z',
+  };
+
+  it('update edit (M13)', async () => {
+    const out = await drive(
+      ['update', 'edit', '77', '--body', 'Edited body', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateEdit',
+            response: {
+              data: {
+                edit_update: {
+                  ...m13MutationUpdate,
+                  body: '<p>Edited body</p>',
+                  text_body: 'Edited body',
+                  updated_at: '2026-04-30T11:45:00Z',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update delete (M13)', async () => {
+    const out = await drive(
+      ['update', 'delete', '77', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateDelete',
+            response: { data: { delete_update: m13MutationUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update like (M13)', async () => {
+    const out = await drive(
+      ['update', 'like', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateLike',
+            response: { data: { like_update: m13MutationUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update unlike (M13)', async () => {
+    const out = await drive(
+      ['update', 'unlike', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateUnlike',
+            response: { data: { unlike_update: m13MutationUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update pin (M13)', async () => {
+    const out = await drive(
+      ['update', 'pin', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdatePin',
+            response: { data: { pin_to_top: m13MutationUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update unpin (M13)', async () => {
+    const out = await drive(
+      ['update', 'unpin', '77', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateUnpin',
+            response: { data: { unpin_from_top: m13MutationUpdate } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update clear-all (M13 — partial-success envelope)', async () => {
+    // M13's first partial-success consumer. data.results carries
+    // per-update outcomes; envelope is ok: true even if every per-
+    // update delete fails, because dispatch ran.
+    const out = await drive(
+      ['update', 'clear-all', '5001', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            response: {
+              data: {
+                items: [{ id: '5001', updates: [{ id: '101' }, { id: '102' }] }],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            response: { data: { delete_update: { id: '101' } } },
+          },
+          {
+            operation_name: 'UpdateClearAllDelete',
+            response: { data: { delete_update: { id: '102' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  // update list per-board (M13 routing variant) and --with-replies
+  // are existing-command shape pins per Codex M18 pre-flight
+  // open question — both are required envelope snapshots since
+  // M13 changed the default-replies behaviour (the v0.2 breaking
+  // change) and added the per-board variant.
+
+  it('update list --board (M13 per-board variant)', async () => {
+    const out = await drive(
+      ['update', 'list', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateListByBoard',
+            response: {
+              data: { boards: [{ id: '111', updates: [sampleUpdate] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('update list --with-replies (M13 opt-in nested shape)', async () => {
+    const updateWithReplies = {
+      ...sampleUpdate,
+      replies: [
+        { id: '88', body: '<p>reply</p>', text_body: 'reply', creator_id: '2', created_at: '2026-04-30T09:30:00Z' },
+      ],
+    };
+    const out = await drive(
+      ['update', 'list', '5001', '--with-replies', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: {
+              data: { items: [{ id: '5001', updates: [updateWithReplies] }] },
             },
           },
         ],
