@@ -31,13 +31,18 @@ export default defineConfig({
         // `/* c8 ignore */` and excluded from the count.
         //
         // The current numbers reflect M3's coverage push (Codex review +
-        // user-driven gate raise) plus the M9.5 branches ratchet that
+        // user-driven gate raise), the M9.5 branches ratchet that
         // followed the resolution-pass.ts + foldAndRemap lifts and the
-        // three coverage tests for board describe (default-archived
-        // group filter) + item create dry-run (resolved_from echo
-        // for date + people). Raise as code lands; never lower.
+        // three coverage tests for board describe + item create
+        // dry-run, and the M18-close ratchet that raised branches
+        // from 95 to 95.5 (actual project branch coverage at v0.2.0
+        // is 95.51%; §3 M18 exit aimed for 96 but the actual M13–M18
+        // delta was smaller — the new code went in at 100% per-file
+        // coverage but the global percentage only ticked up ~0.5pp
+        // because the denominator grew alongside the numerator).
+        // Raise as code lands; never lower.
         lines: 95,
-        branches: 95,
+        branches: 95.5,
         functions: 95,
         statements: 95,
       },

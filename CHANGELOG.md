@@ -179,10 +179,16 @@ once and skip subsequent metadata lookups.
 
 ### Tests + quality gates
 
-- **2279 unit/integration + 38 E2E tests** at the v0.2.0 tag (was
+- **2280 unit/integration + 38 E2E tests** at the v0.2.0 tag (was
   1408+37 = 1445 in v0.1). All green on Node 22 + 24.
-- **Branch coverage ratchet** to 96% (was 95% in v0.1); other
-  thresholds at 95%. The `vitest.config.ts` floor enforces.
+- **Branch coverage ratchet** from 95% (v0.1 floor) to 95.5%
+  (v0.2 floor; project's actual branches at v0.2.0 is 95.51%).
+  Other thresholds held at 95%. The `vitest.config.ts` floor
+  enforces. The §3 M18 exit aimed for 96 — the actual M13–M18
+  branch-coverage delta was smaller (~0.5pp) because the new
+  code shipped at 100% per-file but the denominator grew
+  alongside the numerator. Net effect is "held + small raise"
+  per the §3 M18 "held or raised" exit gate.
 - **92 envelope-shape snapshots** (was 60 in v0.1) — every
   shipped command pinned for byte-shape regressions.
 - **Five test layers held**: unit, integration (in-process
