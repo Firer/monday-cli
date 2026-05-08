@@ -73,10 +73,12 @@ post-mortem):
   slips to v0.3 as a focused coverage-push session if it turns
   out to be load-bearing.
 - **2280 tests passing** (was 2218 at M17 close; +62 net).
-- **The v0.2.0 release.** This commit closes M18 + the v0.2 arc.
-  After it lands on `main`, `npm publish` pushes 0.2.0 to the
-  registry (user runs manually). The v0.3 plan opens in a fresh
-  doc next session.
+- **The v0.2.0 release — published 2026-05-08.** Live on npm at
+  https://www.npmjs.com/package/monday-cli, sha `499afd1d` /
+  sha512 `Q7P0ckiSuocgc...`. First public npm release of
+  `monday-cli`; v0.1.0 was a tagged git release that didn't
+  ship to npm under this name. The v0.3 plan opens in a fresh
+  `docs/v0.3-plan.md` doc next session.
 
 **M17 closed** (see `docs/v0.2-plan.md` §3 M17 status block + §25
 post-mortem):

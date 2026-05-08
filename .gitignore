@@ -14,6 +14,12 @@ test-results/
 .env
 .env.local
 .env.*.local
+# npm credential config — npm flows sometimes write a .npmrc to cwd
+# (e.g. on `npm publish` when no global config is present); we
+# always want the credential reference in ~/.npmrc only, never the
+# repo. Belt-and-braces: even an `${NPM_TOKEN}`-reference variant
+# shouldn't land in git history.
+.npmrc
 
 # Editor / OS
 .idea/

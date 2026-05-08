@@ -233,19 +233,24 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.2.0 (published) ships:** the v0.1 read-only core +
-safe-mutations surface PLUS the full mutation surface (item
-lifecycle, update mutations, workspace lifecycle, board
-lifecycle, board columns + groups). Built incrementally across
-M8–M18; one breaking change vs v0.1 (see
+**v0.2.0 (published — first npm release as `monday-cli`):**
+the v0.1 read-only core + safe-mutations surface PLUS the full
+mutation surface (item lifecycle, update mutations, workspace
+lifecycle, board lifecycle, board columns + groups). Built
+incrementally across M8–M18; one breaking change vs v0.1 (see
 [CHANGELOG.md](./CHANGELOG.md) for the full upgrade guide).
+`npm install -g monday-cli` pulls the published artifact.
 
-**v0.1.0 (published) shipped:** read-only core (account, workspace,
+**v0.1.0 (git tag, foundation milestone — not published to npm
+under the `monday-cli` name):** read-only core (account, workspace,
 board, user, update, item) + safe mutations (`item set` /
 `item clear` / `item update` single + bulk, `update create`) +
 diagnostics (`board doctor`) + GraphQL escape hatch (`raw`) +
 filter DSL (`--where` + `--filter-json`) + cursor pagination with
-stale-cursor fail-fast + NDJSON streaming + local cache.
+stale-cursor fail-fast + NDJSON streaming + local cache. v0.1.0
+shipped to `main` as the foundation milestone but the npm publish
+slipped to v0.2.0; the v0.1 surface is fully present in the
+published v0.2.0 tarball.
 
 **What v0.2 added:**
 

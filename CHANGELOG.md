@@ -215,13 +215,22 @@ once and skip subsequent metadata lookups.
 
 [0.2.0]: https://github.com/Firer/monday-cli/releases/tag/v0.2.0
 
-## [0.1.0] — Initial release
+## [0.1.0] — Foundation milestone (git tag — npm publish slipped to 0.2.0)
 
 The "read-only core + safe mutations" milestone — an agent can read
 everything the CLI surfaces, make small scoped idempotent changes,
 and post comments narrating its work. Built incrementally across
 M0–M7 (M5 split into M5a + M5b; M2.5 inserted post-M2 as a
 structural-debt cleanup pass).
+
+> **Publication note**: 0.1.0 shipped to `main` as a tagged git
+> release but was not published to npm. The first public npm
+> release of `monday-cli` is **0.2.0** (which contains the full
+> v0.1 surface as its foundation — nothing in 0.1.0 was lost or
+> rolled back). The `monday-cli` npm namespace had a brief
+> pre-history (`monday-cli@0.0.1`, published and unpublished
+> within hours on 2026-01-12) before being claimed for this
+> project at the v0.2.0 release.
 
 ### Surface
 
