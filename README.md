@@ -55,10 +55,20 @@ monday account whoami --json
 # 3. List a board's items (replace 12345 with your board ID)
 monday item list --board 12345 --json
 
-# 4. Move a ticket forward
+# 4. File a new task (v0.2)
+monday item create --board 12345 --name "Refactor login" \
+  --set status=Backlog --set 'Due date'=+1w --json
+
+# 5. Find-or-create with idempotent matching (v0.2)
+#    Re-running with the same args is safe — 0/1/2+ matches route to
+#    create / update / `ambiguous_match` (the 27th stable error code).
+monday item upsert --board 12345 --name "Refactor login" \
+  --match-by name --set status='Working on it' --json
+
+# 6. Move a ticket forward
 monday item set 67890 status=Done --json
 
-# 5. Comment on it
+# 7. Comment on it
 monday update create 67890 --body "Shipped in PR #1234" --json
 ```
 
@@ -125,7 +135,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.1.0",
+    "cli_version": "0.2.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -223,15 +233,21 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.1.0 (published) ships:** read-only core (account, workspace,
+**v0.2.0 (published) ships:** the v0.1 read-only core +
+safe-mutations surface PLUS the full mutation surface (item
+lifecycle, update mutations, workspace lifecycle, board
+lifecycle, board columns + groups). Built incrementally across
+M8–M18; one breaking change vs v0.1 (see
+[CHANGELOG.md](./CHANGELOG.md) for the full upgrade guide).
+
+**v0.1.0 (published) shipped:** read-only core (account, workspace,
 board, user, update, item) + safe mutations (`item set` /
 `item clear` / `item update` single + bulk, `update create`) +
 diagnostics (`board doctor`) + GraphQL escape hatch (`raw`) +
 filter DSL (`--where` + `--filter-json`) + cursor pagination with
 stale-cursor fail-fast + NDJSON streaming + local cache.
 
-**v0.2 in development on `main`** (not yet published as a
-tarball — `package.json` still pinned to `0.1.0`):
+**What v0.2 added:**
 
 - **M8** added the `--set-raw <col>=<json>` escape hatch (bypasses
   the friendly translator; gated against read-only-forever and
@@ -343,17 +359,20 @@ with per-category guidance):
   bearing dry-run from cached board metadata; group-delete is
   destructive-no-read minimal.
 
-**Remaining v0.2 milestone:** **M18** — NDJSON streaming for
-`item search` + `update list` + envelope-snapshots refresh +
-README + CHANGELOG + 0.2.0 release prep.
+- **M18** closed v0.2 with NDJSON streaming for `item search` +
+  `update list` (the missing pair vs M7's `item list` streaming
+  pin), envelope-snapshots refresh (60 → 92), `output-shapes.md`
+  audit, README quickstart with `item create` + `item upsert`
+  examples, this CHANGELOG, and the version bump to `0.2.0`.
 
 **Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
-friendly translators (still tentative; usable today via
-`--set-raw`), `monday dev` workflow shortcuts, multi-level subitem
-creation. **v0.4:** `monday item watch`, `--concurrency`, asset
-uploads. See [`docs/cli-design.md`](./docs/cli-design.md) §13 for
-the full roadmap and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md)
-for the active milestone plan.
+friendly translators (slipped from v0.2 tentative at M18 close
+per cli-design §13 + §5.3; usable today via `--set-raw`),
+`monday dev` workflow shortcuts, multi-level subitem creation.
+**v0.4:** `monday item watch`, `--concurrency`, asset uploads.
+See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
+full roadmap and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for
+the v0.2 milestone history.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 

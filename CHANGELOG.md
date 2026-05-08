@@ -3,9 +3,204 @@
 All notable changes to `monday-cli` are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 follows [SemVer](https://semver.org/spec/v2.0.0.html). The CLI's
-output envelope (`{ ok, data, meta, ... }`) and 26 stable error
+output envelope (`{ ok, data, meta, ... }`) and 27 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
+
+## [0.2.0] — Mutating core: agents can drive a backlog
+
+The "agents can drive a backlog" milestone — v0.1's read-only core
++ safe-mutations gain the full mutation surface (item lifecycle,
+update mutations, workspace lifecycle, board lifecycle, board
+columns + groups). One breaking change vs v0.1 (see below);
+everything else is purely additive. Built incrementally across
+M8–M18.
+
+### Breaking changes vs `0.1.0`
+
+**`monday update list` no longer populates `replies: []` by
+default.** Pass `--with-replies` to restore the v0.1 behaviour.
+
+- **Why**: Monday charges complexity for the nested
+  `updates(...) { replies { ... } }` selection, and most agent
+  flows don't need the thread expansion. v0.1 silently paid the
+  charge on every call; v0.2 makes the nested selection opt-in.
+- **Migration**: agents that consume `update.replies` should pass
+  `--with-replies` explicitly. The output shape stays
+  byte-identical when the flag is set; only the default changed.
+- **Detection**: a v0.1 caller looking for `replies[*].body` will
+  see an empty array post-upgrade. There's no error envelope —
+  the field is present and shaped correctly, just empty unless
+  `--with-replies` is set.
+
+This is the only breaking change. All other v0.2 work is
+additive.
+
+### Surface
+
+**Five reader nouns + ~75 commands shipped (was 35 in v0.1).** No
+new nouns; ~30 new verbs spread across the existing 5 mutation-
+receiving nouns plus workspace / board / update / item lifecycles.
+
+**Item lifecycle** (M9–M12) — `item create` (top-level + classic-
+only subitem; single round-trip; optional `--position
+before|after --relative-to <iid>`); `item archive` / `delete` /
+`duplicate` (`duplicate` two-leg live with `--with-updates` +
+`duplicated_from_id` echo); `item move` (same-board via
+`--to-group <gid>`, cross-board via `--to-group <gid> --to-board
+<bid>` + `--columns-mapping`); `item upsert` (idempotency via
+`--match-by <col>[,<col>...]` routing 0/1/2+ matches to
+`create_item` / `update_item` / `ambiguous_match`); bulk `item
+clear --where`.
+
+**Update mutations** (M13) — `update reply` / `edit` / `delete` /
+`like` / `unlike` / `pin` / `unpin` / `clear-all`. The
+`clear-all` verb introduced the **partial-success envelope**:
+`ok: true` whenever dispatch ran; per-target outcomes in
+`data.results: [{ update_id, ok, error? }]`.
+
+**Workspace lifecycle** (M14) — `workspace create` / `update` /
+`delete` / `add-users` / `remove-users`. `add-users` /
+`remove-users` reuse the M13 partial-success envelope with
+resolver-fronted dispatch (mixed numeric IDs + emails).
+
+**Board lifecycle** (M15) — `board create` / `update` /
+`archive` / `delete` / `duplicate` / `add-users`. `board
+duplicate` introduced the **wrapped envelope**: `data: { board:
+<projection>, is_async }` because Monday's `BoardDuplication`
+carries an `is_async` slot the projection schema doesn't model.
+`board update` is per-attribute fan-out across Monday's
+`update_board(board_attribute, new_value)` surface with a
+force-live final read leg.
+
+**Board columns** (M16) — `board column-create` / `column-update`
+/ `column-delete`. `column-create` adds the
+`noncanonical_column_type` warning for non-allowlisted column
+types with per-category `suggested_write_path`. M16 also shipped
+the **§8 eager-invalidation contract**: every board-structure
+mutation calls `invalidateBoard(boardId)` post-success so a
+same-process `board describe` sees fresh state without TTL
+eviction. Six call sites adopted (M16's three column verbs +
+M15's three retrofitted board update / archive / delete).
+
+**Board groups** (M17) — `board group-create` / `group-update` /
+`group-archive` / `group-duplicate` / `group-delete`.
+`group-update` is per-attribute fan-out (no force-live final
+read — Monday's `update_group` returns the full Group projection
+post-mutation, distinguishing it from board-update). Group-
+create + group-update validate `--color` against the pinned
+Monday-supported palette in `src/api/group-color.ts`.
+
+**Writer expansion** (M8) — `--set-raw <col>=<json>` escape
+hatch for non-allowlisted column types (gated against
+read-only-forever and files-shaped types) plus three new firm
+friendly translators: `link` (pipe-form `link=<url>|<text>`),
+`email` (pipe-form `email=<email>|<text>`), and `phone`
+(pipe-form `phone=<phone>|<country>` with ISO 3166-1 alpha-2
+country code).
+
+**NDJSON streaming** (M7 → M18) — `--output ndjson` for `item
+list` (M7), `item search` (M18), and `update list` (M18). Trailer
+shape pinned to `{"_meta":{...}}` per cli-design §6.3 (no
+`warnings` slot — agents read warnings from JSON envelopes, not
+NDJSON streams).
+
+### Output contract additions
+
+**27th error code: `ambiguous_match`** (M12). Reserved on the
+v0.1 registry, now active on `item upsert` when `--match-by`
+resolves to 2+ items. Agents key off `error.code` to retry with
+a tighter match; the message names the matched IDs.
+
+**Three envelope shape variants joined the contract:**
+
+1. **Partial-success envelope** (M13) — `ok: true` with
+   `data.results: [...]` per-target outcomes. Used by `update
+   clear-all`, `workspace add-users` / `remove-users`, `board
+   add-users`. Top-level `ok: false` only on whole-call failure.
+2. **Wrapped envelope** (M15) — `data: { board: <projection>,
+   is_async }` for `board duplicate` (Monday-side async-rebuild
+   slot the projection doesn't model).
+3. **Bulk mutation envelope** (M12) — `data: { summary, items
+   }` for bulk `item update --where` / `item clear --where` with
+   `summary.matched_count` + `summary.applied_count`.
+
+**`resolved_ids`** echo (cli-design §6.4) on every column-
+mutation envelope (`item set` / `clear` / `update`), including
+the empty `{}` when no `--set` token resolved. Agents capture
+once and skip subsequent metadata lookups.
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.2"` resolves**
+  for the M8 firm row (`link` / `email` / `phone` shipped) and
+  **slips to `"v0.3"`** for the tentative row (`tags` /
+  `board_relation` / `dependency` — friendly translators land in
+  v0.3 once the per-account directory + linked-board enumeration
+  design clears). Agents using these types via `--set-raw`
+  continue to work; the runtime hint surfaces `--set-raw` as the
+  current path.
+
+- **The error-code registry expanded from 26 to 27.** New code:
+  `ambiguous_match` (M12) on `item upsert` with 2+ matches.
+  Existing codes' shapes are unchanged.
+
+- **Cache-invalidation discipline tightened.** M16's §8 contract
+  means a same-process `board describe` after `board column-*` /
+  `group-*` / `update` / `archive` / `delete` mutations now sees
+  fresh state. v0.1 callers that read post-mutation state see
+  *less* stale data than before — purely an improvement, but
+  a behavioural shift worth flagging for any agent that timed
+  reads against TTL eviction (none should have, but flagging
+  for completeness).
+
+### Internals worth highlighting
+
+- **9 R-class refactors shipped during v0.2** (R20–R52, with
+  some reserved numbers deferred to v0.3): R29 destructive-gate
+  helper consolidation, R39/R45/R48 per-noun mutation projection
+  helpers (workspace / column / group), R40 partial-success-fan-
+  out helper, R46 §8 eager-invalidation wrappers, R51
+  `findBoardChildOrThrow` helper, R52 `startNdjsonStream` lift
+  (M18 — ships streaming parity across `item list` / `item
+  search` / `update list`). Full R-class register lives in
+  [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) §22.
+
+- **52 Codex AI review rounds** across M8–M18. The two-AI review
+  workflow (cli-design pre-flight + implementation review)
+  caught 200+ findings before merge across the v0.2 work.
+
+### Tests + quality gates
+
+- **2279 unit/integration + 38 E2E tests** at the v0.2.0 tag (was
+  1408+37 = 1445 in v0.1). All green on Node 22 + 24.
+- **Branch coverage ratchet** to 96% (was 95% in v0.1); other
+  thresholds at 95%. The `vitest.config.ts` floor enforces.
+- **92 envelope-shape snapshots** (was 60 in v0.1) — every
+  shipped command pinned for byte-shape regressions.
+- **Five test layers held**: unit, integration (in-process
+  `FixtureTransport`), E2E (subprocess against fixture server),
+  envelope-shape snapshot suite (extended at M18), published-
+  tarball E2E.
+
+### Documentation
+
+- **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** new — the v0.2
+  active plan with M8–M18 milestones, decisions log, R-class
+  register (R20–R52), per-milestone post-mortems (§10–§26), and
+  the §13 deferral roadmap.
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3 grew
+  ~30 new verb entries; §6.4 added the partial-success +
+  wrapped + bulk envelope variants; §8 added the eager-
+  invalidation contract.
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** — every
+  shipped v0.2 command has a per-section data shape entry,
+  snapshot-backed.
+- **README.md** quickstart expanded with `item create` + `item
+  upsert` examples (the two verbs that change the "drive a
+  backlog" story most).
+
+[0.2.0]: https://github.com/Firer/monday-cli/releases/tag/v0.2.0
 
 ## [0.1.0] — Initial release
 

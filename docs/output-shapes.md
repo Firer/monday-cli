@@ -20,7 +20,7 @@ Every command returns the same envelope skeleton:
   "ok": true,
   "data": <command-specific>,
   "meta": { "schema_version": "1", "api_version": "2026-01",
-            "cli_version": "0.1.0", "request_id": "...",
+            "cli_version": "0.2.0", "request_id": "...",
             "source": "live", "cache_age_seconds": null,
             "retrieved_at": "...", "complexity": null },
   "warnings": []
