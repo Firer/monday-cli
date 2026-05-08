@@ -18,15 +18,15 @@ import { assertResponseFieldPresent } from '../../../src/api/response-root.js';
 describe('assertResponseFieldPresent', () => {
   describe("'caller_handles' mode (R42 single-target verbs)", () => {
     it('returns void when the key is present and the value is non-null', () => {
-      expect(() =>
+      expect(() => {
         assertResponseFieldPresent({
           data: { archive_item: { id: '12345' } },
           key: 'archive_item',
           operationLabel: 'ItemArchive',
           details: { item_id: '12345' },
           nullHandling: 'caller_handles',
-        }),
-      ).not.toThrow();
+        });
+      }).not.toThrow();
     });
 
     it('returns void when the key is present and the value is null (caller projector handles null)', () => {
@@ -34,15 +34,15 @@ describe('assertResponseFieldPresent', () => {
       // caller's downstream projector decides per-noun semantics
       // (item archive throws not_found, item set throws
       // internal_error). Helper just covers missing-key.
-      expect(() =>
+      expect(() => {
         assertResponseFieldPresent({
           data: { archive_item: null },
           key: 'archive_item',
           operationLabel: 'ItemArchive',
           details: { item_id: '12345' },
           nullHandling: 'caller_handles',
-        }),
-      ).not.toThrow();
+        });
+      }).not.toThrow();
     });
 
     it('throws internal_error when the key is absent (schema drift)', () => {
@@ -93,7 +93,7 @@ describe('assertResponseFieldPresent', () => {
 
   describe("'throw_not_found' mode (R41 partial-success-fan-out verbs)", () => {
     it('returns void when the key is present and the value is non-null', () => {
-      expect(() =>
+      expect(() => {
         assertResponseFieldPresent({
           data: { add_users_to_board: { id: '111', subscribers: [{ id: '42' }] } },
           key: 'add_users_to_board',
@@ -101,8 +101,8 @@ describe('assertResponseFieldPresent', () => {
           details: { board_id: '111', user_id: '42' },
           nullHandling: 'throw_not_found',
           notFoundTarget: { key: 'user_id', id: '42' },
-        }),
-      ).not.toThrow();
+        });
+      }).not.toThrow();
     });
 
     it('throws internal_error when the key is absent (whole-call schema drift)', () => {

@@ -80,6 +80,45 @@ post-mortem):
   ship to npm under this name. The v0.3 plan opens in a fresh
   `docs/v0.3-plan.md` doc next session.
 
+**v0.2 → v0.3 cleanup window** (mirrors the M17 → M18 cleanup
+window per §22 R51 precedent — see `docs/v0.2-plan.md` §22 R42 +
+R53 entries + §26 looking-ahead block):
+- **R53 — `buildStreamingTrailerMeta` lift. Shipped: `055b13d`.**
+  Three-consumer trigger met at M18 close (item list M7 + item
+  search M18 + update list M18). New helper in
+  `src/utils/output/ndjson.ts` sibling to `startNdjsonStream`;
+  consolidates ~15 × 3 = ~45 lines of meta-build boilerplate into
+  one shared call. Per-noun divergence preserved via optional
+  `result.nextCursor` (cursor- vs page-walked) and `columns`
+  (column-bearing vs not). Existing integration tests across the
+  three streaming paths pass byte-identical pre-lift vs post-lift;
+  five direct unit tests pin the helper's per-input contract.
+- **R42 — retroactive missing-root-key sweep across ~32 sites.
+  Shipped: `c529445`.** Generalised `assertResponseFieldPresent`
+  from a workspace-pair-shaped signature to a flexible
+  `details: Record<string, unknown>` map plus an explicit
+  `nullHandling: 'caller_handles' | 'throw_not_found'`
+  discriminant. Single-target verbs (M5b/M9-M12/M13 ADDED, M15-M17
+  CONSOLIDATED) use 'caller_handles' so the per-noun projector
+  handles null-value; partial-success-fan-out verbs (R41's
+  existing 3 consumers) use 'throw_not_found' to preserve M14's
+  per-target dispatch contract. M13 update verbs run the helper
+  BEFORE the responseSchema parse (z.unknown() normalizes missing
+  keys into present-undefined, swallowing the distinction).
+  `update clear-all` stays on `assertUpdateMutationPresent` —
+  separate v0.3 question. **Coverage dip realised: -0.04pp (95.51
+  → 95.47);** floor lowered 95.5 → 95.45 with documented
+  rationale in `vitest.config.ts` per the post-v0.2 cleanup-window
+  handoff's anticipated 0.05-0.1pp consolidation-effect band.
+  Will close at the next milestone's focused coverage push.
+- **2296 tests passing** (was 2280 at v0.2.0 publish; +5 R53 unit
+  tests + 11 R42 unit tests = +16 net). Quality refactor flagged
+  in §22 R53 (collapsing `unsupportedColumnTypeError` into a
+  category-table-driven shape) deferred to v0.3 → first-cleanup-
+  window — R42's coverage-recovery work pushed this session past
+  the typical refactor budget; the quality refactor was bonus
+  polish per the handoff and ships next.
+
 **M17 closed** (see `docs/v0.2-plan.md` §3 M17 status block + §25
 post-mortem):
 - Five group lifecycle verbs (group-create / group-update /
