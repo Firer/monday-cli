@@ -50,6 +50,19 @@ export interface WalkPagesInputs<T, R> {
    * `--limit-pages`. Default in caller, surfaced as a usage option.
    */
   readonly maxPages: number;
+  /**
+   * Streaming hook for the NDJSON output mode (§6.3). Called once
+   * per emitted item, in the per-page arrival order returned by
+   * `extractItems` (page-walked queries don't sort — Monday's
+   * server-side ordering wins). `await`ed so a slow downstream
+   * consumer (a piped `jq`) backpressures the walker — same shape
+   * as `paginate.onItem`. Mirrors `pagination.ts:369` push-then-
+   * await ordering exactly: the item lands in `collected` before
+   * the hook awaits, so a hook throwing mid-page leaves a
+   * deterministic prefix in `result.items` (Codex M18 pre-flight
+   * P3-1).
+   */
+  readonly onItem?: (item: T) => void | Promise<void>;
 }
 
 export interface WalkPagesResult<T, R> {
@@ -67,10 +80,27 @@ export interface WalkPagesResult<T, R> {
   readonly pagesFetched: number;
 }
 
+const emitPageItems = async <T>(
+  items: readonly T[],
+  collected: T[],
+  onItem: ((item: T) => void | Promise<void>) | undefined,
+): Promise<void> => {
+  // Push-then-await ordering — same as `paginate.emitItems` at
+  // pagination.ts:369. The item lands in `collected` before the
+  // hook awaits, so a hook throwing mid-page leaves a deterministic
+  // prefix in `result.items` (Codex M18 pre-flight P3-1).
+  for (const item of items) {
+    collected.push(item);
+    if (onItem !== undefined) {
+      await onItem(item);
+    }
+  }
+};
+
 export const walkPages = async <T, R>(
   inputs: WalkPagesInputs<T, R>,
 ): Promise<WalkPagesResult<T, R>> => {
-  const { fetchPage, extractItems, pageSize, all, maxPages } = inputs;
+  const { fetchPage, extractItems, pageSize, all, maxPages, onItem } = inputs;
   const startPage = inputs.startPage ?? 1;
 
   // First request always runs. Page count includes this attempt.
@@ -79,7 +109,7 @@ export const walkPages = async <T, R>(
   let pagesFetched = 1;
 
   const firstPage = extractItems(lastResponse);
-  collected.push(...firstPage);
+  await emitPageItems(firstPage, collected, onItem);
 
   // No-walk case: caller asked for one page only.
   if (!all) {
@@ -105,7 +135,7 @@ export const walkPages = async <T, R>(
     if (pageData.length === 0) {
       return { items: collected, lastResponse, hasMore: false, pagesFetched };
     }
-    collected.push(...pageData);
+    await emitPageItems(pageData, collected, onItem);
     if (pageData.length < pageSize) {
       return { items: collected, lastResponse, hasMore: false, pagesFetched };
     }
