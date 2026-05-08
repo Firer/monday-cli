@@ -32,9 +32,12 @@ import {
   DEFAULT_MAX_PAGES,
   walkPages,
 } from '../../api/walk-pages.js';
-import { buildMeta, type Warning } from '../../utils/output/envelope.js';
+import type { Warning } from '../../utils/output/envelope.js';
 import { selectOutput } from '../../utils/output/select.js';
-import { startNdjsonStream } from '../../utils/output/ndjson.js';
+import {
+  buildStreamingTrailerMeta,
+  startNdjsonStream,
+} from '../../utils/output/ndjson.js';
 import { collectSecrets } from '../../cli/envelope-out.js';
 import type { MondayResponse } from '../../api/client.js';
 
@@ -364,16 +367,20 @@ export const updateListCommand: CommandModule<
             onItem: stream.onItem,
           });
           stream.writeTrailer(
-            buildMeta({
-              api_version: apiVersion,
-              cli_version: ctx.cliVersion,
-              request_id: ctx.requestId,
+            buildStreamingTrailerMeta({
+              ctx: {
+                cliVersion: ctx.cliVersion,
+                requestId: ctx.requestId,
+                clock: ctx.clock,
+              },
+              apiVersion,
               source: 'live',
-              retrieved_at: ctx.clock().toISOString(),
-              cache_age_seconds: null,
-              complexity: result.lastResponse.complexity,
-              has_more: result.hasMore,
-              total_returned: result.items.length,
+              cacheAgeSeconds: null,
+              result: {
+                hasMore: result.hasMore,
+                totalReturned: result.items.length,
+                complexity: result.lastResponse.complexity,
+              },
             }),
           );
           return;

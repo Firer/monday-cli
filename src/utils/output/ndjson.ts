@@ -1,4 +1,11 @@
-import type { Meta, Warning } from './envelope.js';
+import type {
+  ColumnHead,
+  Complexity,
+  DataSource,
+  Meta,
+  Warning,
+} from './envelope.js';
+import { buildMeta } from './envelope.js';
 import { redact } from '../redact.js';
 
 /**
@@ -22,7 +29,7 @@ import { redact } from '../redact.js';
  * processing without waiting for the whole walk, not so the
  * presentation layer can drop bytes.
  *
- * Two surfaces:
+ * Three surfaces:
  *
  * - `renderNdjson` (collect-then-emit) — used when the caller
  *   already has the full data array. Single function, no streaming
@@ -36,6 +43,14 @@ import { redact } from '../redact.js';
  *   (M7), `item search` (M18), `update list` (M18). Was previously
  *   a private helper in `src/commands/item/list.ts`; lifted at the
  *   3-consumer trigger.
+ *
+ * - `buildStreamingTrailerMeta` (R53, post-v0.2 cleanup-window lift)
+ *   — sibling to `startNdjsonStream`. Builds the canonical
+ *   §6.3 trailer Meta from the walker result + the three
+ *   source/cache/api inputs. Same three consumers; consolidates
+ *   the ~15-line `buildMeta(...)` boilerplate that was repeated
+ *   across each call site, with cursor-vs-page + column-bearing-
+ *   vs-not divergence handled via optional inputs.
  */
 export interface NdjsonInput {
   readonly data: readonly unknown[];
@@ -132,3 +147,79 @@ export const startNdjsonStream = <T>(
     },
   };
 };
+
+/**
+ * Inputs to `buildStreamingTrailerMeta` (R53 lift, v0.2-plan §22).
+ * Sibling to `startNdjsonStream` — both implement §6.3.
+ *
+ * Three NDJSON consumers (item list / item search / update list)
+ * end up calling `buildMeta(...)` with structurally near-identical
+ * inputs, varying only on whether the noun carries `next_cursor`
+ * (cursor-walked vs page-walked) and `meta.columns` (column-bearing
+ * or not). The helper takes the walker-shaped `result` block + the
+ * three meta source/cache/api inputs + an optional `columns` slot,
+ * builds the canonical-key-order Meta via `buildMeta`, and returns
+ * it ready for `stream.writeTrailer`.
+ *
+ * Five fields total — within the >4-parameter heuristic that
+ * deferred R44 / R49 / R50, since `ctx` and `result` are
+ * structurally complete units (not flat scalars to count).
+ *
+ * Per-consumer divergence the helper preserves:
+ * - cursor-walked consumers (item list / item search) populate
+ *   `result.nextCursor`; the trailer carries `next_cursor`.
+ * - page-walked consumers (update list) omit `result.nextCursor`;
+ *   the trailer drops `next_cursor` entirely (buildMeta convention:
+ *   undefined input → key absent from output).
+ * - column-bearing consumers (item list / item search) populate
+ *   `columns`; non-bearing consumers (update list) omit it; the
+ *   trailer mirrors the input shape on a per-consumer basis.
+ *
+ * The complexity slot is always required: the cursor-walker exposes
+ * it directly on `result.complexity`; the page-walker exposes it
+ * via `result.lastResponse.complexity`. Each consumer extracts at
+ * the call site; the helper takes the post-extraction value.
+ */
+export interface StreamingTrailerInputs {
+  readonly ctx: {
+    readonly cliVersion: string;
+    readonly requestId: string;
+    readonly clock: () => Date;
+  };
+  readonly apiVersion: string;
+  readonly source: DataSource;
+  readonly cacheAgeSeconds: number | null;
+  readonly result: {
+    readonly hasMore: boolean;
+    readonly totalReturned: number;
+    readonly complexity: Complexity | null;
+    /** Omit for page-walked consumers; trailer drops `next_cursor`. */
+    readonly nextCursor?: string | null;
+  };
+  /** Omit for non-column-bearing nouns; trailer drops `columns`. */
+  readonly columns?: Readonly<Record<string, ColumnHead>>;
+}
+
+export const buildStreamingTrailerMeta = (
+  inputs: StreamingTrailerInputs,
+): Meta =>
+  buildMeta({
+    api_version: inputs.apiVersion,
+    cli_version: inputs.ctx.cliVersion,
+    request_id: inputs.ctx.requestId,
+    source: inputs.source,
+    retrieved_at: inputs.ctx.clock().toISOString(),
+    cache_age_seconds: inputs.cacheAgeSeconds,
+    complexity: inputs.result.complexity,
+    has_more: inputs.result.hasMore,
+    total_returned: inputs.result.totalReturned,
+    // Conditional spreads preserve `exactOptionalPropertyTypes`'s
+    // "undefined ≠ absent" rule: passing the keys with explicit
+    // `undefined` would not compile against the optional `?:` slots
+    // in `MetaInput`, even though `buildMeta` would have stripped
+    // them anyway.
+    ...(inputs.result.nextCursor === undefined
+      ? {}
+      : { next_cursor: inputs.result.nextCursor }),
+    ...(inputs.columns === undefined ? {} : { columns: inputs.columns }),
+  });

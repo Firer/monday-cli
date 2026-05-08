@@ -57,9 +57,12 @@ import {
   resolveMeFactory,
   titleMap,
 } from '../../api/item-helpers.js';
-import { buildMeta, type Warning } from '../../utils/output/envelope.js';
+import type { Warning } from '../../utils/output/envelope.js';
 import { selectOutput } from '../../utils/output/select.js';
-import { startNdjsonStream } from '../../utils/output/ndjson.js';
+import {
+  buildStreamingTrailerMeta,
+  startNdjsonStream,
+} from '../../utils/output/ndjson.js';
 import { collectSecrets } from '../../cli/envelope-out.js';
 import type { MondayClient, MondayResponse } from '../../api/client.js';
 
@@ -370,17 +373,21 @@ export const itemSearchCommand: CommandModule<
           // rule. Same shape as item list's streaming branch.
           void filterWarnings;
           stream.writeTrailer(
-            buildMeta({
-              api_version: apiVersion,
-              cli_version: ctx.cliVersion,
-              request_id: ctx.requestId,
+            buildStreamingTrailerMeta({
+              ctx: {
+                cliVersion: ctx.cliVersion,
+                requestId: ctx.requestId,
+                clock: ctx.clock,
+              },
+              apiVersion,
               source: effectiveSource,
-              retrieved_at: ctx.clock().toISOString(),
-              cache_age_seconds: effectiveCacheAge,
-              complexity: result.complexity,
-              next_cursor: result.nextCursor,
-              has_more: result.hasMore,
-              total_returned: result.totalReturned,
+              cacheAgeSeconds: effectiveCacheAge,
+              result: {
+                hasMore: result.hasMore,
+                totalReturned: result.totalReturned,
+                complexity: result.complexity,
+                nextCursor: result.nextCursor,
+              },
               columns: columnHeads,
             }),
           );

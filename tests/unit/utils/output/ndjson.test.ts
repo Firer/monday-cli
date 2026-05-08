@@ -5,6 +5,7 @@ import {
   type MetaInput,
 } from '../../../../src/utils/output/envelope.js';
 import {
+  buildStreamingTrailerMeta,
   renderNdjson,
   startNdjsonStream,
 } from '../../../../src/utils/output/ndjson.js';
@@ -306,5 +307,139 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
     // Both should resolve once 'drain' fires.
     await expect(writeP).resolves.toBeUndefined();
     await expect(writeP2).resolves.toBeUndefined();
+  });
+});
+
+describe('buildStreamingTrailerMeta (R53 lift)', () => {
+  // Direct unit coverage for the streaming-trailer Meta builder.
+  // Item list / item search / update list integration tests
+  // exercise it end-to-end; these unit tests pin the per-input
+  // contract (cursor- vs page-shape, column-bearing vs not, clock
+  // invocation timing, source/cache passthrough) so a regression
+  // surfaces here loudly without depending on any consumer's full
+  // path. Mirrors the M18 startNdjsonStream unit-test cadence.
+
+  const fixedNow = new Date('2026-05-08T10:00:00.000Z');
+  const baseCtx = {
+    cliVersion: '0.2.0',
+    requestId: 'req-streaming-1',
+    clock: () => fixedNow,
+  };
+
+  it('cursor-shape consumer emits a trailer carrying next_cursor + columns', () => {
+    const meta = buildStreamingTrailerMeta({
+      ctx: baseCtx,
+      apiVersion: '2026-01',
+      source: 'live',
+      cacheAgeSeconds: null,
+      result: {
+        hasMore: true,
+        totalReturned: 50,
+        complexity: { before: 10000000, after: 9999800, query: 200, reset_in_x_seconds: 60 },
+        nextCursor: 'cursor-page-2',
+      },
+      columns: {
+        col_status: { id: 'col_status', title: 'Status', type: 'status' },
+      },
+    });
+    expect(meta).toMatchObject({
+      schema_version: '1',
+      api_version: '2026-01',
+      cli_version: '0.2.0',
+      request_id: 'req-streaming-1',
+      source: 'live',
+      cache_age_seconds: null,
+      retrieved_at: '2026-05-08T10:00:00.000Z',
+      complexity: { before: 10000000, after: 9999800, query: 200, reset_in_x_seconds: 60 },
+      next_cursor: 'cursor-page-2',
+      has_more: true,
+      total_returned: 50,
+      columns: { col_status: { id: 'col_status', title: 'Status', type: 'status' } },
+    });
+    // Cursor-shape consumer keeps next_cursor + columns slots present.
+    expect(Object.keys(meta)).toContain('next_cursor');
+    expect(Object.keys(meta)).toContain('columns');
+  });
+
+  it('page-shape consumer omits next_cursor + columns when not provided', () => {
+    const meta = buildStreamingTrailerMeta({
+      ctx: baseCtx,
+      apiVersion: '2026-01',
+      source: 'live',
+      cacheAgeSeconds: null,
+      result: {
+        hasMore: false,
+        totalReturned: 12,
+        complexity: null,
+        // nextCursor omitted — page-walked consumers (update list).
+      },
+      // columns omitted — non-column-bearing nouns.
+    });
+    // §6.3 invariant: trailer drops keys for inputs that are not
+    // applicable. update list's trailer is exactly this shape.
+    expect(Object.keys(meta)).not.toContain('next_cursor');
+    expect(Object.keys(meta)).not.toContain('columns');
+    expect(meta.has_more).toBe(false);
+    expect(meta.total_returned).toBe(12);
+    expect(meta.complexity).toBeNull();
+  });
+
+  it('passes nextCursor null through (final cursor page) without dropping the key', () => {
+    // Distinct from "nextCursor undefined → key dropped". A cursor-
+    // walked consumer at the final page emits next_cursor: null
+    // explicitly; the helper preserves that distinction.
+    const meta = buildStreamingTrailerMeta({
+      ctx: baseCtx,
+      apiVersion: '2026-01',
+      source: 'live',
+      cacheAgeSeconds: null,
+      result: {
+        hasMore: false,
+        totalReturned: 17,
+        complexity: null,
+        nextCursor: null,
+      },
+    });
+    expect(Object.keys(meta)).toContain('next_cursor');
+    expect(meta.next_cursor).toBeNull();
+  });
+
+  it('invokes ctx.clock() at trailer-build time (not earlier) and uses ISO 8601', () => {
+    let calls = 0;
+    const clock = (): Date => {
+      calls += 1;
+      return new Date('2026-05-08T11:11:11.500Z');
+    };
+    expect(calls).toBe(0);
+    const meta = buildStreamingTrailerMeta({
+      ctx: { cliVersion: '0.2.0', requestId: 'req-clock', clock },
+      apiVersion: '2026-01',
+      source: 'live',
+      cacheAgeSeconds: null,
+      result: { hasMore: false, totalReturned: 0, complexity: null },
+    });
+    expect(calls).toBe(1);
+    expect(meta.retrieved_at).toBe('2026-05-08T11:11:11.500Z');
+  });
+
+  it('threads source + cacheAgeSeconds through unchanged (cache-hit path)', () => {
+    // Item list / item search hit cache when board metadata or
+    // column heads come from a cached read. The trailer reflects
+    // that via source: 'cache' + cache_age_seconds: <int>.
+    const meta = buildStreamingTrailerMeta({
+      ctx: baseCtx,
+      apiVersion: '2026-01',
+      source: 'cache',
+      cacheAgeSeconds: 42,
+      result: {
+        hasMore: true,
+        totalReturned: 100,
+        complexity: null,
+        nextCursor: 'cursor-next',
+      },
+      columns: {},
+    });
+    expect(meta.source).toBe('cache');
+    expect(meta.cache_age_seconds).toBe(42);
   });
 });
