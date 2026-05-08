@@ -4591,8 +4591,10 @@ Fields:
 | `retry_after_seconds` | number \| null | Hint for caller-driven retry. |
 | `details` | object | Code-specific extra context. Per-code schemas listed below. |
 
-**Stable error codes (v0.1).** The full list grows over time;
-removals are major bumps.
+**Stable error codes.** The full list grows over time;
+removals are major bumps. v0.1 shipped 26 codes; v0.2-M12 added
+`ambiguous_match` (27 total). Subsequent v0.2 milestones (M13–
+M17) reused the existing codes without adding new ones.
 
 | Code | Origin | Retryable? |
 |------|--------|------------|

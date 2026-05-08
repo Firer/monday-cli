@@ -153,7 +153,7 @@ R45 shipped at M16 implementation start):
 The three binding documents — read in this order before writing code:
 
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
-   contract: command surface, output envelope, 26 stable error codes,
+   contract: command surface, output envelope, 27 stable error codes,
    deferral list, every binding decision. Changes land via PRs that
    argue for the change, not by drift.
 2. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — active plan:
@@ -239,9 +239,11 @@ reasoning (and per-subsystem implementation detail) lives in
   `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
   `retrieved_at`. Adding fields is non-breaking; removing/renaming is
   major. (§6.1)
-- **26 stable error codes** (`usage_error` / `not_found` /
-  `ambiguous_column` / `column_archived` / `unsupported_column_type` /
-  `rate_limited` / `complexity_exceeded` / `stale_cursor` / etc.).
+- **27 stable error codes** (`usage_error` / `not_found` /
+  `ambiguous_column` / `ambiguous_match` / `column_archived` /
+  `unsupported_column_type` / `rate_limited` / `complexity_exceeded` /
+  `stale_cursor` / etc. — `ambiguous_match` joined the registry at
+  M12).
   Errors carry `code`, `message`, `http_status`, `monday_code`,
   `request_id`, `retryable`, `retry_after_seconds`. Agents key off
   `code`, never English. (§6.5)

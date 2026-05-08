@@ -18,7 +18,7 @@ AI coding agents need to operate on real tickets. Monday.com has a
 GraphQL API, but each agent learning that schema from scratch is
 wasteful — and the API is sharp-edged (40+ column types, idiosyncratic
 mutation shapes, complex pagination). `monday-cli` is the abstraction:
-**one stable contract** (universal envelope, 26 stable error codes,
+**one stable contract** (universal envelope, 27 stable error codes,
 JSON Schema introspection) that every agent can target.
 
 - **Agent-first ergonomics.** `--json` everywhere, stable
@@ -176,10 +176,10 @@ If you're an AI coding agent driving this CLI:
    inside an agent harness. `--json` is an alias for
    `--output json` and forces JSON on every command. JSON is
    never truncated; tables are.
-2. **Branch on `error.code`, not `error.message`.** The 26 stable
+2. **Branch on `error.code`, not `error.message`.** The 27 stable
    codes (`not_found`, `confirmation_required`, `column_archived`,
-   `unsupported_column_type`, `rate_limited`, `stale_cursor`, …)
-   are part of the contract. Messages are not.
+   `unsupported_column_type`, `rate_limited`, `stale_cursor`,
+   `ambiguous_match`, …) are part of the contract. Messages are not.
 3. **Read `meta.source`** to know whether the data is
    `"live"` / `"cache"` / `"mixed"` / `"none"`. `"mixed"` means
    board metadata came from cache while the rest hit live —
@@ -273,7 +273,7 @@ tarball — `package.json` still pinned to `0.1.0`):
   + bulk `monday item clear --where`. Upsert takes
   `--match-by <col>[,<col>...]` plus `--name` / `--set` and
   routes 0 / 1 / 2+ matches to `create_item` / `update_item` /
-  `ambiguous_match` (the 28th stable error code). Sequential-
+  `ambiguous_match` (the 27th stable error code). Sequential-
   retry idempotent — re-running with the same args from the
   same agent is safe; concurrent agents are NOT a uniqueness
   guarantee (agents should pick a stable hidden key column for
@@ -294,10 +294,58 @@ with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
 `people`, plus M8 firm row `link`, `email`, `phone`.
 
-**Remaining v0.2 milestones (M13–M18) on `main`:** full update
-mutation surface (`reply` / `edit` / `delete` / `like` / `pin` /
-`clear-all`), workspace + board lifecycle, NDJSON streaming,
-0.2.0 release prep.
+- **M13** ships the full update mutation surface — `monday update
+  reply` / `edit` / `delete` / `like` / `unlike` / `pin` / `unpin`
+  / `clear-all`. The eight new verbs introduce the **partial-
+  success envelope** (`update clear-all` returns `ok: true` with
+  per-target outcomes in `data.results: [...]`); the envelope is
+  `ok: true` whenever the dispatch ran, with per-target failures
+  surfacing as `data.results[i].error: { code, message }` rather
+  than top-level `ok: false`. M13 also flips `update list`'s
+  default-replies behaviour (now empty unless `--with-replies`
+  is set — the one breaking change in v0.2).
+- **M14** ships the workspace lifecycle — `monday workspace
+  create` / `update` / `delete` / `add-users` / `remove-users`.
+  `add-users` / `remove-users` reuse M13's partial-success
+  envelope and add resolver-fronted dispatch (mixed numeric IDs
+  + emails through `userByEmail`); per-token resolution failures
+  land as records inside `data.results` with the input token
+  echoed verbatim.
+- **M15** ships the board lifecycle — `monday board create` /
+  `update` / `archive` / `delete` / `duplicate` / `add-users`.
+  `board duplicate` introduces the **wrapped envelope** shape
+  (`data: { board: <projection>, is_async }`) because Monday's
+  `BoardDuplication` carries an `is_async` slot the projection
+  doesn't model. `board update` is per-attribute fan-out across
+  Monday's `update_board(board_attribute, new_value)` surface
+  with a force-live final read leg (Monday's per-attribute calls
+  return only the changed slice).
+- **M16** ships board column lifecycle + the §8 eager-
+  invalidation contract — `monday board column-create` /
+  `column-update` / `column-delete`. Every board-structure
+  mutation calls `invalidateBoard(boardId)` post-success so a
+  same-process `board describe` sees fresh state without TTL
+  eviction. `column-create` adds the
+  `noncanonical_column_type` warning for non-allowlisted column
+  types with per-category `suggested_write_path` (raw_writable /
+  read_only_forever / files_shaped). M16 retrofitted `board
+  update` / `archive` / `delete` to participate in the §8
+  contract.
+- **M17** ships board group lifecycle — `monday board group-
+  create` / `group-update` / `group-archive` / `group-duplicate`
+  / `group-delete`. Group-update is per-attribute fan-out across
+  Monday's single `update_group(group_attribute, new_value)`
+  surface with NO force-live read leg (Monday's `update_group`
+  returns the full Group projection post-mutation, distinguishing
+  group-update from board-update). Group-create + group-update
+  validate `--color` against the pinned Monday-supported palette
+  in `src/api/group-color.ts`. Group-archive carries a snapshot-
+  bearing dry-run from cached board metadata; group-delete is
+  destructive-no-read minimal.
+
+**Remaining v0.2 milestone:** **M18** — NDJSON streaming for
+`item search` + `update list` + envelope-snapshots refresh +
+README + CHANGELOG + 0.2.0 release prep.
 
 **Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
 friendly translators (still tentative; usable today via

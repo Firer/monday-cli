@@ -891,6 +891,217 @@
   any archived/deleted/unreachable target). Force-refreshes
   metadata so diagnostics describe live state.
 
+### Post-M9 helper modules (M10–M17 mutation surface)
+
+The mutation surface that grew M10–M17 (item lifecycle / update
+mutations / workspace + board + column + group lifecycles)
+settled into a stable set of cross-cutting helpers. Each helper
+is a per-noun (or cross-noun) consolidation of a pattern that
+recurred across ≥3 mutation sites; the lift-when-three-consumers
+heuristic v0.2-plan §22 documents.
+
+- `api/item-source-read.ts` (M10 R27) — `readSourceItemForDryRun
+  ({client, itemId, operationName})`. Single-item read against
+  `ITEM_FIELDS_FRAGMENT` + null-result throw with
+  `details.item_id` + `parseRawItem` + `projectItem`. Three M10
+  consumers (`item archive` / `delete` / `duplicate` dry-run);
+  M11 `item move` joins later. The named `operationName`
+  parameter pins the per-verb GraphQL operation name without
+  forcing each call site to re-declare the fragment.
+
+- `api/item-mutation-result.ts` (M10 R28) — `projectMutationItem
+  ({raw, itemId, errorCode, errorMessage})`. First per-noun
+  projection helper. Owns the null-check + `details: { item_id }`
+  envelope + projection-schema parse. Each call site supplies
+  its own typed error code + message (M10 verbs use `not_found`;
+  M12 upsert's create + update branches diverge on the
+  `errorCode` parameter so the helper stays per-noun-shaped, not
+  per-verb).
+
+- `api/source-aggregator.ts` (M9.5 R30) — `mergeSource` /
+  `mergeCacheAge` / `mergeSourceWithPreflight`. The §6.1
+  `meta.source` four-state aggregator (`'live' | 'cache' |
+  'mixed' | 'none'`) lifted from inline `Math.max` cache-age
+  folds + per-leg `currentSource` accumulators across dry-run.ts
+  / update.ts / create.ts.
+
+- `api/destructive-gate.ts` (M14 R29) —
+  `enforceDestructiveGate({globalFlags, verb, target, detailKey,
+  action, hint, extraDetails?})`. Shared `confirmation_required`
+  gate for every destructive verb: `item archive` / `item delete`
+  / `update delete` / `update clear-all` / `workspace delete` /
+  `board archive` / `board delete` / M16 `column-delete` / M17
+  `group-archive` / `group-delete` (10 consumers post-M17). The
+  M16 `extraDetails` slot extension carries a secondary
+  `board_id` for two-tuple destructive verbs (`column-delete` /
+  `group-archive` / `group-delete`) per cli-design §6.5 single-
+  target shape; `extraDetails` merges FIRST so the canonical
+  `[detailKey]: target` + `hint` always win on key collision.
+  Gate fires BEFORE `resolveClient()` so a missing token still
+  surfaces `confirmation_required` not `config_error` (the M10
+  round-1 P2 ordering invariant — preserved by accepting
+  already-parsed `globalFlags` rather than re-resolving inside
+  the helper).
+
+- `api/items-page-walker.ts` (M13 R34) — `items_page` GraphQL
+  helper for the cursor-walk pagination shape. Five consumers
+  post-M14.
+
+- `api/update-mutation-result.ts` (M14 R37) +
+  `UPDATE_FIELDS_FRAGMENT` (R38) —
+  `projectMutationUpdate({raw, updateId, errorCode,
+  errorMessage})` for the four full-projection M13 update
+  verbs (`create` / `reply` / `edit` / `delete`) + the
+  like-cluster + the dedicated `assertUpdateMutationPresent`
+  for `update clear-all`'s partial-success
+  `{id}`-only wire shape. Two-export seam handles both shapes;
+  five consumers across M13.
+
+- `api/partial-success-mutation.ts` (M13/M14) — the dispatch
+  helper for the §6.4 partial-success envelope shape. M13
+  `update clear-all` + M14 `workspace add-users` /
+  `remove-users` + M15 `board add-users` consume; per-target
+  outcomes (`{<target_id_field>: string, ok: boolean,
+  error?}`) ride in `data.results: [...]` with the id-field
+  name parameterised per verb (`update_id` / `user_id`). The
+  envelope is `ok: true` whenever the dispatch ran — top-level
+  `ok: false` is reserved for whole-call failure.
+
+- `api/users-fan-out-mutation.ts` (M15 R40) — partial-success
+  `--users` resolver-fronted dispatch shared by M14
+  `workspace add-users` / `remove-users` and M15 `board add-users`.
+  Mixes numeric IDs + emails (resolved through `userByEmail`);
+  per-token resolution failures land as records in
+  `data.results` with the input token echoed verbatim. Whole-
+  call `user_not_found` fires only when no dispatchable user_id
+  remains after parsing/resolution.
+
+- `api/response-root.ts` (M15 R41) —
+  `assertResponseFieldPresent(data, fieldName, {mutationName,
+  details})`. The shared missing-root-key guard surfacing
+  `internal_error` with a schema-drift hint (distinguishes
+  Monday's contract-drift signal from null-payload). Used by
+  M14/M15 inline at call sites; R42 (deferred — see §22)
+  consolidates the ~32 pre-M14 + post-M14 mutation sites onto
+  this helper for one uniform shape.
+
+- `api/workspace-projection.ts` (M14/M15 R39) +
+  `WORKSPACE_FIELDS_FRAGMENT` + `workspaceProjectionSchema`.
+  The R28-sibling for Workspace; six M14 consumers (the four
+  workspace mutation verbs + `workspace get`).
+
+- `api/board-projection.ts` (M15 R43) +
+  `BOARD_FIELDS_FRAGMENT` + `boardProjectionSchema`. The
+  read-side projection for Board; six M15 consumers.
+
+- `api/board-mutation-result.ts` (M15 R43) — `projectMutation
+  Board({raw, errorCode, errorMessage, detailKey, detailValue})`.
+  R28-sibling for Board; six M15 consumers (the six board
+  mutation verbs).
+
+- `api/column-mutation-result.ts` (M16 R45) +
+  `COLUMN_FIELDS_FRAGMENT` + `columnProjectionSchema` +
+  `projectMutationColumn({raw, errorCode, errorMessage,
+  boardId, columnIdKey: 'column_id' | 'title', columnIdValue})`.
+  Per-noun projection helper for Column. Three M16 consumers
+  (`column-create` / `column-update` / `column-delete`); the
+  `columnIdKey` parameter pins the per-verb divergence between
+  create's pre-id `'title'` shape and update / delete's
+  `'column_id'` shape.
+
+- `api/board-mutation-invalidation.ts` (M16→M17 cleanup R46) —
+  `withBoardInvalidationSingleLeg({boardId, env, perform})` and
+  `withBoardInvalidationFanOut({boardId, env, runFanOut})`. Pin
+  the cli-design §8 leg-count split in the type system: single-
+  leg verbs invalidate AFTER the success-envelope `data`
+  projection and skip on the error path; fan-out verbs
+  invalidate ONCE after the per-attribute loop settles iff at
+  least one leg succeeded (high-water-mark counter via the
+  closure-captured `recordLegSuccess()` callback so partial-
+  application failure still invalidates). 11 consumers
+  post-M17 (8 single-leg: column-create + column-delete +
+  M15-retrofit board-archive + board-delete + M17 group-create
+  + group-archive + group-duplicate + group-delete; 3 fan-out:
+  column-update + M15-retrofit board-update + M17 group-update).
+
+- `api/group-mutation-result.ts` (M17 R48) +
+  `GROUP_FIELDS_FRAGMENT` + `groupProjectionSchema` +
+  `projectMutationGroup({raw, errorCode, errorMessage, boardId,
+  idKey: 'group_id' | 'name', idValue})`. Per-noun projection
+  helper for Group. Five M17 consumers (all five group verbs);
+  the `idKey` parameter pins create's pre-id `'name'` shape vs
+  update / archive / duplicate / delete's `'group_id'` shape.
+  Fifth per-noun projection helper post-M17 — sets up a
+  hypothetical R44 (generic `projectMutationResource`) lift
+  pending a sixth-noun trigger.
+
+- `api/group-color.ts` (M17 round-1 fix-up) —
+  `GROUP_COLOR_VALUES` palette: 41 names covering Monday's
+  documented group colours. Both `group-create` and
+  `group-update` consume via `z.enum(GROUP_COLOR_VALUES)` so
+  invalid colour names surface as `usage_error` BEFORE any
+  network call. The M17 implementation owns the field set per
+  cli-design §4.3 (the contract pins the shape; the
+  implementation owns the values, mirrors M16
+  `column-types.ts`).
+
+### Post-M9 command surface (M10–M17)
+
+M10–M17 add ~25 command files following the patterns established
+in M5b/M9 (commands/<noun>/<verb>.ts each registered in
+`commands/index.ts`, parsing argv via `parseArgv`, calling into
+the helpers above, projecting through the per-verb output schema,
+emitting the §6 envelope). The cli-design §4.3 contract section
+is the per-verb spec; the v0.2-plan §3 milestone entries
+document the verb cluster post-mortems. Briefly:
+
+- **`commands/item/{archive,delete,duplicate,move,upsert}.ts`** —
+  M10 / M11 / M12 lifecycle verbs. Already documented above.
+- **`commands/update/{reply,edit,delete,like,unlike,pin,unpin,
+  clear-all}.ts`** — M13's eight new update mutation verbs.
+  `clear-all` is the first §6.4 partial-success consumer (the
+  envelope is `ok: true` when dispatch ran; per-target failures
+  land in `data.results[i].error`).
+- **`commands/workspace/{create,update,delete,add-users,
+  remove-users}.ts`** — M14 lifecycle. `add-users` / `remove-
+  users` are the first **resolver-fronted** partial-success
+  consumers (mixed numeric IDs + emails; per-token resolution
+  failures land in `data.results`).
+- **`commands/board/{create,update,archive,delete,duplicate,
+  add-users}.ts`** — M15 lifecycle. `board duplicate` introduces
+  the **wrapped envelope** shape (`data: { board: <projection>,
+  is_async }`) because Monday's `BoardDuplication` carries an
+  `is_async` slot the projection doesn't model. `board update`
+  is per-attribute fan-out across `update_board(board_attribute,
+  new_value)` with a force-live final read leg (Monday's per-
+  attribute calls return only the changed slice).
+- **`commands/board/{column-create,column-update,column-delete}.ts`** —
+  M16 column lifecycle + the §8 eager-invalidation contract.
+  Every verb calls `invalidateBoard(boardId)` post-success via
+  R46's wrappers. `column-update` is per-attribute fan-out
+  across **two** wire surfaces (`change_column_title` for
+  `--title`, `change_column_metadata({column_property:
+  description})` for `--description`); the trailing per-
+  attribute response is authoritative for `data` (no force-live
+  read leg — distinguishes column-update from board-update).
+  `column-delete` is the first **two-tuple destructive verb**
+  (R29's `extraDetails` slot extension carries `board_id`
+  alongside the canonical `column_id` detailKey per cli-design
+  §6.5).
+- **`commands/board/{group-create,group-update,group-archive,
+  group-duplicate,group-delete}.ts`** — M17 group lifecycle.
+  All five adopt R48's `projectMutationGroup` + R46's
+  invalidation wrappers from day one. `group-update` is per-
+  attribute fan-out across the **single** `update_group(
+  group_attribute, new_value)` surface; trailing response is
+  authoritative for `data` (no force-live read leg). `group-
+  archive` + `group-delete` are the 2nd + 3rd two-tuple
+  destructive consumers (after M16 column-delete). `group-
+  duplicate` deliberately omits `--with-updates` because
+  Monday's `duplicate_group` wire signature has no
+  `with_updates` argument (unlike `duplicate_item` /
+  `duplicate_board`).
+
 ### Hard rules
 
 - `commands/` never imports the SDK directly — always goes through
