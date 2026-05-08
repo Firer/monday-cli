@@ -7,7 +7,7 @@ output envelope (`{ ok, data, meta, ... }`) and 27 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
-## [0.2.0] — Mutating core: agents can drive a backlog
+## [0.2.0] - 2026-05-08 — Mutating core: agents can drive a backlog
 
 The "agents can drive a backlog" milestone — v0.1's read-only core
 + safe-mutations gain the full mutation surface (item lifecycle,

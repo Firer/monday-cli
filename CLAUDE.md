@@ -11,8 +11,72 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.1.0 published; v0.2.0 in development on `main`.** M0–M17 shipped;
-**M18 (NDJSON streaming + 0.2.0 release prep) is next.**
+**v0.2.0 published.** M0–M18 shipped on `main`; **v0.3 plan opens
+next session** in a fresh `docs/v0.3-plan.md` doc.
+
+**M18 closed** (see `docs/v0.2-plan.md` §3 M18 status block + §26
+post-mortem):
+- The polish + ship milestone — NDJSON streaming for `item search`
+  + `update list` (the missing pair vs M7's `item list` streaming
+  pin), envelope-snapshots refresh (60 → 92), output-shapes ToC
+  audit, README quickstart with `item create` + `item upsert`
+  examples, CHANGELOG 0.2.0 entry, and the version bump to
+  `0.2.0`. **No new contract surface** — M18 was pure consolidation
+  + release prep.
+- **Three Codex rounds total** — one pre-flight (8 findings: 0 P1
+  / 4 P2 / 4 P3) + two implementation rounds (5 + 3 findings: 0
+  P1 / 4 P2 / 4 P3). The smallest review surface to date (M17: 6
+  rounds, M16: 9, M18: 3); confirms the §25 M17 post-mortem
+  prediction that "rounds scale inversely with cross-cutting
+  contract maturity." M18's no-new-contract status puts it at
+  the floor.
+- **R52 shipped at M18 implementation start** in `39c91a6
+  refactor(r52): lift startNdjsonStream into utils/output/ndjson`.
+  New public exports in `src/utils/output/ndjson.ts`
+  (`startNdjsonStream` + `NdjsonStreamInputs` +
+  `NdjsonStreamHandle`) — three-input parameterised helper
+  (`stream` + `secrets` + `project`) returning a
+  `{ onItem, writeTrailer }` handle. Three consumers post-lift
+  (item list switches inside the same R52 commit; item search +
+  update list adopt from day one). Mirrors R45 / R48's "ship the
+  projection helper alongside the first new consumer" cadence.
+- **`walkPages.onItem` hook shipped in `e8e38c4`.** Mirrors
+  `paginate.onItem`'s contract verbatim — same signature, same
+  per-item-arrival-order, same push-then-await ordering (Codex
+  M18 pre-flight P3-1: pin the ordering invariant explicitly so
+  a future regression that swapped push/await would break loud).
+  `update list` (both per-item and per-board variants) is the
+  first consumer; agents now stream paginated update reads.
+- **NDJSON streaming actual `'drain'` backpressure** (Codex M18
+  round-1 P3-3 fix): `startNdjsonStream.onItem` returns
+  `Promise<void>` and awaits the stream's `'drain'` event when
+  `stream.write` returns false. Pre-fix the helper returned
+  `void`, so `paginate.onItem` / `walkPages.onItem`'s await on a
+  void-returning callback was trivially resolved and items piled
+  up in Node's internal write queue. Now agent's piped `jq`
+  consumer can backpressure the cursor walk for real.
+- **`deferred_to: "v0.2"` runtime drift fixed** (Codex M18
+  pre-flight P2-4 + round-2 P2). Tentative writer-expansion row
+  (`tags` / `board_relation` / `dependency`) **slipped to v0.3
+  at v0.2.0 release** per cli-design §13. Runtime
+  `unsupported_column_type` errors now emit `deferred_to: "v0.3"`
+  for tentative-row types, `deferred_to: "v0.4"` for files-shaped
+  (asset upload), `deferred_to: "v0.3"` for `time_tracking`
+  (verb-shaped extension), `deferred_to: "future"` for unscoped
+  types. Plus a sweep across module/test docstrings to remove
+  stale "v0.2 will add `--set-raw`" wording.
+- **Coverage floor ratchet** branches 95 → 95.5 (project actual
+  at v0.2.0 close: 99.05 / 95.51 / 99.51 / 99.18). The §3 M18
+  96% target wasn't met — the new code shipped at 100% per-file
+  but the global percentage only ticked up by ~0.5pp because
+  the denominator grew alongside the numerator. The 96% target
+  slips to v0.3 as a focused coverage-push session if it turns
+  out to be load-bearing.
+- **2280 tests passing** (was 2218 at M17 close; +62 net).
+- **The v0.2.0 release.** This commit closes M18 + the v0.2 arc.
+  After it lands on `main`, `npm publish` pushes 0.2.0 to the
+  registry (user runs manually). The v0.3 plan opens in a fresh
+  doc next session.
 
 **M17 closed** (see `docs/v0.2-plan.md` §3 M17 status block + §25
 post-mortem):
