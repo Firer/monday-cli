@@ -11,8 +11,42 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.2.0 published.** M0–M18 shipped on `main`; **v0.3 plan opens
-next session** in a fresh `docs/v0.3-plan.md` doc.
+**v0.3 plan landed.** M0–M18 shipped on `main`;
+**`docs/v0.3-plan.md` is the active plan**; **M19 implementation
+begins next session** (writer expansion close — `tags` /
+`board_relation` / `dependency` friendly translators per
+cli-design §5.3 writer-expansion roadmap + §13 v0.3 entry).
+
+**v0.3 plan draft opened this session** (see
+`docs/v0.3-plan.md`):
+- Ten milestones M19–M28 sequenced (writer-expansion close →
+  time_tracking → auth foundations → diagnostics → cross-board
+  reads → history → partial-success bulk → dev namespace →
+  outbound writes → subitem expansion + release prep). M19's
+  body is fully detailed; M20–M28 land as stubs filled out at
+  their respective implementation kickoffs.
+- **R44 / R49 / R50 candidates + non-R-class
+  `unsupportedColumnTypeError` quality refactor** migrated from
+  v0.2-plan §22 to v0.3-plan §22. The `unsupportedColumnTypeError`
+  refactor is M19-fold-pointed (the tentative-row reclassification
+  touches the function anyway).
+- **§8 lists 11 decisions** to close at their milestone-blocking
+  moments. Decision 1 (`tag_not_found` registry entry — `details:
+  { tags: string[], hint }` array shape) must close before M19
+  first feat commit as a cli-design §6.5 extension PR.
+- **Codex pre-flight: two rounds, P1-clean at round 2.** Round 1
+  returned 11 findings (1 P1 / 8 P2 / 2 P3) covering scope-realism
+  + cross-milestone-dependency + cli-design §13 alignment +
+  contract-divergence drift. Round 2 returned 3 P2 / 0 P1 / 0 P3
+  (residual drift from the round-1 fixes); all 14 findings across
+  both rounds addressed inline. M21 OAuth flow per cli-design §7.3
+  pinned (no paste-in shortcut); M22 `monday usage` ships
+  `complexity_remaining_24h` only; M27 webhooks live-only (no §8
+  cache extension); M28 multi-level subitems gated on a Decision
+  11 cli-design §13 v0.3 amendment PR.
+- **No source-code edits this session** — pure planning-doc work.
+  2296 tests still passing; coverage 99.05 / 95.47 / 99.51 /
+  99.18; floor 95/95.45/95/95 unchanged.
 
 **M18 closed** (see `docs/v0.2-plan.md` §3 M18 status block + §26
 post-mortem):
@@ -261,13 +295,16 @@ The three binding documents — read in this order before writing code:
    contract: command surface, output envelope, 27 stable error codes,
    deferral list, every binding decision. Changes land via PRs that
    argue for the change, not by drift.
-2. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — active plan:
-   milestones M8–M18 with deliverables, exit criteria, decisions log,
-   per-milestone post-mortems (M8/M9/M10/M11/M12 + R-class refactor
-   backlogs).
-3. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
+2. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — active plan:
+   milestones M19–M28 with deliverables, exit criteria, decisions log,
+   per-milestone post-mortems land at milestone close.
+3. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped foundations
+   M8–M18 with per-milestone post-mortems (M8/M9/M10/M11/M12 +
+   M13–M18 + R-class refactor backlogs R20–R53). Reference for
+   patterns v0.3 milestones build on.
+4. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
    M0–M7 with M2.5 refactor pass and the M5a/M5b split. Reference for
-   patterns every later milestone builds on.
+   the foundational patterns every later milestone builds on.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)
 (snapshot-backed per-command `data` reference);
