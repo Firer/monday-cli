@@ -55,6 +55,7 @@ import {
   workspaceProjectionSchema,
   type WorkspaceProjection,
 } from '../../api/workspace-projection.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DELETE_WORKSPACE_MUTATION = `
   mutation WorkspaceDelete($workspaceId: ID!) {
@@ -172,24 +173,18 @@ export const workspaceDeleteCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        // Codex M14 round-3 F1: distinguish "root key absent"
-        // (schema-drift → internal_error) from "value null"
-        // (workspace already deleted / id bogus → not_found).
-        if (!('delete_workspace' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's WorkspaceDelete response is missing the delete_workspace root field`,
-            {
-              details: {
-                workspace_id: parsed.workspaceId,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
+        // R42 (post-v0.2 → v0.3 cleanup follow-up): consolidate the
+        // M14 round-3 F1 inline missing-key check onto the shared
+        // helper. Distinguishes "root key absent" (schema-drift →
+        // internal_error) from "value null" (workspace already
+        // deleted / id bogus → not_found via projectDeletedWorkspace).
+        assertResponseFieldPresent({
+          data,
+          key: 'delete_workspace',
+          operationLabel: 'WorkspaceDelete',
+          details: { workspace_id: parsed.workspaceId },
+          nullHandling: 'caller_handles',
+        });
         const projected = projectDeletedWorkspace(
           data.delete_workspace,
           parsed.workspaceId,

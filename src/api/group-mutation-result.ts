@@ -55,11 +55,15 @@
  * stays inline because each verb's response root key (`create_
  * group` / `update_group` / `archive_group` / `duplicate_group` /
  * `delete_group`) is per-verb. The missing-root-key check (schema-
- * drift → `internal_error` with a `hint`) stays inline too —
- * that's Codex M15 implementation round-2 F1's distinction between
- * schema-drift and null-payload, deliberately preserved at each
- * site. R42 would unify the missing-root-key check across all
- * pre-M14 mutation verbs once scheduled.
+ * drift → `internal_error` with a `hint`) was Codex M15
+ * implementation round-2 F1's distinction between schema-drift
+ * and null-payload, deliberately preserved at each site at M17
+ * ship time. **R42 (post-v0.2 → v0.3 cleanup window — `c529445`)
+ * consolidated the inline check across every group-mutation verb
+ * onto `assertResponseFieldPresent`** with `nullHandling:
+ * 'caller_handles'`; the helper runs immediately after each verb's
+ * `unwrapOrThrow(responseSchema.safeParse(...))`, with
+ * `projectMutationGroup` continuing to handle null-value per-noun.
  */
 
 import { z } from 'zod';

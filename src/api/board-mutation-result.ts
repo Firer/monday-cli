@@ -60,11 +60,15 @@
  * stays inline because each verb's response root key
  * (`create_board` / `archive_board` / etc.) is per-verb. The
  * missing-root-key check (schema-drift → `internal_error` with
- * a `hint`) stays inline too — that's Codex M15 implementation
- * round-2 F1's distinction between schema-drift and null-payload,
- * deliberately preserved at each site. R42 would unify the
- * missing-root-key check across all pre-M14 mutation verbs once
- * scheduled.
+ * a `hint`) was Codex M15 implementation round-2 F1's distinction
+ * between schema-drift and null-payload, deliberately preserved at
+ * each site at M15 ship time. **R42 (post-v0.2 → v0.3 cleanup
+ * window — `c529445`) consolidated the inline check across every
+ * board-mutation verb onto `assertResponseFieldPresent`** with
+ * `nullHandling: 'caller_handles'`; the helper runs immediately
+ * after each verb's `unwrapOrThrow(responseSchema.safeParse(...))`,
+ * with `projectMutationBoard` continuing to handle null-value per-
+ * noun (some verbs throw `internal_error`, some `not_found`).
  */
 
 import { ApiError, type ErrorCode } from '../utils/errors.js';

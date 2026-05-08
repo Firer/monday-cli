@@ -39,6 +39,7 @@ import {
   workspaceProjectionSchema,
   type WorkspaceProjection,
 } from '../../api/workspace-projection.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CREATE_WORKSPACE_MUTATION = `
   mutation WorkspaceCreate($name: String!, $kind: WorkspaceKind!, $description: String) {
@@ -167,6 +168,21 @@ export const workspaceCreateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
+        // R42 (post-v0.2 → v0.3 cleanup follow-up): distinguish
+        // missing-root-key (schema-drift → internal_error with
+        // schema-drift hint) from null payload (server-side glitch →
+        // internal_error via projectCreatedWorkspace's null-check).
+        // Pre-R42 conflated both as internal_error / no-payload;
+        // post-R42 the schema-drift case carries a more accurate
+        // diagnostic. M14 workspace verbs were missed by the initial
+        // R42 sweep (the §22 sites list jumped M13 → M15).
+        assertResponseFieldPresent({
+          data,
+          key: 'create_workspace',
+          operationLabel: 'WorkspaceCreate',
+          details: { workspace_name: name },
+          nullHandling: 'caller_handles',
+        });
         const projected = projectCreatedWorkspace(data.create_workspace, name);
 
         emitMutation({

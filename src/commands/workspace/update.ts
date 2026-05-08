@@ -48,6 +48,7 @@ import {
   workspaceProjectionSchema,
   type WorkspaceProjection,
 } from '../../api/workspace-projection.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const WORKSPACE_UPDATE_PREFLIGHT_QUERY = `
   query WorkspaceUpdatePreflight($ids: [ID!]) {
@@ -257,26 +258,20 @@ export const workspaceUpdateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        // Codex M14 round-3 F1: distinguish "root key absent"
-        // (schema-drift → internal_error) from "value null"
-        // (workspace missing → not_found). Pre-fix, both landed
-        // as not_found and agents couldn't tell a CLI/API contract
-        // break from a normal resource absence.
-        if (!('update_workspace' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's WorkspaceUpdate response is missing the update_workspace root field`,
-            {
-              details: {
-                workspace_id: parsed.workspaceId,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
+        // R42 (post-v0.2 → v0.3 cleanup follow-up): consolidate the
+        // M14 round-3 F1 inline missing-key check onto the shared
+        // helper. Distinguishes "root key absent" (schema-drift →
+        // internal_error) from "value null" (workspace missing →
+        // not_found via projectUpdatedWorkspace). M14 workspace verbs
+        // were missed by the initial R42 sweep (the §22 sites list
+        // jumped M13 → M15); folded in here.
+        assertResponseFieldPresent({
+          data,
+          key: 'update_workspace',
+          operationLabel: 'WorkspaceUpdate',
+          details: { workspace_id: parsed.workspaceId },
+          nullHandling: 'caller_handles',
+        });
         const projected = projectUpdatedWorkspace(
           data.update_workspace,
           parsed.workspaceId,
