@@ -85,6 +85,7 @@ import {
   projectMutationColumn,
   type ColumnProjection,
 } from '../../api/column-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CHANGE_COLUMN_TITLE_MUTATION = `
   mutation ColumnChangeTitle($boardId: ID!, $columnId: String!, $title: String!) {
@@ -325,22 +326,17 @@ export const boardColumnUpdateCommand: CommandModule<
                         "if Monday's contract has changed.",
                     },
                   );
-                  if (!('change_column_title' in data)) {
-                    throw new ApiError(
-                      'internal_error',
-                      `Monday's ColumnChangeTitle response is missing the change_column_title root field`,
-                      {
-                        details: {
-                          board_id: parsed.boardId,
-                          column_id: parsed.columnId,
-                          hint:
-                            "this is a schema-drift error in Monday's GraphQL " +
-                            'response; verify the mutation declaration and update ' +
-                            "the response schema if Monday's contract has changed.",
-                        },
-                      },
-                    );
-                  }
+                  // R42: consolidate the inline missing-key check.
+                  assertResponseFieldPresent({
+                    data,
+                    key: 'change_column_title',
+                    operationLabel: 'ColumnChangeTitle',
+                    details: {
+                      board_id: parsed.boardId,
+                      column_id: parsed.columnId,
+                    },
+                    nullHandling: 'caller_handles',
+                  });
                   // R45 lift: null-payload guard + projection.
                   // column-update's null path uses `not_found`
                   // (Monday's idiomatic missing-or-no-access
@@ -380,22 +376,17 @@ export const boardColumnUpdateCommand: CommandModule<
                         "if Monday's contract has changed.",
                     },
                   );
-                  if (!('change_column_metadata' in data)) {
-                    throw new ApiError(
-                      'internal_error',
-                      `Monday's ColumnChangeMetadata response is missing the change_column_metadata root field`,
-                      {
-                        details: {
-                          board_id: parsed.boardId,
-                          column_id: parsed.columnId,
-                          hint:
-                            "this is a schema-drift error in Monday's GraphQL " +
-                            'response; verify the mutation declaration and update ' +
-                            "the response schema if Monday's contract has changed.",
-                        },
-                      },
-                    );
-                  }
+                  // R42: consolidate the inline missing-key check.
+                  assertResponseFieldPresent({
+                    data,
+                    key: 'change_column_metadata',
+                    operationLabel: 'ColumnChangeMetadata',
+                    details: {
+                      board_id: parsed.boardId,
+                      column_id: parsed.columnId,
+                    },
+                    nullHandling: 'caller_handles',
+                  });
                   lastProjected = projectMutationColumn({
                     raw: data.change_column_metadata,
                     errorCode: 'not_found',

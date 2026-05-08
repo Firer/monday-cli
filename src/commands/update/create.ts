@@ -35,6 +35,7 @@ import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { readUpdateBody } from './body-source.js';
 import { UPDATE_FIELDS_FRAGMENT } from '../../api/update-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CREATE_UPDATE_MUTATION = `
   mutation UpdateCreate($itemId: ID!, $body: String!) {
@@ -159,6 +160,18 @@ export const updateCreateCommand: CommandModule<
           { itemId: parsed.itemId, body },
           { operationName: 'UpdateCreate' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (handled downstream by
+        // projectCreatedUpdate). Must run BEFORE the responseSchema
+        // parse — zod's `z.unknown()` field type normalizes missing
+        // keys into present-undefined, swallowing the distinction.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'create_update',
+          operationLabel: 'UpdateCreate',
+          details: { item_id: parsed.itemId },
+          nullHandling: 'caller_handles',
+        });
         const data = unwrapOrThrow(
           responseSchema.safeParse(response.data),
           {

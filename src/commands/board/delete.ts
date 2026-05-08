@@ -42,7 +42,6 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -52,6 +51,7 @@ import {
   type BoardProjection,
 } from '../../api/board-projection.js';
 import { projectMutationBoard } from '../../api/board-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DELETE_BOARD_MUTATION = `
   mutation BoardDelete($boardId: ID!) {
@@ -176,25 +176,17 @@ export const boardDeleteCommand: CommandModule<
                   'Monday\'s contract has changed.',
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error) from null payload (board missing →
-            // not_found). M14 round-2 / round-3 distinction landed
-            // proactively for M15.
-            if (!('delete_board' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's BoardDelete response is missing the delete_board root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    hint:
-                      'this is a schema-drift error in Monday\'s GraphQL ' +
-                      'response; verify the mutation declaration and update ' +
-                      'the response schema if Monday\'s contract has changed.',
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check onto
+            // `assertResponseFieldPresent`. Distinguishes missing-root-
+            // key (schema-drift → internal_error) from null payload
+            // (board missing → not_found via projectMutationBoard).
+            assertResponseFieldPresent({
+              data,
+              key: 'delete_board',
+              operationLabel: 'BoardDelete',
+              details: { board_id: parsed.boardId },
+              nullHandling: 'caller_handles',
+            });
             // R43 lift (api/board-mutation-result.ts): null-payload
             // guard + projection. Delete's null path uses
             // `not_found` (Monday's "id was bogus / already

@@ -94,6 +94,7 @@ import {
   resolveMeFactory,
 } from '../../api/item-helpers.js';
 import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -541,6 +542,13 @@ const executeMutation = async (
       },
       { operationName: 'ItemUpdateSimple' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_simple_column_value',
+      operationLabel: 'ItemUpdateSimple',
+      details: { item_id: itemId, board_id: boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem(response.data.change_simple_column_value, itemId),
       response,
@@ -558,6 +566,13 @@ const executeMutation = async (
       },
       { operationName: 'ItemUpdateRich' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_column_value',
+      operationLabel: 'ItemUpdateRich',
+      details: { item_id: itemId, board_id: boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem(response.data.change_column_value, itemId),
       response,
@@ -574,6 +589,13 @@ const executeMutation = async (
     },
     { operationName: 'ItemUpdateMulti' },
   );
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'change_multiple_column_values',
+    operationLabel: 'ItemUpdateMulti',
+    details: { item_id: itemId, board_id: boardId },
+    nullHandling: 'caller_handles',
+  });
   return {
     projected: projectMutationItem(response.data.change_multiple_column_values, itemId),
     response,

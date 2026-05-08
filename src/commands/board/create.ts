@@ -39,7 +39,6 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema, WorkspaceIdSchema } from '../../types/ids.js';
 import {
@@ -48,6 +47,7 @@ import {
   type BoardProjection,
 } from '../../api/board-projection.js';
 import { projectMutationBoard } from '../../api/board-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CREATE_BOARD_MUTATION = `
   mutation BoardCreate(
@@ -211,27 +211,19 @@ export const boardCreateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        // Distinguish missing-root-key (schema-drift → internal_error
-        // with schema-drift hint) from null payload (Monday returned
-        // no board → also internal_error here since create's contract
-        // is "every successful call returns a Board"). Codex M15
-        // implementation round-2 F3 lateral propagation: each M15
-        // mutation verb's response handler distinguishes the two.
-        if (!('create_board' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's BoardCreate response is missing the create_board root field`,
-            {
-              details: {
-                board_name: name,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
+        // R42: consolidate the inline missing-key check onto
+        // `assertResponseFieldPresent`. Distinguishes missing-root-key
+        // (schema-drift → internal_error) from null payload (handled
+        // downstream by `projectMutationBoard`). Codex M15 round-2 F3
+        // lateral propagation; R42 lifts the inline shape across all
+        // M15-M17 verbs.
+        assertResponseFieldPresent({
+          data,
+          key: 'create_board',
+          operationLabel: 'BoardCreate',
+          details: { board_name: name },
+          nullHandling: 'caller_handles',
+        });
         // R43 lift (api/board-mutation-result.ts): null-payload
         // guard + projection. Create's null path uses
         // `internal_error` because the contract is "every successful

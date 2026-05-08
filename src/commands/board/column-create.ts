@@ -83,7 +83,7 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
+import { UsageError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -93,6 +93,7 @@ import {
   projectMutationColumn,
   type ColumnProjection,
 } from '../../api/column-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import {
   categorizeNoncanonicalColumnType,
   isWritableColumnType,
@@ -593,29 +594,17 @@ export const boardColumnCreateCommand: CommandModule<
                   "Monday's contract has changed.",
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error with schema-drift hint) from null
-            // payload (Monday returned no column → also
-            // internal_error here since create's contract is "every
-            // successful call returns a Column"). Mirrors the M15
-            // board-create / archive / delete missing-root-key vs
-            // null-payload split.
-            if (!('create_column' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's ColumnCreate response is missing the create_column root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    title,
-                    hint:
-                      "this is a schema-drift error in Monday's GraphQL " +
-                      'response; verify the mutation declaration and update ' +
-                      "the response schema if Monday's contract has changed.",
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check onto
+            // `assertResponseFieldPresent`. Distinguishes missing-
+            // root-key (schema-drift → internal_error) from null
+            // payload (handled by projectMutationColumn).
+            assertResponseFieldPresent({
+              data,
+              key: 'create_column',
+              operationLabel: 'ColumnCreate',
+              details: { board_id: parsed.boardId, title },
+              nullHandling: 'caller_handles',
+            });
             // R45 lift (api/column-mutation-result.ts): null-payload
             // guard + projection. Create's null path uses
             // `internal_error` because the contract is "every

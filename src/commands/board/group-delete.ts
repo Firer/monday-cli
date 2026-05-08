@@ -65,7 +65,6 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
-import { ApiError } from '../../utils/errors.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -75,6 +74,7 @@ import {
   projectMutationGroup,
   type GroupProjection,
 } from '../../api/group-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DELETE_GROUP_MUTATION = `
   mutation GroupDelete($boardId: ID!, $groupId: String!) {
@@ -207,26 +207,17 @@ export const boardGroupDeleteCommand: CommandModule<
                   "Monday's contract has changed.",
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error) from null payload (group missing →
-            // not_found). Mirrors the M15 board-delete + M16
-            // column-delete distinction.
-            if (!('delete_group' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's GroupDelete response is missing the delete_group root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    group_id: parsed.groupId,
-                    hint:
-                      "this is a schema-drift error in Monday's GraphQL " +
-                      'response; verify the mutation declaration and update ' +
-                      "the response schema if Monday's contract has changed.",
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check.
+            assertResponseFieldPresent({
+              data,
+              key: 'delete_group',
+              operationLabel: 'GroupDelete',
+              details: {
+                board_id: parsed.boardId,
+                group_id: parsed.groupId,
+              },
+              nullHandling: 'caller_handles',
+            });
             // R48 lift: null-payload guard + projection. Delete's
             // null path uses `not_found` (Monday's "id was bogus /
             // already deleted" mapping).

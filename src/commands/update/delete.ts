@@ -42,6 +42,7 @@ import {
   updateProjectionSchema,
   type UpdateProjection,
 } from '../../api/update-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DELETE_UPDATE_MUTATION = `
   mutation UpdateDelete($id: ID!) {
@@ -144,6 +145,16 @@ export const updateDeleteCommand: CommandModule<
           { id: parsed.updateId },
           { operationName: 'UpdateDelete' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (per-record → not_found
+        // via projectMutationUpdate). Must run BEFORE the parse.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'delete_update',
+          operationLabel: 'UpdateDelete',
+          details: { update_id: parsed.updateId },
+          nullHandling: 'caller_handles',
+        });
         const data = unwrapOrThrow(
           responseSchema.safeParse(response.data),
           {

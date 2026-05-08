@@ -33,6 +33,7 @@ import {
   UPDATE_FIELDS_FRAGMENT,
   updateProjectionSchema,
 } from '../../api/update-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CREATE_REPLY_MUTATION = `
   mutation UpdateReply($parentId: ID!, $body: String!) {
@@ -139,6 +140,16 @@ export const updateReplyCommand: CommandModule<
           { parentId: parsed.parentId, body },
           { operationName: 'UpdateReply' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (per-record → not_found
+        // via projectMutationUpdate). Must run BEFORE the parse.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'create_update',
+          operationLabel: 'UpdateReply',
+          details: { parent_id: parsed.parentId },
+          nullHandling: 'caller_handles',
+        });
         const data = unwrapOrThrow(
           responseSchema.safeParse(response.data),
           {

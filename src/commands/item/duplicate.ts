@@ -69,6 +69,7 @@ import { ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import { projectedItemSchema } from '../../api/item-projection.js';
@@ -231,6 +232,17 @@ export const itemDuplicateCommand: CommandModule<
           },
           { operationName: 'ItemDuplicate' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (per-record →
+        // not_found via the projector). Pre-R42 conflated both as
+        // not_found.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'duplicate_item',
+          operationLabel: 'ItemDuplicate',
+          details: { item_id: parsed.itemId, board_id: boardId },
+          nullHandling: 'caller_handles',
+        });
         // Defence-in-depth — `lookupItemBoard` already verified the
         // source item exists, so a null `duplicate_item` here implies
         // a permission edge case (token can read but not duplicate)

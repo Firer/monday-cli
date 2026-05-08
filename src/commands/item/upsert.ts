@@ -104,6 +104,7 @@ import {
   resolveMeFactory,
 } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -626,6 +627,16 @@ const executeCreate = async (inputs: {
     },
     { operationName: 'ItemUpsertCreate' },
   );
+  // R42: distinguish missing-root-key (schema-drift → internal_error
+  // with schema-drift hint) from null payload (server-side glitch →
+  // internal_error via the projector).
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'create_item',
+    operationLabel: 'ItemUpsertCreate',
+    details: { board_id: inputs.boardId, item_name: inputs.itemName },
+    nullHandling: 'caller_handles',
+  });
   return {
     projected: projectMutationItem({
       raw: response.data.create_item,
@@ -662,6 +673,13 @@ const executeUpdate = async (inputs: {
       },
       { operationName: 'ItemUpsertSimple' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_simple_column_value',
+      operationLabel: 'ItemUpsertSimple',
+      details: { item_id: inputs.itemId, board_id: inputs.boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem({
         raw: response.data.change_simple_column_value,
@@ -693,6 +711,13 @@ const executeUpdate = async (inputs: {
       },
       { operationName: 'ItemUpsertRich' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_column_value',
+      operationLabel: 'ItemUpsertRich',
+      details: { item_id: inputs.itemId, board_id: inputs.boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem({
         raw: response.data.change_column_value,
@@ -715,6 +740,13 @@ const executeUpdate = async (inputs: {
     },
     { operationName: 'ItemUpsertMulti' },
   );
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'change_multiple_column_values',
+    operationLabel: 'ItemUpsertMulti',
+    details: { item_id: inputs.itemId, board_id: inputs.boardId },
+    nullHandling: 'caller_handles',
+  });
   return {
     projected: projectMutationItem({
       raw: response.data.change_multiple_column_values,

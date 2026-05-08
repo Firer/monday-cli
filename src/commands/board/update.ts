@@ -71,6 +71,7 @@ import {
   type BoardProjection,
 } from '../../api/board-projection.js';
 import { projectMutationBoard } from '../../api/board-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const UPDATE_BOARD_MUTATION = `
   mutation BoardUpdate(
@@ -303,22 +304,21 @@ export const boardUpdateCommand: CommandModule<
                 // per-field success; it's a null-payload failure
                 // that must abort the sequence BEFORE the final
                 // read fires false-success.
-                if (!('update_board' in data)) {
-                  throw new ApiError(
-                    'internal_error',
-                    `Monday's BoardUpdate response is missing the update_board root field`,
-                    {
-                      details: {
-                        board_id: parsed.boardId,
-                        board_attribute: attribute,
-                        hint:
-                          'this is a schema-drift error in Monday\'s GraphQL ' +
-                          'response; verify the mutation declaration and update ' +
-                          'the response schema if Monday\'s contract has changed.',
-                      },
-                    },
-                  );
-                }
+                // R42: consolidate the inline missing-key check onto
+                // `assertResponseFieldPresent`. Distinguishes missing-
+                // root-key (schema-drift → internal_error) from null
+                // payload (handled by the explicit check below per the
+                // M15 round-1 F1 abort-the-sequence contract).
+                assertResponseFieldPresent({
+                  data,
+                  key: 'update_board',
+                  operationLabel: 'BoardUpdate',
+                  details: {
+                    board_id: parsed.boardId,
+                    board_attribute: attribute,
+                  },
+                  nullHandling: 'caller_handles',
+                });
                 if (data.update_board === null || data.update_board === undefined) {
                   throw new ApiError(
                     'internal_error',

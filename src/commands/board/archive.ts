@@ -47,9 +47,9 @@ import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import {
   BOARD_FIELDS_FRAGMENT,
@@ -212,25 +212,20 @@ export const boardArchiveCommand: CommandModule<
                   'Monday\'s contract has changed.',
               },
             );
-            // Distinguish missing-root-key (schema-drift →
+            // R42 (post-v0.2 cleanup window): consolidate the inline
+            // missing-key check onto `assertResponseFieldPresent`.
+            // Distinguishes missing-root-key (schema-drift →
             // internal_error) from null payload (board missing →
-            // not_found). M14 round-2 / round-3 distinction landed
-            // proactively.
-            if (!('archive_board' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's BoardArchive response is missing the archive_board root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    hint:
-                      'this is a schema-drift error in Monday\'s GraphQL ' +
-                      'response; verify the mutation declaration and update ' +
-                      'the response schema if Monday\'s contract has changed.',
-                  },
-                },
-              );
-            }
+            // not_found via projectMutationBoard). M14 round-2 /
+            // round-3 distinction was landed proactively at M15;
+            // R42 lifts the inline shape across all M15-M17 verbs.
+            assertResponseFieldPresent({
+              data,
+              key: 'archive_board',
+              operationLabel: 'BoardArchive',
+              details: { board_id: parsed.boardId },
+              nullHandling: 'caller_handles',
+            });
             // R43 lift (api/board-mutation-result.ts): null-payload
             // guard + projection. Archive's null path uses
             // `not_found` (Monday's idiomatic missing-or-no-access

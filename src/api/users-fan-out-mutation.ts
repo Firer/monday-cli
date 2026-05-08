@@ -413,15 +413,20 @@ export const dispatchUsersFanOut = async <
       // R41 lift (api/response-root.ts): distinguishes missing-
       // root-key (internal_error, whole-call re-thrown by
       // dispatchSequential) from null payload (not_found, per-
-      // record).
+      // record). Generalised at R42 to share the helper with single-
+      // target mutation verbs; this 'throw_not_found' mode preserves
+      // the M14 contract (null → not_found landed in per-target
+      // slot).
       assertResponseFieldPresent({
         data,
         key: mutation.rootKey,
         operationLabel: mutation.operationName,
-        scopeKey: scope.key,
-        scopeId: scope.id,
-        targetKey: 'user_id',
-        targetId,
+        details: {
+          [scope.key]: scope.id,
+          user_id: targetId,
+        },
+        nullHandling: 'throw_not_found',
+        notFoundTarget: { key: 'user_id', id: targetId },
       });
     },
   );

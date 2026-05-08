@@ -78,6 +78,7 @@ import { resolveBoardId } from '../../api/item-board-lookup.js';
 import { buildColumnArchivedError } from '../../api/resolution-pass.js';
 import { ITEM_FIELDS_FRAGMENT, resolveMeFactory } from '../../api/item-helpers.js';
 import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -470,6 +471,13 @@ const executeMutation = async (
       },
       { operationName: 'ItemClearSimple' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_simple_column_value',
+      operationLabel: 'ItemClearSimple',
+      details: { item_id: itemId, board_id: boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem(response.data.change_simple_column_value, itemId),
       response,
@@ -499,6 +507,13 @@ const executeMutation = async (
     },
     { operationName: 'ItemClearRich' },
   );
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'change_column_value',
+    operationLabel: 'ItemClearRich',
+    details: { item_id: itemId, board_id: boardId },
+    nullHandling: 'caller_handles',
+  });
   return {
     projected: projectMutationItem(response.data.change_column_value, itemId),
     response,

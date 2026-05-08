@@ -32,6 +32,7 @@ import {
   updateProjectionSchema,
   type UpdateProjection,
 } from '../../api/update-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import type { RunContext } from '../../cli/run.js';
 
 export const toggleOutputSchema = updateProjectionSchema;
@@ -137,6 +138,18 @@ export const buildUpdateToggleCommand = (
           variables,
           { operationName: config.operationName },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (per-record → not_found
+        // via projectMutationUpdate). Must run BEFORE the parse —
+        // the toggle's `z.unknown()` field type would otherwise
+        // normalize a missing wire key into present-undefined.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: config.mutation,
+          operationLabel: config.operationName,
+          details: { update_id: parsed.updateId },
+          nullHandling: 'caller_handles',
+        });
         const data = unwrapOrThrow(
           z
             .object({ [config.mutation]: z.unknown() })

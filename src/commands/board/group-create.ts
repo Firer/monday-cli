@@ -58,7 +58,6 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -69,6 +68,7 @@ import {
   projectMutationGroup,
   type GroupProjection,
 } from '../../api/group-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const CREATE_GROUP_MUTATION = `
   mutation GroupCreate(
@@ -219,29 +219,14 @@ export const boardGroupCreateCommand: CommandModule<
                   "Monday's contract has changed.",
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error with schema-drift hint) from null
-            // payload (Monday returned no group → also internal_
-            // error here since create's contract is "every
-            // successful call returns a Group"). Mirrors the M16
-            // column-create / M15 board-create missing-root-key vs
-            // null-payload split.
-            if (!('create_group' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's GroupCreate response is missing the create_group root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    name,
-                    hint:
-                      "this is a schema-drift error in Monday's GraphQL " +
-                      'response; verify the mutation declaration and update ' +
-                      "the response schema if Monday's contract has changed.",
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check.
+            assertResponseFieldPresent({
+              data,
+              key: 'create_group',
+              operationLabel: 'GroupCreate',
+              details: { board_id: parsed.boardId, name },
+              nullHandling: 'caller_handles',
+            });
             // R48 lift (api/group-mutation-result.ts): null-payload
             // guard + projection. Create's null path uses `internal_
             // error` because the contract is "every successful call

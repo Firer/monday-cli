@@ -70,7 +70,6 @@ import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
 import { findBoardChildOrThrow } from '../../api/board-child-finder.js';
@@ -81,6 +80,7 @@ import {
   projectMutationGroup,
   type GroupProjection,
 } from '../../api/group-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const ARCHIVE_GROUP_MUTATION = `
   mutation GroupArchive($boardId: ID!, $groupId: String!) {
@@ -251,26 +251,17 @@ export const boardGroupArchiveCommand: CommandModule<
                   "Monday's contract has changed.",
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error) from null payload (group missing →
-            // not_found). Mirrors the M15 board-archive missing-root
-            // vs null distinction.
-            if (!('archive_group' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's GroupArchive response is missing the archive_group root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    group_id: parsed.groupId,
-                    hint:
-                      "this is a schema-drift error in Monday's GraphQL " +
-                      'response; verify the mutation declaration and update ' +
-                      "the response schema if Monday's contract has changed.",
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check.
+            assertResponseFieldPresent({
+              data,
+              key: 'archive_group',
+              operationLabel: 'GroupArchive',
+              details: {
+                board_id: parsed.boardId,
+                group_id: parsed.groupId,
+              },
+              nullHandling: 'caller_handles',
+            });
             // R48 lift: null-payload guard + projection. Archive's
             // null path uses `not_found` (Monday's idiomatic
             // missing-or-no-access response) per the M15 board-

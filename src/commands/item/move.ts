@@ -81,6 +81,7 @@ import { parseArgv } from '../parse-argv.js';
 import type { parseGlobalFlags } from '../../types/global-flags.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
@@ -549,6 +550,15 @@ const runSameBoardMove = async ({
     },
     { operationName: 'ItemMoveToGroup' },
   );
+  // R42: distinguish missing-root-key (schema-drift → internal_error)
+  // from null payload (per-record → not_found via the projector).
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'move_item_to_group',
+    operationLabel: 'ItemMoveToGroup',
+    details: { item_id: parsed.itemId, group_id: parsed.toGroup },
+    nullHandling: 'caller_handles',
+  });
   const projected = projectMutationItem({
     raw: response.data.move_item_to_group,
     itemId: parsed.itemId,
@@ -686,6 +696,15 @@ const runCrossBoardMove = async ({
   );
   sourceAgg.record('live', null);
 
+  // R42: distinguish missing-root-key (schema-drift → internal_error)
+  // from null payload (per-record → not_found via the projector).
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'move_item_to_board',
+    operationLabel: 'ItemMoveToBoard',
+    details: { item_id: parsed.itemId, to_board_id: toBoard },
+    nullHandling: 'caller_handles',
+  });
   const projected = projectMutationItem({
     raw: response.data.move_item_to_board,
     itemId: parsed.itemId,

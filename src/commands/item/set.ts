@@ -80,6 +80,7 @@ import {
 import { planChanges } from '../../api/dry-run.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -422,6 +423,13 @@ const executeMutation = async (
       },
       { operationName: 'ItemSetSimple' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_simple_column_value',
+      operationLabel: 'ItemSetSimple',
+      details: { item_id: itemId, board_id: boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem(response.data.change_simple_column_value, itemId),
       response,
@@ -443,6 +451,13 @@ const executeMutation = async (
       },
       { operationName: 'ItemSetRich' },
     );
+    assertResponseFieldPresent({
+      data: response.data,
+      key: 'change_column_value',
+      operationLabel: 'ItemSetRich',
+      details: { item_id: itemId, board_id: boardId },
+      nullHandling: 'caller_handles',
+    });
     return {
       projected: projectMutationItem(response.data.change_column_value, itemId),
       response,

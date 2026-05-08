@@ -62,6 +62,7 @@ import {
   type BoardProjection,
 } from '../../api/board-projection.js';
 import { projectMutationBoard } from '../../api/board-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DUPLICATE_BOARD_MUTATION = `
   mutation BoardDuplicate(
@@ -268,24 +269,17 @@ export const boardDuplicateCommand: CommandModule<
               'Monday\'s contract has changed.',
           },
         );
-        // Distinguish missing-root-key (schema-drift →
-        // internal_error) from null payload (board missing →
-        // not_found). Same M14 round-2/round-3 distinction.
-        if (!('duplicate_board' in data)) {
-          throw new ApiError(
-            'internal_error',
-            `Monday's BoardDuplicate response is missing the duplicate_board root field`,
-            {
-              details: {
-                board_id: parsed.boardId,
-                hint:
-                  'this is a schema-drift error in Monday\'s GraphQL ' +
-                  'response; verify the mutation declaration and update ' +
-                  'the response schema if Monday\'s contract has changed.',
-              },
-            },
-          );
-        }
+        // R42: consolidate the inline missing-key check onto
+        // `assertResponseFieldPresent`. Distinguishes missing-root-key
+        // (schema-drift → internal_error) from null payload (handled
+        // by the explicit check below per M14 round-2/round-3).
+        assertResponseFieldPresent({
+          data,
+          key: 'duplicate_board',
+          operationLabel: 'BoardDuplicate',
+          details: { board_id: parsed.boardId },
+          nullHandling: 'caller_handles',
+        });
         if (data.duplicate_board === null || data.duplicate_board === undefined) {
           throw new ApiError(
             'not_found',

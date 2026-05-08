@@ -24,6 +24,7 @@ import {
   updateProjectionSchema,
   type UpdateProjection,
 } from '../../api/update-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const EDIT_UPDATE_MUTATION = `
   mutation UpdateEdit($id: ID!, $body: String!) {
@@ -127,6 +128,16 @@ export const updateEditCommand: CommandModule<
           { id: parsed.updateId, body },
           { operationName: 'UpdateEdit' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (per-record → not_found
+        // via projectMutationUpdate). Must run BEFORE the parse.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'edit_update',
+          operationLabel: 'UpdateEdit',
+          details: { update_id: parsed.updateId },
+          nullHandling: 'caller_handles',
+        });
         const data = unwrapOrThrow(
           responseSchema.safeParse(response.data),
           {

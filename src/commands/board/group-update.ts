@@ -97,6 +97,7 @@ import {
   projectMutationGroup,
   type GroupProjection,
 } from '../../api/group-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const UPDATE_GROUP_MUTATION = `
   mutation GroupUpdate(
@@ -341,22 +342,17 @@ export const boardGroupUpdateCommand: CommandModule<
                       "if Monday's contract has changed.",
                   },
                 );
-                if (!('update_group' in data)) {
-                  throw new ApiError(
-                    'internal_error',
-                    `Monday's GroupUpdate response is missing the update_group root field`,
-                    {
-                      details: {
-                        board_id: parsed.boardId,
-                        group_id: parsed.groupId,
-                        hint:
-                          "this is a schema-drift error in Monday's GraphQL " +
-                          'response; verify the mutation declaration and update ' +
-                          "the response schema if Monday's contract has changed.",
-                      },
-                    },
-                  );
-                }
+                // R42: consolidate the inline missing-key check.
+                assertResponseFieldPresent({
+                  data,
+                  key: 'update_group',
+                  operationLabel: 'GroupUpdate',
+                  details: {
+                    board_id: parsed.boardId,
+                    group_id: parsed.groupId,
+                  },
+                  nullHandling: 'caller_handles',
+                });
                 // R48 lift: null-payload guard + projection. group-
                 // update's null path uses `not_found` (Monday's
                 // idiomatic missing-or-no-access response).

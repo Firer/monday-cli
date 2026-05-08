@@ -53,7 +53,6 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema, GroupIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -63,6 +62,7 @@ import {
   projectMutationGroup,
   type GroupProjection,
 } from '../../api/group-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 
 const DUPLICATE_GROUP_MUTATION = `
   mutation GroupDuplicate(
@@ -206,26 +206,17 @@ export const boardGroupDuplicateCommand: CommandModule<
                   "Monday's contract has changed.",
               },
             );
-            // Distinguish missing-root-key (schema-drift →
-            // internal_error) from null payload (group missing →
-            // not_found). Mirrors the M15 board-duplicate / M16
-            // column-create distinction.
-            if (!('duplicate_group' in data)) {
-              throw new ApiError(
-                'internal_error',
-                `Monday's GroupDuplicate response is missing the duplicate_group root field`,
-                {
-                  details: {
-                    board_id: parsed.boardId,
-                    group_id: parsed.groupId,
-                    hint:
-                      "this is a schema-drift error in Monday's GraphQL " +
-                      'response; verify the mutation declaration and update ' +
-                      "the response schema if Monday's contract has changed.",
-                  },
-                },
-              );
-            }
+            // R42: consolidate the inline missing-key check.
+            assertResponseFieldPresent({
+              data,
+              key: 'duplicate_group',
+              operationLabel: 'GroupDuplicate',
+              details: {
+                board_id: parsed.boardId,
+                group_id: parsed.groupId,
+              },
+              nullHandling: 'caller_handles',
+            });
             // R48 lift: null-payload guard + projection. duplicate's
             // null path uses `not_found` (Monday's "source group id
             // bogus / no access" mapping).

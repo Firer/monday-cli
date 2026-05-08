@@ -79,6 +79,7 @@ import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
@@ -989,7 +990,19 @@ const executeCreateItem = async (
     variables,
     { operationName: 'ItemCreateTopLevel' },
   );
-  if (response.data.create_item === null || response.data.create_item === undefined) {
+  // R42: distinguish missing-root-key (schema-drift → internal_error
+  // with schema-drift hint) from null payload (server-side glitch →
+  // internal_error with no-payload message below). Pre-R42 conflated
+  // both as internal_error / no-payload; post-R42 the schema-drift
+  // case carries a more accurate diagnostic.
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'create_item',
+    operationLabel: 'ItemCreateTopLevel',
+    details: { board_id: inputs.boardId, item_name: inputs.itemName },
+    nullHandling: 'caller_handles',
+  });
+  if (response.data.create_item === null) {
     throw new ApiError(
       'internal_error',
       `Monday returned no item payload from create_item.`,
@@ -1041,10 +1054,21 @@ const executeCreateSubitem = async (
     },
     { operationName: 'ItemCreateSubitem' },
   );
-  if (
-    response.data.create_subitem === null ||
-    response.data.create_subitem === undefined
-  ) {
+  // R42: distinguish missing-root-key (schema-drift → internal_error
+  // with schema-drift hint) from null payload (server-side glitch →
+  // internal_error with no-payload message below). Pre-R42 conflated
+  // both as internal_error / no-payload.
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'create_subitem',
+    operationLabel: 'ItemCreateSubitem',
+    details: {
+      parent_item_id: inputs.parentItemId,
+      item_name: inputs.itemName,
+    },
+    nullHandling: 'caller_handles',
+  });
+  if (response.data.create_subitem === null) {
     throw new ApiError(
       'internal_error',
       `Monday returned no item payload from create_subitem.`,

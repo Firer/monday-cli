@@ -53,6 +53,7 @@ import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem } from '../../api/item-mutation-result.js';
+import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { readSourceItemForDryRun } from '../../api/item-source-read.js';
 import {
   projectedItemSchema,
@@ -195,6 +196,16 @@ export const itemArchiveCommand: CommandModule<
           { itemId: parsed.itemId },
           { operationName: 'ItemArchive' },
         );
+        // R42: distinguish missing-root-key (schema-drift →
+        // internal_error) from null payload (item missing → not_found
+        // via the projector). Pre-R42 conflated both as not_found.
+        assertResponseFieldPresent({
+          data: response.data,
+          key: 'archive_item',
+          operationLabel: 'ItemArchive',
+          details: { item_id: parsed.itemId },
+          nullHandling: 'caller_handles',
+        });
         const projected = projectMutationItem({
           raw: response.data.archive_item,
           itemId: parsed.itemId,
