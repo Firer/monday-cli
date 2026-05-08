@@ -2137,31 +2137,32 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `countryShortName: ""`. Agents who need to write a phone with
      no country (Monday allows it for some legacy fixtures) use
      `--set-raw`.
-   - `tags` (tentative — may slip to v0.3) — comma-split tag
-     names → `{"tag_ids":[N1,N2]}` via account-tag directory
-     lookup. Cache mirrors the user directory pattern from M5a.
-     Unknown tag name → `error.code = "tag_not_found"` with the
-     unmatched name in `details` (new stable code — 27th if
-     `tags` ships firm; the v0.2-plan §9.2 "Before M12" gate
-     adds it to §6.5). Slip risk: per-account `tags` query may
-     be too expensive to cache cleanly; M8 fixture work decides
-     at close.
-   - `board_relation` (tentative — may slip to v0.3) —
-     comma-split item IDs → `{"item_ids":[N1,N2]}`. Item IDs
-     accepted directly (no name-resolution sugar in v0.2 — agents
-     `item find <name>` first, then `--set`). Cross-board
-     references validated against the source column's allowed
-     boards — Monday's `board_relation` column settings expose
-     `boardIds` (array) or `boardId` (singular) per
-     `get_column_type_schema`; the CLI normalises to
-     `allowed_boards = settings.boardIds ?? [settings.boardId]`.
-     Off-board IDs → `usage_error` with `details.allowed_boards:
-     [...]` for self-correction. Slip risk: linked-board
-     enumeration may require a per-call complexity-budget design
-     pass.
-   - `dependency` (tentative — may slip to v0.3) — same shape
-     as `board_relation` but uses Monday's separate `dependency`
-     column payload. Same slip risk.
+   **Tentative row — slipped to v0.3 at M18 close.** Three types
+   stayed outside the M8 firm row pending design clearance (per-
+   account directory + linked-board enumeration). At M18 close (the
+   v0.2 release tag), the design work hadn't converged enough to
+   ship friendly translators safely; the row slipped to v0.3.
+   Until then, they surface `unsupported_column_type` with
+   `deferred_to: "v0.3"` and the `--set-raw` escape hatch accepts
+   them with the documented Monday wire shape:
+
+   - `tags` (slipped to v0.3) — friendly form will be comma-split
+     tag names → `{"tag_ids":[N1,N2]}` via account-tag directory
+     lookup. Slip rationale: per-account `tags` query may be too
+     expensive to cache cleanly; v0.3's writer-expansion design
+     decides the caching strategy. `--set-raw <col>='{"tag_ids":
+     [N1,N2]}'` in v0.2.
+   - `board_relation` (slipped to v0.3) — friendly form will be
+     comma-split item IDs → `{"item_ids":[N1,N2]}` with cross-
+     board validation against the source column's allowed boards
+     (Monday's `board_relation` settings expose `boardIds` /
+     `boardId`). Slip rationale: linked-board enumeration may
+     require a per-call complexity-budget design pass v0.2 didn't
+     have time to land. `--set-raw <col>='{"item_ids":[N1,N2]}'`
+     in v0.2.
+   - `dependency` (slipped to v0.3) — same friendly shape as
+     `board_relation` but uses Monday's separate `dependency`
+     column payload. Same slip rationale. `--set-raw` in v0.2.
 
 4. **All other column types in v0.2 → `unsupported_column_type`,
    keyed by roadmap category.** The error always includes `column_id`
@@ -2314,12 +2315,9 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
   original `<json>` argv string are not preserved — equivalent
   payloads can render differently.
 
-The friendly translator covers up to thirteen types (`text`,
+The friendly translator covers ten types as of v0.2: `text`,
 `long_text`, `numbers`, `status`, `dropdown`, `date`, `people`
-from v0.1; `link`, `email`, `phone` firm v0.2 additions; `tags`,
-`board_relation`, `dependency` tentative v0.2 additions, any of
-which may slip to v0.3 — so the v0.2 firm count is ten and the
-v0.2 stretch count is thirteen).
+(v0.1) plus `link`, `email`, `phone` (M8 firm row).
 Anything outside that allowlist has two escape paths: `--set-raw`
 for the per-column write (provided the type accepts
 `change_column_value` — read-only-forever and `files`-shaped
@@ -2329,8 +2327,8 @@ for the whole-mutation write (file upload via
 
 **Writer-expansion roadmap.** Per-type slots for the friendly
 translator (`--set <col>=<val>`). v0.1 had no escape hatch — types
-outside the allowlist waited on the next version. v0.2 ships
-`--set-raw <col>=<json>` alongside the friendly-type batch
+outside the allowlist waited on the next version. v0.2 shipped
+`--set-raw <col>=<json>` alongside the firm friendly-type batch
 (M8 — see "Escape hatch" above), so v0.2+ agents have a write
 path for any type the API accepts via column-value mutations
 (`change_column_value` / `change_multiple_column_values` for
@@ -2339,18 +2337,17 @@ path for any type the API accepts via column-value mutations
 the friendly translator hasn't landed for it yet. Read-only-forever types and
 `files`-shaped types (which use `add_file_to_column`) remain
 unreachable through `--set-raw`; file upload waits for v0.4.
-Slots in the table below
-are the *current best plan* — v0.2 may re-slot the harder types
-(`tags`, `board_relation`, `dependency`) to v0.3 after M8 fixture
-work surfaces the design cost; this table is a planning anchor,
-not a binding schedule.
+The v0.2-tentative row (`tags`, `board_relation`, `dependency`)
+**slipped to v0.3 at M18 close** — design clearance (per-account
+directory + linked-board enumeration) didn't converge in v0.2's
+window. Their `unsupported_column_type` errors carry
+`deferred_to: "v0.3"`; `--set-raw` accepts them today.
 
 | Type | Target version | Notes |
 |------|----------------|-------|
-| `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** | Initial allowlist (M5a). |
-| `link`, `email`, `phone` | **v0.2** (firm) | M8 — pipe-form translator + URL/email/E.164 validation. |
-| `tags` | v0.2 (tentative) | M8 — needs account-tag directory lookup. May slip to v0.3 if per-account `tags` query proves too expensive to cache. |
-| `board_relation`, `dependency` | v0.2 (tentative) | M8 — cross-board item-ID validation against the column's `boardIds` (or singular `boardId`) settings. May slip to v0.3 if linked-board enumeration needs a complexity-budget design pass. |
+| `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** (shipped) | Initial allowlist (M5a). |
+| `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
+| `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 | Start/stop semantics — verbs, not value writes. |
 | `files` | v0.4 | Pinned via `add_file_to_column` (§13 v0.4). |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
@@ -5281,15 +5278,19 @@ scoped idempotent changes, and post comments narrating its work.**
 - **Test fixtures + recorded GraphQL responses** before any v0.2
   command lands
 
-### v0.2 (mutating core — "agents can drive a backlog")
+### v0.2 (mutating core — "agents can drive a backlog") — shipped
 
 - **Writer expansion** — `--set-raw <col>=<json>` escape hatch
   (deferred from v0.1) on `item set` / `item update` / bulk
-  `item update --where`, alongside friendly-type expansion for
-  `link`, `email`, `phone`, `tags` (tentative), `board_relation`
-  (tentative), and `dependency` (tentative). v0.1's
-  `unsupported_column_type` `deferred_to: "v0.2"` becomes
-  actionable here.
+  `item update --where`, plus friendly-type expansion for
+  the M8 firm row: `link`, `email`, `phone`. v0.1's
+  `unsupported_column_type` `deferred_to: "v0.2"` resolved for
+  the firm row (now writable through the friendly translator)
+  and **slipped to `"v0.3"`** for the tentative row (`tags`,
+  `board_relation`, `dependency` — design clearance didn't
+  converge in v0.2's window; v0.3 picks them up). The
+  `--set-raw` escape hatch accepts the tentative row today
+  with the documented Monday wire shape.
 - `item create/move/archive/delete/duplicate`
 - `item upsert` (idempotency via `--match-by`; see §5.8)
 - `update reply/edit/delete/like/pin` (with `--body-file` where

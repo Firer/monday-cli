@@ -131,22 +131,22 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
     readonly note?: string;
   }
 
-  it('emits one projected line per item via onItem', () => {
+  it('emits one projected line per item via onItem', async () => {
     const { stream, read } = collect();
     const handle = startNdjsonStream<RawItem>({
       stream,
       secrets: [],
       project: (item) => ({ id: item.id, projected: true }),
     });
-    handle.onItem({ id: '1' });
-    handle.onItem({ id: '2' });
+    await handle.onItem({ id: '1' });
+    await handle.onItem({ id: '2' });
     const lines = read();
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0]!)).toEqual({ id: '1', projected: true });
     expect(JSON.parse(lines[1]!)).toEqual({ id: '2', projected: true });
   });
 
-  it('runs the project callback before serialising', () => {
+  it('runs the project callback before serialising', async () => {
     // The point of `project` is that consumers can transform raw
     // Monday rows into the projected output shape *before* JSON
     // serialisation. A consumer that hands raw rows in (no
@@ -160,12 +160,12 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
       secrets: [],
       project: (item) => item, // identity
     });
-    handle.onItem({ id: '1', note: 'preserved' });
+    await handle.onItem({ id: '1', note: 'preserved' });
     const lines = read();
     expect(JSON.parse(lines[0]!)).toEqual({ id: '1', note: 'preserved' });
   });
 
-  it('redacts the literal secret from each emitted line', () => {
+  it('redacts the literal secret from each emitted line', async () => {
     // Per .claude/rules/security.md: every emitted byte goes
     // through the value-scanning redactor with the runtime token
     // value as a secret. The lifted helper must thread `secrets`
@@ -179,7 +179,7 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
         ...(item.note === undefined ? {} : { note: item.note }),
       }),
     });
-    handle.onItem({ id: '1', note: 'value contains leak-token in body' });
+    await handle.onItem({ id: '1', note: 'value contains leak-token in body' });
     handle.writeTrailer(
       buildMeta({
         ...baseMetaInput,
@@ -214,15 +214,15 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
     );
   });
 
-  it('emits items one-per-line followed by the trailer (full streaming flow)', () => {
+  it('emits items one-per-line followed by the trailer (full streaming flow)', async () => {
     const { stream, read } = collect();
     const handle = startNdjsonStream<RawItem>({
       stream,
       secrets: [],
       project: (item) => ({ id: item.id }),
     });
-    handle.onItem({ id: 'a' });
-    handle.onItem({ id: 'b' });
+    await handle.onItem({ id: 'a' });
+    await handle.onItem({ id: 'b' });
     handle.writeTrailer(buildMeta(baseMetaInput));
     const lines = read();
     expect(lines).toHaveLength(3);
@@ -251,5 +251,60 @@ describe('startNdjsonStream (R52, M18 lift)', () => {
     const trailer = JSON.parse(lines[0]!) as Record<string, unknown>;
     expect(Object.keys(trailer)).toEqual(['_meta']);
     expect('warnings' in trailer).toBe(false);
+  });
+
+  it('awaits stream `drain` when stream.write returns false (real backpressure)', async () => {
+    // Codex M18 implementation review P3-3: walkPages.onItem +
+    // paginate.onItem document backpressure semantics ("a slow
+    // downstream consumer ... backpressures the walker"). Pre-fix,
+    // the lifted helper's onItem ignored stream.write's false
+    // return — items would buffer in Node's internal write queue
+    // and the docstring was aspirational. This test pins the real
+    // backpressure: a stream with a tiny high-water mark + a
+    // delayed drain should make onItem's promise pending until
+    // the drain fires.
+    const tinyStream = new PassThrough({ highWaterMark: 1 });
+    // Don't read — let writes fill the buffer until 'drain' is
+    // needed for further writes.
+    const handle = startNdjsonStream<RawItem>({
+      stream: tinyStream,
+      secrets: [],
+      project: (item) => ({ id: item.id }),
+    });
+
+    // Track resolution via Promise.race against an already-settled
+    // sentinel. Using `let` bools tripped the lint's narrowing
+    // analysis (it doesn't see assignments inside .then callbacks).
+    const sentinel = Symbol('not-yet');
+    const raceFor = <T>(p: Promise<T>): Promise<T | typeof sentinel> =>
+      Promise.race([p, Promise.resolve(sentinel)]);
+
+    const writeP = handle.onItem({ id: 'x'.repeat(64) });
+    // Second write to guarantee the queue tips over the
+    // highWaterMark of 1 even if the first write was below.
+    const writeP2 = handle.onItem({ id: 'y'.repeat(64) });
+
+    // Yield once to give the writes a chance to flush their
+    // first-pass `stream.write` call.
+    await new Promise<void>((r) => setImmediate(r));
+
+    // At this point at least one of the writes should be pending
+    // on a 'drain' (highWaterMark = 1, payload >> 1). If both
+    // resolved, the helper isn't actually awaiting drain.
+    const firstSettled = await raceFor(writeP);
+    const secondSettled = await raceFor(writeP2);
+    if (firstSettled !== sentinel && secondSettled !== sentinel) {
+      throw new Error(
+        'expected at least one onItem to be pending on drain; both resolved synchronously',
+      );
+    }
+
+    // Drain the buffer by reading every queued chunk; the resume
+    // triggers the 'drain' event the helper is awaiting.
+    tinyStream.resume();
+
+    // Both should resolve once 'drain' fires.
+    await expect(writeP).resolves.toBeUndefined();
+    await expect(writeP2).resolves.toBeUndefined();
   });
 });

@@ -156,19 +156,24 @@ once and skip subsequent metadata lookups.
 
 ### Internals worth highlighting
 
-- **9 R-class refactors shipped during v0.2** (R20–R52, with
-  some reserved numbers deferred to v0.3): R29 destructive-gate
-  helper consolidation, R39/R45/R48 per-noun mutation projection
-  helpers (workspace / column / group), R40 partial-success-fan-
-  out helper, R46 §8 eager-invalidation wrappers, R51
-  `findBoardChildOrThrow` helper, R52 `startNdjsonStream` lift
-  (M18 — ships streaming parity across `item list` / `item
-  search` / `update list`). Full R-class register lives in
-  [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) §22.
+- **R-class refactors shipped during v0.2** — the R20–R52 register
+  consolidates per-noun + cross-cutting boilerplate as the surface
+  grew. Highlights: R29 destructive-gate helper (5 verb consumers
+  across item / update / workspace), R37/R39/R43/R45/R48 per-noun
+  mutation projection helpers (Update / Workspace / Board / Column
+  / Group), R40 partial-success-fan-out helper, R46 §8 eager-
+  invalidation wrappers, R51 `findBoardChildOrThrow` helper, R52
+  `startNdjsonStream` lift (M18 — ships streaming parity across
+  `item list` / `item search` / `update list`). R42 / R44 / R49 /
+  R50 stayed deferred to v0.3 at v0.2.0 close. Full R-class
+  register lives in [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) §22
+  with shipped commit SHAs.
 
-- **52 Codex AI review rounds** across M8–M18. The two-AI review
-  workflow (cli-design pre-flight + implementation review)
-  caught 200+ findings before merge across the v0.2 work.
+- **Two-AI review** (cli-design pre-flight + implementation review)
+  ran for every milestone M8–M18. Catches contract drift before
+  it reaches `main` and projection bugs before they reach a
+  release; the cumulative finding count across the v0.2 arc is in
+  the per-milestone post-mortems in `docs/v0.2-plan.md` §10–§26.
 
 ### Tests + quality gates
 

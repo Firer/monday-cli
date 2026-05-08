@@ -40,11 +40,11 @@
  *
  * **Numeric tokens rejected.** cli-design.md §5.3 step 3 only
  * lists emails + `me`. Numeric tokens (`--set Owner=12345`) are
- * rejected with a `usage_error`. v0.1 has no raw-write escape —
- * agents with a raw user ID either look up the email and use
- * the email form, or wait for v0.2's `--set-raw` (writer-
- * expansion milestone). cli-design doesn't say either way;
- * logged as a spec gap.
+ * rejected with a `usage_error`. Agents with a raw user ID either
+ * look up the email and use the email form, or use the M8
+ * `--set-raw <col>=<json>` escape hatch with the literal Monday
+ * wire shape. cli-design doesn't say either way; logged as a spec
+ * gap.
  *
  * **Shared seams.** `isMeToken` lives in `src/api/me-token.ts`
  * (R15) — same helper backs `--where Owner=me` (filters.ts) and
@@ -171,10 +171,10 @@ export interface ParsedPeopleInput {
  *
  * Throws `usage_error` (UsageError):
  *   - empty input after trim+filter (no labels, no IDs);
- *   - numeric token (`--set Owner=12345`) — v0.1 only accepts
- *     emails / `me`. Agents with a raw user ID look up the
- *     email, or wait for v0.2's `--set-raw` (writer-expansion
- *     milestone).
+ *   - numeric token (`--set Owner=12345`) — friendly form only
+ *     accepts emails / `me`. Agents with a raw user ID look up
+ *     the email, or use the M8 `--set-raw` escape hatch with
+ *     the literal Monday wire shape.
  *   - resolved user ID exceeds `Number.MAX_SAFE_INTEGER` (2^53 - 1)
  *     — defensive guard against a future Monday user-ID range
  *     expansion. Same shape as the status / dropdown safe-integer
@@ -215,10 +215,9 @@ export const parsePeopleInput = async (
   for (const token of tokens) {
     if (NON_NEGATIVE_INTEGER.test(token)) {
       // Numeric tokens aren't in cli-design's people grammar. Reject
-      // with a v0.2-deferral hint — v0.1 has no raw-write escape, so
-      // agents with a raw user ID either look up the email or wait
-      // for v0.2's `--set-raw`. Logged as a spec gap in v0.1-plan.md
-      // §3 M5a.
+      // with a hint pointing at the email form first and the M8
+      // `--set-raw` escape as the path for raw IDs. Logged as a spec
+      // gap in v0.1-plan.md §3 M5a.
       throw numericPeopleTokenError(columnId, token, raw);
     }
     const id =

@@ -396,8 +396,8 @@ describe('translateColumnValue — dropdown (rich)', () => {
   it('numeric label collision known limitation: literal "1" parses as id', () => {
     // A dropdown label literally named "1" cannot be set via the
     // friendly translator — `--set tags=1` resolves to {ids: [1]}.
-    // Pinned so the limitation is loud, not silent. v0.1 has no
-    // raw-write escape; v0.2's --set-raw will be the workaround.
+    // Pinned so the limitation is loud, not silent. The M8
+    // --set-raw escape hatch is the workaround.
     const out = translate('dropdown', '1');
     expect(out.payload).toEqual<ColumnValuePayload>({
       format: 'rich',

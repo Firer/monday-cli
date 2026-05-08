@@ -590,13 +590,12 @@ const translateStatus = (
  *
  * **Disambiguation rule, pinned.** A label literally named `"1"`
  * cannot be set via `--set tags=1` — that input parses as the
- * `id` path. v0.1 has no escape; v0.2's `--set-raw
- * tags='{"labels":["1"]}'` will be the workaround once the
- * writer-expansion milestone lands. Surfaced in the module header
- * as a known limitation; documented via unit test rather than
- * runtime warning because it's a corner case (Monday-generated
- * dropdown labels are strings the user typed; integer-only labels
- * are vanishingly rare).
+ * `id` path. The M8 `--set-raw tags='{"labels":["1"]}'` escape
+ * hatch is the workaround. Surfaced in the module header as a
+ * known limitation; documented via unit test rather than runtime
+ * warning because it's a corner case (Monday-generated dropdown
+ * labels are strings the user typed; integer-only labels are
+ * vanishingly rare).
  *
  * **Empty-after-filter throws `usage_error`.** Inputs like
  * `--set tags=""` or `--set tags=" , "` carry no labels and no
@@ -626,8 +625,8 @@ const translateDropdown = (
           hint:
             'pass a comma-separated list of labels (e.g. --set ' +
             `${columnId}='Backend,Frontend') or numeric IDs (--set ` +
-            `${columnId}=1,2). v0.1 has no raw-write escape — v0.2's ` +
-            `writer-expansion milestone adds --set-raw.`,
+            `${columnId}=1,2). The --set-raw escape hatch accepts the ` +
+            `literal Monday wire shape if neither form fits.`,
         },
       },
     );
@@ -654,9 +653,9 @@ const translateDropdown = (
  * chars long). Either case would land at Monday as the wrong
  * integer or as `null` after `JSON.stringify`. The error carries
  * the raw input so an agent's debug log shows exactly what they
- * sent, and a hint nudging them toward the label path. (v0.2
- * adds `--set-raw` as a paste-ready alternative; v0.1 has no
- * raw-write escape.)
+ * sent, and a hint nudging them toward the label path. The M8
+ * `--set-raw` escape hatch is the paste-ready alternative when
+ * the friendly translator can't accept the input.
  */
 const unsafeIntegerError = (
   columnId: string,
@@ -685,8 +684,8 @@ const unsafeIntegerError = (
       `9007199254740991). Number(raw) would lose precision or yield ` +
       `Infinity, corrupting the wire shape. Monday's ${columnType} ` +
       `${noun} are small non-negative integers — pass a label or ` +
-      `${smaller}. (v0.1 has no raw-write escape; v0.2's writer-` +
-      `expansion milestone adds --set-raw.)`,
+      `${smaller}, or use --set-raw <col>=<json> with the literal ` +
+      `Monday wire shape.`,
     {
       details: {
         column_id: columnId,
@@ -918,8 +917,8 @@ export const bundleColumnValues = (
 /**
  * Builds the canonical `unsupported_column_type` error (`cli-design.md`
  * §5.3 step 4 + §6.5). Branches on the type's roadmap category so
- * agents get accurate guidance instead of a blanket "wait for v0.2"
- * hint.
+ * agents get accurate guidance instead of a blanket "wait for the
+ * next version" hint.
  *
  * Three categories per `column-types.ts getColumnRoadmapCategory`:
  *

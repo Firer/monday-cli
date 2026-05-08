@@ -86,19 +86,45 @@ export interface NdjsonStreamInputs<T> {
 }
 
 export interface NdjsonStreamHandle<T> {
-  readonly onItem: (item: T) => void;
+  /**
+   * Per-item callback for the stream. Returns a `Promise<void>`
+   * that resolves once the bytes are flushed (or, when
+   * `stream.write` returns `false`, once the stream's `'drain'`
+   * event fires). Threaded through `paginate.onItem` /
+   * `walkPages.onItem` so a slow downstream consumer (a piped
+   * `jq`, an open-ended `tee`) backpressures the cursor walk
+   * for real — not just in spirit. Without the await on `'drain'`,
+   * a fast walker against a slow stdout would buffer items in
+   * Node's internal write queue and the "backpressure" comment in
+   * `walk-pages.ts` / `pagination.ts` would be aspirational.
+   */
+  readonly onItem: (item: T) => Promise<void>;
   readonly writeTrailer: (meta: Meta) => void;
 }
+
+const writeAndDrain = async (
+  stream: NodeJS.WritableStream,
+  bytes: string,
+): Promise<void> => {
+  if (stream.write(bytes)) return;
+  // High-water mark hit; wait for the next 'drain' before resolving.
+  // The walker awaits this, so the next item waits with us.
+  await new Promise<void>((resolve) => {
+    stream.once('drain', () => {
+      resolve();
+    });
+  });
+};
 
 export const startNdjsonStream = <T>(
   inputs: NdjsonStreamInputs<T>,
 ): NdjsonStreamHandle<T> => {
   const { stream, secrets, project } = inputs;
   return {
-    onItem: (item) => {
+    onItem: async (item) => {
       const projected = project(item);
       const redacted = redact(projected, { secrets });
-      stream.write(`${JSON.stringify(redacted)}\n`);
+      await writeAndDrain(stream, `${JSON.stringify(redacted)}\n`);
     },
     writeTrailer: (meta) => {
       const trailer = redact({ _meta: meta }, { secrets });
