@@ -4591,7 +4591,11 @@ Fields:
 **Stable error codes.** The full list grows over time;
 removals are major bumps. v0.1 shipped 26 codes; v0.2-M12 added
 `ambiguous_match` (27 total). Subsequent v0.2 milestones (M13–
-M17) reused the existing codes without adding new ones.
+M18) reused the existing codes without adding new ones. v0.3-M19
+adds `tag_not_found` (28 total) — registered pre-M19 as the
+writer-expansion close requires it (the `tags` friendly translator's
+per-account directory-miss surface), so the registry entry lands
+ahead of the M19 implementation feat commits.
 
 | Code | Origin | Retryable? |
 |------|--------|------------|
@@ -4603,6 +4607,7 @@ M17) reused the existing codes without adding new ones.
 | `ambiguous_match` | `item upsert` matched 2+ items (M12) | No |
 | `column_not_found` | `--set` matched no column | No |
 | `user_not_found` | Email lookup failed | No |
+| `tag_not_found` | `--set tags=...` named one or more tags not in the account directory (M19+) | No |
 | `unsupported_column_type` | Tried `--set` on a type not in v0.1 allowlist | No |
 | `column_archived` | `--set` against a column archived on the board | No |
 | `unauthorized` | Token missing/invalid | No |
@@ -4703,6 +4708,27 @@ slots that ship in v0.1 across multiple codes:
     inside a partial-success envelope land in
     `data.results[i].error` instead — `failed_tokens` is reserved
     for the whole-call boundary.
+- `tag_not_found` (M19+ — `--set tags=<name1>,<name2>` named one
+  or more tags not in the account directory):
+  - `tags: string[]` — every input tag that the per-account
+    directory lookup missed, in input order. **Always an array,
+    never a singular `tag` field**; a multi-miss `--set
+    tags=foo,bar,baz` where two tags are absent surfaces a single
+    error envelope with `tags: ["foo","bar"]` rather than two
+    separate errors. The shape diverges intentionally from
+    `user_not_found.details.email` (singular) — `resolveTags`
+    detects every miss in one directory pass, so the array form
+    avoids forcing agents to retry tag-by-tag. A future
+    consolidation that unifies the two directory-miss shapes is a
+    separate cli-design PR; until then, agents key off
+    `tag_not_found` for the array shape and `user_not_found` for
+    the singular shape.
+  - `hint: string` — actionable guidance pointing at the discovery
+    surface. Default text: ``Run `monday account tags` to list
+    available tags.`` The hint commits to the `monday account
+    tags` read verb as a v0.3 deliverable; whether it lands inside
+    M19 implementation or as a v0.3.x fast-follow is decided at
+    M19 implementation kickoff.
 - `ambiguous_match` (M12 — `item upsert` matched 2+ items):
   - `board_id: string` — the `--board <bid>` the upsert ran against.
   - `match_by: string[]` — the resolved `--match-by` tokens (the
