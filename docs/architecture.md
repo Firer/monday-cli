@@ -1045,6 +1045,22 @@ heuristic v0.2-plan §22 documents.
   implementation owns the values, mirrors M16
   `column-types.ts`).
 
+- `api/board-child-finder.ts` (M17→M18 cleanup R51) —
+  `findBoardChildOrThrow<K extends 'columns' | 'groups'>({
+  metadata, kind, id, boardId})`. Discriminated lookup-and-throw
+  helper for the M16/M17 dry-run preflight "board-level read
+  succeeded but the child ID isn't on the board" carve-out:
+  finds a child entity by ID inside `metadata[kind]`, throws
+  `not_found` with `details: { board_id, [<kind-singular>_id]:
+  id }` if absent. Conditional return type
+  (`K extends 'columns' ? BoardColumn : BoardGroup`) preserves
+  type-narrowing at every call site without `as` casts. Three
+  consumers post-M17 (`column-update` + `group-update` +
+  `group-archive` dry-run preflights). Future v0.3 fourth child
+  kind (e.g. board subscribers) extends the `K` union without
+  re-touching the helper — the noun derivation is mechanical
+  (`kind.slice(0, -1)`).
+
 ### Post-M9 command surface (M10–M17)
 
 M10–M17 add ~25 command files following the patterns established

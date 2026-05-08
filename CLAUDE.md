@@ -58,16 +58,16 @@ post-mortem):
   group-update adopts `withBoardInvalidationFanOut` (3rd fan-out
   consumer after column-update + board-update).
 
-**M17 → M18 cleanup window** (R51 scheduled for the cleanup
-window; full detail in §22):
-- **R51 — `findBoardChildOrThrow` helper.** New post-M17 finding;
-  3-consumer pattern surfaced by M17 implementation review
-  (column-update + group-update + group-archive each load board
-  metadata, find a child by ID, throw `not_found` with
-  `details: {board_id, [<kind>_id]: id}` if absent). Three call
-  sites collapse from 14 lines each to a single helper call;
-  pure boilerplate consolidation. Schedule: M17 → M18 cleanup
-  window (mirrors R40 + R43 + R46's M15→M16 / M16→M17 cadence).
+**M17 → M18 cleanup window** (R51 shipped at the cleanup window;
+full detail in §22):
+- **R51 — `findBoardChildOrThrow` helper. Shipped: `9e7c032`.**
+  New post-M17 finding; 3-consumer pattern surfaced by M17
+  implementation review (column-update + group-update +
+  group-archive each load board metadata, find a child by ID,
+  throw `not_found` with `details: {board_id, [<kind>_id]: id}`
+  if absent). Three call sites collapsed from 14 lines each to
+  a single helper call; pure boilerplate consolidation. Mirrors
+  R40 + R43 + R46's M15→M16 / M16→M17 cleanup-window cadence.
 - **R49 candidate** (snapshot-bearing destructive-archive dry-run
   helper) — evaluated at M17 close and deferred to v0.3. The three
   archive verbs (item-archive / board-archive / group-archive)
