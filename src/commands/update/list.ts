@@ -32,7 +32,11 @@ import {
   DEFAULT_MAX_PAGES,
   walkPages,
 } from '../../api/walk-pages.js';
-import type { Warning } from '../../utils/output/envelope.js';
+import { buildMeta, type Warning } from '../../utils/output/envelope.js';
+import { selectOutput } from '../../utils/output/select.js';
+import { startNdjsonStream } from '../../utils/output/ndjson.js';
+import { collectSecrets } from '../../cli/envelope-out.js';
+import type { MondayResponse } from '../../api/client.js';
 
 // Two GraphQL query strings — with-replies and without-replies.
 // Choosing at action-time keeps the wire-side complexity charge
@@ -197,6 +201,7 @@ export const updateListCommand: CommandModule<
     'monday update list 5001',
     'monday update list 5001 --with-replies --json',
     'monday update list --board 111 --all --json',
+    'monday update list --board 111 --all --output ndjson',
   ],
   idempotent: true,
   inputSchema,
@@ -264,52 +269,119 @@ export const updateListCommand: CommandModule<
           );
         }
 
-        const { client, toEmit } = resolveClient(ctx, program.opts());
+        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
+          ctx,
+          program.opts(),
+        );
 
         const limit = parsed.limit ?? 25;
         const maxPages = parsed.limitPages ?? DEFAULT_MAX_PAGES;
+
+        const format = selectOutput({
+          json: globalFlags.json,
+          table: globalFlags.table,
+          ...(globalFlags.output === undefined ? {} : { output: globalFlags.output }),
+          env: ctx.env,
+          isTTY: ctx.isTTY,
+        });
+
         let pageCounter = 0;
-        const result = await walkPages<unknown, RawItemsResponse | RawBoardsResponse>({
-          fetchPage: async (page) => {
-            const response = await client.raw<RawItemsResponse | RawBoardsResponse>(
-              routing.query,
-              { ids: [routing.id], limit, page },
-              {
-                operationName:
-                  routing.kind === 'item' ? 'UpdateList' : 'UpdateListByBoard',
-              },
-            );
-            pageCounter++;
-            // First-page not_found handling — distinguish "missing
-            // resource" (Monday returns []) from "exists with zero
-            // updates" (returns [{...}] with empty `updates`). Same
-            // shape v0.1 used; widened to cover the board variant.
-            if (pageCounter === 1) {
-              const collection =
-                routing.kind === 'item'
-                  ? (response.data as RawItemsResponse).items ?? []
-                  : (response.data as RawBoardsResponse).boards ?? [];
-              if (collection.length === 0) {
-                throw new ApiError(
-                  'not_found',
-                  `Monday returned no ${routing.kind} for id ${routing.id}`,
-                  routing.kind === 'item'
-                    ? { details: { item_id: routing.id } }
-                    : { details: { board_id: routing.id } },
-                );
-              }
-            }
-            return response;
-          },
-          extractItems: (r) => {
-            const raw =
+        const fetchPageImpl = async (
+          page: number,
+        ): Promise<MondayResponse<RawItemsResponse | RawBoardsResponse>> => {
+          const response = await client.raw<RawItemsResponse | RawBoardsResponse>(
+            routing.query,
+            { ids: [routing.id], limit, page },
+            {
+              operationName:
+                routing.kind === 'item' ? 'UpdateList' : 'UpdateListByBoard',
+            },
+          );
+          pageCounter++;
+          // First-page not_found handling — distinguish "missing
+          // resource" (Monday returns []) from "exists with zero
+          // updates" (returns [{...}] with empty `updates`). Same
+          // shape v0.1 used; widened to cover the board variant.
+          if (pageCounter === 1) {
+            const collection =
               routing.kind === 'item'
-                ? extractItemUpdates(r as { data: RawItemsResponse })
-                : extractBoardUpdates(r as { data: RawBoardsResponse });
-            // Normalise replies at the extraction boundary so
-            // `--with-replies` absent → every update.replies is [].
-            return normaliseReplies(raw, withReplies);
-          },
+                ? (response.data as RawItemsResponse).items ?? []
+                : (response.data as RawBoardsResponse).boards ?? [];
+            if (collection.length === 0) {
+              throw new ApiError(
+                'not_found',
+                `Monday returned no ${routing.kind} for id ${routing.id}`,
+                routing.kind === 'item'
+                  ? { details: { item_id: routing.id } }
+                  : { details: { board_id: routing.id } },
+              );
+            }
+          }
+          return response;
+        };
+
+        const extractItemsImpl = (
+          r: { data: RawItemsResponse | RawBoardsResponse },
+        ): readonly unknown[] => {
+          const raw =
+            routing.kind === 'item'
+              ? extractItemUpdates(r as { data: RawItemsResponse })
+              : extractBoardUpdates(r as { data: RawBoardsResponse });
+          // Normalise replies at the extraction boundary so
+          // `--with-replies` absent → every update.replies is [].
+          // The streaming path's `project` callback runs the per-
+          // update zod parse for JSON-mode parity (Codex M18 pre-
+          // flight P3-2). Items hit `walkPages.onItem` AFTER
+          // `normaliseReplies`, so NDJSON output matches JSON
+          // output's `replies: []` default.
+          return normaliseReplies(raw, withReplies);
+        };
+
+        // Streaming NDJSON path — emit per-arrival via the new
+        // `walkPages.onItem` hook (M18 lift), then the §6.3 trailer.
+        // Update list's trailer omits `meta.columns` (updates aren't
+        // a column-bearing entity) and `meta.next_cursor` (page-
+        // walked, not cursor-walked); other slots match item list
+        // / item search exactly.
+        if (format === 'ndjson') {
+          const stream = startNdjsonStream<unknown>({
+            stream: ctx.stdout,
+            secrets: collectSecrets(ctx.env),
+            // Project through the per-update schema so NDJSON output
+            // matches JSON-mode shape. A raw Monday update that
+            // doesn't conform fails here loud rather than emitting
+            // a half-shape line that JSON mode would have rejected
+            // in `outputSchema.parse(result.items)` — Codex P3-2.
+            project: (raw) => updateSchema.parse(raw),
+          });
+          const result = await walkPages<unknown, RawItemsResponse | RawBoardsResponse>({
+            fetchPage: fetchPageImpl,
+            extractItems: extractItemsImpl,
+            pageSize: limit,
+            all: parsed.all === true,
+            startPage: parsed.page ?? 1,
+            maxPages,
+            onItem: stream.onItem,
+          });
+          stream.writeTrailer(
+            buildMeta({
+              api_version: apiVersion,
+              cli_version: ctx.cliVersion,
+              request_id: ctx.requestId,
+              source: 'live',
+              retrieved_at: ctx.clock().toISOString(),
+              cache_age_seconds: null,
+              complexity: result.lastResponse.complexity,
+              has_more: result.hasMore,
+              total_returned: result.items.length,
+            }),
+          );
+          return;
+        }
+
+        const result = await walkPages<unknown, RawItemsResponse | RawBoardsResponse>({
+          fetchPage: fetchPageImpl,
+          extractItems: extractItemsImpl,
           pageSize: limit,
           all: parsed.all === true,
           startPage: parsed.page ?? 1,

@@ -1891,3 +1891,271 @@ describe('monday update clear-all (integration, M13 — partial-success envelope
     expect(env.planned_changes[0]?.update_ids.length).toBe(200);
   });
 });
+
+describe('monday update list — NDJSON streaming (M18)', () => {
+  // Mirrors item list / item search M18 streaming tests but
+  // exercises the page-walked variant via `walkPages.onItem`
+  // (not `paginate.onItem`). Two variants: per-item routing
+  // (positional <iid>) and per-board routing (--board <bid>);
+  // both stream through the same lifted `startNdjsonStream`
+  // helper (R52). Per-update zod parse runs in the project
+  // callback for parity with JSON mode (Codex P3-2).
+  //
+  // Trailer-side per-noun divergence vs item list/search:
+  // update list omits `meta.columns` (updates aren't column-
+  // bearing) and `meta.next_cursor` (page-walked, not cursor-
+  // walked). Other slots (has_more, total_returned, complexity)
+  // match.
+
+  it('per-item: streams NDJSON one update per line + trailer', async () => {
+    const out = await drive(
+      ['update', 'list', '5001', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '5001',
+                    updates: [
+                      sampleUpdate,
+                      { ...sampleUpdate, id: '78', text_body: 'Second' },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    expect(lines).toHaveLength(3); // 2 updates + trailer
+    const u1 = JSON.parse(lines[0] ?? '') as { id: string };
+    const u2 = JSON.parse(lines[1] ?? '') as { id: string };
+    expect(u1.id).toBe('77');
+    expect(u2.id).toBe('78');
+    const trailer = JSON.parse(lines[2] ?? '') as {
+      _meta: { has_more: boolean; total_returned: number };
+    };
+    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer._meta.total_returned).toBe(2);
+  });
+
+  it('per-board: streams NDJSON aggregated updates one per line + trailer', async () => {
+    const out = await drive(
+      ['update', 'list', '--board', '111', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateListByBoard',
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    updates: [sampleUpdate],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    expect(lines).toHaveLength(2); // 1 update + trailer
+    const u = JSON.parse(lines[0] ?? '') as { id: string };
+    expect(u.id).toBe('77');
+    const trailer = JSON.parse(lines[1] ?? '') as {
+      _meta: { has_more: boolean; total_returned: number };
+    };
+    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer._meta.total_returned).toBe(1);
+  });
+
+  it('streams NDJSON across pages with --all (walkPages.onItem fires per page)', async () => {
+    // Pin walkPages.onItem ordering across pages — items arrive
+    // in the wire order Monday returns; the streaming hook fires
+    // per-item-per-page sequentially.
+    const out = await drive(
+      ['update', 'list', '5001', '--all', '--limit', '2', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            match_variables: { ids: ['5001'], limit: 2, page: 1 },
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '5001',
+                    updates: [
+                      { ...sampleUpdate, id: '1' },
+                      { ...sampleUpdate, id: '2' },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'UpdateList',
+            match_variables: { ids: ['5001'], limit: 2, page: 2 },
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '5001',
+                    updates: [
+                      { ...sampleUpdate, id: '3' },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    expect(lines).toHaveLength(4); // 3 updates + trailer
+    const ids = lines.slice(0, 3).map((l) => (JSON.parse(l) as { id: string }).id);
+    expect(ids).toEqual(['1', '2', '3']);
+    const trailer = JSON.parse(lines[3] ?? '') as {
+      _meta: { has_more: boolean; total_returned: number };
+    };
+    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer._meta.total_returned).toBe(3);
+  });
+
+  it('NDJSON projection runs normaliseReplies (default replies omitted matches JSON mode)', async () => {
+    // Codex M18 pre-flight P3-2: NDJSON path must run through
+    // the same `normaliseReplies` boundary as JSON mode so the
+    // default `replies: []` shape matches. This pins the
+    // post-`normaliseReplies` zod parse in the streaming
+    // branch's project callback.
+    const updateWithPopulatedReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'reply body',
+          text_body: 'reply body',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
+    const out = await drive(
+      ['update', 'list', '5001', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            // Default GraphQL must NOT include the `replies` selection.
+            match_query: /^(?:(?!replies \{).)*$/s,
+            response: {
+              data: {
+                items: [
+                  { id: '5001', updates: [updateWithPopulatedReplies] },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    const update = JSON.parse(lines[0] ?? '') as { replies: readonly unknown[] };
+    // normaliseReplies emptied the replies array — NDJSON output
+    // matches JSON-mode default (empty array, regardless of what
+    // Monday returned).
+    expect(update.replies).toEqual([]);
+  });
+
+  it('NDJSON --with-replies populates replies (parity with JSON mode opt-in)', async () => {
+    const updateWithReplies = {
+      ...sampleUpdate,
+      replies: [
+        {
+          id: '88',
+          body: 'reply',
+          text_body: 'reply',
+          creator_id: '2',
+          created_at: '2026-04-30T09:30:00Z',
+        },
+      ],
+    };
+    const out = await drive(
+      ['update', 'list', '5001', '--with-replies', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: {
+              data: {
+                items: [{ id: '5001', updates: [updateWithReplies] }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    const update = JSON.parse(lines[0] ?? '') as { replies: readonly { id: string }[] };
+    expect(update.replies).toHaveLength(1);
+    expect(update.replies[0]?.id).toBe('88');
+  });
+
+  it('NDJSON trailer has only the `_meta` key (§6.3 contract pin)', async () => {
+    const out = await drive(
+      ['update', 'list', '5001', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: {
+              data: { items: [{ id: '5001', updates: [sampleUpdate] }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    const trailer = JSON.parse(lines[lines.length - 1] ?? '') as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(trailer)).toEqual(['_meta']);
+  });
+
+  it('not_found error surfaces on stderr (envelope on error path, no NDJSON output)', async () => {
+    // Streaming applies on success only — a not_found before any
+    // item arrives goes through the runner's error envelope on
+    // stderr, exit 2. stdout stays empty (no half-stream).
+    const out = await drive(
+      ['update', 'list', '99999', '--output', 'ndjson'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateList',
+            response: { data: { items: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).toBe('');
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+  });
+});
