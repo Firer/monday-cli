@@ -57,6 +57,7 @@ import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
+import { GROUP_COLOR_VALUES } from '../../api/group-color.js';
 import {
   GROUP_FIELDS_FRAGMENT,
   groupProjectionSchema,
@@ -89,12 +90,13 @@ const inputSchema = z
     name: z.string().refine((s) => s.trim().length > 0, {
       message: '--name must be non-empty (whitespace-only is rejected)',
     }),
-    color: z
-      .string()
-      .refine((s) => s.trim().length > 0, {
-        message: '--color must be non-empty (whitespace-only is rejected)',
-      })
-      .optional(),
+    // Per cli-design §4.3 group-create: --color is argv-parse
+    // validated against the pinned Monday-supported palette.
+    // M17 implementation owns the field set (see api/group-color.ts);
+    // values outside the set surface as usage_error (exit 1) before
+    // any network call. Mirrors M16 column-create's per-type
+    // `--settings` field-set ownership rationale.
+    color: z.enum(GROUP_COLOR_VALUES).optional(),
   })
   .strict();
 
@@ -139,7 +141,10 @@ export const boardGroupCreateCommand: CommandModule<
           ...(opts as Readonly<Record<string, unknown>>),
         });
         const name = parsed.name.trim();
-        const color = parsed.color?.trim();
+        // No trim on color — the enum check on inputSchema rejects
+        // anything outside GROUP_COLOR_VALUES, which already covers
+        // exact-match shapes.
+        const color = parsed.color;
 
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,

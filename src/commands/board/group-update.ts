@@ -89,6 +89,7 @@ import { ApiError } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { withBoardInvalidationFanOut } from '../../api/board-mutation-invalidation.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
+import { GROUP_COLOR_VALUES } from '../../api/group-color.js';
 import {
   GROUP_FIELDS_FRAGMENT,
   groupProjectionSchema,
@@ -131,12 +132,12 @@ const inputSchema = z
         message: '--name must be non-empty (whitespace-only is rejected)',
       })
       .optional(),
-    color: z
-      .string()
-      .refine((s) => s.trim().length > 0, {
-        message: '--color must be non-empty (whitespace-only is rejected)',
-      })
-      .optional(),
+    // Per cli-design §4.3 group-update: --color is argv-parse
+    // validated against the same pinned palette group-create uses
+    // (see api/group-color.ts). Sharing the constant means a value
+    // accepted by group-create round-trips through group-update
+    // without surprise rejections.
+    color: z.enum(GROUP_COLOR_VALUES).optional(),
   })
   .strict()
   .refine((v) => v.name !== undefined || v.color !== undefined, {
@@ -208,7 +209,10 @@ export const boardGroupUpdateCommand: CommandModule<
           ...(opts as Readonly<Record<string, unknown>>),
         });
         const trimmedName = parsed.name?.trim();
-        const trimmedColor = parsed.color?.trim();
+        // No trim on color — the enum check on inputSchema rejects
+        // anything outside GROUP_COLOR_VALUES; values that survive
+        // are exact palette-name matches.
+        const colorValue = parsed.color;
 
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
@@ -258,8 +262,8 @@ export const boardGroupUpdateCommand: CommandModule<
             // field.
             diff.name = { from: current.title, to: trimmedName };
           }
-          if (trimmedColor !== undefined) {
-            diff.color = { from: current.color, to: trimmedColor };
+          if (colorValue !== undefined) {
+            diff.color = { from: current.color, to: colorValue };
           }
 
           emitDryRun({
@@ -292,10 +296,10 @@ export const boardGroupUpdateCommand: CommandModule<
               value: trimmedName,
               groupAttribute: 'title',
             });
-          } else if (field === 'color' && trimmedColor !== undefined) {
+          } else if (field === 'color' && colorValue !== undefined) {
             dispatchPlan.push({
               field: 'color',
-              value: trimmedColor,
+              value: colorValue,
               groupAttribute: 'color',
             });
           }

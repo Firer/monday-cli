@@ -4613,6 +4613,22 @@ describe('monday board group-create (integration, M17)', () => {
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('rejects --color outside the pinned Monday palette as usage_error (no network call)', async () => {
+    // Per cli-design §4.3 group-create: --color is argv-parse
+    // validated against the pinned palette (api/group-color.ts).
+    // A bogus colour name surfaces usage_error (exit 1) BEFORE any
+    // network call — agents read the rejection locally rather than
+    // round-tripping through Monday's validation_failed.
+    const out = await drive(
+      ['board', 'group-create', '12345', '--name', 'X', '--color', 'not-a-palette-color', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
   it('rejects non-numeric boardId at argv parse', async () => {
     const out = await drive(
       ['board', 'group-create', 'abc', '--name', 'X', '--json'],
@@ -4921,6 +4937,20 @@ describe('monday board group-update (integration, M17)', () => {
       { interactions: [] },
     );
     expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects --color outside the pinned Monday palette as usage_error (no network call)', async () => {
+    // Same pinned palette as group-create — sharing the constant
+    // means a colour accepted by group-create round-trips through
+    // group-update without surprise rejections.
+    const out = await drive(
+      ['board', 'group-update', '12345', 'topics', '--color', 'not-a-palette-color', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
   });
@@ -5602,6 +5632,51 @@ describe('monday board group-archive (integration, M17)', () => {
     const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
     expect(warningCodes).not.toContain('stale_cache_refreshed');
   });
+
+  it('cache invalidation: error path skips invalidation (failed archive didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on the error path.
+    // An archive that returns null (not_found) didn't change server
+    // state; the cache remains valid. Mirror group-create / group-
+    // delete error-path tests.
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Archive fails (Monday returns null = not_found).
+    const archived = await drive(
+      ['board', 'group-archive', '111', 'ghost', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupArchive',
+            response: { data: { archive_group: null } },
+          },
+        ],
+      },
+    );
+    expect(archived.exitCode).toBe(2);
+    // Post-archive describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: a cache hit needs no live fetch. If
+      // invalidation incorrectly fired, the test fails with an
+      // exhausted cassette.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
+  });
 });
 
 // =============================================================================
@@ -5834,6 +5909,52 @@ describe('monday board group-duplicate (integration, M17)', () => {
     expect(postEnv.data.groups.map((g) => g.id)).toContain('topics_1');
     const warningCodes = (postEnv.warnings ?? []).map((w) => w.code);
     expect(warningCodes).not.toContain('stale_cache_refreshed');
+  });
+
+  it('cache invalidation: error path skips invalidation (failed duplicate didn\'t change board state)', async () => {
+    // §8 single-leg contract: skip invalidation on the error path.
+    // A duplicate that returns null (not_found — source group
+    // missing / no access) didn't change server state; the cache
+    // remains valid. Mirror group-archive / group-create / group-
+    // delete error-path tests.
+    const preGroup = {
+      id: 'topics',
+      title: 'Topics',
+      color: 'blue',
+      position: '1.0',
+      archived: false,
+      deleted: false,
+    };
+    // Seed cache.
+    await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [preGroup])] },
+    );
+    // Duplicate fails.
+    const duplicated = await drive(
+      ['board', 'group-duplicate', '111', 'ghost', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GroupDuplicate',
+            response: { data: { duplicate_group: null } },
+          },
+        ],
+      },
+    );
+    expect(duplicated.exitCode).toBe(2);
+    // Post-duplicate describe — cache hit (source: 'cache') because
+    // invalidation was skipped on the error path.
+    const postOut = await drive(
+      ['board', 'describe', '111', '--json'],
+      // Empty interactions: a cache hit needs no live fetch. If
+      // invalidation incorrectly fired, the test fails with an
+      // exhausted cassette.
+      { interactions: [] },
+    );
+    expect(postOut.exitCode).toBe(0);
+    const postEnv = parseEnvelope(postOut.stdout);
+    expect(postEnv.meta.source).toBe('cache');
   });
 });
 
