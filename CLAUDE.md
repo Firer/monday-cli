@@ -11,13 +11,68 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3 plan landed.** M0–M18 shipped on `main`;
-**`docs/v0.3-plan.md` is the active plan**; **M19 implementation
-begins next session** (writer expansion close — `tags` /
+**v0.3-M19 pre-flight gate closed.** M0–M18 shipped on `main`;
+v0.3 plan landed (last session); **M19 pre-flight contract diff
+landed this session — M19 implementation feat commits begin
+next session** (writer expansion close — `tags` /
 `board_relation` / `dependency` friendly translators per
 cli-design §5.3 writer-expansion roadmap + §13 v0.3 entry).
 
-**v0.3 plan draft opened this session** (see
+**v0.3-M19 pre-flight gate landed this session** (per
+`docs/v0.3-plan.md` §9 preconditions):
+- **Decision 1 (`tag_not_found` registry entry) closed** in
+  `4c652d5 docs(cli-design): add tag_not_found to §6.5 — v0.3-M19
+  prerequisite`. cli-design §6.5 grows from 27 → 28 stable error
+  codes; `details` shape pinned as `{ tags: string[], hint:
+  string }` (array form per Decision 1 round-1 P2.8 fix). Hint
+  default hard-pinned to reference `monday account tags`
+  (forward-looking commitment per session decision — agent UX
+  over the conservative `monday raw` fallback). Codex round 1
+  returned 0 P1 / 3 P2 / 1 P3; two findings (P2-1 + P3-1)
+  addressed inline, two (P2-3 + P2-4) deferred to the contract
+  diff that followed in this same session.
+- **M19 contract diff landed in this same session** (one
+  commit, lands after this CLAUDE.md flip — the SHA isn't
+  knowable until the commit lands; reference it via
+  `git log --oneline | head -1` post-push). The
+  diff lands tag-directory + board-relation-validation module
+  signatures (stub bodies — runtime lands at M19 implementation
+  alongside the friendly translator cases) + `src/utils/errors.ts`
+  ERROR_CODES widening (28 total) so M19 feat commits throw into a
+  stable typed surface + cross-doc count-bumps (CLAUDE.md /
+  README.md / output-shapes.md) per Codex P2-4 fix + v0.3-plan
+  Decision 1 status flip + §9 preconditions tick + §3 M19
+  deliverables wording realignments (V0_3 → V0_2 constant name
+  per stability comment, `user-directory.ts` → `resolvers.ts`
+  pattern reference, `error-codes.ts` hedge removal, `monday
+  account tags` deliverable note added).
+- **`column-values.ts` dispatcher widening deferred to M19
+  implementation.** The pre-flight diff intentionally does NOT
+  widen `WRITABLE_COLUMN_TYPES` (10 → 13) or add the new
+  translator switch cases — that would create a half-state where
+  the type is "writable" but the body throws. M19 feat commits
+  widen the dispatcher AND land the runtime translator bodies
+  in the same commit per the R45 / R48 "ship the helper
+  alongside the first new consumer" cadence.
+- **`column-types.ts` constant rename NOT happening.** v0.3-plan
+  §3 M19 deliverables originally said "drop from
+  `V0_3_WRITER_EXPANSION_TYPES`" but the runtime constant retains
+  its M8-era spelling `V0_2_WRITER_EXPANSION_TYPES` per the
+  stability comment at `column-types.ts` lines 209–211 — renaming
+  would churn every consumer with no wire-shape change.
+  Plan-doc wording realigned to the actual constant name in this
+  commit.
+- **Test count grows 2296 → 2308** (+12 net: 6 in
+  `tag-directory.test.ts` + 5 in
+  `board-relation-validation.test.ts` + 1 new
+  `tag_not_found` containment assertion in `errors.test.ts`;
+  existing `ERROR_CODES.length === 27` assertion bumped to
+  28). Coverage unchanged at 99.05 / 95.47 / 99.51 / 99.18
+  (above the 95/95.45/95/95 floor); new stub modules use
+  `c8 ignore` on throw-bodies + carry surface-import tests
+  for the type-level exports.
+
+**v0.3 plan draft opened last session** (see
 `docs/v0.3-plan.md`):
 - Ten milestones M19–M28 sequenced (writer-expansion close →
   time_tracking → auth foundations → diagnostics → cross-board
@@ -292,7 +347,7 @@ R45 shipped at M16 implementation start):
 The three binding documents — read in this order before writing code:
 
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
-   contract: command surface, output envelope, 27 stable error codes,
+   contract: command surface, output envelope, 28 stable error codes,
    deferral list, every binding decision. Changes land via PRs that
    argue for the change, not by drift.
 2. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — active plan:
@@ -381,11 +436,12 @@ reasoning (and per-subsystem implementation detail) lives in
   `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
   `retrieved_at`. Adding fields is non-breaking; removing/renaming is
   major. (§6.1)
-- **27 stable error codes** (`usage_error` / `not_found` /
+- **28 stable error codes** (`usage_error` / `not_found` /
   `ambiguous_column` / `ambiguous_match` / `column_archived` /
   `unsupported_column_type` / `rate_limited` / `complexity_exceeded` /
-  `stale_cursor` / etc. — `ambiguous_match` joined the registry at
-  M12).
+  `stale_cursor` / `tag_not_found` / etc. — `ambiguous_match` joined
+  the registry at M12; `tag_not_found` joined as a v0.3-M19
+  prerequisite ahead of the `tags` friendly translator).
   Errors carry `code`, `message`, `http_status`, `monday_code`,
   `request_id`, `retryable`, `retry_after_seconds`. Agents key off
   `code`, never English. (§6.5)

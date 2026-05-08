@@ -2745,6 +2745,12 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
         "typical_http_status": null,
       },
       {
+        "code": "tag_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
         "code": "unsupported_column_type",
         "exit_code": 2,
         "retryable": false,
@@ -3137,6 +3143,12 @@ exports[`envelope snapshot — schema > schema config.show — single-command na
       },
       {
         "code": "user_not_found",
+        "exit_code": 2,
+        "retryable": false,
+        "typical_http_status": null,
+      },
+      {
+        "code": "tag_not_found",
         "exit_code": 2,
         "retryable": false,
         "typical_http_status": null,

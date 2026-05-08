@@ -18,7 +18,7 @@ AI coding agents need to operate on real tickets. Monday.com has a
 GraphQL API, but each agent learning that schema from scratch is
 wasteful — and the API is sharp-edged (40+ column types, idiosyncratic
 mutation shapes, complex pagination). `monday-cli` is the abstraction:
-**one stable contract** (universal envelope, 27 stable error codes,
+**one stable contract** (universal envelope, 28 stable error codes,
 JSON Schema introspection) that every agent can target.
 
 - **Agent-first ergonomics.** `--json` everywhere, stable
@@ -186,10 +186,11 @@ If you're an AI coding agent driving this CLI:
    inside an agent harness. `--json` is an alias for
    `--output json` and forces JSON on every command. JSON is
    never truncated; tables are.
-2. **Branch on `error.code`, not `error.message`.** The 27 stable
+2. **Branch on `error.code`, not `error.message`.** The 28 stable
    codes (`not_found`, `confirmation_required`, `column_archived`,
    `unsupported_column_type`, `rate_limited`, `stale_cursor`,
-   `ambiguous_match`, …) are part of the contract. Messages are not.
+   `ambiguous_match`, `tag_not_found`, …) are part of the contract.
+   Messages are not.
 3. **Read `meta.source`** to know whether the data is
    `"live"` / `"cache"` / `"mixed"` / `"none"`. `"mixed"` means
    board metadata came from cache while the rest hit live —

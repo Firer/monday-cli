@@ -15,8 +15,8 @@ import {
 } from '../../../src/utils/errors.js';
 
 describe('ERROR_CODES', () => {
-  it('contains exactly the 27 stable codes (26 v0.1 + 1 v0.2 M12)', () => {
-    expect(ERROR_CODES).toHaveLength(27);
+  it('contains exactly the 28 stable codes (26 v0.1 + 1 v0.2 M12 + 1 v0.3 M19 prerequisite)', () => {
+    expect(ERROR_CODES).toHaveLength(28);
   });
 
   it('includes column_archived (precondition resolved per §6.5)', () => {
@@ -25,6 +25,10 @@ describe('ERROR_CODES', () => {
 
   it('includes ambiguous_match (M12 — `item upsert` matched 2+ items)', () => {
     expect(ERROR_CODES).toContain('ambiguous_match');
+  });
+
+  it('includes tag_not_found (M19+ — registered pre-M19 as the writer-expansion close prerequisite)', () => {
+    expect(ERROR_CODES).toContain('tag_not_found');
   });
 
   it('has no duplicates', () => {

@@ -2389,20 +2389,26 @@ Every error envelope has the same shape (cli-design §6.5):
 }
 ```
 
-The 27 stable error codes (post-M12) — `usage_error`,
-`confirmation_required`, `not_found`, `ambiguous_name`,
-`ambiguous_column`, `ambiguous_match` (M12), `column_not_found`,
-`user_not_found`, `unsupported_column_type`, `column_archived`,
-`unauthorized`, `forbidden`, `rate_limited`, `complexity_exceeded`,
+The 28 stable error codes (post-v0.3-M19 prerequisite) —
+`usage_error`, `confirmation_required`, `not_found`,
+`ambiguous_name`, `ambiguous_column`, `ambiguous_match` (M12),
+`column_not_found`, `user_not_found`, `tag_not_found` (M19+),
+`unsupported_column_type`, `column_archived`, `unauthorized`,
+`forbidden`, `rate_limited`, `complexity_exceeded`,
 `daily_limit_exceeded`, `concurrency_exceeded`, `ip_rate_limited`,
 `resource_locked`, `validation_failed`, `stale_cursor`,
 `config_error`, `cache_error`, `network_error`, `timeout`,
 `dev_not_configured`, `dev_board_misconfigured`, `internal_error`.
 v0.1 shipped 26; M12's `item upsert` added `ambiguous_match` (27
-total). Subsequent v0.2 milestones (M13–M17) reused the existing
-codes without adding new ones. The two `dev_*` codes are reserved
-for the v0.3 `monday dev` namespace — listed but inactive on the
-v0.1/v0.2 surface. Warning
+total). Subsequent v0.2 milestones (M13–M18) reused the existing
+codes without adding new ones. v0.3-M19 adds `tag_not_found` (28
+total) — registered pre-M19 as the writer-expansion close
+prerequisite (the `tags` friendly translator's per-account
+directory-miss surface; cli-design §6.5 entry landed at
+`4c652d5`, runtime widening alongside the M19 pre-flight contract
+diff). The two `dev_*` codes are reserved for the v0.3 `monday
+dev` namespace — listed but inactive on the v0.1/v0.2/v0.3-M19
+surface. Warning
 codes (`stale_cache_refreshed`, `pagination_cap_reached`,
 `column_token_collision`, etc.) live in `warnings[]`, not
 `error`. See [cli-design.md §6.5](./cli-design.md#65-error) for

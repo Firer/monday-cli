@@ -3,8 +3,14 @@
  * `code` from `cli-design.md` §6.5 — agents key off the code, never
  * the English `message`. v0.1 froze 26 codes; `ambiguous_match` ships
  * in v0.2 M12 (`item upsert` with 2+ matches), bringing the count to
- * 27. `dev_*` codes ship in v0.3 but are listed here so the M5b agent
- * doesn't need to backfill the type.
+ * 27. `tag_not_found` registered pre-v0.3-M19 as the writer-expansion
+ * close prerequisite (cli-design §6.5 entry landed at `4c652d5`); the
+ * runtime throw site lands at M19 implementation when the `tags`
+ * friendly translator + `tag-directory.ts` ship — but the union
+ * widens here in the M19 pre-flight contract diff so M19 feat commits
+ * throw into a stable typed surface (28 total). `dev_*` codes ship
+ * in v0.3 but are listed here so the M5b agent doesn't need to
+ * backfill the type.
  */
 
 export const ERROR_CODES = [
@@ -16,6 +22,7 @@ export const ERROR_CODES = [
   'ambiguous_match',
   'column_not_found',
   'user_not_found',
+  'tag_not_found',
   'unsupported_column_type',
   'column_archived',
   'unauthorized',
@@ -108,6 +115,7 @@ export const CODE_RETRYABLE_DEFAULT: Readonly<Record<ErrorCode, boolean>> = Obje
   ambiguous_match: false,
   column_not_found: false,
   user_not_found: false,
+  tag_not_found: false,
   unsupported_column_type: false,
   column_archived: false,
   unauthorized: false,
@@ -148,6 +156,7 @@ export const CODE_TYPICAL_HTTP_STATUS: Readonly<Record<ErrorCode, number | null>
   ambiguous_match: null,
   column_not_found: null,
   user_not_found: null,
+  tag_not_found: null,
   unsupported_column_type: null,
   column_archived: 200,
   unauthorized: 401,
@@ -260,6 +269,7 @@ export const exitCodeForError = (code: ErrorCode): ExitCode => {
     case 'ambiguous_match':
     case 'column_not_found':
     case 'user_not_found':
+    case 'tag_not_found':
     case 'unsupported_column_type':
     case 'column_archived':
     case 'unauthorized':
