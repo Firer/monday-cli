@@ -202,12 +202,15 @@ export const isFilesShapedType = (type: string): type is FilesShapedType =>
  * `unsupported_column_type` error builder uses this to pick a
  * per-category message + details slot.
  *
- *   - `'v0_2_writer_expansion'` — tentative-row v0.2 types still
- *     pending (`tags` / `board_relation` / `dependency`). Surfaces
- *     `deferred_to: "v0.2"` and points at the writer-expansion
- *     milestone. M8 shipped `link` / `email` / `phone` firm so the
- *     branch no longer fires for those types — they resolve through
- *     the friendly translator.
+ *   - `'v0_2_writer_expansion'` — tentative-row writer-expansion
+ *     types (`tags` / `board_relation` / `dependency`) that
+ *     **slipped from v0.2 to v0.3 at M18 close**. Surfaces
+ *     `deferred_to: "v0.3"` and points at the v0.3 writer-expansion
+ *     work. The category constant name retains its M8-era spelling
+ *     for stability — renaming would churn every consumer with no
+ *     wire-shape change. M8 shipped `link` / `email` / `phone`
+ *     firm so the branch no longer fires for those types — they
+ *     resolve through the friendly translator.
  *   - `'read_only_forever'` — Monday-computed columns (mirror /
  *     formula / auto_number / creation_log / last_updated /
  *     item_id). Surfaces `read_only: true` and points at the
@@ -225,6 +228,9 @@ export const isFilesShapedType = (type: string): type is FilesShapedType =>
  * Codex M5b cleanup re-review #1: pre-fix `unsupportedColumnType
  * Error` blanket-deferred every non-allowlisted type to v0.2, which
  * over-promised for the read-only-forever row and the v0.3+ rows.
+ * Codex M18 pre-flight P2-4: tentative row slipped to v0.3 at M18
+ * close per cli-design §13 + §5.3 line 2172 — runtime + tests +
+ * comments aligned.
  */
 export type ColumnRoadmapCategory =
   | 'v0_2_writer_expansion'

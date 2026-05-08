@@ -458,13 +458,14 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.2 writer-expansion tentative (tags) surfaces with deferred_to: v0.2', async () => {
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (tags) surfaces with deferred_to: v0.3', async () => {
     // Codex M5b cleanup re-review #1 (companion test): tentative
-    // v0.2 writer-expansion types (`tags` / `board_relation` /
-    // `dependency`) still surface as `deferred_to: "v0.2"` until
-    // their friendly translators land. M8 firm row (link / email /
-    // phone) is now writable through the friendly translator and
-    // tested as happy-path elsewhere.
+    // writer-expansion types (`tags` / `board_relation` /
+    // `dependency`) **slipped to v0.3 at M18 close** per cli-design
+    // §13 + §5.3 line 2172 — they surface as `deferred_to: "v0.3"`
+    // until their friendly translators land in v0.3. M8 firm row
+    // (link / email / phone) is writable through the friendly
+    // translator and tested as happy-path elsewhere.
     const tagsBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -503,10 +504,10 @@ describe('monday item set (integration, M5b)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details?.deferred_to).toBe('v0.3');
     expect(env.error?.details).not.toHaveProperty('read_only');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
-    // M8 ships --set-raw, so the v0.2-tentative branch's hint
+    // M8 ships --set-raw, so the v0.3-tentative branch's hint
     // legitimately points agents at the escape hatch in the
     // meantime. Pre-M8 this test pinned the absence of the dead
     // Path B `Use --set-raw` instruction; that form is gone, so the

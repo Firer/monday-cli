@@ -283,17 +283,17 @@ describe('parsePeopleInput — numeric token rejection', () => {
         column_type: 'people',
         token: '12345',
         raw_input: '12345',
-        deferred_to: 'v0.2',
       });
-      // Hint guides the agent to the email form (the v0.1 escape)
-      // and references v0.2's --set-raw without instructing the
-      // agent to use it today.
+      // No `deferred_to` slot — the --set-raw path exists today
+      // (M8 shipped), so this isn't a deferral. Stale "v0.2 will
+      // add this" wording was removed at 0.2.0 release prep.
+      expect(err.details).not.toHaveProperty('deferred_to');
+      // Hint guides the agent to the email form first, then
+      // surfaces --set-raw as the escape for raw IDs.
       const hint = err.details?.hint;
       expect(typeof hint).toBe('string');
       expect(hint as string).toMatch(/--set owner=/u);
-      expect(hint as string).toMatch(/v0\.2/u);
-      // Pin: the dead "Use --set-raw" instruction must not return.
-      expect(err.message).not.toMatch(/Use --set-raw/u);
+      expect(hint as string).toMatch(/--set-raw/u);
     }
   });
 
@@ -425,15 +425,14 @@ describe('parsePeopleInput — safe-integer guard on resolved IDs', () => {
         column_type: 'people',
         token: 'alice@example.com',
         resolved_id: huge,
-        // Path B (M5b cleanup): v0.1 has no --set-raw flag, so the
-        // error advertises the v0.2 writer-expansion milestone
-        // rather than emitting a paste-ready dead command.
-        deferred_to: 'v0.2',
       });
+      // No `deferred_to` slot — --set-raw shipped in M8, so the
+      // path forward is documented inline as a current option,
+      // not a future-version promise. M18 release-prep cleanup.
+      expect(err.details).not.toHaveProperty('deferred_to');
       const hint = err.details?.hint;
       expect(typeof hint).toBe('string');
-      expect(hint as string).toContain('v0.2');
-      expect(hint as string).not.toMatch(/^--set-raw /u);
+      expect(hint as string).toContain('--set-raw');
     }
   });
 

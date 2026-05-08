@@ -227,8 +227,8 @@ describe('monday item clear (integration, M5b)', () => {
     // `unsupported_column_type` "with a `--set-raw` hint" — that
     // hint was the exact dead v0.1 suggestion Path B was meant to
     // remove. The new policy mirrors `item set`: read-only-forever
-    // types get `read_only: true`, v0.2-roadmap types get
-    // `deferred_to: "v0.2"`. No --set-raw hint anywhere in v0.1.
+    // types get `read_only: true`, v0.3-roadmap candidates (slipped
+    // from v0.2 tentative at M18 close) get `deferred_to: "v0.3"`.
     const formulaBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -275,11 +275,13 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.2 writer-expansion tentative (tags) surfaces with deferred_to: v0.2', async () => {
-    // Companion test: v0.2-tentative types carry `deferred_to: "v0.2"`,
-    // mirroring `item set`. M8 firm row (link / email / phone) is now
-    // writable end-to-end; the tentative row (tags / board_relation /
-    // dependency) holds the deferral until fixture work clears.
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (tags) surfaces with deferred_to: v0.3', async () => {
+    // Companion test: tentative writer-expansion types **slipped to
+    // v0.3 at M18 close** per cli-design §13 + §5.3 line 2172 — they
+    // carry `deferred_to: "v0.3"`, mirroring `item set`. M8 firm row
+    // (link / email / phone) is writable end-to-end; the tentative
+    // row (tags / board_relation / dependency) holds the deferral
+    // until v0.3's writer-expansion design clears.
     const tagsBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -317,7 +319,7 @@ describe('monday item clear (integration, M5b)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details?.deferred_to).toBe('v0.3');
     expect(env.error?.details).not.toHaveProperty('read_only');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });

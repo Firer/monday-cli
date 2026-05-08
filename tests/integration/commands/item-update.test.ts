@@ -655,8 +655,9 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     // translateColumnValueAsync throws ApiError(unsupported_column_type)
     // for non-allowlisted types. Covers update.ts:521 idx 0 (the
     // err instanceof MondayCliError check after translation).
-    // Path B (M5b cleanup): the error advertises v0.2's writer-
-    // expansion milestone instead of a dead --set-raw suggestion.
+    // Path B (M5b cleanup): the error advertises the v0.3 writer-
+    // expansion milestone (slipped from v0.2 tentative at M18 close)
+    // instead of a dead --set-raw suggestion.
     const tagsMeta = {
       ...sampleBoardMetadata,
       columns: [
@@ -703,7 +704,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.2');
+    expect(env.error?.details?.deferred_to).toBe('v0.3');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });
 

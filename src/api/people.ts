@@ -303,20 +303,20 @@ const idStringToNumber = (id: string, columnId: string, token: string): number =
       `People column "${columnId}" got a resolved user ID "${id}" ` +
         `(from token "${token}") that exceeds JavaScript's safe-integer ` +
         `range (2^53 - 1, i.e. 9007199254740991). Number(id) would lose ` +
-        `precision, corrupting the personsAndTeams wire payload. v0.1 ` +
-        `has no raw-write escape; v0.2's writer-expansion milestone ` +
-        `adds --set-raw.`,
+        `precision, corrupting the personsAndTeams wire payload. Use ` +
+        `--set-raw <col>=<json> with the literal Monday wire shape ` +
+        `instead.`,
       {
         details: {
           column_id: columnId,
           column_type: 'people',
           token,
           resolved_id: id,
-          deferred_to: 'v0.2',
           hint:
             'this user ID exceeds JS safe-integer range; the friendly ' +
-            'translator can\'t round-trip it. v0.2\'s --set-raw will ' +
-            'accept the literal Monday wire shape.',
+            "translator can't round-trip it. Use --set-raw <col>=<json> " +
+            'with the literal Monday wire shape (e.g. --set-raw ' +
+            `${columnId}='{"personsAndTeams":[{"id":${id},"kind":"person"}]}').`,
         },
       },
     );
@@ -348,8 +348,9 @@ const emptyPeopleInputError = (columnId: string, raw: string): UsageError =>
         hint:
           'pass a comma-separated list of emails (e.g. --set ' +
           `${columnId}=alice@example.com,bob@example.com), or ` +
-          `--set ${columnId}=me. (v0.1 has no raw-write escape; v0.2's ` +
-          `writer-expansion milestone adds --set-raw.)`,
+          `--set ${columnId}=me. The --set-raw escape hatch accepts ` +
+          'the literal Monday wire shape if email resolution is not ' +
+          'an option.',
       },
     },
   );
@@ -358,9 +359,9 @@ const emptyPeopleInputError = (columnId: string, raw: string): UsageError =>
  * Builds the `usage_error` for a numeric token that the translator
  * doesn't accept. cli-design.md §5.3 step 3 only lists emails and
  * `me` for the people grammar — numeric tokens are an explicit
- * v0.1 spec gap. v0.1 has no raw-write escape; agents with a raw
- * user ID look up the email, or wait for v0.2's `--set-raw`
- * (writer-expansion milestone).
+ * grammar gap. Agents with a raw user ID either look up the
+ * email, or use the `--set-raw <col>=<json>` escape hatch (M8)
+ * with the literal Monday wire shape.
  *
  * `raw` is included alongside `token` because the failing token
  * may be one of many in a comma list (`alice@example.com,12345`)
@@ -373,20 +374,19 @@ const numericPeopleTokenError = (
 ): UsageError =>
   new UsageError(
     `People column "${columnId}" got numeric token "${token}", which ` +
-      `is not in the v0.1 people grammar (cli-design.md §5.3 step 3 ` +
-      `only lists emails and \`me\`). v0.1 has no raw-write escape; ` +
-      `look up the user's email and use the email form, or wait for ` +
-      `v0.2's --set-raw (writer-expansion milestone).`,
+      `is not in the people grammar (cli-design.md §5.3 step 3 only ` +
+      `lists emails and \`me\`). Look up the user's email and use the ` +
+      `email form, or use --set-raw <col>=<json> with the literal ` +
+      `Monday wire shape.`,
     {
       details: {
         column_id: columnId,
         column_type: 'people',
         token,
         raw_input: raw,
-        deferred_to: 'v0.2',
         hint:
           `pass the user's email instead (e.g. --set ${columnId}=` +
-          `alice@example.com); v0.2's --set-raw will accept ` +
+          `alice@example.com), or use --set-raw ${columnId}=` +
           `'{"personsAndTeams":[{"id":${token},"kind":"person"}]}'.`,
       },
     },

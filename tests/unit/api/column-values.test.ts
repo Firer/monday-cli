@@ -563,20 +563,21 @@ describe('translateColumnValue — sync entry on a people column', () => {
   });
 });
 
-describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion tentatives)', () => {
+describe('translateColumnValue — non-allowlisted types (v0.3 writer-expansion candidates)', () => {
   // M8 firm row (link / email / phone) ships in WRITABLE_COLUMN_TYPES
   // — those are tested as happy-path translators below, not here. The
-  // tentative row (tags / board_relation / dependency) stays
-  // unsupported until the per-account directory + linked-board
-  // enumeration design clears; their `unsupported_column_type` errors
-  // continue to point at v0.2 writer-expansion. The `--set-raw`
-  // escape hatch (M8) accepts these types in the meantime — the
+  // tentative row (tags / board_relation / dependency) **slipped to
+  // v0.3 at M18 close** per cli-design §13 + §5.3 line 2172 — friendly
+  // translators land in v0.3 once the per-account directory + linked-
+  // board enumeration design clears. Until then, their
+  // `unsupported_column_type` errors carry `deferred_to: "v0.3"`. The
+  // `--set-raw` escape hatch (M8) accepts these types today — the
   // hint surfaces that.
   it.each([
     'tags',
     'board_relation',
     'dependency',
-  ])('%s → unsupported_column_type with deferred_to: v0.2', (type) => {
+  ])('%s → unsupported_column_type with deferred_to: v0.3', (type) => {
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
       /not yet in the friendly --set translator allowlist/u,
     );
@@ -588,7 +589,7 @@ describe('translateColumnValue — non-allowlisted types (v0.2 writer-expansion 
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         type,
-        deferred_to: 'v0.2',
+        deferred_to: 'v0.3',
         hint: expect.stringContaining('--set-raw') as unknown,
       });
       // Negative assertions: no dead `set_raw_example` slot; no
@@ -1170,11 +1171,13 @@ describe('translateColumnValueAsync — surface contract', () => {
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('v0.2 writer-expansion tentative (tags) → deferred_to: "v0.2"', () => {
+  it('v0.3 writer-expansion candidate (tags) → deferred_to: "v0.3"', () => {
     // M8 firm row (link/email/phone) ships in WRITABLE_COLUMN_TYPES;
-    // tentative row (tags / board_relation / dependency) stays in the
-    // v0.2 deferral until per-account directory + linked-board
-    // enumeration design clears.
+    // tentative row (tags / board_relation / dependency) **slipped
+    // from v0.2 to v0.3 at M18 close** per cli-design §13 + §5.3
+    // line 2172 — friendly translators land in v0.3 once the per-
+    // account directory + linked-board enumeration design clears.
+    // The `--set-raw` escape hatch (M8) accepts these types today.
     const err = unsupportedColumnTypeError('col_42', 'tags');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
@@ -1182,13 +1185,13 @@ describe('unsupportedColumnTypeError', () => {
     expect(err.details).toMatchObject({
       column_id: 'col_42',
       type: 'tags',
-      deferred_to: 'v0.2',
+      deferred_to: 'v0.3',
     });
     expect(err.details).not.toHaveProperty('set_raw_example');
     expect(err.details).not.toHaveProperty('read_only');
   });
 
-  it('read-only-forever type (mirror) → read_only: true (no v0.2 promise)', () => {
+  it('read-only-forever type (mirror) → read_only: true (no version promise)', () => {
     const err = unsupportedColumnTypeError('col_42', 'mirror');
     expect(err.code).toBe('unsupported_column_type');
     expect(err.details).toMatchObject({
@@ -1196,24 +1199,25 @@ describe('unsupportedColumnTypeError', () => {
       type: 'mirror',
       // Codex M5b cleanup re-review #1: types Monday computes
       // server-side never become writable via the API. The error
-      // says so explicitly instead of falsely deferring to v0.2.
+      // says so explicitly instead of falsely deferring to a
+      // future version.
       read_only: true,
     });
     // Negative regression pins: read-only types must not advertise
     // a future write path or a --set-raw escape.
     expect(err.details).not.toHaveProperty('deferred_to');
     expect(err.details).not.toHaveProperty('set_raw_example');
-    expect(err.message).not.toMatch(/v0\.2/u);
+    expect(err.message).not.toMatch(/v0\.[23]/u);
     expect(err.message).not.toMatch(/--set-raw/u);
   });
 
-  it('future / unspecified type (battery) → deferred_to: "future" (no v0.2 promise)', () => {
+  it('future / unspecified type (battery) → deferred_to: "future" (no version promise)', () => {
     const err = unsupportedColumnTypeError('col_42', 'battery');
     expect(err.code).toBe('unsupported_column_type');
     expect(err.details).toMatchObject({
       column_id: 'col_42',
       type: 'battery',
-      // Codex M5b cleanup re-review #1: types not on the v0.2
+      // Codex M5b cleanup re-review #1: types not on the v0.3
       // roadmap and not read-only-forever fall into the "future"
       // bucket — surface that explicitly rather than over-promise.
       deferred_to: 'future',

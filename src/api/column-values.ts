@@ -87,10 +87,10 @@
  * `src/api/raw-write.ts`) for column types that don't have a
  * friendly translator yet. Non-allowlisted column types still
  * surface `unsupported_column_type` keyed by roadmap category per
- * `column-types.ts getColumnRoadmapCategory`: v0.2-tentative
- * writer-expansion types (`tags` / `board_relation` / `dependency`
- * — promotion or v0.3 slip pending) get `deferred_to: "v0.2"` plus
- * a `--set-raw` hint, read-only-forever types get
+ * `column-types.ts getColumnRoadmapCategory`: tentative writer-
+ * expansion types (`tags` / `board_relation` / `dependency`) slipped
+ * to v0.3 at M18 close — they get `deferred_to: "v0.3"` plus a
+ * `--set-raw` hint, read-only-forever types get
  * `read_only: true`, anything else gets `deferred_to: "future"`
  * with a `--set-raw` hint when the underlying mutation is shaped
  * like `change_column_value`. The M8 contract is "we translate the
@@ -252,12 +252,13 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
  * **Throws** `ApiError`:
  *   - `unsupported_column_type` — type not in the friendly
  *     allowlist. Carries `column_id` + `type` plus per-category
- *     details: `deferred_to: "v0.2"` for the still-pending v0.2
- *     row (`tags` / `board_relation` / `dependency`), `read_only:
- *     true` for read-only-forever types (mirror / formula /
- *     auto_number / creation_log / last_updated / item_id),
- *     `deferred_to: "future"` for anything else. The `--set-raw`
- *     escape hatch (M8) accepts most non-allowlisted types.
+ *     details: `deferred_to: "v0.3"` for the tentative writer-
+ *     expansion row that slipped from v0.2 (`tags` /
+ *     `board_relation` / `dependency`), `read_only: true` for
+ *     read-only-forever types (mirror / formula / auto_number /
+ *     creation_log / last_updated / item_id), `deferred_to:
+ *     "future"` for anything else. The `--set-raw` escape hatch
+ *     (M8) accepts most non-allowlisted types.
  *   - `internal_error` — sync entry was called on a `people`
  *     column. Programmer error: the write surface always uses
  *     `translateColumnValueAsync`. The check exists so a future
@@ -403,7 +404,7 @@ export const translateColumnValue = (
  *
  * **Throws** `unsupported_column_type` for types outside the v0.1
  * writable allowlist — same code path the value translator uses,
- * keyed by roadmap category (`deferred_to: "v0.2"` /
+ * keyed by roadmap category (`deferred_to: "v0.3"` /
  * `read_only: true` / `deferred_to: "future"`). Agents see the
  * same per-category surface across `item set` / `item update` /
  * `item clear`, so a wrapper that triages on the error details
@@ -922,10 +923,11 @@ export const bundleColumnValues = (
  *
  * Three categories per `column-types.ts getColumnRoadmapCategory`:
  *
- *   - **v0.2 writer-expansion** (`link` / `email` / `phone` / `tags`
- *     / `board_relation` / `dependency`) — `deferred_to: "v0.2"`,
- *     message names the v0.2 writer-expansion milestone (which
- *     lands `--set-raw` plus the new friendly types).
+ *   - **v0.3 writer-expansion candidates** (`tags` / `board_relation`
+ *     / `dependency` — slipped from v0.2 tentative at M18 close)
+ *     get `deferred_to: "v0.3"`. The M8 firm row (`link` / `email`
+ *     / `phone`) shipped friendly translators in v0.2 and goes
+ *     through the writable-allowlist branch, not this error path.
  *   - **read-only forever** (`mirror` / `formula` / `auto_number` /
  *     `creation_log` / `last_updated` / `item_id`) — Monday-computed
  *     columns that are not writable via the API regardless of CLI
@@ -935,8 +937,8 @@ export const bundleColumnValues = (
  *   - **future** (anything else) — `deferred_to: "future"`, generic
  *     message. Examples include `battery`, `item_assignees`,
  *     `time_tracking`, `files`, `rating`. The roadmap doesn't
- *     promise these for v0.2, so over-promising would be the same
- *     drift Codex M5b cleanup re-review caught.
+ *     promise these for v0.2 or v0.3, so over-promising would be
+ *     the same drift Codex M5b cleanup re-review caught.
  *
  * Exported for unit coverage.
  */
@@ -976,16 +978,16 @@ export const unsupportedColumnTypeError = (
       'unsupported_column_type',
       `Column "${columnId}" has type "${type}", which is not yet in the ` +
         `friendly --set translator allowlist. The v0.2 writer-expansion ` +
-        `milestone covers tags / board_relation / dependency tentatively; ` +
-        `their friendly translators land later in v0.2 once the per-account ` +
-        `directory + linked-board enumeration design clears. Use ` +
-        `--set-raw <col>=<json> with the documented Monday wire shape in ` +
-        `the meantime.`,
+        `tentative row (tags / board_relation / dependency) slipped to ` +
+        `v0.3 at M18 close — friendly translators land then once the ` +
+        `per-account directory + linked-board enumeration design clears. ` +
+        `Use --set-raw <col>=<json> with the documented Monday wire shape ` +
+        `in the meantime.`,
       {
         details: {
           column_id: columnId,
           type,
-          deferred_to: 'v0.2',
+          deferred_to: 'v0.3',
           hint:
             `use --set-raw <col>=<json> with the Monday wire shape (e.g. ` +
             `--set-raw ${columnId}='{"tag_ids":[1,2]}' for tags). ` +
