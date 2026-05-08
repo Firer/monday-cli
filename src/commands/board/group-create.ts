@@ -16,13 +16,18 @@
  * `dev mutate` escape hatch.
  *
  * **`--color` validation.** Monday's accepted colour names are
- * documented outside the SDK's typed surface and evolve over time
- * (the SDK types `group_color` as plain `String?`); v0.2 forwards
- * the agent's value verbatim and lets Monday validate server-side.
- * The CLI rejects only empty / whitespace-only `--color` at argv-
- * parse time. Mirrors M16 column-create's per-type `--settings`
- * field-set ownership rationale (over-pinning would force docs
- * revisions on every Monday palette tweak).
+ * documented outside the SDK's typed surface (the SDK types
+ * `group_color` as plain `String?`); the v0.2 implementation owns
+ * the field set per cli-design §4.3 group-create. Argv-parses
+ * against the pinned `GROUP_COLOR_VALUES` palette in
+ * `src/api/group-color.ts` (shared with `group-update` so a colour
+ * accepted by create round-trips through update without surprise
+ * rejections). Bogus palette names surface as `usage_error` (exit
+ * 1) BEFORE any network call. Mirrors M16 column-create's per-type
+ * `--settings` field-set ownership rationale — pinning specific
+ * values inline in the contract would force docs revisions every
+ * time Monday tweaks the palette; the implementation owns the
+ * field set so the contract pins only the SHAPE.
  *
  * **Live-envelope projection.** Returned `Maybe<Group>` is projected
  * through `groupProjectionSchema` (the M17 R48-lifted shared shape)
