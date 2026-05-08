@@ -64,12 +64,10 @@ import {
 } from '../../api/item-helpers.js';
 import {
   buildMeta,
-  type ColumnHead,
-  type Complexity,
   type Warning,
 } from '../../utils/output/envelope.js';
 import { selectOutput } from '../../utils/output/select.js';
-import { redact } from '../../utils/redact.js';
+import { startNdjsonStream } from '../../utils/output/ndjson.js';
 import {
   parseGlobalFlags,
 } from '../../types/global-flags.js';
@@ -161,64 +159,6 @@ const nextFetcher = (
       itemFields: ITEM_FIELDS_FRAGMENT,
       itemSchema: listItemSchema,
     });
-};
-
-/**
- * Streaming NDJSON path — writes items per-arrival to stdout, then
- * the §6.3 `_meta` trailer. Bypasses `emitSuccess` because the
- * paginate-then-render shape forces collect-before-emit.
- */
-interface StreamNdjsonInputs {
-  readonly stream: NodeJS.WritableStream;
-  readonly secrets: readonly string[];
-  readonly titles: ReadonlyMap<string, string>;
-  readonly columns: Readonly<Record<string, ColumnHead>>;
-  readonly apiVersion: string;
-  readonly cliVersion: string;
-  readonly requestId: string;
-  readonly retrievedAt: string;
-  /** §6.1 — derived from metadata + items legs by the caller. */
-  readonly source: 'live' | 'cache' | 'mixed';
-  readonly cacheAgeSeconds: number | null;
-}
-
-interface StreamHandle {
-  readonly onItem: (raw: unknown) => void;
-  readonly writeTrailer: (params: {
-    readonly nextCursor: string | null;
-    readonly hasMore: boolean;
-    readonly totalReturned: number;
-    readonly complexity: Complexity | null;
-    readonly warnings: readonly Warning[];
-  }) => void;
-}
-
-const startNdjsonStream = (inputs: StreamNdjsonInputs): StreamHandle => {
-  const { stream, secrets, titles, columns } = inputs;
-  return {
-    onItem: (raw) => {
-      const projected = projectFromRaw(raw, titles, { omitColumnTitles: true });
-      const redacted = redact(projected, { secrets });
-      stream.write(`${JSON.stringify(redacted)}\n`);
-    },
-    writeTrailer: (params) => {
-      const meta = buildMeta({
-        api_version: inputs.apiVersion,
-        cli_version: inputs.cliVersion,
-        request_id: inputs.requestId,
-        source: inputs.source,
-        retrieved_at: inputs.retrievedAt,
-        cache_age_seconds: inputs.cacheAgeSeconds,
-        complexity: params.complexity,
-        next_cursor: params.nextCursor,
-        has_more: params.hasMore,
-        total_returned: params.totalReturned,
-        columns,
-      });
-      const trailer = redact({ _meta: meta }, { secrets });
-      stream.write(`${JSON.stringify(trailer)}\n`);
-    },
-  };
 };
 
 export const itemListCommand: CommandModule<
@@ -332,20 +272,16 @@ export const itemListCommand: CommandModule<
         // Streaming NDJSON path — emit per-arrival, then the §6.3
         // trailer. Bypasses emitSuccess because the streaming
         // contract requires items hitting stdout before the walk
-        // completes.
+        // completes. R52 (M18) lifted the stream helper into
+        // `utils/output/ndjson.ts`; per-call `Meta` stays at the
+        // call site so per-noun trailer shape (item list/search
+        // carries `meta.columns`; update list does not) lives at
+        // the caller.
         if (format === 'ndjson') {
-          const secrets = collectSecrets(ctx.env);
-          const stream = startNdjsonStream({
+          const stream = startNdjsonStream<unknown>({
             stream: ctx.stdout,
-            secrets,
-            titles,
-            columns: columnHeads,
-            apiVersion,
-            cliVersion: ctx.cliVersion,
-            requestId: ctx.requestId,
-            retrievedAt: ctx.clock().toISOString(),
-            source: effectiveSource,
-            cacheAgeSeconds: effectiveCacheAge,
+            secrets: collectSecrets(ctx.env),
+            project: (raw) => projectFromRaw(raw, titles, { omitColumnTitles: true }),
           });
           const result = await paginate<unknown, ItemsPagePayload<unknown>>({
             fetchInitial: initialFetcher(client, parsed.board, parsed.group, queryParams),
@@ -358,13 +294,29 @@ export const itemListCommand: CommandModule<
             pageSize,
             onItem: stream.onItem,
           });
-          stream.writeTrailer({
-            nextCursor: result.nextCursor,
-            hasMore: result.hasMore,
-            totalReturned: result.totalReturned,
-            complexity: result.complexity,
-            warnings: filterWarnings,
-          });
+          // §6.3 trailer-warnings pin: filterWarnings live on the
+          // success envelope when the caller picks JSON; in NDJSON
+          // they're dropped per the §6.3 "no warnings in trailer"
+          // rule. If a future milestone needs them in-stream, the
+          // contract path is `_meta.warnings` (extend `Meta`,
+          // don't add a sibling key). Suppress the unused-variable
+          // lint hint on the streaming branch with a void cast.
+          void filterWarnings;
+          stream.writeTrailer(
+            buildMeta({
+              api_version: apiVersion,
+              cli_version: ctx.cliVersion,
+              request_id: ctx.requestId,
+              source: effectiveSource,
+              retrieved_at: ctx.clock().toISOString(),
+              cache_age_seconds: effectiveCacheAge,
+              complexity: result.complexity,
+              next_cursor: result.nextCursor,
+              has_more: result.hasMore,
+              total_returned: result.totalReturned,
+              columns: columnHeads,
+            }),
+          );
           return;
         }
 

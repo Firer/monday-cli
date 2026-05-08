@@ -1,4 +1,5 @@
 import type { Meta, Warning } from './envelope.js';
+import { redact } from '../redact.js';
 
 /**
  * NDJSON renderer for collections (`cli-design.md` §6.3).
@@ -20,6 +21,21 @@ import type { Meta, Warning } from './envelope.js';
  * NDJSON **never truncates**: streaming exists so agents can start
  * processing without waiting for the whole walk, not so the
  * presentation layer can drop bytes.
+ *
+ * Two surfaces:
+ *
+ * - `renderNdjson` (collect-then-emit) — used when the caller
+ *   already has the full data array. Single function, no streaming
+ *   semantics.
+ *
+ * - `startNdjsonStream` (R52, M18 lift) — used when the caller is
+ *   walking a paginated source (`paginate.onItem` /
+ *   `walkPages.onItem`). Returns a `{ onItem, writeTrailer }`
+ *   handle so the caller can emit per-item-arrival and write the
+ *   trailer after the walk completes. Three consumers: `item list`
+ *   (M7), `item search` (M18), `update list` (M18). Was previously
+ *   a private helper in `src/commands/item/list.ts`; lifted at the
+ *   3-consumer trigger.
  */
 export interface NdjsonInput {
   readonly data: readonly unknown[];
@@ -41,4 +57,52 @@ export const renderNdjson = (
     stream.write(`${JSON.stringify(resource)}\n`);
   }
   stream.write(`${JSON.stringify({ _meta: input.meta })}\n`);
+};
+
+/**
+ * Inputs to `startNdjsonStream`. Three fields — well below the
+ * >4-parameter heuristic that deferred R44 / R49 / R50:
+ *
+ * - `stream` — the writable stream items + trailer write to
+ *   (typically `ctx.stdout`).
+ * - `secrets` — token bytes the redactor scrubs from every emitted
+ *   line (per `.claude/rules/security.md` "value-scanning filter").
+ *   Caller passes `collectSecrets(ctx.env)`.
+ * - `project` — per-item projection callback. Decouples the helper
+ *   from per-noun output shape: item list/search projects raw
+ *   Monday rows through `projectFromRaw`; update list runs items
+ *   through `normaliseReplies` + the per-update zod parse.
+ *
+ * The trailer-side `Meta` is built by the caller (`buildMeta(...)`)
+ * and passed into `writeTrailer`. This keeps the per-noun trailer-
+ * shape variance at the call site — item list/search carries
+ * `meta.columns`, `update list` does not — without parameterising
+ * a `meta` builder inside the helper.
+ */
+export interface NdjsonStreamInputs<T> {
+  readonly stream: NodeJS.WritableStream;
+  readonly secrets: readonly string[];
+  readonly project: (item: T) => unknown;
+}
+
+export interface NdjsonStreamHandle<T> {
+  readonly onItem: (item: T) => void;
+  readonly writeTrailer: (meta: Meta) => void;
+}
+
+export const startNdjsonStream = <T>(
+  inputs: NdjsonStreamInputs<T>,
+): NdjsonStreamHandle<T> => {
+  const { stream, secrets, project } = inputs;
+  return {
+    onItem: (item) => {
+      const projected = project(item);
+      const redacted = redact(projected, { secrets });
+      stream.write(`${JSON.stringify(redacted)}\n`);
+    },
+    writeTrailer: (meta) => {
+      const trailer = redact({ _meta: meta }, { secrets });
+      stream.write(`${JSON.stringify(trailer)}\n`);
+    },
+  };
 };

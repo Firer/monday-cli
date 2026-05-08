@@ -4,7 +4,10 @@ import {
   buildMeta,
   type MetaInput,
 } from '../../../../src/utils/output/envelope.js';
-import { renderNdjson } from '../../../../src/utils/output/ndjson.js';
+import {
+  renderNdjson,
+  startNdjsonStream,
+} from '../../../../src/utils/output/ndjson.js';
 
 const baseMetaInput: MetaInput = {
   api_version: '2026-01',
@@ -112,5 +115,141 @@ describe('renderNdjson', () => {
     const lines = read();
     // Sanity: nested object stays on the resource line.
     expect(lines[0]).toBe('{"id":"1","nested":{"a":1,"b":2}}');
+  });
+});
+
+describe('startNdjsonStream (R52, M18 lift)', () => {
+  // Direct unit coverage for the lifted stream helper. Item list +
+  // item search + update list integration tests exercise it end-to-
+  // end; these unit tests pin the per-input contract (project
+  // callback, redaction passthrough, trailer shape, one-line-per-
+  // resource) so a future regression to the helper itself fails
+  // here loudly without depending on any consumer's full path.
+
+  interface RawItem {
+    readonly id: string;
+    readonly note?: string;
+  }
+
+  it('emits one projected line per item via onItem', () => {
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: [],
+      project: (item) => ({ id: item.id, projected: true }),
+    });
+    handle.onItem({ id: '1' });
+    handle.onItem({ id: '2' });
+    const lines = read();
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]!)).toEqual({ id: '1', projected: true });
+    expect(JSON.parse(lines[1]!)).toEqual({ id: '2', projected: true });
+  });
+
+  it('runs the project callback before serialising', () => {
+    // The point of `project` is that consumers can transform raw
+    // Monday rows into the projected output shape *before* JSON
+    // serialisation. A consumer that hands raw rows in (no
+    // project) should see them serialised raw. Field name `note`
+    // intentionally chosen — `raw_token` would trigger the key-
+    // based filter (per .claude/rules/security.md) and the
+    // serialised output would surprise the test reader.
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: [],
+      project: (item) => item, // identity
+    });
+    handle.onItem({ id: '1', note: 'preserved' });
+    const lines = read();
+    expect(JSON.parse(lines[0]!)).toEqual({ id: '1', note: 'preserved' });
+  });
+
+  it('redacts the literal secret from each emitted line', () => {
+    // Per .claude/rules/security.md: every emitted byte goes
+    // through the value-scanning redactor with the runtime token
+    // value as a secret. The lifted helper must thread `secrets`
+    // through to `redact()` for each item AND the trailer.
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: ['leak-token'],
+      project: (item) => ({
+        id: item.id,
+        ...(item.note === undefined ? {} : { note: item.note }),
+      }),
+    });
+    handle.onItem({ id: '1', note: 'value contains leak-token in body' });
+    handle.writeTrailer(
+      buildMeta({
+        ...baseMetaInput,
+        request_id: 'leak-token-in-meta',
+      }),
+    );
+    const lines = read();
+    expect(lines.join('\n')).not.toContain('leak-token');
+    // Sanity: the redaction substituted the canonical [REDACTED]
+    // marker (per src/utils/redact.ts).
+    expect(lines[0]).toContain('[REDACTED]');
+    expect(lines[1]).toContain('[REDACTED]');
+  });
+
+  it('writeTrailer emits exactly `{"_meta":{...}}`, no sibling keys', () => {
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: [],
+      project: (item) => item,
+    });
+    handle.writeTrailer(buildMeta(baseMetaInput));
+    const lines = read();
+    expect(lines).toHaveLength(1);
+    const trailer = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(Object.keys(trailer)).toEqual(['_meta']);
+    // Trailer's `_meta` carries the full Meta shape (schema_version,
+    // api_version, etc.) — same shape the JSON envelope's `meta`
+    // would have.
+    expect((trailer._meta as { schema_version: string }).schema_version).toBe(
+      '1',
+    );
+  });
+
+  it('emits items one-per-line followed by the trailer (full streaming flow)', () => {
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: [],
+      project: (item) => ({ id: item.id }),
+    });
+    handle.onItem({ id: 'a' });
+    handle.onItem({ id: 'b' });
+    handle.writeTrailer(buildMeta(baseMetaInput));
+    const lines = read();
+    expect(lines).toHaveLength(3);
+    // Sanity on full ordering: items, then trailer.
+    expect(JSON.parse(lines[0]!)).toEqual({ id: 'a' });
+    expect(JSON.parse(lines[1]!)).toEqual({ id: 'b' });
+    const trailer = JSON.parse(lines[2]!) as Record<string, unknown>;
+    expect(Object.keys(trailer)).toEqual(['_meta']);
+  });
+
+  it('does not include `warnings` in the trailer (§6.3 contract pin)', () => {
+    // §6.3 fixes the trailer shape: `{"_meta":{...}}` exactly. No
+    // warnings sibling. The lifted helper takes a `Meta` directly,
+    // so even if the caller built one with no warning surface, the
+    // trailer line stays single-key. Future warning-in-trailer
+    // contract path is `_meta.warnings` (extend the Meta type),
+    // not a sibling.
+    const { stream, read } = collect();
+    const handle = startNdjsonStream<RawItem>({
+      stream,
+      secrets: [],
+      project: (item) => item,
+    });
+    handle.writeTrailer(buildMeta(baseMetaInput));
+    const lines = read();
+    const trailer = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(Object.keys(trailer)).toEqual(['_meta']);
+    expect('warnings' in trailer).toBe(false);
   });
 });
