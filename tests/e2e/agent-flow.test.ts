@@ -1,24 +1,31 @@
 /**
- * Agent-flow E2E (`v0.1-plan.md` §3 M6 exit criterion).
+ * Agent-flow E2E (`v0.1-plan.md` §3 M6 exit criterion + `v0.2-plan.md`
+ * §3 M18 "agent-flow extended with v0.2 verb").
  *
  * Replays the v0.1 fallback path from `examples.md` §1 — the workflow
- * an agent runs to "pick up a task and finish it" using only v0.1
- * commands (the `monday dev …` namespace ships in v0.3):
+ * an agent runs to "pick up a task and finish it" — extended at M18
+ * with `item create` so the smoke spans a v0.1 + v0.2 mix:
  *
- *   1. `monday item list --board <bid> --where status=Backlog --where owner=me`
- *      → ranked list of agent's open tasks.
- *   2. `monday item set <iid> status='Working on it'`
- *      → mark the picked task in-progress.
- *   3. `monday item set <iid> status=Done`
- *      → mark the task complete (after the work is done).
- *   4. `monday update create <iid> --body "..."`
- *      → post a result comment narrating what shipped.
+ *   1. `monday item create --board <bid> --name "..." --set status=Backlog`
+ *      → file the new task (v0.2, M9). The created item's ID feeds
+ *      every subsequent step — the spawn is **load-bearing**, not a
+ *      smoke-only addition.
+ *   2. `monday item list --board <bid> --where status=Backlog --where owner=me`
+ *      → ranked list of agent's open tasks. Verifies the just-
+ *      created item is reachable through the M3 read path.
+ *   3. `monday item set <iid> status='Working on it'`
+ *      → mark the picked task in-progress (M5b mutation).
+ *   4. `monday item set <iid> status=Done`
+ *      → mark the task complete (M5b mutation).
+ *   5. `monday update create <iid> --body "..."`
+ *      → post a result comment narrating what shipped (M5b mutation).
  *
  * Each step spawns the compiled binary against an in-process fixture
  * server, asserting the §6 envelope contract holds end-to-end across
- * four invocations. This is the agent flow the v0.1 contract was
- * designed for; if the binary survives this test the contract holds
- * for the most common agent loop.
+ * five invocations spanning M3 (item list) + M5b (item set, update
+ * create) + M9 (item create). If the binary survives this test the
+ * contract holds for the most common agent loop AND the v0.1+v0.2
+ * mix.
  *
  * Build dependency: `dist/cli/index.js` must be current. CI runs
  * `npm run build` before `test:e2e`.
@@ -194,7 +201,7 @@ const whoamiInteraction: Interaction = {
   },
 };
 
-describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () => {
+describe('M6 e2e — agent flow (v0.1 fallback path + M18 v0.2 extension)', () => {
   let server: FixtureServer | undefined;
   afterEach(async () => {
     if (server !== undefined) {
@@ -203,8 +210,8 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
     }
   });
 
-  // 4 sequential spawns at ~1.2s each push the wall-clock cost
-  // of this test close to the 5s vitest default. Bumping to 10s
+  // 5 sequential spawns at ~1.2s each push the wall-clock cost
+  // of this test close to the 5s vitest default. Bumping to 15s
   // gives headroom against system-load flakes (the agent-flow E2E
   // runs on Node 22/24 in CI and occasionally trips the default
   // when tsx import + commander registration are both warming up).
@@ -213,17 +220,36 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
   // B added duplicate (registry now 40 entries vs 39); under heavy
   // concurrent test load the 10s budget started flaking, so the
   // ceiling lifts to 15s. CLAUDE.md predicted this — the headroom
-  // bump is the documented response.
-  it('list backlog → start → done → comment, contract holds across 4 spawns', { timeout: 15000 }, async () => {
+  // bump is the documented response. M18 added a 5th spawn (item
+  // create); the 15s ceiling holds.
+  it('create → list backlog → start → done → comment, contract holds across 5 spawns spanning v0.1+v0.2', { timeout: 15000 }, async () => {
+    // M18 release-prep: `item create` (v0.2 / M9) is the new
+    // first step. The created item's ID `5001` flows into every
+    // subsequent step — the spawn is load-bearing, not smoke-only
+    // (Codex M18 pre-flight P3-4: re-using the returned ID
+    // in `item set` / `update create` proves the v0.2 envelope's
+    // `data.id` slot is contract-correct, not just present).
     const cassette: Cassette = {
       interactions: [
-        // Step 1: `monday item list --board 111 --where status=Backlog --where owner=me`
-        // Order: BoardMetadata (filter resolves `status` token) →
-        // Whoami (resolves `owner=me`) → ItemList (fetches matched items).
+        // Step 1: `monday item create --board 111 --name "Refactor login"
+        //          --set status=Backlog`
+        // Order: BoardMetadata (resolves --set status token) →
+        // ItemCreateTopLevel (creates the item).
         {
           operation_name: 'BoardMetadata',
           response: { data: { boards: [sampleBoardMetadata] } },
         },
+        {
+          operation_name: 'ItemCreateTopLevel',
+          response: {
+            data: {
+              create_item: buildItem('Backlog', 0),
+            },
+          },
+        },
+        // Step 2: `monday item list --board 111 --where status=Backlog --where owner=me`
+        // Order: cache hit on metadata (warmed by step 1) →
+        // Whoami (resolves `owner=me`) → ItemList.
         whoamiInteraction,
         {
           operation_name: 'ItemsPage',
@@ -240,7 +266,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
             },
           },
         },
-        // Step 2: `monday item set 5001 status='Working on it' --board 111`
+        // Step 3: `monday item set 5001 status='Working on it' --board 111`
         // Order: cache hit on metadata → ItemSetRich (the live mutation).
         {
           operation_name: 'ItemSetRich',
@@ -250,7 +276,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
             },
           },
         },
-        // Step 3: `monday item set 5001 status=Done --board 111`
+        // Step 4: `monday item set 5001 status=Done --board 111`
         {
           operation_name: 'ItemSetRich',
           response: {
@@ -259,7 +285,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
             },
           },
         },
-        // Step 4: `monday update create 5001 --body "..."`
+        // Step 5: `monday update create 5001 --body "..."`
         {
           operation_name: 'UpdateCreate',
           response: {
@@ -287,7 +313,41 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
     try {
       server = await startFixtureServer({ cassette });
 
-      // ── Spawn 1: list ───────────────────────────────────────────
+      // ── Spawn 1: create (M9 / v0.2) ─────────────────────────────
+      const createResult = await spawnCli({
+        args: [
+          'item',
+          'create',
+          '--board',
+          '111',
+          '--name',
+          'Refactor login',
+          '--set',
+          'status=Backlog',
+          '--json',
+        ],
+        env: fixtureEnv(server, { XDG_CACHE_HOME: xdg }),
+      });
+      expect(createResult.exitCode).toBe(0);
+      const createEnv = parseEnvelope(createResult.stdout) as EnvelopeShape & {
+        data: { id: string; name: string };
+      };
+      // Cold-start `item create` — no cache yet. Metadata leg is
+      // live; mutation leg is live. M3 source aggregation reports
+      // `meta.source: 'live'` when both legs come from live data.
+      // The cache file gets populated as a side-effect for the
+      // subsequent spawns.
+      assertEnvelopeContract(createEnv, { source: 'live' });
+      expect(createEnv.data.id).toBe('5001');
+      expect(createEnv.data.name).toBe('Refactor login');
+      expect(createResult.stdout).not.toContain(LEAK_CANARY);
+      expect(createResult.stderr).not.toContain(LEAK_CANARY);
+
+      // The created ID is now the "picked task" for every
+      // downstream step — load-bearing, not just smoke.
+      const createdItemId = createEnv.data.id;
+
+      // ── Spawn 2: list ───────────────────────────────────────────
       const listResult = await spawnCli({
         args: [
           'item',
@@ -306,26 +366,24 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       const listEnv = parseEnvelope(listResult.stdout) as EnvelopeShape & {
         data: readonly { id: string; name: string }[];
       };
-      // Cold-start `item list` — no cache yet. Filter resolution
-      // fetches metadata live (no stale-cache refresh path), and
-      // items_page is also live; M3's source aggregation keeps
-      // `meta.source` as `'live'` when there's nothing cache-sourced
-      // in the call. The cache file gets populated as a side-effect,
-      // which the next spawn picks up.
-      assertEnvelopeContract(listEnv, { source: 'live' });
+      // Step 1 warmed the cache; step 2's metadata leg is cache-
+      // backed. Items page leg stays live → meta.source: 'mixed'.
+      assertEnvelopeContract(listEnv, { source: 'mixed' });
       expect(listEnv.data).toHaveLength(1);
-      expect(listEnv.data[0]?.id).toBe('5001');
+      // Pin: the listed item is the one we just created — proves
+      // the v0.2 create's `data.id` round-trips through the v0.1
+      // read path.
+      expect(listEnv.data[0]?.id).toBe(createdItemId);
       expect(listEnv.data[0]?.name).toBe('Refactor login');
-      // Token never leaks across the whole flow.
       expect(listResult.stdout).not.toContain(LEAK_CANARY);
       expect(listResult.stderr).not.toContain(LEAK_CANARY);
 
-      // ── Spawn 2: start (status=Working on it) ───────────────────
+      // ── Spawn 3: start (status=Working on it) ───────────────────
       const startResult = await spawnCli({
         args: [
           'item',
           'set',
-          '5001',
+          createdItemId,
           'status=Working on it',
           '--board',
           '111',
@@ -343,9 +401,9 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       // `item set` resolves `status_4` against board metadata. The
       // first spawn populated the cache; this spawn picks the cached
       // shape and the live mutation, so source should be `'mixed'`
-      // and `meta.idempotent` is set per cli-design §6.4.
+      // per cli-design §6.4.
       assertEnvelopeContract(startEnv, { source: 'mixed' });
-      expect(startEnv.data.id).toBe('5001');
+      expect(startEnv.data.id).toBe(createdItemId);
       expect(startEnv.data.columns.status_4).toMatchObject({
         type: 'status',
         label: 'Working on it',
@@ -353,12 +411,12 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       expect(startResult.stdout).not.toContain(LEAK_CANARY);
       expect(startResult.stderr).not.toContain(LEAK_CANARY);
 
-      // ── Spawn 3: done (status=Done) ─────────────────────────────
+      // ── Spawn 4: done (status=Done) ─────────────────────────────
       const doneResult = await spawnCli({
         args: [
           'item',
           'set',
-          '5001',
+          createdItemId,
           'status=Done',
           '--board',
           '111',
@@ -374,17 +432,18 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
         };
       };
       assertEnvelopeContract(doneEnv, { source: 'mixed' });
+      expect(doneEnv.data.id).toBe(createdItemId);
       expect(doneEnv.data.columns.status_4).toMatchObject({
         type: 'status',
         label: 'Done',
       });
 
-      // ── Spawn 4: comment (update create) ────────────────────────
+      // ── Spawn 5: comment (update create) ────────────────────────
       const commentResult = await spawnCli({
         args: [
           'update',
           'create',
-          '5001',
+          createdItemId,
           '--body',
           'Shipped in PR #1234',
           '--json',
@@ -400,7 +459,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path from examples.md §1)', () =
       assertEnvelopeContract(commentEnv, { source: 'live' });
       expect(commentEnv.data.id).toBe('777');
       expect(commentEnv.data.text_body).toBe('Shipped in PR #1234');
-      expect(commentEnv.data.item_id).toBe('5001');
+      expect(commentEnv.data.item_id).toBe(createdItemId);
 
       // ── Cassette fully consumed in expected order ───────────────
       expect(server.remaining()).toBe(0);
