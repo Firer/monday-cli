@@ -58,20 +58,28 @@ post-mortem):
   group-update adopts `withBoardInvalidationFanOut` (3rd fan-out
   consumer after column-update + board-update).
 
-**M17 → M18 cleanup window** (no R-class lifts scheduled — both
-M17-surfaced candidates deferred to v0.3; full detail in §22):
+**M17 → M18 cleanup window** (R51 scheduled for the cleanup
+window; full detail in §22):
+- **R51 — `findBoardChildOrThrow` helper.** New post-M17 finding;
+  3-consumer pattern surfaced by M17 implementation review
+  (column-update + group-update + group-archive each load board
+  metadata, find a child by ID, throw `not_found` with
+  `details: {board_id, [<kind>_id]: id}` if absent). Three call
+  sites collapse from 14 lines each to a single helper call;
+  pure boilerplate consolidation. Schedule: M17 → M18 cleanup
+  window (mirrors R40 + R43 + R46's M15→M16 / M16→M17 cadence).
 - **R49 candidate** (snapshot-bearing destructive-archive dry-run
   helper) — evaluated at M17 close and deferred to v0.3. The three
   archive verbs (item-archive / board-archive / group-archive)
   diverge enough on snapshot-loading semantics that a unified
-  helper signature exceeds the >4-parameter heuristic. Inline
-  duplication-cost stays acceptable for v0.2.
+  helper signature exceeds the >4-parameter heuristic.
 - **R50 candidate** (1-surface attribute fan-out helper) — deferred
   to v0.3. Two consumers post-M17 (board-update + group-update);
   below the 3-consumer trigger.
 - **R42** (retroactive missing-root-key sweep across ~32 sites
   including the 5 new M17 mutation sites) — stays deferred to a
-  focused post-M17 dedicated cleanup session.
+  focused post-M17 dedicated cleanup session distinct from the
+  M17 → M18 cleanup window.
 - **R44** (generic `projectMutationResource` over R28/R37/R43/R45/R48)
   stays deferred to v0.3 OR a sixth-noun trigger; touching R44 now
   would re-touch five per-noun helpers and scope-creep into a
