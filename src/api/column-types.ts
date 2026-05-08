@@ -114,6 +114,25 @@ const V0_2_WRITER_EXPANSION_SET: ReadonlySet<string> = new Set<string>(
 );
 
 /**
+ * Membership test for the v0.2 writer-expansion tentative row. Used
+ * by the `unsupportedColumnTypeError` 5-way classifier to keep the
+ * `v0_2_writer_expansion` row reachable via a single source-of-truth
+ * predicate. Mirrors the `isReadOnlyForeverType` /
+ * `isFilesShapedType` exported helper pattern.
+ *
+ * The set is populated through M19 implementation start with the
+ * three slipped types (`tags` / `board_relation` / `dependency`); at
+ * M19 close the three graduate into `WRITABLE_COLUMN_TYPES` and this
+ * predicate returns `false` for every input. The helper survives so a
+ * future tentative-row revival (next time the writer-expansion
+ * roadmap has a tentative slot) can re-populate the set without re-
+ * architecting the classifier.
+ */
+export const isV0_2WriterExpansionType = (
+  type: string,
+): type is V0_2WriterExpansionType => V0_2_WRITER_EXPANSION_SET.has(type);
+
+/**
  * Column types Monday computes server-side and **never makes
  * writable via the API** (`cli-design.md` §5.3 writer-expansion
  * roadmap table — "read-only forever" row). cli-design says

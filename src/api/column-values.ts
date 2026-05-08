@@ -102,8 +102,9 @@
 import { ApiError, UsageError } from '../utils/errors.js';
 import type { JsonObject } from '../types/json.js';
 import {
-  getColumnRoadmapCategory,
   isFilesShapedType,
+  isReadOnlyForeverType,
+  isV0_2WriterExpansionType,
   isWritableColumnType,
   type WritableColumnType,
 } from './column-types.js';
@@ -921,24 +922,35 @@ export const bundleColumnValues = (
  * agents get accurate guidance instead of a blanket "wait for the
  * next version" hint.
  *
- * Three categories per `column-types.ts getColumnRoadmapCategory`:
+ * **5-way classifier** (M19 fold of v0.2-plan §22 / v0.3-plan §22
+ * non-R-class quality refactor — collapses the prior 5-branch
+ * if/else chain into a single category-table dispatch).
+ * Categories, in precedence order:
  *
- *   - **v0.3 writer-expansion candidates** (`tags` / `board_relation`
- *     / `dependency` — slipped from v0.2 tentative at M18 close)
- *     get `deferred_to: "v0.3"`. The M8 firm row (`link` / `email`
- *     / `phone`) shipped friendly translators in v0.2 and goes
- *     through the writable-allowlist branch, not this error path.
  *   - **read-only forever** (`mirror` / `formula` / `auto_number` /
- *     `creation_log` / `last_updated` / `item_id`) — Monday-computed
- *     columns that are not writable via the API regardless of CLI
- *     version. `read_only: true`, hint points at the underlying
- *     source column. cli-design.md §5.3 writer-expansion roadmap
- *     "read-only forever" row says this explicitly.
- *   - **future** (anything else) — `deferred_to: "future"`, generic
- *     message. Examples include `battery`, `item_assignees`,
- *     `time_tracking`, `files`, `rating`. The roadmap doesn't
- *     promise these for v0.2 or v0.3, so over-promising would be
- *     the same drift Codex M5b cleanup re-review caught.
+ *     `creation_log` / `last_updated` / `item_id` / `item_assignees`)
+ *     — Monday-computed columns that are not writable via the API
+ *     regardless of CLI version. Carry `read_only: true` (no
+ *     `deferred_to`); hint points at the underlying source column.
+ *     cli-design.md §5.3 writer-expansion roadmap "read-only forever"
+ *     row says this explicitly.
+ *   - **v0.2 writer-expansion** (`tags` / `board_relation` /
+ *     `dependency` — slipped from v0.2 tentative at M18 close;
+ *     graduated into the friendly allowlist at M19 close so this
+ *     row is unreachable post-M19 but stays as documented dead code
+ *     for stability + future tentative-row revival). Carry
+ *     `deferred_to: "v0.3"`; hint nudges agents at `--set-raw`.
+ *   - **`files`-shaped** (currently `file` only) — Monday writes via
+ *     `add_file_to_column` (multipart upload) rather than
+ *     `change_column_value`, so neither friendly translator nor
+ *     `--set-raw` can reach the wire surface. Carry
+ *     `deferred_to: "v0.4"`; hint flags the multipart-upload nature.
+ *   - **`time_tracking`** — verb-shaped extension (start/stop, not
+ *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
+ *     hint points at the upcoming verb surface.
+ *   - **future** (anything else — `battery`, `rating`, etc.) —
+ *     `deferred_to: "future"`, generic message pointing at
+ *     `--set-raw` provided the type accepts `change_column_value`.
  *
  * Exported for unit coverage.
  */
@@ -946,120 +958,115 @@ export const unsupportedColumnTypeError = (
   columnId: string,
   type: string,
 ): ApiError => {
-  const category = getColumnRoadmapCategory(type);
-  if (category === 'read_only_forever') {
-    return new ApiError(
-      'unsupported_column_type',
-      `Column "${columnId}" has type "${type}", which Monday computes ` +
-        `server-side and does not make writable via the API. This is ` +
-        `not a v0.1 limitation — Monday's API rejects write attempts ` +
-        `against this type regardless of CLI version, so no future ` +
-        `release will lift the restriction. Set the underlying source ` +
-        `column instead (e.g. for a mirror column, write to the column ` +
-        `the mirror reflects on the linked board).`,
-      {
-        details: {
-          column_id: columnId,
-          type,
-          read_only: true,
-          hint:
-            'this column type is computed by Monday and is permanently ' +
-            'read-only via the API. Do not attempt --set / --set-raw — ' +
-            'identify the underlying source column (the column the ' +
-            'mirror / formula / auto_number / etc. reflects) and write ' +
-            'to that instead. See cli-design.md §5.3 writer-expansion ' +
-            'roadmap (read-only-forever row) for the full type list.',
-        },
-      },
-    );
-  }
-  if (category === 'v0_2_writer_expansion') {
-    return new ApiError(
-      'unsupported_column_type',
-      `Column "${columnId}" has type "${type}", which is not yet in the ` +
-        `friendly --set translator allowlist. The v0.2 writer-expansion ` +
-        `tentative row (tags / board_relation / dependency) slipped to ` +
-        `v0.3 at M18 close — friendly translators land then once the ` +
-        `per-account directory + linked-board enumeration design clears. ` +
-        `Use --set-raw <col>=<json> with the documented Monday wire shape ` +
-        `in the meantime.`,
-      {
-        details: {
-          column_id: columnId,
-          type,
-          deferred_to: 'v0.3',
-          hint:
-            `use --set-raw <col>=<json> with the Monday wire shape (e.g. ` +
-            `--set-raw ${columnId}='{"tag_ids":[1,2]}' for tags). ` +
-            `See https://developer.monday.com/api-reference/reference/` +
-            `column-types-reference for per-type wire shapes.`,
-        },
-      },
-    );
-  }
-  // category === 'future'
-
-  // Files-shaped types are pinned to `deferred_to: "v0.4"` per
-  // cli-design.md §5.3 writer-expansion roadmap (the "files" row).
-  // Monday writes these via `add_file_to_column` (multipart upload)
-  // rather than `change_column_value`, so the friendly translator
-  // can't translate them at all and `--set-raw` also rejects them
-  // (different code path; raw-write.ts emits the same v0.4
-  // deferral). Without this branch, files-shaped types would fall
-  // through to the generic `future` branch and contradict the
-  // contract — Codex M18 round-2 P2.
-  if (isFilesShapedType(type)) {
-    return new ApiError(
-      'unsupported_column_type',
-      `Column "${columnId}" has type "${type}", which Monday writes ` +
-        `via add_file_to_column (multipart upload) rather than ` +
-        `change_column_value. The friendly --set translator can't ` +
-        `reach this surface; --set-raw <col>=<json> can't either. ` +
-        `Asset upload is pinned to v0.4 per cli-design.md §13.`,
-      {
-        details: {
-          column_id: columnId,
-          type,
-          deferred_to: 'v0.4',
-          hint:
-            'asset upload is a v0.4 deferral; the underlying mutation ' +
-            '(add_file_to_column) requires multipart wire shape that ' +
-            'the column-value path does not model.',
-        },
-      },
-    );
-  }
-
-  // `time_tracking` is pinned to `deferred_to: "v0.3"` per
-  // cli-design.md §5.3 writer-expansion roadmap row. It's a v0.3
-  // deferral because the semantics are start/stop verbs (not value
-  // writes), so the friendly translator can't represent it without
-  // a verb-shaped extension. `--set-raw` rejects similarly.
-  if (type === 'time_tracking') {
-    return new ApiError(
-      'unsupported_column_type',
-      `Column "${columnId}" has type "time_tracking", which Monday ` +
-        `mutates via start/stop verbs rather than column-value writes. ` +
-        `The friendly --set translator and --set-raw both target ` +
-        `change_column_value-shaped types; time_tracking needs a ` +
-        `verb-shaped extension pinned for v0.3.`,
-      {
-        details: {
-          column_id: columnId,
-          type,
-          deferred_to: 'v0.3',
-          hint:
-            'time_tracking uses start/stop verbs, not column-value ' +
-            'writes. v0.3 plans a dedicated surface; until then there ' +
-            'is no friendly or raw write path.',
-        },
-      },
-    );
-  }
-
+  const category = classifyUnsupported(type);
+  const row = UNSUPPORTED_TABLE[category];
   return new ApiError(
     'unsupported_column_type',
-    `Column "${columnId}" has type "${type}", which is not in the ` +
+    row.message(columnId, type),
+    {
+      details: {
+        column_id: columnId,
+        type,
+        ...row.details(columnId),
+      },
+    },
+  );
+};
+
+type UnsupportedCategory =
+  | 'read_only_forever'
+  | 'v0_2_writer_expansion'
+  | 'files_shaped'
+  | 'time_tracking'
+  | 'future';
+
+const classifyUnsupported = (type: string): UnsupportedCategory => {
+  if (isReadOnlyForeverType(type)) return 'read_only_forever';
+  if (isV0_2WriterExpansionType(type)) return 'v0_2_writer_expansion';
+  if (isFilesShapedType(type)) return 'files_shaped';
+  if (type === 'time_tracking') return 'time_tracking';
+  return 'future';
+};
+
+interface UnsupportedTableRow {
+  readonly message: (columnId: string, type: string) => string;
+  readonly details: (columnId: string) => Record<string, unknown>;
+}
+
+const UNSUPPORTED_TABLE: Readonly<
+  Record<UnsupportedCategory, UnsupportedTableRow>
+> = {
+  read_only_forever: {
+    message: (columnId, type) =>
+      `Column "${columnId}" has type "${type}", which Monday computes ` +
+      `server-side and does not make writable via the API. This is ` +
+      `not a v0.1 limitation — Monday's API rejects write attempts ` +
+      `against this type regardless of CLI version, so no future ` +
+      `release will lift the restriction. Set the underlying source ` +
+      `column instead (e.g. for a mirror column, write to the column ` +
+      `the mirror reflects on the linked board).`,
+    details: () => ({
+      read_only: true,
+      hint:
+        'this column type is computed by Monday and is permanently ' +
+        'read-only via the API. Do not attempt --set / --set-raw — ' +
+        'identify the underlying source column (the column the ' +
+        'mirror / formula / auto_number / etc. reflects) and write ' +
+        'to that instead. See cli-design.md §5.3 writer-expansion ' +
+        'roadmap (read-only-forever row) for the full type list.',
+    }),
+  },
+  v0_2_writer_expansion: {
+    message: (columnId, type) =>
+      `Column "${columnId}" has type "${type}", which is not yet in the ` +
+      `friendly --set translator allowlist. The v0.2 writer-expansion ` +
+      `tentative row (tags / board_relation / dependency) slipped to ` +
+      `v0.3 at M18 close — friendly translators land then once the ` +
+      `per-account directory + linked-board enumeration design clears. ` +
+      `Use --set-raw <col>=<json> with the documented Monday wire shape ` +
+      `in the meantime.`,
+    details: (columnId) => ({
+      deferred_to: 'v0.3',
+      hint:
+        `use --set-raw <col>=<json> with the Monday wire shape (e.g. ` +
+        `--set-raw ${columnId}='{"tag_ids":[1,2]}' for tags). ` +
+        `See https://developer.monday.com/api-reference/reference/` +
+        `column-types-reference for per-type wire shapes.`,
+    }),
+  },
+  files_shaped: {
+    message: (columnId, type) =>
+      `Column "${columnId}" has type "${type}", which Monday writes ` +
+      `via add_file_to_column (multipart upload) rather than ` +
+      `change_column_value. The friendly --set translator can't ` +
+      `reach this surface; --set-raw <col>=<json> can't either. ` +
+      `Asset upload is pinned to v0.4 per cli-design.md §13.`,
+    details: () => ({
+      deferred_to: 'v0.4',
+      hint:
+        'asset upload is a v0.4 deferral; the underlying mutation ' +
+        '(add_file_to_column) requires multipart wire shape that ' +
+        'the column-value path does not model.',
+    }),
+  },
+  time_tracking: {
+    message: (columnId) =>
+      `Column "${columnId}" has type "time_tracking", which Monday ` +
+      `mutates via start/stop verbs rather than column-value writes. ` +
+      `The friendly --set translator and --set-raw both target ` +
+      `change_column_value-shaped types; time_tracking needs a ` +
+      `verb-shaped extension pinned for v0.3.`,
+    details: () => ({
+      deferred_to: 'v0.3',
+      hint:
+        'time_tracking uses start/stop verbs, not column-value ' +
+        'writes. v0.3 plans a dedicated surface; until then there ' +
+        'is no friendly or raw write path.',
+    }),
+  },
+  future: {
+    message: (columnId, type) =>
+      `Column "${columnId}" has type "${type}", which is not in the ` +
       `friendly --set translator allowlist (text, long_text, numbers, ` +
       `status, dropdown, date, people, link, email, phone) and is not ` +
       `pinned to a specific roadmap version. Try --set-raw <col>=<json> ` +
@@ -1067,17 +1074,13 @@ export const unsupportedColumnTypeError = (
       `type Monday writes via change_column_value. Files-shaped types ` +
       `(file) and read-only-forever types (mirror / formula / etc.) are ` +
       `the exception; --set-raw rejects those at column-resolution time.`,
-    {
-      details: {
-        column_id: columnId,
-        type,
-        deferred_to: 'future',
-        hint:
-          'use --set-raw <col>=<json> with the Monday wire shape if the ' +
-          'type accepts change_column_value. Examples in this bucket ' +
-          '(battery, rating) are not yet scoped on the writer-expansion ' +
-          'roadmap. See cli-design.md §5.3.',
-      },
-    },
-  );
+    details: () => ({
+      deferred_to: 'future',
+      hint:
+        'use --set-raw <col>=<json> with the Monday wire shape if the ' +
+        'type accepts change_column_value. Examples in this bucket ' +
+        '(battery, rating) are not yet scoped on the writer-expansion ' +
+        'roadmap. See cli-design.md §5.3.',
+    }),
+  },
 };
