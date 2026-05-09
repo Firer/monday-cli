@@ -74,14 +74,17 @@ expansion roadmap + §13 v0.3 entry).
   schema `{tags, total}`. Cache-aware via
   `loadAccountTags`. Registry slot in
   `src/commands/index.ts:136`.
-- **Commit 6 — Codex implementation review feedback**
-  (this session). Findings from the post-Commit-5 Codex
-  review applied inline. Detail in v0.3-plan §11 M19
-  post-mortem.
-- **Commit 7 — `docs(m19) close M19`** (this session).
-  Status flip + post-mortem + cross-doc sweep (CLAUDE.md
-  / README / cli-design §8 + §4.3 / output-shapes /
-  examples / api-reference / architecture).
+- **Commit 6 — `7707085 docs(m19)`** (this session). The
+  M19 close itself, bundling Codex implementation review
+  feedback (2 P1 + 3 P2 + 1 P3 findings, all addressed
+  inline) with the close docs sweep (CLAUDE.md / README /
+  cli-design §8 + §4.3 / output-shapes ToC + account-tags
+  entry / api-reference M19 row / architecture.md).
+  Combined to one commit because the Codex fixes touch
+  the same files the close sweep touches; splitting
+  would have created two near-identical doc-sweep
+  commits. Final M19 commit; the milestone closes
+  here.
 
 **Test count + coverage at M19 close:** 2308 (M19 entry,
 post-pre-flight) → 2466 (M19 close), +158 net. Coverage
