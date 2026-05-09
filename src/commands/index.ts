@@ -41,6 +41,10 @@ import { accountWhoamiCommand } from './account/whoami.js';
 import { accountInfoCommand } from './account/info.js';
 import { accountVersionCommand } from './account/version.js';
 import { accountComplexityCommand } from './account/complexity.js';
+// M19 Commit 5 (v0.3) — account.tags read verb. Closes the §6.5
+// `tag_not_found.details.hint` forward-reference (4c652d5) by giving
+// agents a self-fulfilling next step when a tag-name lookup misses.
+import { accountTagsCommand } from './account/tags.js';
 // M3 commands — workspace + board (incl. describe core) + user + update reads.
 import { workspaceListCommand } from './workspace/list.js';
 import { workspaceGetCommand } from './workspace/get.js';
@@ -133,6 +137,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     accountInfoCommand,
     accountVersionCommand,
     accountComplexityCommand,
+    accountTagsCommand,
     workspaceListCommand,
     workspaceGetCommand,
     workspaceFoldersCommand,

@@ -21,6 +21,7 @@ import {
   drive,
   parseEnvelope,
   assertEnvelopeContract,
+  useCachedIntegrationEnv,
   FIXTURE_API_URL,
   LEAK_CANARY,
   type EnvelopeShape,
@@ -373,6 +374,181 @@ describe('monday account complexity (integration)', () => {
     });
   });
 });
+
+describe('monday account tags (integration, M19 Commit 5)', () => {
+  // Per-test cache isolation — loadAccountTags writes to
+  // ~/.cache/monday-cli on cache miss, and a shared cache directory
+  // would let one test's cache write contaminate another. Each test
+  // gets a fresh XDG_CACHE_HOME via useCachedIntegrationEnv (same
+  // pattern item-set / item-list etc. use for board-metadata cache
+  // isolation).
+  const { drive: cachedDrive } = useCachedIntegrationEnv('monday-cli-account-tags-');
+
+  // Tag-directory read verb. M19-fold mandatory per Codex round-1
+  // P2-9 — closes the §6.5 `tag_not_found.details.hint` forward
+  // reference. Cache-aware via loadAccountTags; first call hits live
+  // (no on-disk cache), subsequent calls in the same xdgRoot would
+  // hit cache (not exercised in this test — each test gets a fresh
+  // xdgRoot via useItemTestEnv-style isolation).
+
+  const accountTagsInteraction: Interaction = {
+    operation_name: 'AccountTags',
+    response: {
+      data: {
+        account: {
+          tags: [
+            { id: '101', name: 'launch' },
+            { id: '202', name: 'priority' },
+            { id: '303', name: 'P1' },
+          ],
+        },
+      },
+    },
+  };
+
+  it('emits the tag list + envelope contract (live source on cold cache)', async () => {
+    const out = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [accountTagsInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: AccountTagsData;
+    };
+    assertEnvelopeContract(env);
+    expect(env.meta.source).toBe('live');
+    expect(env.meta.cache_age_seconds).toBeNull();
+    expect(env.data.total).toBe(3);
+    expect(env.data.tags).toEqual([
+      { id: '101', name: 'launch' },
+      { id: '202', name: 'priority' },
+      { id: '303', name: 'P1' },
+    ]);
+  });
+
+  it('--no-cache forces a live fetch even when a fresh cache entry exists', async () => {
+    // Two-call sequence: first call populates the per-test cache
+    // (live), second call with --no-cache bypasses cache (live
+    // again). Both fire AccountTags interactions; the second call
+    // reads via the live path despite an existing cache entry.
+    // Same xdgRoot across both calls (passed by cachedDrive).
+    const first = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [accountTagsInteraction] },
+    );
+    expect(first.exitCode).toBe(0);
+    const firstEnv = parseEnvelope(first.stdout);
+    expect(firstEnv.meta.source).toBe('live');
+
+    const second = await cachedDrive(
+      ['account', 'tags', '--no-cache', '--json'],
+      { interactions: [accountTagsInteraction] },
+    );
+    expect(second.exitCode).toBe(0);
+    const secondEnv = parseEnvelope(second.stdout);
+    // --no-cache forces live despite an existing cache entry from
+    // the first call.
+    expect(secondEnv.meta.source).toBe('live');
+  });
+
+  it('subsequent call without --no-cache reads from cache (cache hit)', async () => {
+    // Cold call → live + cache write; second call (same xdgRoot,
+    // no --no-cache) → cache hit, no AccountTags interaction needed.
+    const first = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [accountTagsInteraction] },
+    );
+    expect(first.exitCode).toBe(0);
+
+    // Second call: zero interactions in the cassette — if the cache
+    // path failed and a live fetch fired, the FixtureTransport would
+    // throw "no more interactions".
+    const second = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [] },
+    );
+    expect(second.exitCode).toBe(0);
+    const env = parseEnvelope(second.stdout) as EnvelopeShape & {
+      data: AccountTagsData;
+    };
+    expect(env.meta.source).toBe('cache');
+    expect(env.meta.cache_age_seconds).not.toBeNull();
+    expect(env.data.total).toBe(3);
+  });
+
+  it('--verbose surfaces meta.complexity from the live query', async () => {
+    const verboseInteraction: Interaction = {
+      operation_name: 'AccountTags',
+      response: {
+        data: {
+          account: { tags: [{ id: '101', name: 'launch' }] },
+          complexity: {
+            before: 5_000_000,
+            after: 4_999_999,
+            query: 1,
+            reset_in_x_seconds: 30,
+          },
+        },
+      },
+    };
+    const out = await cachedDrive(
+      ['--verbose', 'account', 'tags', '--json'],
+      { interactions: [verboseInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    // Envelope projects the GraphQL `{before, after, query,
+    // reset_in_x_seconds}` block onto the stable
+    // `{before, used, remaining, reset_in_seconds}` shape (cli-design
+    // §6.1 meta.complexity).
+    expect(env.meta.complexity).toMatchObject({
+      used: 1,
+      remaining: 4_999_999,
+      reset_in_seconds: 30,
+    });
+  });
+
+  it('empty account.tags response → empty list, total: 0', async () => {
+    const emptyInteraction: Interaction = {
+      operation_name: 'AccountTags',
+      response: { data: { account: { tags: [] } } },
+    };
+    const out = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [emptyInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: AccountTagsData;
+    };
+    expect(env.data).toEqual({ tags: [], total: 0 });
+  });
+
+  it('account: null response → benign empty list (the ?? [] fallback)', async () => {
+    // loadAccountTags treats `account: null` as a benign empty tag
+    // list per the implementation's `?? []` fallback (Monday occasionally
+    // returns null for guest tokens / restricted scopes). This pins
+    // the documented null-account semantics.
+    const nullAccountInteraction: Interaction = {
+      operation_name: 'AccountTags',
+      response: { data: { account: null } },
+    };
+    const out = await cachedDrive(
+      ['account', 'tags', '--json'],
+      { interactions: [nullAccountInteraction] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: AccountTagsData;
+    };
+    expect(env.data).toEqual({ tags: [], total: 0 });
+  });
+});
+
+interface AccountTagsData {
+  readonly tags: readonly { readonly id: string; readonly name: string }[];
+  readonly total: number;
+}
 
 describe('error code coverage (§5.6 row M2)', () => {
   // Each entry produces the named code from a cassette response.
