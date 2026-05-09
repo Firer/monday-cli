@@ -104,10 +104,13 @@ export interface ResolveTagsResult {
   readonly source: 'cache' | 'live' | 'mixed';
   /**
    * Age of the cache entry the resolver read from when `source` is
-   * `'cache'` or `'mixed'`; `null` for `'live'` (no cache leg) and
-   * for the misses-trigger-refresh case where the live re-fetch
-   * supersedes the cache. Surfaced into `meta.cache_age_seconds`
-   * via the translator-source aggregation pathway.
+   * `'cache'` (full cache hit, no live refresh) or `'mixed'` (cache
+   * had some matches, live refresh covered the rest — the cache
+   * leg's age is preserved as the worst-case staleness the agent
+   * observed). `null` for `'live'` (no cache leg fired — empty
+   * cache or `noCache: true`). Surfaced into `meta.cache_age_seconds`
+   * via the translator-source aggregation pathway, matching the
+   * broader §6.1 mixed-source/cache-age contract.
    */
   readonly cacheAgeSeconds: number | null;
 }
@@ -442,9 +445,11 @@ export const resolveTags = async (
     ids: liveMatched.ids,
     misses: liveMatched.misses,
     source,
-    // Age tracks the cache leg's age when we used cache data. After a
-    // live refresh that supersedes the cache, the result is fresh —
-    // surface null per the convention `BoardMetadataLoadResult` uses.
+    // For `'mixed'`, surface the cache leg's age as the worst-case
+    // staleness the agent observed — matches the broader §6.1
+    // mixed-source/cache-age contract (`mergeCacheAge` keeps the
+    // oldest age across legs that hit cache). For `'live'` (no
+    // cache leg fired), null.
     cacheAgeSeconds: source === 'mixed' ? cacheHitAge : null,
   };
 };

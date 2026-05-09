@@ -7,27 +7,33 @@
  * `change_column_value` / `change_multiple_column_values` mutations
  * accept.
  *
- * **Two entry points.** Nine of the ten allowlisted types translate
- * purely locally — no network, no clock dependency beyond the date
+ * **Two entry points.** Most allowlisted types translate purely
+ * locally — no network, no clock dependency beyond the date
  * module's injectable clock — and live behind the sync
- * `translateColumnValue`. `people` is the exception: email→ID
- * resolution can hit the network. Rather than forcing a
- * `Promise<TranslatedColumnValue>` on every call site for the nine
- * sync types, `translateColumnValueAsync` is the unified async entry
- * point the command layer always calls. It delegates to the sync
- * version for non-people types and dispatches to `parsePeopleInput`
- * for `people`. M5b's write surface goes through async exclusively
- * (people may appear in any `--set` bundle).
+ * `translateColumnValue`. `people` and (M19+) `tags` are the
+ * exceptions: email→ID resolution + tag-name→tag-id resolution can
+ * hit the network. Rather than forcing a
+ * `Promise<TranslatedColumnValue>` on every call site for the
+ * sync types, `translateColumnValueAsync` is the unified async
+ * entry point the command layer always calls. It delegates to the
+ * sync version for non-async types and dispatches to
+ * `translatePeople` / `translateTags` for the async ones. M5b's
+ * write surface goes through async exclusively (people / tags may
+ * appear in any `--set` bundle).
  *
- * **Scope.** All ten allowlisted types translate:
+ * **Scope.** Eleven allowlisted types translate (post-M19 Commit 2;
+ * grows to 13 once Commits 3 / 4 land `board_relation` /
+ * `dependency`):
  * `text` / `long_text` / `numbers` (simple-string payloads, M5a
  * skeleton); `status` / `dropdown` (rich-object payloads); `date`
  * (rich, with relative-token resolution against the profile
  * timezone); `people` (rich, with `me`-token + email resolution via
- * the M3 `userByEmail` directory cache); and the M8 firm additions
+ * the M3 `userByEmail` directory cache); the M8 firm additions
  * `link` / `email` / `phone` (pipe-form parsers in `links.ts` /
  * `emails.ts` / `phones.ts`; same `change_column_value` wire path
- * as the v0.1 rich types).
+ * as the v0.1 rich types); and (M19 Commit 2) `tags` (rich, with
+ * tag-name→tag-id resolution via the per-account directory cache
+ * in `tag-directory.ts`).
  *
  * **Date resolution context** (cli-design §5.3 step 3 + the
  * "Relative dates and timezone" subsection). Relative tokens

@@ -349,6 +349,11 @@ describe('resolveTags — comma-split + cache-then-live', () => {
     expect(result.misses).toEqual([]);
     // Source is 'mixed' because cache had launch but not priority.
     expect(result.source).toBe('mixed');
+    // cacheAgeSeconds preserves the cache leg's age (worst-case
+    // staleness) for `'mixed'` per §6.1 mergeCacheAge contract.
+    // The cache was just-written so the age is 0+ seconds.
+    expect(result.cacheAgeSeconds).not.toBeNull();
+    expect(result.cacheAgeSeconds).toBeGreaterThanOrEqual(0);
     expect(stats.calls).toBe(2);
   });
 
