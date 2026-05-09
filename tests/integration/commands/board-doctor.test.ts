@@ -198,40 +198,16 @@ describe('monday board doctor (integration)', () => {
     expect(dx?.category).toBe('read_only_forever');
   });
 
-  it('unsupported_column_type: M19-pending tentative (dependency) surfaces with v0.2_writer_expansion category', async () => {
-    // M19 close graduates `tags` (Commit 2) + `board_relation`
-    // (Commit 3) to the friendly translator — board doctor no
-    // longer flags those as unsupported. `dependency` is still
-    // pending (Commit 4); doctor surfaces it under the
-    // `v0_2_writer_expansion` category until that lands. The
-    // category constant name retains its M8-era spelling for
-    // stability — the user-visible message names v0.3.
-    const out = await drive(
-      ['board', 'doctor', '111', '--json'],
-      {
-        interactions: [
-          boardWithColumns([
-            {
-              id: 'dep_1',
-              title: 'Blocking Items',
-              type: 'dependency',
-              description: null,
-              archived: null,
-              settings_str: '{}',
-              width: null,
-            },
-          ]),
-        ],
-      },
-    );
-    expect(out.exitCode).toBe(0);
-    const env = parseEnvelope(out.stdout) as EnvelopeShape & DoctorEnvelope;
-    const dx = env.data?.diagnostics?.[0] as
-      | { severity: string; category: string }
-      | undefined;
-    expect(dx?.severity).toBe('warning');
-    expect(dx?.category).toBe('v0.2_writer_expansion');
-  });
+  // M19 close graduated the full v0.2 tentative row (`tags` /
+  // `board_relation` / `dependency`) into the friendly translator;
+  // doctor no longer flags those as unsupported. The
+  // `v0_2_writer_expansion` category branch in
+  // `unsupportedColumnTypeError` is now unreachable through the
+  // runtime classifier (V0_2_WRITER_EXPANSION_TYPES is empty).
+  // Doctor's `unsupported_column_type` diagnostics route through
+  // `read_only_forever` (mirror / formula / etc.) or `future`
+  // (battery / rating / etc.). The dead-code retention is documented
+  // in column-types.ts; no runtime test covers it.
 
   it('unsupported_column_type: future type (battery) surfaces with future category', async () => {
     const out = await drive(

@@ -1197,21 +1197,21 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.data.summary.applied_count).toBe(2);
   });
 
-  it('live: --set against unsupported column type (dependency, M19-pending) in bulk surfaces typed error', async () => {
+  it('live: --set against unsupported column type (battery) in bulk surfaces typed error', async () => {
     // Covers update.ts bulk path: translateColumnValueAsync throws
     // ApiError(unsupported_column_type) → folded with
-    // resolverWarnings and re-thrown. M19 close graduates `tags`
-    // (Commit 2) + `board_relation` (Commit 3) to the friendly
-    // translator; `dependency` graduates at Commit 4. This test
-    // pins the bulk-path surface for the last tentative-row member
-    // until that commit lands.
-    const tentativeMeta = {
+    // resolverWarnings and re-thrown. M19 close graduated the full
+    // v0.2 tentative row (`tags` / `board_relation` / `dependency`);
+    // the v0_2_writer_expansion branch is now dead code. Future-
+    // roadmap types like `battery` route through the `future`
+    // category with a --set-raw hint.
+    const futureMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'dep_42',
-          title: 'Blocking Items',
-          type: 'dependency',
+          id: 'bat_42',
+          title: 'Progress',
+          type: 'battery',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -1226,7 +1226,7 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         '--filter-json',
         '{"rules":[]}',
         '--set',
-        'dep_42=12345',
+        'bat_42=42',
         '--board',
         '111',
         '--yes',
@@ -1236,7 +1236,7 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tentativeMeta] } },
+            response: { data: { boards: [futureMeta] } },
           },
           {
             operation_name: 'ItemsPage',

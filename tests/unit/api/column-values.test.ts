@@ -581,73 +581,35 @@ describe('translateColumnValue — sync entry on a people column', () => {
   });
 });
 
-describe('translateColumnValue — non-allowlisted types (M19 still-tentative row)', () => {
-  // M19 graduates `tags` (Commit 2) + `board_relation` (Commit 3)
-  // into the friendly allowlist; `dependency` graduates at Commit 4.
-  // Until that lands, its `unsupported_column_type` error carries
-  // `deferred_to: "v0.3"` via the `v0_2_writer_expansion` category
-  // row. The `--set-raw` escape hatch accepts the type today —
-  // the hint surfaces that.
-  it('dependency → unsupported_column_type with deferred_to: v0.3', () => {
-    const type = 'dependency';
-    expect(() => translate(type, 'whatever', 'col_z')).toThrow(
-      /not yet in the friendly --set translator allowlist/u,
-    );
-    try {
-      translate(type, 'whatever', 'col_z');
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      expect(err.code).toBe('unsupported_column_type');
-      expect(err.details).toMatchObject({
-        column_id: 'col_z',
-        type,
-        deferred_to: 'v0.3',
-        hint: expect.stringContaining('--set-raw') as unknown,
-      });
-      // Negative assertions: no dead `set_raw_example` slot; no
-      // read_only flag (this type IS writable via --set-raw and the
-      // friendly translator is just pending).
-      expect(err.details).not.toHaveProperty('set_raw_example');
-      expect(err.details).not.toHaveProperty('read_only');
-    }
-  });
-
-  // `tags` graduated at M19 Commit 2 — calling the SYNC translator
-  // on it now hits the programmer-error guard (translateColumnValue
-  // is sync; tag resolution is async via translateColumnValueAsync).
-  // This test pins the new behaviour so a regression that wires tags
-  // through the sync entry surfaces loud, not silent.
-  it('tags (sync entry) → internal_error with a hint to use the async entry', () => {
-    expect(() => translate('tags', 'launch', 'col_z')).toThrow(ApiError);
-    try {
-      translate('tags', 'launch', 'col_z');
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      expect(err.code).toBe('internal_error');
-      expect(err.message).toMatch(/translateColumnValueAsync/u);
-      expect(err.details).toMatchObject({
-        column_id: 'col_z',
-        column_type: 'tags',
-      });
-    }
-  });
-
-  // `board_relation` graduated at M19 Commit 3 — same programmer-
-  // error guard as `tags`. Pinned for regression.
-  it('board_relation (sync entry) → internal_error with a hint to use the async entry', () => {
-    expect(() => translate('board_relation', '12345', 'rel_1')).toThrow(ApiError);
-    try {
-      translate('board_relation', '12345', 'rel_1');
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      expect(err.code).toBe('internal_error');
-      expect(err.message).toMatch(/translateColumnValueAsync/u);
-      expect(err.details).toMatchObject({
-        column_id: 'rel_1',
-        column_type: 'board_relation',
-      });
-    }
-  });
+describe('translateColumnValue — async-only column types (sync entry guards)', () => {
+  // M19 graduates the full v0.2 tentative row (`tags` Commit 2,
+  // `board_relation` Commit 3, `dependency` Commit 4) into the
+  // friendly allowlist via the async entry point. Calling the SYNC
+  // translator on any of these surfaces a programmer-error
+  // `internal_error` with a hint pointing at translateColumnValueAsync.
+  // These tests pin the guard so a future regression that wires an
+  // async-only type through the sync entry fires loud, not silent.
+  it.each([
+    ['tags', 'launch', 'tags_1'],
+    ['board_relation', '12345', 'rel_1'],
+    ['dependency', '12345', 'dep_1'],
+  ])(
+    '%s (sync entry) → internal_error with a hint to use the async entry',
+    (type, value, columnId) => {
+      expect(() => translate(type, value, columnId)).toThrow(ApiError);
+      try {
+        translate(type, value, columnId);
+      } catch (err) {
+        if (!(err instanceof ApiError)) throw err;
+        expect(err.code).toBe('internal_error');
+        expect(err.message).toMatch(/translateColumnValueAsync/u);
+        expect(err.details).toMatchObject({
+          column_id: columnId,
+          column_type: type,
+        });
+      }
+    },
+  );
 });
 
 describe('translateColumnValue — read-only-forever types', () => {
@@ -1833,6 +1795,66 @@ describe('translateColumnValueAsync — board_relation translator (M19)', () => 
     expect(captured).toEqual([111, 222]);
   });
 
+  it('dependency dispatch: same wire shape, reads dependencyBoards (M19 Commit 4)', async () => {
+    // Commit 4 sibling: `dependency` translator routes through the
+    // same translateRelation helper but reads `dependencyBoards`
+    // from settings instead of `boardIds`. Wire shape identical
+    // (`{item_ids: [...]}`); validator gets `context: 'dependency'`.
+    const dependencySettings = JSON.stringify({ dependencyBoards: [333] });
+    let capturedContext: 'board_relation' | 'dependency' | undefined;
+    let capturedAllowed: readonly number[] | undefined;
+    const out = await translateColumnValueAsync({
+      column: {
+        id: 'dep_1',
+        type: 'dependency',
+        settingsStr: dependencySettings,
+      },
+      value: '12345',
+      relationResolution: {
+        validateItems: (inputs) => {
+          capturedContext = inputs.context;
+          capturedAllowed = inputs.allowedBoards;
+          return Promise.resolve({
+            ok: true,
+            items: [{ itemId: 12345, boardId: 333 }],
+          });
+        },
+      },
+    });
+    expect(capturedContext).toBe('dependency');
+    expect(capturedAllowed).toEqual([333]);
+    expect(out.columnType).toBe('dependency');
+    expect(out.payload).toEqual({
+      format: 'rich',
+      value: { item_ids: [12345] },
+    });
+    expect(out.relationResolution).toEqual({
+      context: 'dependency',
+      allowed_boards: [333],
+      items: [{ input: '12345', resolved_board_id: '333' }],
+    });
+  });
+
+  it('dependency: settings without dependencyBoards → empty allowedBoards → usage_error', async () => {
+    // Commit 4 mirror of the empty-allowed-boards branch — dependency
+    // settings without a dependencyBoards array has no allowed-boards
+    // list to validate against.
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'dep_1',
+          type: 'dependency',
+          settingsStr: '{}',
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(/no dependency boards configured/u);
+  });
+
   it('multi-mismatch (one missing, one wrong board) → message lists each per-item with annotated reason', async () => {
     // Pins both branches of buildRelationMismatchMessage:
     // `mismatches.length === 1 ? 'item' : 'items'` (multi here) and
@@ -1889,26 +1911,15 @@ describe('translateColumnValueAsync — board_relation translator (M19)', () => 
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('v0.3 writer-expansion candidate (dependency, M19-pending) → deferred_to: "v0.3"', () => {
-    // M19 close graduates `tags` (Commit 2) + `board_relation`
-    // (Commit 3) to WRITABLE_COLUMN_TYPES; `dependency` graduates
-    // at Commit 4. Until that lands, the v0_2_writer_expansion
-    // category branch surfaces it with `deferred_to: "v0.3"`.
-    // Post-Commit-4 the category row becomes unreachable but stays
-    // as documented dead code for stability + future tentative-row
-    // revival.
-    const err = unsupportedColumnTypeError('col_42', 'dependency');
-    expect(err).toBeInstanceOf(ApiError);
-    expect(err.code).toBe('unsupported_column_type');
-    expect(err.retryable).toBe(false);
-    expect(err.details).toMatchObject({
-      column_id: 'col_42',
-      type: 'dependency',
-      deferred_to: 'v0.3',
-    });
-    expect(err.details).not.toHaveProperty('set_raw_example');
-    expect(err.details).not.toHaveProperty('read_only');
-  });
+  // M19 close (Commits 2-4) graduated the full v0.2 tentative row
+  // into WRITABLE_COLUMN_TYPES. The `v0_2_writer_expansion` category
+  // branch in the classifier is now unreachable through the runtime
+  // — `V0_2_WRITER_EXPANSION_TYPES` is empty, so `isV0_2WriterExpansionType`
+  // returns false for every input. The branch + category row stay
+  // as documented dead code for stability + future tentative-row
+  // revival (next time the writer-expansion roadmap has a tentative
+  // slot, populating the set re-enables the branch without touching
+  // the classifier shape).
 
   it('read-only-forever type (mirror) → read_only: true (no version promise)', () => {
     const err = unsupportedColumnTypeError('col_42', 'mirror');

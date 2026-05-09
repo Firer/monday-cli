@@ -650,22 +650,21 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.error?.details?.column_id).toBe('status_4');
   });
 
-  it('live: --set against an unsupported column type (dependency, M19-pending) surfaces with v0.3 deferral', async () => {
+  it('live: --set against an unsupported column type (battery) surfaces with future deferral', async () => {
     // Single-path translation-error branch: column resolves OK, but
     // translateColumnValueAsync throws ApiError(unsupported_column_type)
-    // for non-allowlisted types. M19 close graduates `tags` (Commit 2)
-    // and `board_relation` (Commit 3) to the friendly translator;
-    // `dependency` graduates at Commit 4. Path B (M5b cleanup): the
-    // error advertises the v0.3 writer-expansion milestone (slipped
-    // from v0.2 tentative at M18 close) instead of a dead --set-raw
-    // suggestion.
-    const tentativeMeta = {
+    // for non-allowlisted types. M19 close graduated the full v0.2
+    // tentative row (`tags` / `board_relation` / `dependency`); the
+    // v0_2_writer_expansion category is now dead code. Future-roadmap
+    // types like `battery` route through the `future` category branch
+    // with a --set-raw escape-hatch hint.
+    const futureMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'dep_42',
-          title: 'Blocking Items',
-          type: 'dependency',
+          id: 'bat_42',
+          title: 'Progress',
+          type: 'battery',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -679,7 +678,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         'update',
         '12345',
         '--set',
-        'dep_42=12345',
+        'bat_42=42',
         '--board',
         '111',
         '--json',
@@ -688,7 +687,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tentativeMeta] } },
+            response: { data: { boards: [futureMeta] } },
           },
         ],
       },
@@ -705,8 +704,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.3');
-    expect(env.error?.details).not.toHaveProperty('set_raw_example');
+    expect(env.error?.details?.deferred_to).toBe('future');
   });
 
   it('F4 (single path): validation_failed after cache-sourced resolution remaps to column_archived', async () => {

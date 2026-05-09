@@ -596,12 +596,14 @@ export const translateColumnValue = (
         },
       );
     case 'board_relation':
+    case 'dependency':
       // Relation translation is async (the validator hits live
       // `items(ids: [...])` against Monday). Same programmer-error
-      // shape as people / tags.
+      // shape as people / tags. board_relation lands at Commit 3,
+      // dependency at Commit 4 — both share the same sync guard.
       throw new ApiError(
         'internal_error',
-        `translateColumnValue (sync) called on board_relation column "${column.id}". ` +
+        `translateColumnValue (sync) called on ${column.type} column "${column.id}". ` +
           `Relation validation is async — use translateColumnValueAsync.`,
         {
           details: {
@@ -690,11 +692,12 @@ export const translateColumnClear = (
     case 'phone':
     case 'tags':
     case 'board_relation':
+    case 'dependency':
       // Rich types clear to `{}` via change_column_value per
       // cli-design §5.3 "Clearing column values" table. M8 firm row
       // (link / email / phone) and M19 row (tags / board_relation /
-      // dependency once Commit 4 lands) extend the table verbatim —
-      // same payload, same mutation, same dispatch.
+      // dependency) extend the table verbatim — same payload, same
+      // mutation, same dispatch.
       return {
         columnId: column.id,
         columnType: column.type,
@@ -720,6 +723,9 @@ export const translateColumnValueAsync = async (
   }
   if (inputs.column.type === 'board_relation') {
     return translateRelation(inputs, 'board_relation');
+  }
+  if (inputs.column.type === 'dependency') {
+    return translateRelation(inputs, 'dependency');
   }
   return translateColumnValue(inputs);
 };
@@ -1108,14 +1114,9 @@ const deriveAllowedBoards = (
     } else if (typeof obj.boardId === 'number') {
       candidates = [obj.boardId];
     }
-    /* c8 ignore start — `dependency` branch lands at M19 Commit 4;
-       translateColumnValueAsync only routes `'board_relation'` here
-       in Commit 3, so the else-if and its body are unreachable until
-       Commit 4 widens the dispatcher. */
   } else if (Array.isArray(obj.dependencyBoards)) {
     candidates = obj.dependencyBoards as readonly unknown[];
   }
-  /* c8 ignore stop */
   const out: number[] = [];
   for (const candidate of candidates) {
     if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) {

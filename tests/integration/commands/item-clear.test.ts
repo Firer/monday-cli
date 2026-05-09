@@ -275,19 +275,19 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (dependency, M19-pending) surfaces with deferred_to: v0.3', async () => {
-    // M19 close graduates `tags` (Commit 2) + `board_relation`
-    // (Commit 3) to the friendly translator + clear path;
-    // `dependency` graduates at Commit 4. This test pins the
-    // `deferred_to: "v0.3"` surface for the last tentative-row
-    // member until that commit lands.
-    const tentativeBoard = {
+  it('live: unsupported_column_type — future-roadmap type (battery) surfaces with deferred_to: "future"', async () => {
+    // M19 close graduated the full v0.2 tentative row (`tags` /
+    // `board_relation` / `dependency`) to the friendly translator
+    // + clear path. The v0_2_writer_expansion category branch is
+    // now unreachable; `future` is the catch-all for non-allowlisted
+    // types like `battery` / `rating` / unknown future types.
+    const futureBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'dep_1',
-          title: 'Blocking Items',
-          type: 'dependency',
+          id: 'bat_1',
+          title: 'Progress',
+          type: 'battery',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -296,12 +296,12 @@ describe('monday item clear (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'clear', '12345', 'dep_1', '--board', '111', '--json'],
+      ['item', 'clear', '12345', 'bat_1', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tentativeBoard] } },
+            response: { data: { boards: [futureBoard] } },
           },
         ],
       },
@@ -318,9 +318,8 @@ describe('monday item clear (integration, M5b)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.3');
+    expect(env.error?.details?.deferred_to).toBe('future');
     expect(env.error?.details).not.toHaveProperty('read_only');
-    expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });
 
   it('--dry-run: archived column surfaces column_archived before item-state read fires', async () => {

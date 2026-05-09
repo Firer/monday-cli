@@ -271,8 +271,13 @@ const WRITABLE_SETTINGS_SCHEMAS: Readonly<
   // there's no documented JSON shape Monday accepts at column-create
   // time. The friendly translator validates per-item membership at
   // write time against `column.settings.boardIds`. Conservative
-  // empty schema; `dependency` (Commit 4) will add a parallel entry.
+  // empty schema.
   board_relation: emptySettingsSchema,
+  // M19 Commit 4: `dependency` mirrors `board_relation` —
+  // dependencyBoards configured via Monday's UI, no documented
+  // create-time JSON shape, per-item validation at write time
+  // against `column.settings.dependencyBoards`.
+  dependency: emptySettingsSchema,
 };
 
 /**
@@ -297,6 +302,7 @@ const WRITABLE_SETTINGS_EXPECTED_KEYS: Readonly<
   phone: [],
   tags: [],
   board_relation: [],
+  dependency: [],
 };
 
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>

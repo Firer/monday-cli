@@ -138,6 +138,15 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         `--set ${column.id}=12345`,
         `--set ${column.id}='12345,67890'`,
       ];
+    case 'dependency':
+      // M19 Commit 4 friendly translator: sibling of board_relation
+      // (identical wire shape, identical validator). Reads
+      // `column.settings.dependencyBoards` instead of `boardIds`.
+      // Same per-call cap of 25 items.
+      return [
+        `--set ${column.id}=12345`,
+        `--set ${column.id}='12345,67890'`,
+      ];
     /* c8 ignore next 2 — unreachable: isWritableColumnType gates the
        entry, so any column.type that lands here is one of the cases
        above. */

@@ -458,23 +458,23 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (dependency, still M19-pending) surfaces with deferred_to: v0.3', async () => {
-    // M19 close graduates `tags` (Commit 2) and `board_relation`
-    // (Commit 3) to the friendly allowlist; this test pins the
-    // `deferred_to: "v0.3"` surface for the last remaining
-    // tentative-row member (`dependency`) until Commit 4 graduates
-    // it too. The category branch becomes unreachable at Commit 4;
-    // the `v0_2_writer_expansion` row in `unsupportedColumnTypeError`
-    // stays as documented dead code so a future tentative-row revival
-    // (next time the writer-expansion roadmap has a tentative slot)
-    // can re-populate the set without re-architecting the classifier.
-    const tentativeBoard = {
+  it('live: unsupported_column_type — future-roadmap type (battery) surfaces with deferred_to: "future"', async () => {
+    // M19 close graduated the full v0.2 tentative row (`tags` /
+    // `board_relation` / `dependency`) into the friendly translator;
+    // the v0_2_writer_expansion category branch is now unreachable
+    // through the runtime classifier (V0_2_WRITER_EXPANSION_TYPES is
+    // empty post-M19). This test pins the `future` category surface
+    // for any non-allowlisted, non-read-only-forever, non-files-shaped
+    // type — agents writing against an unknown column type get a
+    // category-accurate "future" deferral with a --set-raw hint
+    // rather than a dead v0.3 promise.
+    const futureBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'dep_1',
-          title: 'Blocking Items',
-          type: 'dependency',
+          id: 'bat_1',
+          title: 'Progress',
+          type: 'battery',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -483,12 +483,12 @@ describe('monday item set (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'set', '12345', 'dep_1=12345', '--board', '111', '--json'],
+      ['item', 'set', '12345', 'bat_1=42', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tentativeBoard] } },
+            response: { data: { boards: [futureBoard] } },
           },
         ],
       },
@@ -506,9 +506,8 @@ describe('monday item set (integration, M5b)', () => {
       };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.3');
+    expect(env.error?.details?.deferred_to).toBe('future');
     expect(env.error?.details).not.toHaveProperty('read_only');
-    expect(env.error?.details).not.toHaveProperty('set_raw_example');
   });
 
   it('--dry-run: emits the §6.4 envelope with planned_changes, no mutation fires', async () => {
@@ -834,6 +833,77 @@ describe('monday item set (integration, M5b)', () => {
           {
             operation_name: 'ItemSetRich',
             response: { data: { change_column_value: itemWithRelation } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: dependency column validates dependencyBoards and emits {item_ids:[...]} payload (M19 Commit 4 happy path)', async () => {
+    // M19 Commit 4 sibling of the board_relation cassette above.
+    // Same wire shape (`{item_ids:[...]}`), same validator path,
+    // same `ItemsByIdsForRelation` operation; divergence is
+    // `settings_str.dependencyBoards` instead of `boardIds`.
+    const dependencyBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'dep_1',
+          title: 'Blocking Items',
+          type: 'dependency',
+          description: null,
+          archived: null,
+          settings_str: JSON.stringify({ dependencyBoards: [333] }),
+          width: null,
+        },
+      ],
+    };
+    const itemWithDependency = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'dep_1',
+          type: 'dependency',
+          text: 'Blocking-1',
+          value: '{"item_ids":[77777]}',
+          column: { title: 'Blocking Items' },
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'dep_1=77777',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [dependencyBoard] } },
+          },
+          {
+            operation_name: 'ItemsByIdsForRelation',
+            response: {
+              data: {
+                items: [{ id: '77777', board: { id: '333' } }],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: itemWithDependency } },
           },
         ],
       },
