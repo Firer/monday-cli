@@ -73,6 +73,7 @@ import {
   type DateResolutionContext,
   type MultiColumnValue,
   type PeopleResolutionContext,
+  type RelationResolutionContext,
   type SelectedMutation,
   type TagResolutionContext,
   type TranslatedColumnValue,
@@ -149,6 +150,13 @@ export interface PlanChangesInputs {
    * `translateColumnValueAsync` raises `internal_error` if missing.
    */
   readonly tagResolution?: TagResolutionContext;
+  /**
+   * Relation-resolution context — `validateItems` (M19+). Required
+   * when any `--set` pair targets a `board_relation` or `dependency`
+   * column; `translateColumnValueAsync` raises `internal_error`
+   * if missing.
+   */
+  readonly relationResolution?: RelationResolutionContext;
   /** Cache root + tz from process.env; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
   /** `--no-cache`: skip the column-metadata cache entirely. */
@@ -263,6 +271,9 @@ export const planChanges = async (
     ...(inputs.tagResolution === undefined
       ? {}
       : { tagResolution: inputs.tagResolution }),
+    ...(inputs.relationResolution === undefined
+      ? {}
+      : { relationResolution: inputs.relationResolution }),
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
   });
@@ -405,6 +416,7 @@ const buildNameTranslatedValue = (
   resolvedFrom: null,
   peopleResolution: null,
   tagResolution: null,
+  relationResolution: null,
   translatorResolution: null,
 });
 
@@ -577,6 +589,7 @@ export interface PlanCreateInputs {
   readonly dateResolution?: DateResolutionContext;
   readonly peopleResolution?: PeopleResolutionContext;
   readonly tagResolution?: TagResolutionContext;
+  readonly relationResolution?: RelationResolutionContext;
   readonly env?: NodeJS.ProcessEnv;
   readonly noCache?: boolean;
 }
@@ -692,6 +705,9 @@ export const planCreate = async (
     ...(inputs.tagResolution === undefined
       ? {}
       : { tagResolution: inputs.tagResolution }),
+    ...(inputs.relationResolution === undefined
+      ? {}
+      : { relationResolution: inputs.relationResolution }),
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
   });
@@ -849,6 +865,22 @@ const buildCreateDiffCell = (
       },
     };
   }
+  if (translated.relationResolution !== null) {
+    return {
+      from: null,
+      to,
+      details: {
+        resolved_from: {
+          context: translated.relationResolution.context,
+          allowed_boards: [...translated.relationResolution.allowed_boards],
+          items: translated.relationResolution.items.map((i) => ({
+            input: i.input,
+            resolved_board_id: i.resolved_board_id,
+          })),
+        },
+      },
+    };
+  }
   return { from: null, to };
 };
 
@@ -941,24 +973,41 @@ const buildDiffCell = (
       },
     };
   }
+  if (translated.relationResolution !== null) {
+    return {
+      from,
+      to,
+      details: {
+        resolved_from: {
+          context: translated.relationResolution.context,
+          allowed_boards: [...translated.relationResolution.allowed_boards],
+          items: translated.relationResolution.items.map((i) => ({
+            input: i.input,
+            resolved_board_id: i.resolved_board_id,
+          })),
+        },
+      },
+    };
+  }
   return { from, to };
 };
 
 /**
  * Echo-slot exclusivity invariant. Translators populate at most one
  * of `resolvedFrom` (date) / `peopleResolution` (people) /
- * `tagResolution` (M19 tags) — and Commit 3 will add
- * `relationResolution` (board_relation + dependency). A regression
- * that mistakenly sets two slots would silently collapse to whichever
- * branch fires first below; fire an `internal_error` so the bug is
- * loud, not silent. Codex pass-2 finding F3 (M5b precedent); widened
- * for M19's new echo slots.
+ * `tagResolution` (M19 tags) / `relationResolution` (M19
+ * board_relation + dependency). A regression that mistakenly sets
+ * two slots would silently collapse to whichever branch fires first
+ * below; fire an `internal_error` so the bug is loud, not silent.
+ * Codex pass-2 finding F3 (M5b precedent); widened for M19's new
+ * echo slots.
  */
 const assertEchoExclusivity = (translated: TranslatedColumnValue): void => {
   const populated = [
     translated.resolvedFrom !== null ? 'resolvedFrom' : null,
     translated.peopleResolution !== null ? 'peopleResolution' : null,
     translated.tagResolution !== null ? 'tagResolution' : null,
+    translated.relationResolution !== null ? 'relationResolution' : null,
   ].filter((slot): slot is string => slot !== null);
   /* c8 ignore start — defensive guard against a future translator
      wiring bug. Today's translators populate at most one echo slot;

@@ -112,6 +112,7 @@ import {
   isReadOnlyForeverType,
   isV0_2WriterExpansionType,
   isWritableColumnType,
+  parseColumnSettings,
   type WritableColumnType,
 } from './column-types.js';
 import {
@@ -128,6 +129,11 @@ import { parseLinkInput } from './links.js';
 import { parseEmailInput } from './emails.js';
 import { parsePhoneInput } from './phones.js';
 import type { ResolveTagsResult } from './tag-directory.js';
+import {
+  parseRelationItemIds,
+  type BoardRelationValidationResult,
+  type RelationContext,
+} from './board-relation-validation.js';
 
 export type { DateResolution, DateResolutionContext } from './dates.js';
 export type {
@@ -140,6 +146,11 @@ export type {
 export type { LinkPayload } from './links.js';
 export type { EmailPayload } from './emails.js';
 export type { PhonePayload } from './phones.js';
+export type {
+  BoardRelationValidationResult,
+  RelationContext,
+  ValidatedRelationItem,
+} from './board-relation-validation.js';
 
 /**
  * Discriminator on the wire payload's *shape*, not the GraphQL
@@ -183,6 +194,38 @@ export interface TagResolution {
 export interface TagResolutionToken {
   readonly input: string;
   readonly resolved_id: string;
+}
+
+/**
+ * Echo of the per-item resolution for the M19 `board_relation` /
+ * `dependency` translators — one entry per validated input item ID,
+ * pairing the verbatim input with the home-board ID the validator
+ * confirmed lies inside the column's allowed-board set. Shared by
+ * both translators (the divergence is which settings field they
+ * read; the echo shape is identical). Populated by the relation
+ * translators; `null` for every other type.
+ *
+ * The dry-run engine renders this as `details.resolved_from` on
+ * relation-column diff cells per cli-design §5.3 design Q5.
+ */
+export interface RelationResolution {
+  /**
+   * Discriminant: `board_relation` or `dependency`. The agent's
+   * `details.resolved_from` echo carries the original column type so
+   * a wrapper that triages on the resolution shape doesn't have to
+   * cross-reference back to the column metadata.
+   */
+  readonly context: RelationContext;
+  /** The allowed-boards list the validator checked against. */
+  readonly allowed_boards: readonly number[];
+  readonly items: readonly RelationResolutionItem[];
+}
+
+export interface RelationResolutionItem {
+  /** The verbatim input item ID (decimal string form for round-trip). */
+  readonly input: string;
+  /** Resolved home board for the item (decimal string form). */
+  readonly resolved_board_id: string;
 }
 
 /**
@@ -257,6 +300,14 @@ export interface TranslatedColumnValue {
    */
   readonly tagResolution: TagResolution | null;
   /**
+   * Echo of the per-item resolution for the M19 `board_relation` /
+   * `dependency` translators; `null` for every other type. Mutually
+   * exclusive with `resolvedFrom` / `peopleResolution` /
+   * `tagResolution`. The dry-run engine renders this as
+   * `details.resolved_from` on relation-column diff cells.
+   */
+  readonly relationResolution: RelationResolution | null;
+  /**
    * Source + cache-age provenance for the translator's resolution
    * leg. `null` for translators that don't hit a cache leg
    * (date / people / status / dropdown / simple types). Populated
@@ -323,6 +374,33 @@ export interface TagResolutionContext {
 }
 
 /**
+ * Resolution context for the M19 `board_relation` / `dependency`
+ * translators. A single async callback the command layer wires
+ * upstream so the translator stays pure (no `MondayClient` / `env`
+ * reaches `column-values.ts`).
+ *
+ * The callback takes the parsed item-ID list (post `parseRelationItemIds`),
+ * the column's allowed-boards list (derived from `column.settings`
+ * — `boardIds` for `board_relation`, `dependencyBoards` for
+ * `dependency`), and the diagnostic context discriminant; it returns
+ * the `BoardRelationValidationResult` from `validateBoardRelationItems`.
+ *
+ * The context is shared by both translators because the validator
+ * shape is identical — only the settings field the translator reads
+ * to populate `allowedBoards` differs. Routing through one callback
+ * keeps the resolution-context builder simple (one closure over
+ * `MondayClient` rather than two).
+ */
+export interface RelationResolutionContext {
+  readonly validateItems: (inputs: {
+    readonly itemIds: readonly number[];
+    readonly allowedBoards: readonly number[];
+    readonly columnId: string;
+    readonly context: RelationContext;
+  }) => Promise<BoardRelationValidationResult>;
+}
+
+/**
  * Async-entry inputs — superset of `TranslateColumnValueInputs`
  * with the people-resolution slot. Required for people columns;
  * ignored for everything else. The async entry point delegates
@@ -350,6 +428,14 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
    * controls).
    */
   readonly tagResolution?: TagResolutionContext;
+  /**
+   * Resolution context for the M19 `board_relation` / `dependency`
+   * translators. Required when any `--set` token resolves to one of
+   * those types; the translator throws `internal_error` if the slot
+   * is absent. The command layer wires `validateItems` through
+   * `buildResolutionContexts`.
+   */
+  readonly relationResolution?: RelationResolutionContext;
 }
 
 /**
@@ -418,6 +504,7 @@ export const translateColumnValue = (
         resolvedFrom: parsed.resolvedFrom,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
     }
@@ -436,6 +523,7 @@ export const translateColumnValue = (
         resolvedFrom: null,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
     }
@@ -449,6 +537,7 @@ export const translateColumnValue = (
         resolvedFrom: null,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
     }
@@ -462,6 +551,7 @@ export const translateColumnValue = (
         resolvedFrom: null,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
     }
@@ -497,6 +587,22 @@ export const translateColumnValue = (
         'internal_error',
         `translateColumnValue (sync) called on tags column "${column.id}". ` +
           `Tag resolution is async — use translateColumnValueAsync.`,
+        {
+          details: {
+            column_id: column.id,
+            column_type: column.type,
+            hint: 'use translateColumnValueAsync from src/api/column-values.ts',
+          },
+        },
+      );
+    case 'board_relation':
+      // Relation translation is async (the validator hits live
+      // `items(ids: [...])` against Monday). Same programmer-error
+      // shape as people / tags.
+      throw new ApiError(
+        'internal_error',
+        `translateColumnValue (sync) called on board_relation column "${column.id}". ` +
+          `Relation validation is async — use translateColumnValueAsync.`,
         {
           details: {
             column_id: column.id,
@@ -572,6 +678,7 @@ export const translateColumnClear = (
         resolvedFrom: null,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
     case 'status':
@@ -582,10 +689,11 @@ export const translateColumnClear = (
     case 'email':
     case 'phone':
     case 'tags':
+    case 'board_relation':
       // Rich types clear to `{}` via change_column_value per
       // cli-design §5.3 "Clearing column values" table. M8 firm row
       // (link / email / phone) and M19 row (tags / board_relation /
-      // dependency once those land) extend the table verbatim —
+      // dependency once Commit 4 lands) extend the table verbatim —
       // same payload, same mutation, same dispatch.
       return {
         columnId: column.id,
@@ -595,6 +703,7 @@ export const translateColumnClear = (
         resolvedFrom: null,
         peopleResolution: null,
         tagResolution: null,
+        relationResolution: null,
         translatorResolution: null,
       };
   }
@@ -608,6 +717,9 @@ export const translateColumnValueAsync = async (
   }
   if (inputs.column.type === 'tags') {
     return translateTags(inputs);
+  }
+  if (inputs.column.type === 'board_relation') {
+    return translateRelation(inputs, 'board_relation');
   }
   return translateColumnValue(inputs);
 };
@@ -659,6 +771,7 @@ const translatePeople = async (
     resolvedFrom: null,
     peopleResolution: parsed.resolution,
     tagResolution: null,
+    relationResolution: null,
     translatorResolution: null,
   };
 };
@@ -785,11 +898,264 @@ const translateTags = async (
     resolvedFrom: null,
     peopleResolution: null,
     tagResolution: { tokens: echoTokens },
+    relationResolution: null,
     translatorResolution: {
       source: resolved.source,
       cacheAgeSeconds: resolved.cacheAgeSeconds,
     },
   };
+};
+
+/**
+ * Async translator for the M19 `board_relation` and `dependency`
+ * column types. Both share the same wire shape
+ * (`{ item_ids: [N1, N2] }`) and the same per-item allowed-boards
+ * validator; the divergence is the settings field the per-translator
+ * arm reads (`column.settings.boardIds` for `board_relation` /
+ * `column.settings.dependencyBoards` for `dependency`).
+ *
+ * **Five-step resolution.**
+ *
+ *   1. Require `relationResolution` context (programmer-error guard
+ *      mirroring `tags` / `people`).
+ *   2. Require `column.settingsStr` (the field the resolver-pass
+ *      threads through). Surfacing this as `internal_error` rather
+ *      than `usage_error` because the resolver-pass always supplies
+ *      the field; reaching this branch is a wiring bug.
+ *   3. Parse `parseRelationItemIds(value, columnId, context)` for
+ *      input validation — empty / over-cap / non-decimal /
+ *      unsafe-integer / duplicate inputs reject pre-network.
+ *   4. Derive `allowedBoards` from the parsed settings shape per
+ *      `context` discriminant. Empty `allowedBoards` (no boards
+ *      configured on the column) surfaces `usage_error` — the
+ *      validator can't validate against an empty allowed set.
+ *   5. Call `relationResolution.validateItems({ ... })`. On
+ *      mismatch, surface `usage_error` with per-item details. On
+ *      success, build the wire payload + per-item echo.
+ *
+ * **`translatorResolution`** carries `{ source: 'live',
+ * cacheAgeSeconds: null }` for symmetry with the tags translator's
+ * cache-aware path. The relation validator is always live (item
+ * board membership can change cross-call), but threading the slot
+ * keeps the post-translate aggregation pass's shape uniform.
+ */
+const translateRelation = async (
+  inputs: TranslateColumnValueAsyncInputs,
+  context: RelationContext,
+): Promise<TranslatedColumnValue> => {
+  const { relationResolution } = inputs;
+  if (relationResolution === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `translateColumnValueAsync requires a relationResolution context for ` +
+        `${context} column "${inputs.column.id}". M19's command layer wires ` +
+        `validateItems through this slot via buildResolutionContexts.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: context,
+          hint:
+            'pass { relationResolution: { validateItems } } when calling ' +
+            'translateColumnValueAsync. The validateItems callback closes ' +
+            'over MondayClient.',
+        },
+      },
+    );
+  }
+  if (
+    inputs.column.settingsStr === undefined ||
+    inputs.column.settingsStr === null
+  ) {
+    throw new ApiError(
+      'internal_error',
+      `translateColumnValueAsync requires column.settingsStr for ${context} ` +
+        `column "${inputs.column.id}" — the translator reads ` +
+        `${
+          context === 'board_relation' ? 'boardIds' : 'dependencyBoards'
+        } from settings to derive allowed boards.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: context,
+          hint:
+            'the resolver-pass threads settings_str through ResolvedSet; ' +
+            'verify the call site passes column.settingsStr (R20 lift, ' +
+            'M19 widening).',
+        },
+      },
+    );
+  }
+
+  const itemIds = parseRelationItemIds(inputs.value, inputs.column.id, context);
+
+  const settings = parseColumnSettings(inputs.column.settingsStr);
+  const allowedBoards = deriveAllowedBoards(settings, context);
+  if (allowedBoards.length === 0) {
+    throw new UsageError(
+      `${
+        context === 'board_relation' ? 'Board-relation' : 'Dependency'
+      } column "${inputs.column.id}" has no ${
+        context === 'board_relation' ? 'allowed boards' : 'dependency boards'
+      } configured. Configure the column's linked-board list in Monday's ` +
+        `UI before linking items via --set, or use --set-raw with the ` +
+        `literal Monday wire shape.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: context,
+          raw_input: inputs.value,
+          hint:
+            `${
+              context === 'board_relation' ? 'board_relation' : 'dependency'
+            } columns scope item links to a configured set of boards; the ` +
+            `translator can't validate item membership against an empty ` +
+            `allowed set.`,
+        },
+      },
+    );
+  }
+
+  const result = await relationResolution.validateItems({
+    itemIds,
+    allowedBoards,
+    columnId: inputs.column.id,
+    context,
+  });
+
+  if (!result.ok) {
+    throw new UsageError(
+      buildRelationMismatchMessage(inputs.column.id, context, result.mismatches),
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: context,
+          raw_input: inputs.value,
+          allowed_boards: allowedBoards,
+          mismatches: result.mismatches.map((m) => ({
+            item_id: m.itemId,
+            actual_board: m.actualBoard,
+          })),
+          hint:
+            `each item must belong to one of the column's allowed boards ` +
+            `[${allowedBoards.join(', ')}]. Items missing from the response ` +
+            `(actual_board: null) were not visible to the caller's token, ` +
+            `archived, or deleted.`,
+        },
+      },
+    );
+  }
+
+  // Build per-item echo from the validator's items array. The
+  // validator preserves input-token order (parseRelationItemIds
+  // rejects duplicates so order-preservation is straightforward).
+  const echoItems: RelationResolutionItem[] = result.items.map((item) => ({
+    input: item.itemId.toString(),
+    /* c8 ignore next 5 — defensive: validateItems only returns items
+       in result.items when the per-item check passes (boardId is
+       present + allowed). String() guard for noUncheckedIndexedAccess
+       narrowing. */
+    resolved_board_id: item.boardId === null ? '' : item.boardId.toString(),
+  }));
+
+  return {
+    columnId: inputs.column.id,
+    // Type-cast: at Commit 3 only `'board_relation'` is in
+    // WRITABLE_COLUMN_TYPES; Commit 4 adds `'dependency'` and the
+    // cast becomes structurally identity. The dispatcher only
+    // routes the matching column types here, so the cast is safe.
+    columnType: context as WritableColumnType,
+    rawInput: inputs.value,
+    payload: {
+      format: 'rich',
+      value: { item_ids: [...itemIds] },
+    },
+    resolvedFrom: null,
+    peopleResolution: null,
+    tagResolution: null,
+    relationResolution: {
+      context,
+      allowed_boards: allowedBoards,
+      items: echoItems,
+    },
+    translatorResolution: {
+      source: 'live',
+      cacheAgeSeconds: null,
+    },
+  };
+};
+
+/**
+ * Derives the column's allowed-board list from its parsed
+ * `settings_str`. `board_relation` reads `settings.boardIds`
+ * (falling back to `[settings.boardId]` for legacy single-target
+ * shape Monday occasionally returns); `dependency` reads
+ * `settings.dependencyBoards` per Monday's distinct settings shape.
+ *
+ * Returns `readonly number[]` after filtering to safe integers — a
+ * malformed settings entry surfaces as an empty list, which the
+ * caller branches on via the no-allowed-boards usage_error.
+ */
+const deriveAllowedBoards = (
+  settings: unknown,
+  context: RelationContext,
+): readonly number[] => {
+  if (settings === null || typeof settings !== 'object') return [];
+  const obj = settings as Record<string, unknown>;
+  let candidates: readonly unknown[] = [];
+  if (context === 'board_relation') {
+    if (Array.isArray(obj.boardIds)) {
+      candidates = obj.boardIds as readonly unknown[];
+    } else if (typeof obj.boardId === 'number') {
+      candidates = [obj.boardId];
+    }
+    /* c8 ignore start — `dependency` branch lands at M19 Commit 4;
+       translateColumnValueAsync only routes `'board_relation'` here
+       in Commit 3, so the else-if and its body are unreachable until
+       Commit 4 widens the dispatcher. */
+  } else if (Array.isArray(obj.dependencyBoards)) {
+    candidates = obj.dependencyBoards as readonly unknown[];
+  }
+  /* c8 ignore stop */
+  const out: number[] = [];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) {
+      out.push(candidate);
+    } else if (
+      typeof candidate === 'string' &&
+      /^(?:0|[1-9]\d*)$/u.test(candidate)
+    ) {
+      const parsed = Number(candidate);
+      if (Number.isSafeInteger(parsed)) out.push(parsed);
+    }
+  }
+  return out;
+};
+
+/**
+ * Builds the human-readable `usage_error` message for one or more
+ * relation mismatches. Mirrors the per-noun wording the
+ * `parseRelationItemIds` errors use ("Board-relation column…",
+ * "Dependency column…") so an agent reading two consecutive errors
+ * sees consistent wording.
+ */
+const buildRelationMismatchMessage = (
+  columnId: string,
+  context: RelationContext,
+  mismatches: readonly { itemId: number; actualBoard: number | null }[],
+): string => {
+  const titled = context === 'board_relation' ? 'Board-relation' : 'Dependency';
+  const noun = mismatches.length === 1 ? 'item' : 'items';
+  const detail = mismatches
+    .map((m) =>
+      m.actualBoard === null
+        ? `${m.itemId.toString()} (not visible / deleted)`
+        : `${m.itemId.toString()} (board ${m.actualBoard.toString()})`,
+    )
+    .join(', ');
+  return (
+    `${titled} column "${columnId}" rejected ${mismatches.length.toString()} ` +
+    `${noun} not in the column's allowed-board set: ${detail}.`
+  );
 };
 
 const simple = (
@@ -807,6 +1173,7 @@ const simple = (
   resolvedFrom: null,
   peopleResolution: null,
   tagResolution: null,
+  relationResolution: null,
   translatorResolution: null,
 });
 
@@ -823,6 +1190,7 @@ const rich = (
   resolvedFrom: null,
   peopleResolution: null,
   tagResolution: null,
+  relationResolution: null,
   translatorResolution: null,
 });
 

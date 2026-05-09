@@ -458,23 +458,23 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (board_relation, still M19-pending) surfaces with deferred_to: v0.3', async () => {
-    // M19 close graduates `tags` to the friendly allowlist; this
-    // test pins the `deferred_to: "v0.3"` surface for the remaining
-    // tentative-row members (`board_relation` / `dependency`) until
-    // Commits 3 / 4 graduate them too. The category branch becomes
-    // unreachable at Commit 4; the `v0_2_writer_expansion` row in
-    // `unsupportedColumnTypeError` stays as documented dead code so
-    // a future tentative-row revival (next time the writer-expansion
-    // roadmap has a tentative slot) can re-populate the set without
-    // re-architecting the classifier.
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (dependency, still M19-pending) surfaces with deferred_to: v0.3', async () => {
+    // M19 close graduates `tags` (Commit 2) and `board_relation`
+    // (Commit 3) to the friendly allowlist; this test pins the
+    // `deferred_to: "v0.3"` surface for the last remaining
+    // tentative-row member (`dependency`) until Commit 4 graduates
+    // it too. The category branch becomes unreachable at Commit 4;
+    // the `v0_2_writer_expansion` row in `unsupportedColumnTypeError`
+    // stays as documented dead code so a future tentative-row revival
+    // (next time the writer-expansion roadmap has a tentative slot)
+    // can re-populate the set without re-architecting the classifier.
     const tentativeBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'rel_1',
-          title: 'Linked Items',
-          type: 'board_relation',
+          id: 'dep_1',
+          title: 'Blocking Items',
+          type: 'dependency',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -483,7 +483,7 @@ describe('monday item set (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'set', '12345', 'rel_1=12345', '--board', '111', '--json'],
+      ['item', 'set', '12345', 'dep_1=12345', '--board', '111', '--json'],
       {
         interactions: [
           {
@@ -646,6 +646,336 @@ describe('monday item set (integration, M5b)', () => {
       },
     );
     expect(out.exitCode).toBe(0);
+  });
+
+  it('live: tags column resolves names via account-tag directory and emits projected item (M19 Commit 2 happy path)', async () => {
+    // M19 Commit 2 deferred-from-Codex P2-2: end-to-end cassette
+    // exercising the full friendly translator path against fixture
+    // transport — `BoardMetadata` → `AccountTags` (live, populates
+    // cache) → `ItemSetRich`. Pins the `tag_ids` payload, the
+    // resolved-tag-id echo, and the envelope source/cache-age slots
+    // through to the wire.
+    const tagsBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithTags = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'tags_1',
+          type: 'tags',
+          text: 'launch',
+          value: '{"tag_ids":[101]}',
+          column: { title: 'Tags' },
+        },
+      ],
+    };
+    const out = await drive(
+      ['item', 'set', '12345', 'tags_1=launch', '--board', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [tagsBoard] } },
+          },
+          {
+            operation_name: 'AccountTags',
+            response: {
+              data: {
+                account: {
+                  tags: [
+                    { id: '101', name: 'launch' },
+                    { id: '202', name: 'priority' },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: itemWithTags } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    // Live tag-directory leg + live mutation = source 'live'.
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: tags multi-miss surfaces tag_not_found with details.tags array (M19 Commit 2 wiring)', async () => {
+    // Multi-miss surfaces ONE error per Decision 1 (4c652d5).
+    // Both BoardMetadata (cache miss → live) and AccountTags
+    // (cache miss → live) fire; no mutation runs since the
+    // translator throws before reaching the mutation.
+    const tagsBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'tags_1',
+          title: 'Tags',
+          type: 'tags',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'tags_1=foo,bar',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [tagsBoard] } },
+          },
+          {
+            operation_name: 'AccountTags',
+            response: {
+              data: {
+                account: { tags: [{ id: '101', name: 'launch' }] },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('tag_not_found');
+    expect(env.error?.details).toMatchObject({
+      tags: ['foo', 'bar'],
+    });
+  });
+
+  it('live: board_relation column validates allowed boards and emits {item_ids:[...]} payload (M19 Commit 3 happy path)', async () => {
+    // M19 Commit 3 happy-path cassette: BoardMetadata returns a
+    // board_relation column with `settings_str.boardIds: [222]`,
+    // ItemsByIdsForRelation confirms each input item belongs to
+    // board 222, ItemSetRich fires with the wire payload.
+    const relationBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'rel_1',
+          title: 'Linked Items',
+          type: 'board_relation',
+          description: null,
+          archived: null,
+          settings_str: JSON.stringify({ boardIds: [222] }),
+          width: null,
+        },
+      ],
+    };
+    const itemWithRelation = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'rel_1',
+          type: 'board_relation',
+          text: 'Linked-1, Linked-2',
+          value: '{"item_ids":[55555,66666]}',
+          column: { title: 'Linked Items' },
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'rel_1=55555,66666',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [relationBoard] } },
+          },
+          {
+            operation_name: 'ItemsByIdsForRelation',
+            response: {
+              data: {
+                items: [
+                  { id: '55555', board: { id: '222' } },
+                  { id: '66666', board: { id: '222' } },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemSetRich',
+            response: { data: { change_column_value: itemWithRelation } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string };
+    };
+    assertEnvelopeContract(env);
+    expect(env.data.id).toBe('12345');
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('--dry-run: board_relation surfaces resolved_from echo with context + allowed_boards + items (M19 Commit 3 dry-run)', async () => {
+    // Pins the dry-run echo branch in dry-run.ts buildDiffCell —
+    // relationResolution slot renders as
+    // `details.resolved_from: {context, allowed_boards, items}` so
+    // agents reading dry-run output see the validator's per-item
+    // mapping alongside the wire payload.
+    const relationBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'rel_1',
+          title: 'Linked Items',
+          type: 'board_relation',
+          description: null,
+          archived: null,
+          settings_str: JSON.stringify({ boardIds: [222] }),
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'rel_1=55555',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [relationBoard] } },
+          },
+          {
+            operation_name: 'ItemsByIdsForRelation',
+            response: {
+              data: {
+                items: [{ id: '55555', board: { id: '222' } }],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [sampleItem] } },
+          },
+          // No ItemSetRich — dry-run must not fire any mutation.
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        diff: Readonly<Record<string, { details?: { resolved_from?: unknown } }>>;
+      }[];
+    };
+    assertEnvelopeContract(env);
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.diff.rel_1).toMatchObject({
+      to: { item_ids: [55555] },
+      details: {
+        resolved_from: {
+          context: 'board_relation',
+          allowed_boards: [222],
+          items: [{ input: '55555', resolved_board_id: '222' }],
+        },
+      },
+    });
+  });
+
+  it('live: board_relation rejects items whose board falls outside allowed-boards (M19 Commit 3 mismatch)', async () => {
+    // Mismatch surface: validator returns {ok: false, mismatches},
+    // translator throws UsageError with details.allowed_boards +
+    // details.mismatches. No mutation fires.
+    const relationBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'rel_1',
+          title: 'Linked Items',
+          type: 'board_relation',
+          description: null,
+          archived: null,
+          settings_str: JSON.stringify({ boardIds: [222] }),
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'rel_1=55555',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [relationBoard] } },
+          },
+          {
+            operation_name: 'ItemsByIdsForRelation',
+            response: {
+              data: {
+                items: [{ id: '55555', board: { id: '999' } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details).toMatchObject({
+      column_id: 'rel_1',
+      column_type: 'board_relation',
+      allowed_boards: [222],
+    });
   });
 
   it('live: user_not_found surfaces typed error when email is unknown', async () => {

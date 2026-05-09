@@ -232,7 +232,7 @@ export const itemSetCommand: CommandModule<
         // to date.parseDateInput per cli-design §5.3 line 765;
         // `resolveMe` + `resolveEmail` cover the people branch's
         // `me` token and email-lookup paths per §5.3 line 728-734.
-        const { dateResolution, peopleResolution, tagResolution } =
+        const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
@@ -245,6 +245,7 @@ export const itemSetCommand: CommandModule<
             dateResolution,
             peopleResolution,
             tagResolution,
+            relationResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -339,6 +340,7 @@ export const itemSetCommand: CommandModule<
               dateResolution,
               peopleResolution,
               tagResolution,
+              relationResolution,
             });
           }
           const mutation: SelectedMutation = selectMutation([translated]);

@@ -138,10 +138,8 @@ describe('exampleSetForColumn — non-writable types', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    // M19 still-tentative row: `board_relation` / `dependency`
-    // graduate at Commits 3 / 4. `tags` graduated at Commit 2 and now
-    // returns the friendly-translator example list.
-    'board_relation',
+    // M19 still-tentative row: `dependency` graduates at Commit 4.
+    // `tags` graduated at Commit 2; `board_relation` at Commit 3.
     'dependency',
     'rating',
   ])('%s returns null', (type) => {
@@ -154,6 +152,15 @@ describe('exampleSetForColumn — M19 tags (writable)', () => {
     expect(exampleSetForColumn(col({ type: 'tags' }))).toEqual([
       `--set col_1=launch`,
       `--set col_1='launch,priority'`,
+    ]);
+  });
+});
+
+describe('exampleSetForColumn — M19 board_relation (writable)', () => {
+  it('board_relation returns single + multi --set examples', () => {
+    expect(exampleSetForColumn(col({ type: 'board_relation' }))).toEqual([
+      `--set col_1=12345`,
+      `--set col_1='12345,67890'`,
     ]);
   });
 });

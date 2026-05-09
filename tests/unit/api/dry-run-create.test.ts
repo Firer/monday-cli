@@ -161,3 +161,80 @@ describe('planCreate — tags translator dry-run echo (M19)', () => {
     });
   });
 });
+
+describe('planCreate — board_relation translator dry-run echo (M19 Commit 3)', () => {
+  it('emits details.resolved_from for board_relation inputs in buildCreateDiffCell', async () => {
+    // Covers the buildCreateDiffCell `relationResolution !== null`
+    // branch (`from: null`, `to: { item_ids: [...] }`,
+    // `details.resolved_from: {context, allowed_boards, items}` per
+    // cli-design §5.3 design Q5). Mirrors the planChanges board_
+    // relation echo path through item-set.test.ts integration.
+    const relationBoard: { boards: unknown[] } = {
+      boards: [
+        {
+          id: '111',
+          name: 'Sprint',
+          description: null,
+          state: 'active',
+          board_kind: 'public',
+          board_folder_id: null,
+          workspace_id: null,
+          url: null,
+          hierarchy_type: 'top_level',
+          is_leaf: true,
+          updated_at: null,
+          groups: [],
+          columns: [
+            {
+              id: 'rel_1',
+              title: 'Linked Items',
+              type: 'board_relation',
+              description: null,
+              archived: false,
+              settings_str: JSON.stringify({ boardIds: [222] }),
+              width: null,
+            },
+          ],
+        },
+      ],
+    };
+    const client = {
+      raw: vi.fn().mockResolvedValue({
+        data: relationBoard,
+        complexity: null,
+        stats: { attempts: 1, totalSleepMs: 0 },
+      }),
+    } as unknown as MondayClient;
+    const result = await planCreate({
+      client,
+      mode: { kind: 'item', boardId: '111' },
+      name: 'Launch task',
+      setEntries: [{ token: 'rel_1', value: '12345,67890' }],
+      relationResolution: {
+        validateItems: () =>
+          Promise.resolve({
+            ok: true,
+            items: [
+              { itemId: 12345, boardId: 222 },
+              { itemId: 67890, boardId: 222 },
+            ],
+          }),
+      },
+    });
+    const plan = result.plannedChanges[0]!;
+    expect(plan.diff.rel_1).toEqual({
+      from: null,
+      to: { item_ids: [12345, 67890] },
+      details: {
+        resolved_from: {
+          context: 'board_relation',
+          allowed_boards: [222],
+          items: [
+            { input: '12345', resolved_board_id: '222' },
+            { input: '67890', resolved_board_id: '222' },
+          ],
+        },
+      },
+    });
+  });
+});

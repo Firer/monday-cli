@@ -9,12 +9,13 @@ import {
 } from '../../../src/api/column-types.js';
 
 describe('WRITABLE_COLUMN_TYPES', () => {
-  it('matches the v0.1 + M8 firm + M19 tags allowlist exactly, in declared order', () => {
+  it('matches the v0.1 + M8 firm + M19 (tags + board_relation) allowlist exactly, in declared order', () => {
     // Order is part of the contract — tests iterate the array form
     // and downstream snapshots pin the literal sequence. v0.1 entries
     // come first (`text` … `people`); M8 firm additions follow in
     // roadmap order (`link` / `email` / `phone`); M19 graduates
-    // `tags` from the v0.2 tentative row.
+    // `tags` (Commit 2) + `board_relation` (Commit 3) from the v0.2
+    // tentative row. `dependency` graduates at Commit 4.
     expect(WRITABLE_COLUMN_TYPES).toEqual([
       'text',
       'long_text',
@@ -27,6 +28,7 @@ describe('WRITABLE_COLUMN_TYPES', () => {
       'email',
       'phone',
       'tags',
+      'board_relation',
     ]);
   });
 });
@@ -45,9 +47,8 @@ describe('isWritableColumnType', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    // M19 still-tentative row: `board_relation` / `dependency` graduate
-    // at Commits 3 / 4. `tags` graduated at Commit 2.
-    'board_relation',
+    // M19 still-tentative row: `dependency` graduates at Commit 4.
+    // `tags` graduated at Commit 2; `board_relation` at Commit 3.
     'dependency',
     'rating',
     '',
@@ -74,7 +75,8 @@ describe('isWritableColumnType', () => {
         | 'link'
         | 'email'
         | 'phone'
-        | 'tags' = candidate;
+        | 'tags'
+        | 'board_relation' = candidate;
       expect(narrowed).toBe('status');
     } else {
       throw new Error('expected status to be writable');
@@ -179,9 +181,9 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     'country',
     'hour',
     'timeline',
-    // `tags` graduated to WRITABLE_COLUMN_TYPES at M19 close —
-    // `categorizeNoncanonicalColumnType` returns null for it now.
-    'board_relation',
+    // `tags` (Commit 2) and `board_relation` (Commit 3) graduated
+    // to WRITABLE_COLUMN_TYPES at M19 close —
+    // `categorizeNoncanonicalColumnType` returns null for them now.
     'dependency',
     'rating',
     'battery',

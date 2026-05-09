@@ -931,7 +931,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
         // success envelope.
         const lookupWarnings: readonly Warning[] = lookup.warnings;
 
-        const { dateResolution, peopleResolution, tagResolution } =
+        const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (decision.kind === 'create') {
@@ -945,6 +945,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
             dateResolution,
             peopleResolution,
             tagResolution,
+            relationResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
             dryRun: globalFlags.dryRun,
@@ -970,6 +971,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
           dateResolution,
           peopleResolution,
           tagResolution,
+          relationResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
           dryRun: globalFlags.dryRun,
@@ -1005,6 +1007,9 @@ interface BranchRunInputsBase {
   readonly tagResolution: ReturnType<
     typeof buildResolutionContexts
   >['tagResolution'];
+  readonly relationResolution: ReturnType<
+    typeof buildResolutionContexts
+  >['relationResolution'];
   readonly env: NodeJS.ProcessEnv;
   readonly noCache: boolean;
   readonly dryRun: boolean;
@@ -1043,6 +1048,7 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
       dateResolution: inputs.dateResolution,
       peopleResolution: inputs.peopleResolution,
       tagResolution: inputs.tagResolution,
+      relationResolution: inputs.relationResolution,
       env: inputs.env,
       noCache: inputs.noCache,
     });
@@ -1102,6 +1108,7 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
     dateResolution: inputs.dateResolution,
     peopleResolution: inputs.peopleResolution,
     tagResolution: inputs.tagResolution,
+    relationResolution: inputs.relationResolution,
     env: inputs.env,
     noCache: inputs.noCache,
   });
@@ -1204,6 +1211,7 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       dateResolution: inputs.dateResolution,
       peopleResolution: inputs.peopleResolution,
       tagResolution: inputs.tagResolution,
+      relationResolution: inputs.relationResolution,
       env: inputs.env,
       noCache: inputs.noCache,
     });
@@ -1260,6 +1268,7 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
     dateResolution: inputs.dateResolution,
     peopleResolution: inputs.peopleResolution,
     tagResolution: inputs.tagResolution,
+    relationResolution: inputs.relationResolution,
     env: inputs.env,
     noCache: inputs.noCache,
   });
@@ -1288,6 +1297,7 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     },
     ...translated,

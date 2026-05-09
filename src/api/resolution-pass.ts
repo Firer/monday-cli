@@ -65,6 +65,7 @@ import {
   translateColumnValueAsync,
   type DateResolutionContext,
   type PeopleResolutionContext,
+  type RelationResolutionContext,
   type TagResolutionContext,
   type TranslatedColumnValue,
 } from './column-values.js';
@@ -128,6 +129,15 @@ export interface ResolveAndTranslateInputs {
    * cache controls into the callback.
    */
   readonly tagResolution?: TagResolutionContext;
+  /**
+   * Resolution context for the M19 `board_relation` / `dependency`
+   * translators. Required when any `--set` token resolves to one
+   * of those types; the translator throws `internal_error` if the
+   * slot is absent. Shared by both relation translators (the
+   * per-noun divergence is the `context` discriminant the
+   * translator passes through, not a second callback).
+   */
+  readonly relationResolution?: RelationResolutionContext;
   readonly env?: NodeJS.ProcessEnv;
   readonly noCache?: boolean;
   /**
@@ -389,6 +399,9 @@ export const resolveAndTranslate = async (
           ...(inputs.tagResolution === undefined
             ? {}
             : { tagResolution: inputs.tagResolution }),
+          ...(inputs.relationResolution === undefined
+            ? {}
+            : { relationResolution: inputs.relationResolution }),
         });
         translated.push(t);
       } catch (err) {

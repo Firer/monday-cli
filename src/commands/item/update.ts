@@ -380,7 +380,7 @@ export const itemUpdateCommand: CommandModule<
           explicit: parsed.board,
         });
 
-        const { dateResolution, peopleResolution, tagResolution } =
+        const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
@@ -394,6 +394,7 @@ export const itemUpdateCommand: CommandModule<
             dateResolution,
             peopleResolution,
             tagResolution,
+            relationResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -419,6 +420,7 @@ export const itemUpdateCommand: CommandModule<
           dateResolution,
           peopleResolution,
           tagResolution,
+          relationResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
         });
@@ -453,6 +455,7 @@ export const itemUpdateCommand: CommandModule<
                   resolvedFrom: null,
                   peopleResolution: null,
                   tagResolution: null,
+                  relationResolution: null,
                   translatorResolution: null,
                 },
                 ...translated,
@@ -868,7 +871,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // means a malformed --set / --set-raw doesn't pay for the metadata
   // load + items_page walk first.)
 
-  const { dateResolution, peopleResolution, tagResolution } =
+  const { dateResolution, peopleResolution, tagResolution, relationResolution } =
     buildResolutionContexts({ client, ctx, globalFlags });
 
   // 5) Dry-run path: per-item planChanges. Column resolution is
@@ -898,6 +901,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         dateResolution,
         peopleResolution,
         tagResolution,
+        relationResolution,
         env: ctx.env,
         noCache: globalFlags.noCache,
       });
@@ -954,6 +958,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     dateResolution,
     peopleResolution,
     tagResolution,
+    relationResolution,
     env: ctx.env,
     noCache: globalFlags.noCache,
     initialSource: meta.source,
@@ -991,6 +996,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
             resolvedFrom: null,
             peopleResolution: null,
             tagResolution: null,
+            relationResolution: null,
             translatorResolution: null,
           },
           ...translated,

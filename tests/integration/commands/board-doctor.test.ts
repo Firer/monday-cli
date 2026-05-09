@@ -198,22 +198,23 @@ describe('monday board doctor (integration)', () => {
     expect(dx?.category).toBe('read_only_forever');
   });
 
-  it('unsupported_column_type: M19-pending tentative (board_relation) surfaces with v0.2_writer_expansion category', async () => {
-    // M19 close graduates `tags` to the friendly translator — board
-    // doctor no longer flags it as unsupported. `board_relation` and
-    // `dependency` are still pending (Commits 3 / 4); doctor still
-    // surfaces them under the `v0_2_writer_expansion` category until
-    // those land. The category constant name retains its M8-era
-    // spelling for stability — the user-visible message names v0.3.
+  it('unsupported_column_type: M19-pending tentative (dependency) surfaces with v0.2_writer_expansion category', async () => {
+    // M19 close graduates `tags` (Commit 2) + `board_relation`
+    // (Commit 3) to the friendly translator — board doctor no
+    // longer flags those as unsupported. `dependency` is still
+    // pending (Commit 4); doctor surfaces it under the
+    // `v0_2_writer_expansion` category until that lands. The
+    // category constant name retains its M8-era spelling for
+    // stability — the user-visible message names v0.3.
     const out = await drive(
       ['board', 'doctor', '111', '--json'],
       {
         interactions: [
           boardWithColumns([
             {
-              id: 'rel_1',
-              title: 'Linked Items',
-              type: 'board_relation',
+              id: 'dep_1',
+              title: 'Blocking Items',
+              type: 'dependency',
               description: null,
               archived: null,
               settings_str: '{}',

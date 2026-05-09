@@ -127,6 +127,17 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
         `--set ${column.id}=launch`,
         `--set ${column.id}='launch,priority'`,
       ];
+    case 'board_relation':
+      // M19 Commit 3 friendly translator: comma-split numeric item
+      // ID list, validated against the column's allowed boards
+      // (`column.settings.boardIds`). Wire shape `{item_ids:[...]}`.
+      // Per-call cap of 25 items (Monday's documented relation-
+      // column item ceiling); over-cap surfaces `usage_error`
+      // pre-network.
+      return [
+        `--set ${column.id}=12345`,
+        `--set ${column.id}='12345,67890'`,
+      ];
     /* c8 ignore next 2 — unreachable: isWritableColumnType gates the
        entry, so any column.type that lands here is one of the cases
        above. */

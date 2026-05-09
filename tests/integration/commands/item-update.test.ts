@@ -650,21 +650,22 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.error?.details?.column_id).toBe('status_4');
   });
 
-  it('live: --set against an unsupported column type (board_relation, M19-pending) surfaces with v0.3 deferral', async () => {
+  it('live: --set against an unsupported column type (dependency, M19-pending) surfaces with v0.3 deferral', async () => {
     // Single-path translation-error branch: column resolves OK, but
     // translateColumnValueAsync throws ApiError(unsupported_column_type)
-    // for non-allowlisted types. M19 close graduates `tags` to the
-    // friendly translator; `board_relation` and `dependency` graduate
-    // at Commits 3 / 4. Path B (M5b cleanup): the error advertises
-    // the v0.3 writer-expansion milestone (slipped from v0.2 tentative
-    // at M18 close) instead of a dead --set-raw suggestion.
+    // for non-allowlisted types. M19 close graduates `tags` (Commit 2)
+    // and `board_relation` (Commit 3) to the friendly translator;
+    // `dependency` graduates at Commit 4. Path B (M5b cleanup): the
+    // error advertises the v0.3 writer-expansion milestone (slipped
+    // from v0.2 tentative at M18 close) instead of a dead --set-raw
+    // suggestion.
     const tentativeMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'rel_42',
-          title: 'Linked Items',
-          type: 'board_relation',
+          id: 'dep_42',
+          title: 'Blocking Items',
+          type: 'dependency',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -678,7 +679,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         'update',
         '12345',
         '--set',
-        'rel_42=12345',
+        'dep_42=12345',
         '--board',
         '111',
         '--json',

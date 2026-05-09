@@ -1197,20 +1197,21 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
     expect(env.data.summary.applied_count).toBe(2);
   });
 
-  it('live: --set against unsupported column type (board_relation, M19-pending) in bulk surfaces typed error', async () => {
+  it('live: --set against unsupported column type (dependency, M19-pending) in bulk surfaces typed error', async () => {
     // Covers update.ts bulk path: translateColumnValueAsync throws
     // ApiError(unsupported_column_type) → folded with
-    // resolverWarnings and re-thrown. M19 close graduates `tags` to
-    // the friendly translator; `board_relation` and `dependency`
-    // graduate at Commits 3 / 4. This test pins the bulk-path
-    // surface for the still-tentative members until those land.
+    // resolverWarnings and re-thrown. M19 close graduates `tags`
+    // (Commit 2) + `board_relation` (Commit 3) to the friendly
+    // translator; `dependency` graduates at Commit 4. This test
+    // pins the bulk-path surface for the last tentative-row member
+    // until that commit lands.
     const tentativeMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'rel_42',
-          title: 'Linked Items',
-          type: 'board_relation',
+          id: 'dep_42',
+          title: 'Blocking Items',
+          type: 'dependency',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -1225,7 +1226,7 @@ describe('monday item update (integration, M5b — bulk --where path)', () => {
         '--filter-json',
         '{"rules":[]}',
         '--set',
-        'rel_42=12345',
+        'dep_42=12345',
         '--board',
         '111',
         '--yes',

@@ -37,6 +37,7 @@ describe('translateColumnValue — simple types', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -70,6 +71,7 @@ describe('translateColumnValue — simple types', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -84,6 +86,7 @@ describe('translateColumnValue — simple types', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -138,6 +141,7 @@ describe('translateColumnValue — status (rich)', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -278,6 +282,7 @@ describe('translateColumnValue — dropdown (rich)', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -490,6 +495,7 @@ describe('translateColumnValue — date (rich)', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -576,16 +582,14 @@ describe('translateColumnValue — sync entry on a people column', () => {
 });
 
 describe('translateColumnValue — non-allowlisted types (M19 still-tentative row)', () => {
-  // M19 graduates `tags` into the friendly allowlist (Commit 2);
-  // `board_relation` and `dependency` graduate at Commits 3 and 4.
-  // Until those land, their `unsupported_column_type` errors carry
+  // M19 graduates `tags` (Commit 2) + `board_relation` (Commit 3)
+  // into the friendly allowlist; `dependency` graduates at Commit 4.
+  // Until that lands, its `unsupported_column_type` error carries
   // `deferred_to: "v0.3"` via the `v0_2_writer_expansion` category
-  // row. The `--set-raw` escape hatch accepts these types today —
+  // row. The `--set-raw` escape hatch accepts the type today —
   // the hint surfaces that.
-  it.each([
-    'board_relation',
-    'dependency',
-  ])('%s → unsupported_column_type with deferred_to: v0.3', (type) => {
+  it('dependency → unsupported_column_type with deferred_to: v0.3', () => {
+    const type = 'dependency';
     expect(() => translate(type, 'whatever', 'col_z')).toThrow(
       /not yet in the friendly --set translator allowlist/u,
     );
@@ -624,6 +628,23 @@ describe('translateColumnValue — non-allowlisted types (M19 still-tentative ro
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         column_type: 'tags',
+      });
+    }
+  });
+
+  // `board_relation` graduated at M19 Commit 3 — same programmer-
+  // error guard as `tags`. Pinned for regression.
+  it('board_relation (sync entry) → internal_error with a hint to use the async entry', () => {
+    expect(() => translate('board_relation', '12345', 'rel_1')).toThrow(ApiError);
+    try {
+      translate('board_relation', '12345', 'rel_1');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/translateColumnValueAsync/u);
+      expect(err.details).toMatchObject({
+        column_id: 'rel_1',
+        column_type: 'board_relation',
       });
     }
   });
@@ -1113,6 +1134,7 @@ describe('translateColumnValueAsync — surface contract', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -1151,6 +1173,7 @@ describe('translateColumnValueAsync — surface contract', () => {
         tokens: [{ input: 'alice@example.com', resolved_id: '42' }],
       },
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -1449,23 +1472,438 @@ describe('translateColumnValueAsync — tags translator (M19)', () => {
     });
   });
 });
+
+describe('translateColumnValueAsync — board_relation translator (M19)', () => {
+  // M19 Commit 3: the `board_relation` friendly translator dispatches
+  // via the async entry, calling `relationResolution.validateItems`
+  // to confirm each input item belongs to one of the column's
+  // allowed boards. Wire payload `{ item_ids: [N1, N2] }`. The
+  // per-item `relationResolution` echo populates dry-run rendering;
+  // `translatorResolution: { source: 'live', cacheAgeSeconds: null }`
+  // since the validator is always live.
+
+  const validBoardRelationSettings = JSON.stringify({ boardIds: [111, 222] });
+
+  const stubValidateItems =
+    (result:
+      | {
+          ok: true;
+          items: readonly { itemId: number; boardId: number | null }[];
+        }
+      | {
+          ok: false;
+          mismatches: readonly { itemId: number; actualBoard: number | null }[];
+        }) =>
+    () =>
+      Promise.resolve(result);
+
+  it('happy path: comma-split item IDs validated and threaded to {item_ids: [...]} payload', async () => {
+    const out = await translateColumnValueAsync({
+      column: {
+        id: 'rel_1',
+        type: 'board_relation',
+        settingsStr: validBoardRelationSettings,
+      },
+      value: '12345,67890',
+      relationResolution: {
+        validateItems: stubValidateItems({
+          ok: true,
+          items: [
+            { itemId: 12345, boardId: 111 },
+            { itemId: 67890, boardId: 222 },
+          ],
+        }),
+      },
+    });
+    expect(out.columnId).toBe('rel_1');
+    expect(out.columnType).toBe('board_relation');
+    expect(out.payload).toEqual({
+      format: 'rich',
+      value: { item_ids: [12345, 67890] },
+    });
+    expect(out.relationResolution).toEqual({
+      context: 'board_relation',
+      allowed_boards: [111, 222],
+      items: [
+        { input: '12345', resolved_board_id: '111' },
+        { input: '67890', resolved_board_id: '222' },
+      ],
+    });
+    expect(out.translatorResolution).toEqual({
+      source: 'live',
+      cacheAgeSeconds: null,
+    });
+    expect(out.tagResolution).toBeNull();
+    expect(out.peopleResolution).toBeNull();
+    expect(out.resolvedFrom).toBeNull();
+  });
+
+  it('validateItems is called with the parsed itemIds + derived allowedBoards + columnId + context', async () => {
+    let capturedInputs:
+      | {
+          itemIds: readonly number[];
+          allowedBoards: readonly number[];
+          columnId: string;
+          context: 'board_relation' | 'dependency';
+        }
+      | undefined;
+    await translateColumnValueAsync({
+      column: {
+        id: 'rel_1',
+        type: 'board_relation',
+        settingsStr: validBoardRelationSettings,
+      },
+      value: '12345',
+      relationResolution: {
+        validateItems: (inputs) => {
+          capturedInputs = inputs;
+          return Promise.resolve({
+            ok: true,
+            items: [{ itemId: 12345, boardId: 111 }],
+          });
+        },
+      },
+    });
+    expect(capturedInputs).toEqual({
+      itemIds: [12345],
+      allowedBoards: [111, 222],
+      columnId: 'rel_1',
+      context: 'board_relation',
+    });
+  });
+
+  it('fallback: settings.boardId (singular, legacy) → derives allowedBoards: [boardId]', async () => {
+    const legacySettings = JSON.stringify({ boardId: 999 });
+    let captured: readonly number[] | undefined;
+    await translateColumnValueAsync({
+      column: {
+        id: 'rel_1',
+        type: 'board_relation',
+        settingsStr: legacySettings,
+      },
+      value: '12345',
+      relationResolution: {
+        validateItems: (inputs) => {
+          captured = inputs.allowedBoards;
+          return Promise.resolve({
+            ok: true,
+            items: [{ itemId: 12345, boardId: 999 }],
+          });
+        },
+      },
+    });
+    expect(captured).toEqual([999]);
+  });
+
+  it('mismatch result → usage_error with details.mismatches', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: stubValidateItems({
+            ok: false,
+            mismatches: [{ itemId: 12345, actualBoard: 999 }],
+          }),
+        },
+      }),
+    ).rejects.toThrow(UsageError);
+    try {
+      await translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: stubValidateItems({
+            ok: false,
+            mismatches: [{ itemId: 12345, actualBoard: 999 }],
+          }),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.message).toMatch(/allowed-board set/u);
+      expect(err.details).toMatchObject({
+        column_id: 'rel_1',
+        column_type: 'board_relation',
+        allowed_boards: [111, 222],
+        mismatches: [{ item_id: 12345, actual_board: 999 }],
+      });
+    }
+  });
+
+  it('empty input → usage_error pointing at monday item clear (parseRelationItemIds rejection)', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(/monday item clear/u);
+  });
+
+  it('over-cap input (26 items) → usage_error pre-validator (no validateItems call)', async () => {
+    const ids = Array.from({ length: 26 }, (_, i) => (i + 1).toString());
+    let validateItemsCalled = false;
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: ids.join(','),
+        relationResolution: {
+          validateItems: () => {
+            validateItemsCalled = true;
+            return Promise.resolve({ ok: true, items: [] });
+          },
+        },
+      }),
+    ).rejects.toThrow(/per-call cap of 25/u);
+    expect(validateItemsCalled).toBe(false);
+  });
+
+  it('missing relationResolution context → internal_error wiring hint', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '12345',
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+    try {
+      await translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '12345',
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/buildResolutionContexts/u);
+      expect(err.details).toMatchObject({
+        column_id: 'rel_1',
+        column_type: 'board_relation',
+      });
+    }
+  });
+
+  it('missing settingsStr (null) → internal_error wiring hint', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'rel_1', type: 'board_relation', settingsStr: null },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'rel_1', type: 'board_relation', settingsStr: null },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/settingsStr/u);
+    }
+  });
+
+  it('missing settingsStr (undefined) → internal_error wiring hint', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'rel_1', type: 'board_relation' },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('empty allowed-boards (no boardIds in settings) → usage_error', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: '{}',
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(UsageError);
+    try {
+      await translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: '{}',
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.message).toMatch(/no allowed boards configured/u);
+      expect(err.details).toMatchObject({
+        column_id: 'rel_1',
+        column_type: 'board_relation',
+      });
+    }
+  });
+
+  it('settingsStr that fails JSON.parse → falls through to empty allowedBoards → usage_error', async () => {
+    // parseColumnSettings returns null for malformed input;
+    // deriveAllowedBoards returns [] for null; the no-allowed-boards
+    // branch fires.
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: 'not-json',
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(/no allowed boards configured/u);
+  });
+
+  it('settings.boardIds with string-form decimal IDs (Monday legacy) → derived as numbers', async () => {
+    // Monday occasionally returns boardIds as decimal strings rather
+    // than numbers in legacy boards. deriveAllowedBoards parses the
+    // string form via the same regex parseRelationItemIds uses.
+    const stringSettings = JSON.stringify({ boardIds: ['111', '222'] });
+    let captured: readonly number[] | undefined;
+    await translateColumnValueAsync({
+      column: {
+        id: 'rel_1',
+        type: 'board_relation',
+        settingsStr: stringSettings,
+      },
+      value: '12345',
+      relationResolution: {
+        validateItems: (inputs) => {
+          captured = inputs.allowedBoards;
+          return Promise.resolve({
+            ok: true,
+            items: [{ itemId: 12345, boardId: 111 }],
+          });
+        },
+      },
+    });
+    expect(captured).toEqual([111, 222]);
+  });
+
+  it('multi-mismatch (one missing, one wrong board) → message lists each per-item with annotated reason', async () => {
+    // Pins both branches of buildRelationMismatchMessage:
+    // `mismatches.length === 1 ? 'item' : 'items'` (multi here) and
+    // `actualBoard === null ? '(not visible / deleted)' : '(board N)'`.
+    try {
+      await translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: validBoardRelationSettings,
+        },
+        value: '12345,67890',
+        relationResolution: {
+          validateItems: stubValidateItems({
+            ok: false,
+            mismatches: [
+              { itemId: 12345, actualBoard: null },
+              { itemId: 67890, actualBoard: 999 },
+            ],
+          }),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.message).toMatch(/2 items not in/u);
+      expect(err.message).toMatch(/12345 \(not visible \/ deleted\)/u);
+      expect(err.message).toMatch(/67890 \(board 999\)/u);
+    }
+  });
+
+  it('settings.boardIds with malformed entries (non-numeric strings) → filtered to empty → usage_error', async () => {
+    // Mix of valid and invalid entries — only valid ones survive the
+    // safe-integer guard. All-invalid → empty → no-allowed-boards
+    // usage_error.
+    const malformedSettings = JSON.stringify({
+      boardIds: ['not-numeric', { wrong: 'shape' }, true],
+    });
+    await expect(
+      translateColumnValueAsync({
+        column: {
+          id: 'rel_1',
+          type: 'board_relation',
+          settingsStr: malformedSettings,
+        },
+        value: '12345',
+        relationResolution: {
+          validateItems: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(/no allowed boards configured/u);
+  });
+});
 });
 
 describe('unsupportedColumnTypeError', () => {
-  it('v0.3 writer-expansion candidate (board_relation, M19-pending) → deferred_to: "v0.3"', () => {
-    // M19 close graduates `tags` to WRITABLE_COLUMN_TYPES;
-    // `board_relation` and `dependency` graduate at Commits 3 / 4.
-    // Until those land, the v0_2_writer_expansion category branch
-    // surfaces them with `deferred_to: "v0.3"`. Post-Commit-4 the
-    // category row becomes unreachable but stays as documented dead
-    // code for stability + future tentative-row revival.
-    const err = unsupportedColumnTypeError('col_42', 'board_relation');
+  it('v0.3 writer-expansion candidate (dependency, M19-pending) → deferred_to: "v0.3"', () => {
+    // M19 close graduates `tags` (Commit 2) + `board_relation`
+    // (Commit 3) to WRITABLE_COLUMN_TYPES; `dependency` graduates
+    // at Commit 4. Until that lands, the v0_2_writer_expansion
+    // category branch surfaces it with `deferred_to: "v0.3"`.
+    // Post-Commit-4 the category row becomes unreachable but stays
+    // as documented dead code for stability + future tentative-row
+    // revival.
+    const err = unsupportedColumnTypeError('col_42', 'dependency');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
     expect(err.retryable).toBe(false);
     expect(err.details).toMatchObject({
       column_id: 'col_42',
-      type: 'board_relation',
+      type: 'dependency',
       deferred_to: 'v0.3',
     });
     expect(err.details).not.toHaveProperty('set_raw_example');

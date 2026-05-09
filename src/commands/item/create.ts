@@ -780,7 +780,7 @@ export const itemCreateCommand: CommandModule<
             ? createMode.subitemsBoardId
             : createMode.boardId;
 
-        const { dateResolution, peopleResolution, tagResolution } =
+        const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
@@ -793,6 +793,7 @@ export const itemCreateCommand: CommandModule<
             dateResolution,
             peopleResolution,
             tagResolution,
+            relationResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -836,6 +837,7 @@ export const itemCreateCommand: CommandModule<
           dateResolution,
           peopleResolution,
           tagResolution,
+          relationResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
         });

@@ -15,10 +15,15 @@
  * `update.ts:450` single, `update.ts:1275` bulk, `create.ts:893`)
  * — see v0.2-plan §12 R24.
  *
- * **M19 widening.** Adds `tagResolution.resolveTags` closing over
- * `MondayClient` + `env` + `noCache`; the friendly `tags` translator
- * consumes it via the existing `TranslateColumnValueAsyncInputs.
- * tagResolution` slot. The relation slot lands at Commit 3.
+ * **M19 widening.** Adds `tagResolution.resolveTags` (Commit 2) +
+ * `relationResolution.validateItems` (Commit 3) closing over
+ * `MondayClient` + `env` + `noCache`. The friendly `tags` /
+ * `board_relation` / `dependency` translators consume them via the
+ * matching `TranslateColumnValueAsyncInputs.*Resolution` slots.
+ * `dependency` (Commit 4) reuses the same relation slot — the
+ * validator's per-noun divergence is captured by the `context`
+ * discriminant the translator passes through, NOT by a second
+ * callback.
  */
 
 import type { MondayClient } from './client.js';
@@ -27,11 +32,13 @@ import type { GlobalFlags } from '../types/global-flags.js';
 import type {
   DateResolutionContext,
   PeopleResolutionContext,
+  RelationResolutionContext,
   TagResolutionContext,
 } from './column-values.js';
 import { resolveMeFactory } from './item-helpers.js';
 import { userByEmail } from './resolvers.js';
 import { resolveTags } from './tag-directory.js';
+import { validateBoardRelationItems } from './board-relation-validation.js';
 
 export interface BuildResolutionContextsInputs {
   readonly client: MondayClient;
@@ -43,6 +50,7 @@ export interface ResolutionContexts {
   readonly dateResolution: DateResolutionContext;
   readonly peopleResolution: PeopleResolutionContext;
   readonly tagResolution: TagResolutionContext;
+  readonly relationResolution: RelationResolutionContext;
 }
 
 export const buildResolutionContexts = (
@@ -76,5 +84,17 @@ export const buildResolutionContexts = (
         noCache: globalFlags.noCache,
       }),
   };
-  return { dateResolution, peopleResolution, tagResolution };
+  const relationResolution: RelationResolutionContext = {
+    validateItems: ({ itemIds, allowedBoards, columnId, context }) =>
+      validateBoardRelationItems({
+        client,
+        itemIds,
+        allowedBoards,
+        columnId,
+        context,
+        env: ctx.env,
+        noCache: globalFlags.noCache,
+      }),
+  };
+  return { dateResolution, peopleResolution, tagResolution, relationResolution };
 };

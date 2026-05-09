@@ -275,18 +275,19 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (board_relation, M19-pending) surfaces with deferred_to: v0.3', async () => {
-    // M19 close graduates `tags` to the friendly translator + clear
-    // path; `board_relation` and `dependency` graduate at Commits 3 /
-    // 4. This test pins the `deferred_to: "v0.3"` surface for the
-    // remaining tentative-row members until those commits land.
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (dependency, M19-pending) surfaces with deferred_to: v0.3', async () => {
+    // M19 close graduates `tags` (Commit 2) + `board_relation`
+    // (Commit 3) to the friendly translator + clear path;
+    // `dependency` graduates at Commit 4. This test pins the
+    // `deferred_to: "v0.3"` surface for the last tentative-row
+    // member until that commit lands.
     const tentativeBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'rel_1',
-          title: 'Linked Items',
-          type: 'board_relation',
+          id: 'dep_1',
+          title: 'Blocking Items',
+          type: 'dependency',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -295,7 +296,7 @@ describe('monday item clear (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'clear', '12345', 'rel_1', '--board', '111', '--json'],
+      ['item', 'clear', '12345', 'dep_1', '--board', '111', '--json'],
       {
         interactions: [
           {

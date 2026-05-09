@@ -266,6 +266,13 @@ const WRITABLE_SETTINGS_SCHEMAS: Readonly<
   // write time. Conservative empty schema mirrors `link` / `email` /
   // `phone` / `date` / `people`.
   tags: emptySettingsSchema,
+  // M19 Commit 3: `board_relation`'s linked-board list is configured
+  // through Monday's UI rather than via `create_column.defaults` —
+  // there's no documented JSON shape Monday accepts at column-create
+  // time. The friendly translator validates per-item membership at
+  // write time against `column.settings.boardIds`. Conservative
+  // empty schema; `dependency` (Commit 4) will add a parallel entry.
+  board_relation: emptySettingsSchema,
 };
 
 /**
@@ -289,6 +296,7 @@ const WRITABLE_SETTINGS_EXPECTED_KEYS: Readonly<
   email: [],
   phone: [],
   tags: [],
+  board_relation: [],
 };
 
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>

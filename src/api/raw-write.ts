@@ -261,6 +261,7 @@ export const translateRawColumnValue = (
     // translator cache leg to aggregate. The user owns the wire-shape
     // correctness (cli-design §5.3 escape-hatch contract).
     tagResolution: null,
+    relationResolution: null,
     translatorResolution: null,
   };
 };

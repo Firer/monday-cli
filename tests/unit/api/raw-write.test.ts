@@ -185,6 +185,7 @@ describe('translateRawColumnValue — happy paths', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     });
   });
@@ -361,6 +362,7 @@ describe('--set-raw → selectMutation round-trip', () => {
       resolvedFrom: null,
       peopleResolution: null,
       tagResolution: null,
+      relationResolution: null,
       translatorResolution: null,
     };
     const raw = translateRawColumnValue(
