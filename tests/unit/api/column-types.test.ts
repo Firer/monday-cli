@@ -9,13 +9,12 @@ import {
 } from '../../../src/api/column-types.js';
 
 describe('WRITABLE_COLUMN_TYPES', () => {
-  it('matches the v0.1 + M8 firm allowlist exactly, in declared order', () => {
+  it('matches the v0.1 + M8 firm + M19 tags allowlist exactly, in declared order', () => {
     // Order is part of the contract — tests iterate the array form
     // and downstream snapshots pin the literal sequence. v0.1 entries
     // come first (`text` … `people`); M8 firm additions follow in
-    // roadmap order (`link` / `email` / `phone`). Tentative v0.2
-    // types (tags / board_relation / dependency) stay outside this
-    // list until their fixture work clears.
+    // roadmap order (`link` / `email` / `phone`); M19 graduates
+    // `tags` from the v0.2 tentative row.
     expect(WRITABLE_COLUMN_TYPES).toEqual([
       'text',
       'long_text',
@@ -27,6 +26,7 @@ describe('WRITABLE_COLUMN_TYPES', () => {
       'link',
       'email',
       'phone',
+      'tags',
     ]);
   });
 });
@@ -45,10 +45,8 @@ describe('isWritableColumnType', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    // M8 tentative-row types (still v0.2-deferred until fixture work
-    // clears). `tags` / `board_relation` / `dependency` are NOT in
-    // the firm allowlist yet.
-    'tags',
+    // M19 still-tentative row: `board_relation` / `dependency` graduate
+    // at Commits 3 / 4. `tags` graduated at Commit 2.
     'board_relation',
     'dependency',
     'rating',
@@ -63,7 +61,8 @@ describe('isWritableColumnType', () => {
     if (isWritableColumnType(candidate)) {
       // Compile-time check: this would not type-check if the predicate
       // didn't narrow `candidate` to `WritableColumnType`. Union
-      // includes M8 firm additions (link / email / phone).
+      // includes M8 firm additions (link / email / phone) and M19
+      // (`tags`).
       const narrowed:
         | 'text'
         | 'long_text'
@@ -74,7 +73,8 @@ describe('isWritableColumnType', () => {
         | 'people'
         | 'link'
         | 'email'
-        | 'phone' = candidate;
+        | 'phone'
+        | 'tags' = candidate;
       expect(narrowed).toBe('status');
     } else {
       throw new Error('expected status to be writable');
@@ -179,7 +179,8 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     'country',
     'hour',
     'timeline',
-    'tags',
+    // `tags` graduated to WRITABLE_COLUMN_TYPES at M19 close —
+    // `categorizeNoncanonicalColumnType` returns null for it now.
     'board_relation',
     'dependency',
     'rating',

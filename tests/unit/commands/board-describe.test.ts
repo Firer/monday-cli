@@ -138,13 +138,22 @@ describe('exampleSetForColumn — non-writable types', () => {
     'auto_number',
     'creation_log',
     'last_updated',
-    // M8 tentative-row v0.2 types — still unwritable via the friendly
-    // translator until fixture work clears.
-    'tags',
+    // M19 still-tentative row: `board_relation` / `dependency`
+    // graduate at Commits 3 / 4. `tags` graduated at Commit 2 and now
+    // returns the friendly-translator example list.
     'board_relation',
     'dependency',
     'rating',
   ])('%s returns null', (type) => {
     expect(exampleSetForColumn(col({ type }))).toBeNull();
+  });
+});
+
+describe('exampleSetForColumn — M19 tags (writable)', () => {
+  it('tags returns single + multi --set examples', () => {
+    expect(exampleSetForColumn(col({ type: 'tags' }))).toEqual([
+      `--set col_1=launch`,
+      `--set col_1='launch,priority'`,
+    ]);
   });
 });

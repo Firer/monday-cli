@@ -77,6 +77,7 @@ import {
   foldAndRemap,
   foldResolverWarningsIntoError,
 } from '../../api/resolver-error-fold.js';
+import { mergeSource, mergeCacheAge } from '../../api/source-aggregator.js';
 import { planChanges } from '../../api/dry-run.js';
 import { ITEM_FIELDS_FRAGMENT } from '../../api/item-helpers.js';
 import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
@@ -231,9 +232,8 @@ export const itemSetCommand: CommandModule<
         // to date.parseDateInput per cli-design §5.3 line 765;
         // `resolveMe` + `resolveEmail` cover the people branch's
         // `me` token and email-lookup paths per §5.3 line 728-734.
-        const { dateResolution, peopleResolution } = buildResolutionContexts(
-          { client, ctx, globalFlags },
-        );
+        const { dateResolution, peopleResolution, tagResolution } =
+          buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
           const result = await planChanges({
@@ -244,6 +244,7 @@ export const itemSetCommand: CommandModule<
             ...(rawParsed === null ? {} : { rawEntries: [rawParsed] }),
             dateResolution,
             peopleResolution,
+            tagResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -327,10 +328,17 @@ export const itemSetCommand: CommandModule<
               column: {
                 id: resolution.match.column.id,
                 type: resolution.match.column.type,
+                // M19+: relation/dependency translators (Commit 3 / 4)
+                // read `column.settingsStr` for allowed-board derivation.
+                // Always passed even on `item set` (single-column verb)
+                // so a board_relation / dependency target on this path
+                // resolves the same way the multi-target paths do.
+                settingsStr: resolution.match.column.settings_str,
               },
               value: friendly.value,
               dateResolution,
               peopleResolution,
+              tagResolution,
             });
           }
           const mutation: SelectedMutation = selectMutation([translated]);
@@ -365,6 +373,30 @@ export const itemSetCommand: CommandModule<
         // filters.ts and search.ts use post-R12.
         const warnings: readonly Warning[] = resolverWarnings;
 
+        // Source aggregation across three legs (M19 widening of the
+        // pre-M19 column-resolution-only path):
+        //   1. Column metadata resolution (cache | live | mixed).
+        //   2. Translator resolution (M19+ — `tags` reads the per-
+        //      account directory; relation translators are always
+        //      live). Carried on `translated.translatorResolution`;
+        //      `null` for translators with no cache leg (date /
+        //      people / status / dropdown / simple types / link /
+        //      email / phone / --set-raw escape).
+        //   3. The mutation itself — always live.
+        // mergeSource handles the precedence: any 'live' + 'cache'
+        // mix produces 'mixed'; any 'live' alone stays 'live'.
+        let aggSource: 'live' | 'cache' | 'mixed' = resolution.source;
+        const translatorSource = translated.translatorResolution?.source ?? null;
+        if (translatorSource !== null) {
+          aggSource = mergeSource(aggSource, translatorSource);
+        }
+        // The mutation is always live — fold it in last.
+        aggSource = mergeSource(aggSource, 'live');
+        const aggCacheAge = mergeCacheAge(
+          resolution.cacheAgeSeconds,
+          translated.translatorResolution?.cacheAgeSeconds ?? null,
+        );
+
         emitMutation({
           ctx,
           data: mutationResult.projected,
@@ -372,13 +404,8 @@ export const itemSetCommand: CommandModule<
           programOpts: program.opts(),
           warnings,
           ...toEmit(mutationResult.response),
-          // Resolution may have served from cache (and refreshed if
-          // the column wasn't there); thread the resolved source +
-          // age through. The mutation itself is always live, so a
-          // pure-cache leg never happens here — but the resolver's
-          // `mixed` outcome still surfaces as `mixed`.
-          source: resolution.source === 'cache' ? 'mixed' : resolution.source,
-          cacheAgeSeconds: resolution.cacheAgeSeconds,
+          source: aggSource,
+          cacheAgeSeconds: aggCacheAge,
           // cli-design §5.3 step 2: echo the resolved column ID so
           // an agent's "set then re-read" loop can use the resolved
           // ID without consulting metadata twice. Keyed by the raw

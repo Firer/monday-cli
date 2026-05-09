@@ -458,21 +458,23 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (tags) surfaces with deferred_to: v0.3', async () => {
-    // Codex M5b cleanup re-review #1 (companion test): tentative
-    // writer-expansion types (`tags` / `board_relation` /
-    // `dependency`) **slipped to v0.3 at M18 close** per cli-design
-    // §13 + §5.3 line 2172 — they surface as `deferred_to: "v0.3"`
-    // until their friendly translators land in v0.3. M8 firm row
-    // (link / email / phone) is writable through the friendly
-    // translator and tested as happy-path elsewhere.
-    const tagsBoard = {
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (board_relation, still M19-pending) surfaces with deferred_to: v0.3', async () => {
+    // M19 close graduates `tags` to the friendly allowlist; this
+    // test pins the `deferred_to: "v0.3"` surface for the remaining
+    // tentative-row members (`board_relation` / `dependency`) until
+    // Commits 3 / 4 graduate them too. The category branch becomes
+    // unreachable at Commit 4; the `v0_2_writer_expansion` row in
+    // `unsupportedColumnTypeError` stays as documented dead code so
+    // a future tentative-row revival (next time the writer-expansion
+    // roadmap has a tentative slot) can re-populate the set without
+    // re-architecting the classifier.
+    const tentativeBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'tags_1',
-          title: 'Tags',
-          type: 'tags',
+          id: 'rel_1',
+          title: 'Linked Items',
+          type: 'board_relation',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -481,12 +483,12 @@ describe('monday item set (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'set', '12345', 'tags_1=Backend', '--board', '111', '--json'],
+      ['item', 'set', '12345', 'rel_1=12345', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tagsBoard] } },
+            response: { data: { boards: [tentativeBoard] } },
           },
         ],
       },
@@ -507,11 +509,6 @@ describe('monday item set (integration, M5b)', () => {
     expect(env.error?.details?.deferred_to).toBe('v0.3');
     expect(env.error?.details).not.toHaveProperty('read_only');
     expect(env.error?.details).not.toHaveProperty('set_raw_example');
-    // M8 ships --set-raw, so the v0.3-tentative branch's hint
-    // legitimately points agents at the escape hatch in the
-    // meantime. Pre-M8 this test pinned the absence of the dead
-    // Path B `Use --set-raw` instruction; that form is gone, so the
-    // negative-only assertion is dropped.
   });
 
   it('--dry-run: emits the §6.4 envelope with planned_changes, no mutation fires', async () => {

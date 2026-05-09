@@ -22,7 +22,7 @@ const entrySchema = z
     size_bytes: z.number().int().nonnegative(),
     modified_at: z.iso.datetime({ offset: true }),
     age_seconds: z.number().int().nonnegative(),
-    kind: z.enum(['boards', 'users', 'schema', 'other']),
+    kind: z.enum(['boards', 'users', 'schema', 'account_tags', 'other']),
     id: z.string().nullable(),
   })
   .strict();
@@ -57,7 +57,7 @@ export const cacheListCommand: CommandModule<
   CacheListOutput
 > = {
   name: 'cache.list',
-  summary: 'List cached entries (boards, users, schema)',
+  summary: 'List cached entries (boards, users, schema, account_tags)',
   examples: [
     'monday cache list',
     'monday cache list --json',

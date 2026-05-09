@@ -121,6 +121,7 @@ import {
 import { parseLinkInput } from './links.js';
 import { parseEmailInput } from './emails.js';
 import { parsePhoneInput } from './phones.js';
+import type { ResolveTagsResult } from './tag-directory.js';
 
 export type { DateResolution, DateResolutionContext } from './dates.js';
 export type {
@@ -159,6 +160,47 @@ export type ColumnValuePayload =
       readonly format: 'rich';
       readonly value: JsonObject;
     };
+
+/**
+ * Echo of the per-tag resolution for the M19 `tags` translator —
+ * one entry per input tag-name, pairing the verbatim input with the
+ * resolved Monday tag ID (numeric-string form, mirroring the people
+ * translator's `resolved_id` shape). Populated by the `tags`
+ * translator; `null` for every other type. The dry-run engine
+ * renders this as `details.resolved_from` on tag-column diff cells
+ * per cli-design §5.3 design Q5.
+ */
+export interface TagResolution {
+  readonly tokens: readonly TagResolutionToken[];
+}
+
+export interface TagResolutionToken {
+  readonly input: string;
+  readonly resolved_id: string;
+}
+
+/**
+ * Translator-side source/cache-age provenance for the
+ * `meta.source` + `meta.cache_age_seconds` aggregation pathway.
+ * Populated by translators whose resolution may hit the cache
+ * (`tags` reads from the per-account directory cache;
+ * `board_relation` / `dependency` always live, populating
+ * `{source: 'live', cacheAgeSeconds: null}` for the symmetry).
+ * `null` for every other type — date / people / status / dropdown
+ * / text / long_text / numbers / link / email / phone don't have
+ * a per-translator cache leg today (people's `userByEmail` is a
+ * pre-existing parity gap logged for §22 cleanup-window).
+ *
+ * The dispatcher (`resolveAndTranslate` in `resolution-pass.ts`)
+ * merges each translated value's `translatorResolution` into the
+ * envelope-level `meta.source` via the existing `mergeSource` /
+ * `mergeCacheAge` helpers — same pathway that aggregates per-
+ * column-resolution source today.
+ */
+export interface TranslatorResolutionInfo {
+  readonly source: 'cache' | 'live' | 'mixed' | null;
+  readonly cacheAgeSeconds: number | null;
+}
 
 export interface TranslatedColumnValue {
   /** The resolved column ID — echoed in M5b's mutation envelope. */
@@ -199,15 +241,49 @@ export interface TranslatedColumnValue {
    * date case).
    */
   readonly peopleResolution: PeopleResolution | null;
+  /**
+   * Echo of the per-tag resolution for the M19 `tags` translator;
+   * `null` for every other type. Mutually exclusive with
+   * `resolvedFrom` and `peopleResolution` (and with the future
+   * `relationResolution` slot Commit 3 lands). The dry-run engine
+   * renders this as `details.resolved_from` on tag-column diff
+   * cells.
+   */
+  readonly tagResolution: TagResolution | null;
+  /**
+   * Source + cache-age provenance for the translator's resolution
+   * leg. `null` for translators that don't hit a cache leg
+   * (date / people / status / dropdown / simple types). Populated
+   * by `tags` (reads the per-account tag directory) and the
+   * relation translators (always live). Aggregated into envelope-
+   * level `meta.source` by `resolveAndTranslate`'s post-translate
+   * merge pass.
+   */
+  readonly translatorResolution: TranslatorResolutionInfo | null;
 }
 
 export interface TranslateColumnValueInputs {
   /**
-   * The resolved column. Only `id` and `type` are read; the full
+   * The resolved column. `id` and `type` are required; the full
    * `BoardColumn` is fine but not required, so the bulk path can
    * project a slim shape.
+   *
+   * **`settingsStr` (optional, M19+):** the column's raw
+   * `settings_str` from Monday's metadata. Required by the
+   * `board_relation` and `dependency` translators (Commits 3 / 4)
+   * to derive `column.settings.boardIds` /
+   * `column.settings.dependencyBoards` for allowed-board
+   * validation. Other translators ignore the field. Optional on
+   * the input shape so existing callers (date / people / status
+   * / dropdown / simple types) don't need to thread the value
+   * through pre-M19; the relation translators throw
+   * `internal_error` if the field is absent at translation time.
    */
-  readonly column: { readonly id: string; readonly type: string };
+  readonly column: {
+    readonly id: string;
+    readonly type: string;
+    readonly settingsStr?: string | null;
+  };
   /** The raw user-supplied value (post-`--set` parsing). */
   readonly value: string;
   /**
@@ -218,6 +294,26 @@ export interface TranslateColumnValueInputs {
    * through this slot per cli-design §5.3 line 765.
    */
   readonly dateResolution?: DateResolutionContext;
+}
+
+/**
+ * Resolution context for the M19 `tags` translator. Mirrors the
+ * `peopleResolution` slot one-to-one: a single async callback the
+ * command layer wires upstream so the translator stays pure (no
+ * `MondayClient` / `env` reaches `column-values.ts`).
+ *
+ * The callback takes the raw user-supplied input (the comma-split
+ * tag-name list, post-`--set` parsing) and returns the
+ * `ResolveTagsResult` from `tag-directory.resolveTags` — `{ ids,
+ * misses, source, cacheAgeSeconds }`. The translator threads
+ * `source` + `cacheAgeSeconds` into `translatorResolution` for
+ * envelope-level aggregation, and threads `ids` into the wire
+ * payload + the per-tag `tagResolution` echo. Misses surface as
+ * `tag_not_found` (the translator's responsibility, not the
+ * callback's).
+ */
+export interface TagResolutionContext {
+  readonly resolveTags: (input: string) => Promise<ResolveTagsResult>;
 }
 
 /**
@@ -240,6 +336,14 @@ export interface TranslateColumnValueAsyncInputs extends TranslateColumnValueInp
    * line 704-707 pin the grammar.
    */
   readonly peopleResolution?: PeopleResolutionContext;
+  /**
+   * Resolution context for the M19 `tags` translator. Required
+   * for `tags` columns; ignored for non-`tags` types. The command
+   * layer wires `resolveTags` through `buildResolutionContexts`
+   * (closing over the shared `MondayClient` + `env` + cache
+   * controls).
+   */
+  readonly tagResolution?: TagResolutionContext;
 }
 
 /**
@@ -307,6 +411,8 @@ export const translateColumnValue = (
         payload: { format: 'rich', value: parsed.payload },
         resolvedFrom: parsed.resolvedFrom,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
     }
     case 'link': {
@@ -323,6 +429,8 @@ export const translateColumnValue = (
         payload: { format: 'rich', value: parsed as unknown as JsonObject },
         resolvedFrom: null,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
     }
     case 'email': {
@@ -334,6 +442,8 @@ export const translateColumnValue = (
         payload: { format: 'rich', value: parsed as unknown as JsonObject },
         resolvedFrom: null,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
     }
     case 'phone': {
@@ -345,6 +455,8 @@ export const translateColumnValue = (
         payload: { format: 'rich', value: parsed as unknown as JsonObject },
         resolvedFrom: null,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
     }
     case 'people':
@@ -359,6 +471,26 @@ export const translateColumnValue = (
         'internal_error',
         `translateColumnValue (sync) called on people column "${column.id}". ` +
           `People resolution is async — use translateColumnValueAsync.`,
+        {
+          details: {
+            column_id: column.id,
+            column_type: column.type,
+            hint: 'use translateColumnValueAsync from src/api/column-values.ts',
+          },
+        },
+      );
+    case 'tags':
+      // Tag translation is async (tag-name→tag-id resolution hits
+      // the per-account directory cache or the `account.tags`
+      // GraphQL endpoint). Surface as `internal_error` for the same
+      // reason as `people` — a future contributor who accidentally
+      // routes a tags column through the sync entry point sees a
+      // loud programmer-error message rather than a silent payload
+      // corruption.
+      throw new ApiError(
+        'internal_error',
+        `translateColumnValue (sync) called on tags column "${column.id}". ` +
+          `Tag resolution is async — use translateColumnValueAsync.`,
         {
           details: {
             column_id: column.id,
@@ -433,6 +565,8 @@ export const translateColumnClear = (
         payload: { format: 'simple', value: '' },
         resolvedFrom: null,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
     case 'status':
     case 'dropdown':
@@ -441,10 +575,12 @@ export const translateColumnClear = (
     case 'link':
     case 'email':
     case 'phone':
+    case 'tags':
       // Rich types clear to `{}` via change_column_value per
       // cli-design §5.3 "Clearing column values" table. M8 firm row
-      // (link / email / phone) extends the table verbatim — same
-      // payload, same mutation, same dispatch.
+      // (link / email / phone) and M19 row (tags / board_relation /
+      // dependency once those land) extend the table verbatim —
+      // same payload, same mutation, same dispatch.
       return {
         columnId: column.id,
         columnType: column.type,
@@ -452,6 +588,8 @@ export const translateColumnClear = (
         payload: { format: 'rich', value: {} },
         resolvedFrom: null,
         peopleResolution: null,
+        tagResolution: null,
+        translatorResolution: null,
       };
   }
 };
@@ -459,9 +597,18 @@ export const translateColumnClear = (
 export const translateColumnValueAsync = async (
   inputs: TranslateColumnValueAsyncInputs,
 ): Promise<TranslatedColumnValue> => {
-  if (inputs.column.type !== 'people') {
-    return translateColumnValue(inputs);
+  if (inputs.column.type === 'people') {
+    return translatePeople(inputs);
   }
+  if (inputs.column.type === 'tags') {
+    return translateTags(inputs);
+  }
+  return translateColumnValue(inputs);
+};
+
+const translatePeople = async (
+  inputs: TranslateColumnValueAsyncInputs,
+): Promise<TranslatedColumnValue> => {
   const { peopleResolution } = inputs;
   if (peopleResolution === undefined) {
     throw new ApiError(
@@ -505,6 +652,137 @@ export const translateColumnValueAsync = async (
     },
     resolvedFrom: null,
     peopleResolution: parsed.resolution,
+    tagResolution: null,
+    translatorResolution: null,
+  };
+};
+
+/**
+ * Async translator for the M19 `tags` column type. Resolves a
+ * comma-split tag-name list against the per-account directory
+ * (cache-then-live via `tagResolution.resolveTags`), surfaces the
+ * wire payload `{ tag_ids: [N1, N2] }`, populates the per-tag
+ * `tagResolution` echo for dry-run rendering, and threads
+ * source/cache-age provenance through `translatorResolution` for
+ * envelope-level aggregation.
+ *
+ * **Empty input rejected** — mirrors the dropdown / people empty-
+ * input contract per cli-design §5.3 lines 2375–2386 (`--set
+ * <col>=""` is value-shaping, not clear-intent; `monday item clear`
+ * is the dedicated clear surface). Surfaces `usage_error` with
+ * `details.hint` pointing at `monday item clear`.
+ *
+ * **Misses surface as `tag_not_found`** — single error envelope
+ * with `details: { tags: misses[] }` per cli-design §6.5 +
+ * Decision 1 (`4c652d5`). Multi-miss `--set tags=foo,bar,baz` where
+ * two tags are absent surfaces ONE error with `tags: ["foo", "bar"]`,
+ * NOT two separate errors.
+ */
+const translateTags = async (
+  inputs: TranslateColumnValueAsyncInputs,
+): Promise<TranslatedColumnValue> => {
+  const { tagResolution } = inputs;
+  if (tagResolution === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `translateColumnValueAsync requires a tagResolution context for tags ` +
+        `column "${inputs.column.id}". M19's command layer wires resolveTags ` +
+        `through this slot via buildResolutionContexts.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: 'tags',
+          hint:
+            'pass { tagResolution: { resolveTags } } when calling ' +
+            'translateColumnValueAsync. The resolveTags callback closes ' +
+            'over MondayClient + env + noCache.',
+        },
+      },
+    );
+  }
+  // Empty input boundary: split + trim + filter — if nothing is left
+  // after the split, the user passed `--set tags=""` or `--set
+  // tags=" , "`. Reject with usage_error pointing at `monday item
+  // clear` (mirror dropdown/people empty-input contract).
+  const tokens = inputs.value
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (tokens.length === 0) {
+    throw new UsageError(
+      `Tags column "${inputs.column.id}" needs at least one tag name. ` +
+        `Got "${inputs.value}". To clear a tags column, use ` +
+        `\`monday item clear <iid> ${inputs.column.id} [--board <bid>]\` instead.`,
+      {
+        details: {
+          column_id: inputs.column.id,
+          column_type: 'tags',
+          raw_input: inputs.value,
+          hint:
+            'pass a comma-separated list of tag names (e.g. --set ' +
+            `${inputs.column.id}=launch,priority). To clear, use ` +
+            '`monday item clear` — `--set tags=""` is value-shaping, ' +
+            'not clear-intent (cli-design §5.3 lines 2375–2386).',
+        },
+      },
+    );
+  }
+
+  const resolved = await tagResolution.resolveTags(inputs.value);
+  if (resolved.misses.length > 0) {
+    const missList = resolved.misses.map((m) => JSON.stringify(m)).join(', ');
+    const noun = resolved.misses.length === 1 ? 'tag' : 'tags';
+    throw new ApiError(
+      'tag_not_found',
+      `${resolved.misses.length.toString()} ${noun} not in the account directory: ${missList}`,
+      {
+        details: {
+          tags: resolved.misses,
+          hint: 'Run `monday account tags` to list available tags.',
+        },
+      },
+    );
+  }
+
+  // Build the per-token echo. resolveTags returns ids in input-token
+  // order (post-dedup); zip with the dedup'd token list to surface
+  // the verbatim input alongside each resolved id.
+  const dedup: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token
+      .normalize('NFC')
+      .trim()
+      .replace(/\s+/gu, ' ')
+      .toLocaleLowerCase('und');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedup.push(token);
+  }
+  const echoTokens: TagResolutionToken[] = dedup.map((token, i) => ({
+    input: token,
+    /* c8 ignore next 5 — defensive: resolveTags returns ids parallel
+       to the dedup'd input order (length-matched), so `id` is always
+       present at index `i`. The String() guard exists for
+       noUncheckedIndexedAccess narrowing only. */
+    resolved_id: String(resolved.ids[i] ?? ''),
+  }));
+
+  return {
+    columnId: inputs.column.id,
+    columnType: 'tags',
+    rawInput: inputs.value,
+    payload: {
+      format: 'rich',
+      value: { tag_ids: [...resolved.ids] },
+    },
+    resolvedFrom: null,
+    peopleResolution: null,
+    tagResolution: { tokens: echoTokens },
+    translatorResolution: {
+      source: resolved.source,
+      cacheAgeSeconds: resolved.cacheAgeSeconds,
+    },
   };
 };
 
@@ -517,11 +795,13 @@ const simple = (
   columnType,
   payload: { format: 'simple', value: rawInput },
   rawInput,
-  // Only the date / people translators populate resolution echoes;
-  // every other type emits null so the dry-run engine has one shape
-  // to read per slot.
+  // Only the date / people / tags / relation translators populate
+  // resolution echoes; every other type emits null so the dry-run
+  // engine has one shape to read per slot.
   resolvedFrom: null,
   peopleResolution: null,
+  tagResolution: null,
+  translatorResolution: null,
 });
 
 const rich = (
@@ -536,6 +816,8 @@ const rich = (
   rawInput,
   resolvedFrom: null,
   peopleResolution: null,
+  tagResolution: null,
+  translatorResolution: null,
 });
 
 /**

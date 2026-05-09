@@ -931,9 +931,8 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
         // success envelope.
         const lookupWarnings: readonly Warning[] = lookup.warnings;
 
-        const { dateResolution, peopleResolution } = buildResolutionContexts(
-          { client, ctx, globalFlags },
-        );
+        const { dateResolution, peopleResolution, tagResolution } =
+          buildResolutionContexts({ client, ctx, globalFlags });
 
         if (decision.kind === 'create') {
           await runCreateBranch({
@@ -945,6 +944,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
             createLabelsIfMissing: parsed.createLabelsIfMissing,
             dateResolution,
             peopleResolution,
+            tagResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
             dryRun: globalFlags.dryRun,
@@ -969,6 +969,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
           createLabelsIfMissing: parsed.createLabelsIfMissing,
           dateResolution,
           peopleResolution,
+          tagResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
           dryRun: globalFlags.dryRun,
@@ -1001,6 +1002,9 @@ interface BranchRunInputsBase {
   readonly peopleResolution: ReturnType<
     typeof buildResolutionContexts
   >['peopleResolution'];
+  readonly tagResolution: ReturnType<
+    typeof buildResolutionContexts
+  >['tagResolution'];
   readonly env: NodeJS.ProcessEnv;
   readonly noCache: boolean;
   readonly dryRun: boolean;
@@ -1038,6 +1042,7 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
         : { rawEntries: inputs.rawEntries }),
       dateResolution: inputs.dateResolution,
       peopleResolution: inputs.peopleResolution,
+      tagResolution: inputs.tagResolution,
       env: inputs.env,
       noCache: inputs.noCache,
     });
@@ -1096,6 +1101,7 @@ const runCreateBranch = async (inputs: CreateBranchInputs): Promise<void> => {
     rawEntries: inputs.rawEntries,
     dateResolution: inputs.dateResolution,
     peopleResolution: inputs.peopleResolution,
+    tagResolution: inputs.tagResolution,
     env: inputs.env,
     noCache: inputs.noCache,
   });
@@ -1197,6 +1203,7 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       nameChange: inputs.name,
       dateResolution: inputs.dateResolution,
       peopleResolution: inputs.peopleResolution,
+      tagResolution: inputs.tagResolution,
       env: inputs.env,
       noCache: inputs.noCache,
     });
@@ -1252,6 +1259,7 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
     rawEntries: inputs.rawEntries,
     dateResolution: inputs.dateResolution,
     peopleResolution: inputs.peopleResolution,
+    tagResolution: inputs.tagResolution,
     env: inputs.env,
     noCache: inputs.noCache,
   });
@@ -1279,6 +1287,8 @@ const runUpdateBranch = async (inputs: UpdateBranchInputs): Promise<void> => {
       payload: { format: 'simple', value: inputs.name },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     },
     ...translated,
   ];

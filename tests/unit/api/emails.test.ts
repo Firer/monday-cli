@@ -171,6 +171,8 @@ describe('parseEmailInput — dispatcher integration', () => {
       },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 

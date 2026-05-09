@@ -36,6 +36,8 @@ describe('translateColumnValue — simple types', () => {
       payload: { format: 'simple', value: 'Refactor login' },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -67,6 +69,8 @@ describe('translateColumnValue — simple types', () => {
       },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -79,6 +83,8 @@ describe('translateColumnValue — simple types', () => {
       payload: { format: 'simple', value: '42' },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -131,6 +137,8 @@ describe('translateColumnValue — status (rich)', () => {
       payload: { format: 'rich', value: { label: 'Done' } },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -269,6 +277,8 @@ describe('translateColumnValue — dropdown (rich)', () => {
       payload: { format: 'rich', value: { labels: ['Backend'] } },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -479,6 +489,8 @@ describe('translateColumnValue — date (rich)', () => {
       payload: { format: 'rich', value: { date: '2026-05-01' } },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -563,18 +575,14 @@ describe('translateColumnValue — sync entry on a people column', () => {
   });
 });
 
-describe('translateColumnValue — non-allowlisted types (v0.3 writer-expansion candidates)', () => {
-  // M8 firm row (link / email / phone) ships in WRITABLE_COLUMN_TYPES
-  // — those are tested as happy-path translators below, not here. The
-  // tentative row (tags / board_relation / dependency) **slipped to
-  // v0.3 at M18 close** per cli-design §13 + §5.3 line 2172 — friendly
-  // translators land in v0.3 once the per-account directory + linked-
-  // board enumeration design clears. Until then, their
-  // `unsupported_column_type` errors carry `deferred_to: "v0.3"`. The
-  // `--set-raw` escape hatch (M8) accepts these types today — the
-  // hint surfaces that.
+describe('translateColumnValue — non-allowlisted types (M19 still-tentative row)', () => {
+  // M19 graduates `tags` into the friendly allowlist (Commit 2);
+  // `board_relation` and `dependency` graduate at Commits 3 and 4.
+  // Until those land, their `unsupported_column_type` errors carry
+  // `deferred_to: "v0.3"` via the `v0_2_writer_expansion` category
+  // row. The `--set-raw` escape hatch accepts these types today —
+  // the hint surfaces that.
   it.each([
-    'tags',
     'board_relation',
     'dependency',
   ])('%s → unsupported_column_type with deferred_to: v0.3', (type) => {
@@ -597,6 +605,26 @@ describe('translateColumnValue — non-allowlisted types (v0.3 writer-expansion 
       // friendly translator is just pending).
       expect(err.details).not.toHaveProperty('set_raw_example');
       expect(err.details).not.toHaveProperty('read_only');
+    }
+  });
+
+  // `tags` graduated at M19 Commit 2 — calling the SYNC translator
+  // on it now hits the programmer-error guard (translateColumnValue
+  // is sync; tag resolution is async via translateColumnValueAsync).
+  // This test pins the new behaviour so a regression that wires tags
+  // through the sync entry surfaces loud, not silent.
+  it('tags (sync entry) → internal_error with a hint to use the async entry', () => {
+    expect(() => translate('tags', 'launch', 'col_z')).toThrow(ApiError);
+    try {
+      translate('tags', 'launch', 'col_z');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/translateColumnValueAsync/u);
+      expect(err.details).toMatchObject({
+        column_id: 'col_z',
+        column_type: 'tags',
+      });
     }
   });
 });
@@ -1084,6 +1112,8 @@ describe('translateColumnValueAsync — surface contract', () => {
       payload: { format: 'simple', value: 'Refactor login' },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -1120,6 +1150,8 @@ describe('translateColumnValueAsync — surface contract', () => {
       peopleResolution: {
         tokens: [{ input: 'alice@example.com', resolved_id: '42' }],
       },
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -1169,6 +1201,211 @@ describe('translateColumnValueAsync — surface contract', () => {
     });
   });
 
+describe('translateColumnValueAsync — tags translator (M19)', () => {
+  // M19 close: the `tags` friendly translator dispatches via the async
+  // entry, calling `tagResolution.resolveTags` to look up tag names
+  // against the per-account directory. The translator surfaces the
+  // wire payload `{ tag_ids: [N1, N2] }`, populates the per-tag
+  // `tagResolution` echo for dry-run rendering, and threads
+  // source/cache-age provenance through `translatorResolution`.
+
+  const stubResolveTags =
+    (result: {
+      ids: readonly number[];
+      misses: readonly string[];
+      source: 'cache' | 'live' | 'mixed';
+      cacheAgeSeconds: number | null;
+    }) =>
+    (_input: string): Promise<typeof result> =>
+      Promise.resolve(result);
+
+  it('happy path: comma-split tags resolve to {tag_ids:[N1,N2]} payload', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'tags_1', type: 'tags' },
+      value: 'launch,priority',
+      tagResolution: {
+        resolveTags: stubResolveTags({
+          ids: [101, 202],
+          misses: [],
+          source: 'cache',
+          cacheAgeSeconds: 30,
+        }),
+      },
+    });
+    expect(out.columnId).toBe('tags_1');
+    expect(out.columnType).toBe('tags');
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'rich',
+      value: { tag_ids: [101, 202] },
+    });
+    expect(out.tagResolution).toEqual({
+      tokens: [
+        { input: 'launch', resolved_id: '101' },
+        { input: 'priority', resolved_id: '202' },
+      ],
+    });
+    expect(out.translatorResolution).toEqual({
+      source: 'cache',
+      cacheAgeSeconds: 30,
+    });
+    expect(out.resolvedFrom).toBeNull();
+    expect(out.peopleResolution).toBeNull();
+  });
+
+  it('source: live → translatorResolution carries live + null cache age', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'tags_1', type: 'tags' },
+      value: 'launch',
+      tagResolution: {
+        resolveTags: stubResolveTags({
+          ids: [101],
+          misses: [],
+          source: 'live',
+          cacheAgeSeconds: null,
+        }),
+      },
+    });
+    expect(out.translatorResolution).toEqual({
+      source: 'live',
+      cacheAgeSeconds: null,
+    });
+  });
+
+  it('multi-miss → tag_not_found ApiError with details.tags array', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: 'foo,bar,baz',
+        tagResolution: {
+          resolveTags: stubResolveTags({
+            ids: [],
+            misses: ['foo', 'bar', 'baz'],
+            source: 'live',
+            cacheAgeSeconds: null,
+          }),
+        },
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: 'foo,bar',
+        tagResolution: {
+          resolveTags: stubResolveTags({
+            ids: [],
+            misses: ['foo', 'bar'],
+            source: 'live',
+            cacheAgeSeconds: null,
+          }),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('tag_not_found');
+      expect(err.details).toMatchObject({
+        tags: ['foo', 'bar'],
+        hint: expect.stringContaining('monday account tags') as unknown,
+      });
+    }
+  });
+
+  it('single-miss → tag_not_found surfaces "1 tag not in" wording', async () => {
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: 'unknown',
+        tagResolution: {
+          resolveTags: stubResolveTags({
+            ids: [],
+            misses: ['unknown'],
+            source: 'live',
+            cacheAgeSeconds: null,
+          }),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.message).toContain('1 tag not in');
+      expect(err.details).toMatchObject({ tags: ['unknown'] });
+    }
+  });
+
+  it('empty input → usage_error pointing at monday item clear', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: '',
+        tagResolution: {
+          resolveTags: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      }),
+    ).rejects.toThrow(UsageError);
+
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: '  ,  ,  ',
+        tagResolution: {
+          resolveTags: () =>
+            Promise.reject(new Error('should not be called')),
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      expect(err.message).toMatch(/monday item clear/u);
+      expect(err.details).toMatchObject({
+        column_id: 'tags_1',
+        column_type: 'tags',
+      });
+    }
+  });
+
+  it('missing tagResolution context → internal_error with wiring hint', async () => {
+    await expect(
+      translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: 'launch',
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    try {
+      await translateColumnValueAsync({
+        column: { id: 'tags_1', type: 'tags' },
+        value: 'launch',
+      });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      expect(err.code).toBe('internal_error');
+      expect(err.message).toMatch(/buildResolutionContexts/u);
+      expect(err.details).toMatchObject({
+        column_id: 'tags_1',
+        column_type: 'tags',
+      });
+    }
+  });
+
+  it('NFC + case-fold dedup applied before zipping echo (Launch+launch resolves to one id)', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'tags_1', type: 'tags' },
+      value: 'Launch,launch',
+      tagResolution: {
+        resolveTags: stubResolveTags({
+          ids: [101],
+          misses: [],
+          source: 'cache',
+          cacheAgeSeconds: 0,
+        }),
+      },
+    });
+    expect(out.payload).toEqual<ColumnValuePayload>({
+      format: 'rich',
+      value: { tag_ids: [101] },
+    });
+    expect(out.tagResolution?.tokens).toHaveLength(1);
+  });
+
   it('selectMutation accepts a people-translated value and emits change_column_value', async () => {
     // Pinning that the people TranslatedColumnValue threads through
     // the existing selectMutation dispatch unchanged — it's a rich
@@ -1212,22 +1449,23 @@ describe('translateColumnValueAsync — surface contract', () => {
     });
   });
 });
+});
 
 describe('unsupportedColumnTypeError', () => {
-  it('v0.3 writer-expansion candidate (tags) → deferred_to: "v0.3"', () => {
-    // M8 firm row (link/email/phone) ships in WRITABLE_COLUMN_TYPES;
-    // tentative row (tags / board_relation / dependency) **slipped
-    // from v0.2 to v0.3 at M18 close** per cli-design §13 + §5.3
-    // line 2172 — friendly translators land in v0.3 once the per-
-    // account directory + linked-board enumeration design clears.
-    // The `--set-raw` escape hatch (M8) accepts these types today.
-    const err = unsupportedColumnTypeError('col_42', 'tags');
+  it('v0.3 writer-expansion candidate (board_relation, M19-pending) → deferred_to: "v0.3"', () => {
+    // M19 close graduates `tags` to WRITABLE_COLUMN_TYPES;
+    // `board_relation` and `dependency` graduate at Commits 3 / 4.
+    // Until those land, the v0_2_writer_expansion category branch
+    // surfaces them with `deferred_to: "v0.3"`. Post-Commit-4 the
+    // category row becomes unreachable but stays as documented dead
+    // code for stability + future tentative-row revival.
+    const err = unsupportedColumnTypeError('col_42', 'board_relation');
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe('unsupported_column_type');
     expect(err.retryable).toBe(false);
     expect(err.details).toMatchObject({
       column_id: 'col_42',
-      type: 'tags',
+      type: 'board_relation',
       deferred_to: 'v0.3',
     });
     expect(err.details).not.toHaveProperty('set_raw_example');

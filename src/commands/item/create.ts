@@ -780,9 +780,8 @@ export const itemCreateCommand: CommandModule<
             ? createMode.subitemsBoardId
             : createMode.boardId;
 
-        const { dateResolution, peopleResolution } = buildResolutionContexts(
-          { client, ctx, globalFlags },
-        );
+        const { dateResolution, peopleResolution, tagResolution } =
+          buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
           const result = await planCreate({
@@ -793,6 +792,7 @@ export const itemCreateCommand: CommandModule<
             ...(rawEntries.length === 0 ? {} : { rawEntries }),
             dateResolution,
             peopleResolution,
+            tagResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -835,6 +835,7 @@ export const itemCreateCommand: CommandModule<
           rawEntries,
           dateResolution,
           peopleResolution,
+          tagResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
         });

@@ -256,6 +256,12 @@ export const translateRawColumnValue = (
     payload: { format: 'rich', value },
     resolvedFrom: null,
     peopleResolution: null,
+    // M19+: --set-raw bypasses the friendly translator entirely, so
+    // there's no tag/relation resolution echo to surface and no per-
+    // translator cache leg to aggregate. The user owns the wire-shape
+    // correctness (cli-design §5.3 escape-hatch contract).
+    tagResolution: null,
+    translatorResolution: null,
   };
 };
 

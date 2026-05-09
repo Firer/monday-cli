@@ -51,6 +51,11 @@ export const WRITABLE_COLUMN_TYPES = [
   'link',
   'email',
   'phone',
+  // M19 close: tags graduates from the v0.2 tentative row into the
+  // friendly allowlist via the `tag-directory.ts` per-account
+  // directory + the `tag_not_found` registry entry (cli-design §6.5,
+  // landed at `4c652d5`).
+  'tags',
 ] as const;
 
 export type WritableColumnType = (typeof WRITABLE_COLUMN_TYPES)[number];
@@ -101,7 +106,14 @@ export const parseColumnSettings = (raw: string | null): unknown => {
  * guidance instead of blanket-deferring every non-allowlisted type.
  */
 export const V0_2_WRITER_EXPANSION_TYPES = [
-  'tags',
+  // M19 incremental migration: `tags` graduated to the friendly
+  // allowlist at Commit 2; `board_relation` graduates at Commit 3;
+  // `dependency` at Commit 4. The constant retains its M8-era
+  // spelling per the stability comment below — renaming would churn
+  // every consumer with no wire-shape change. Once the set is empty
+  // the runtime category branch becomes unreachable; the row stays
+  // as documented dead code so a future tentative-row revival can
+  // re-populate the set without re-architecting the classifier.
   'board_relation',
   'dependency',
 ] as const;

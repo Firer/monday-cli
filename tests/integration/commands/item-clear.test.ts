@@ -275,20 +275,18 @@ describe('monday item clear (integration, M5b)', () => {
     expect(env.error?.message).not.toMatch(/--set-raw/);
   });
 
-  it('live: unsupported_column_type — v0.3 writer-expansion candidate (tags) surfaces with deferred_to: v0.3', async () => {
-    // Companion test: tentative writer-expansion types **slipped to
-    // v0.3 at M18 close** per cli-design §13 + §5.3 line 2172 — they
-    // carry `deferred_to: "v0.3"`, mirroring `item set`. M8 firm row
-    // (link / email / phone) is writable end-to-end; the tentative
-    // row (tags / board_relation / dependency) holds the deferral
-    // until v0.3's writer-expansion design clears.
-    const tagsBoard = {
+  it('live: unsupported_column_type — v0.3 writer-expansion candidate (board_relation, M19-pending) surfaces with deferred_to: v0.3', async () => {
+    // M19 close graduates `tags` to the friendly translator + clear
+    // path; `board_relation` and `dependency` graduate at Commits 3 /
+    // 4. This test pins the `deferred_to: "v0.3"` surface for the
+    // remaining tentative-row members until those commits land.
+    const tentativeBoard = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'tags_1',
-          title: 'Tags',
-          type: 'tags',
+          id: 'rel_1',
+          title: 'Linked Items',
+          type: 'board_relation',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -297,12 +295,12 @@ describe('monday item clear (integration, M5b)', () => {
       ],
     };
     const out = await drive(
-      ['item', 'clear', '12345', 'tags_1', '--board', '111', '--json'],
+      ['item', 'clear', '12345', 'rel_1', '--board', '111', '--json'],
       {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tagsBoard] } },
+            response: { data: { boards: [tentativeBoard] } },
           },
         ],
       },

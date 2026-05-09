@@ -260,6 +260,12 @@ const WRITABLE_SETTINGS_SCHEMAS: Readonly<
   link: emptySettingsSchema,
   email: emptySettingsSchema,
   phone: emptySettingsSchema,
+  // M19: `tags` ships with no documented `defaults: JSON` shape from
+  // Monday — `create_column` for a tags column accepts no settings,
+  // and the friendly translator owns the per-tag-name resolution at
+  // write time. Conservative empty schema mirrors `link` / `email` /
+  // `phone` / `date` / `people`.
+  tags: emptySettingsSchema,
 };
 
 /**
@@ -282,6 +288,7 @@ const WRITABLE_SETTINGS_EXPECTED_KEYS: Readonly<
   link: [],
   email: [],
   phone: [],
+  tags: [],
 };
 
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>

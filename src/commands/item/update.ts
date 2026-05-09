@@ -380,9 +380,8 @@ export const itemUpdateCommand: CommandModule<
           explicit: parsed.board,
         });
 
-        const { dateResolution, peopleResolution } = buildResolutionContexts(
-          { client, ctx, globalFlags },
-        );
+        const { dateResolution, peopleResolution, tagResolution } =
+          buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
           const result = await planChanges({
@@ -394,6 +393,7 @@ export const itemUpdateCommand: CommandModule<
             ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
             dateResolution,
             peopleResolution,
+            tagResolution,
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
@@ -418,6 +418,7 @@ export const itemUpdateCommand: CommandModule<
           rawEntries,
           dateResolution,
           peopleResolution,
+          tagResolution,
           env: ctx.env,
           noCache: globalFlags.noCache,
         });
@@ -451,6 +452,8 @@ export const itemUpdateCommand: CommandModule<
                   payload: { format: 'simple', value: parsed.name },
                   resolvedFrom: null,
                   peopleResolution: null,
+                  tagResolution: null,
+                  translatorResolution: null,
                 },
                 ...translated,
               ];
@@ -865,9 +868,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // means a malformed --set / --set-raw doesn't pay for the metadata
   // load + items_page walk first.)
 
-  const { dateResolution, peopleResolution } = buildResolutionContexts(
-    { client, ctx, globalFlags },
-  );
+  const { dateResolution, peopleResolution, tagResolution } =
+    buildResolutionContexts({ client, ctx, globalFlags });
 
   // 5) Dry-run path: per-item planChanges. Column resolution is
   //    cached after the first call; per-item state read fires per
@@ -895,6 +897,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
         dateResolution,
         peopleResolution,
+        tagResolution,
         env: ctx.env,
         noCache: globalFlags.noCache,
       });
@@ -950,6 +953,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     rawEntries,
     dateResolution,
     peopleResolution,
+    tagResolution,
     env: ctx.env,
     noCache: globalFlags.noCache,
     initialSource: meta.source,
@@ -986,6 +990,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
             payload: { format: 'simple', value: parsed.name },
             resolvedFrom: null,
             peopleResolution: null,
+            tagResolution: null,
+            translatorResolution: null,
           },
           ...translated,
         ];

@@ -650,21 +650,21 @@ describe('monday item update (integration, M5b — single-item path)', () => {
     expect(env.error?.details?.column_id).toBe('status_4');
   });
 
-  it('live: --set against an unsupported column type surfaces with v0.2 deferral', async () => {
+  it('live: --set against an unsupported column type (board_relation, M19-pending) surfaces with v0.3 deferral', async () => {
     // Single-path translation-error branch: column resolves OK, but
     // translateColumnValueAsync throws ApiError(unsupported_column_type)
-    // for non-allowlisted types. Covers update.ts:521 idx 0 (the
-    // err instanceof MondayCliError check after translation).
-    // Path B (M5b cleanup): the error advertises the v0.3 writer-
-    // expansion milestone (slipped from v0.2 tentative at M18 close)
-    // instead of a dead --set-raw suggestion.
-    const tagsMeta = {
+    // for non-allowlisted types. M19 close graduates `tags` to the
+    // friendly translator; `board_relation` and `dependency` graduate
+    // at Commits 3 / 4. Path B (M5b cleanup): the error advertises
+    // the v0.3 writer-expansion milestone (slipped from v0.2 tentative
+    // at M18 close) instead of a dead --set-raw suggestion.
+    const tentativeMeta = {
       ...sampleBoardMetadata,
       columns: [
         {
-          id: 'tags_42',
-          title: 'Tags',
-          type: 'tags',
+          id: 'rel_42',
+          title: 'Linked Items',
+          type: 'board_relation',
           description: null,
           archived: null,
           settings_str: '{}',
@@ -678,7 +678,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         'update',
         '12345',
         '--set',
-        'tags_42=Backend',
+        'rel_42=12345',
         '--board',
         '111',
         '--json',
@@ -687,7 +687,7 @@ describe('monday item update (integration, M5b — single-item path)', () => {
         interactions: [
           {
             operation_name: 'BoardMetadata',
-            response: { data: { boards: [tagsMeta] } },
+            response: { data: { boards: [tentativeMeta] } },
           },
         ],
       },

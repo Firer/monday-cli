@@ -65,6 +65,7 @@ import {
   translateColumnValueAsync,
   type DateResolutionContext,
   type PeopleResolutionContext,
+  type TagResolutionContext,
   type TranslatedColumnValue,
 } from './column-values.js';
 import { translateRawColumnValue, type ParsedSetRawExpression } from './raw-write.js';
@@ -82,6 +83,13 @@ export interface ResolvedSet {
   readonly value: string;
   readonly columnId: string;
   readonly columnType: string;
+  /**
+   * The resolved column's `settings_str` from Monday's metadata
+   * (M19+). Threaded into `translateColumnValueAsync` so the
+   * `board_relation` and `dependency` translators can derive
+   * allowed boards. Other translators ignore the field.
+   */
+  readonly settingsStr: string | null;
 }
 
 export interface ResolvedRaw {
@@ -90,6 +98,11 @@ export interface ResolvedRaw {
   readonly entry: ParsedSetRawExpression;
   readonly columnId: string;
   readonly columnType: string;
+  /** Mirror of `ResolvedSet.settingsStr` so the union shape stays
+   * symmetric; `--set-raw` writes don't go through the friendly
+   * translator so the field is unused on the raw branch but
+   * carrying it keeps the discriminated-union shape uniform. */
+  readonly settingsStr: string | null;
 }
 
 export type ResolvedEntry = ResolvedSet | ResolvedRaw;
@@ -107,6 +120,14 @@ export interface ResolveAndTranslateInputs {
   readonly rawEntries: readonly ParsedSetRawExpression[];
   readonly dateResolution?: DateResolutionContext;
   readonly peopleResolution?: PeopleResolutionContext;
+  /**
+   * Resolution context for the M19 `tags` translator. Required when
+   * any `--set` token resolves to a `tags` column; the translator
+   * throws `internal_error` if the slot is absent. Builders
+   * (`buildResolutionContexts`) close `MondayClient` + `env` +
+   * cache controls into the callback.
+   */
+  readonly tagResolution?: TagResolutionContext;
   readonly env?: NodeJS.ProcessEnv;
   readonly noCache?: boolean;
   /**
@@ -259,6 +280,7 @@ export const resolveAndTranslate = async (
       value: entry.value,
       columnId: resolution.match.column.id,
       columnType: resolution.match.column.type,
+      settingsStr: resolution.match.column.settings_str,
     });
     resolvedIds[entry.token] = resolution.match.column.id;
   }
@@ -308,6 +330,7 @@ export const resolveAndTranslate = async (
       entry,
       columnId: resolution.match.column.id,
       columnType: resolution.match.column.type,
+      settingsStr: resolution.match.column.settings_str,
     });
     resolvedIds[entry.token] = resolution.match.column.id;
   }
@@ -351,7 +374,11 @@ export const resolveAndTranslate = async (
     if (r.kind === 'set') {
       try {
         const t = await translateColumnValueAsync({
-          column: { id: r.columnId, type: r.columnType },
+          column: {
+            id: r.columnId,
+            type: r.columnType,
+            settingsStr: r.settingsStr,
+          },
           value: r.value,
           ...(inputs.dateResolution === undefined
             ? {}
@@ -359,6 +386,9 @@ export const resolveAndTranslate = async (
           ...(inputs.peopleResolution === undefined
             ? {}
             : { peopleResolution: inputs.peopleResolution }),
+          ...(inputs.tagResolution === undefined
+            ? {}
+            : { tagResolution: inputs.tagResolution }),
         });
         translated.push(t);
       } catch (err) {
@@ -381,6 +411,26 @@ export const resolveAndTranslate = async (
         }
         throw err;
       }
+    }
+  }
+
+  // M19 post-translate aggregation: merge each translator's
+  // translatorResolution.source / .cacheAgeSeconds into the envelope-
+  // level aggregate. Translators that don't hit a cache leg (date /
+  // people / status / dropdown / simple types / link / email /
+  // phone) emit `null` here, which `mergeSource` / `mergeCacheAge`
+  // treat as a no-op. The `tags` translator emits the tag-directory
+  // resolver's source/age; future relation translators (Commits 3 /
+  // 4) emit `{source: 'live', cacheAgeSeconds: null}` for symmetry
+  // (the validator is always live).
+  for (const t of translated) {
+    const tr = t.translatorResolution;
+    if (tr === null) continue;
+    if (tr.source !== null) {
+      aggregateSource = mergeSource(aggregateSource, tr.source);
+    }
+    if (tr.cacheAgeSeconds !== null) {
+      aggregateCacheAge = mergeCacheAge(aggregateCacheAge, tr.cacheAgeSeconds);
     }
   }
 

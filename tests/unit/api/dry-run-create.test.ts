@@ -88,3 +88,76 @@ describe('planCreate — no-set short-circuit', () => {
     });
   });
 });
+
+describe('planCreate — tags translator dry-run echo (M19)', () => {
+  it('emits details.resolved_from for tags inputs in buildCreateDiffCell', async () => {
+    // Covers the buildCreateDiffCell `tagResolution !== null` branch
+    // (`from: null`, `to: { tag_ids: [...] }`, `details.resolved_from
+    // .tokens` per cli-design §5.3 design Q5). Mirrors the planChanges
+    // tags echo test in dry-run.test.ts.
+    const tagsBoard: { boards: unknown[] } = {
+      boards: [
+        {
+          id: '111',
+          name: 'Sprint',
+          description: null,
+          state: 'active',
+          board_kind: 'public',
+          board_folder_id: null,
+          workspace_id: null,
+          url: null,
+          hierarchy_type: 'top_level',
+          is_leaf: true,
+          updated_at: null,
+          groups: [],
+          columns: [
+            {
+              id: 'tags_1',
+              title: 'Tags',
+              type: 'tags',
+              description: null,
+              archived: false,
+              settings_str: null,
+              width: null,
+            },
+          ],
+        },
+      ],
+    };
+    const client = {
+      raw: vi.fn().mockResolvedValue({
+        data: tagsBoard,
+        complexity: null,
+        stats: { attempts: 1, totalSleepMs: 0 },
+      }),
+    } as unknown as MondayClient;
+    const result = await planCreate({
+      client,
+      mode: { kind: 'item', boardId: '111' },
+      name: 'Launch task',
+      setEntries: [{ token: 'tags_1', value: 'launch,priority' }],
+      tagResolution: {
+        resolveTags: () =>
+          Promise.resolve({
+            ids: [101, 202],
+            misses: [],
+            source: 'live',
+            cacheAgeSeconds: null,
+          }),
+      },
+    });
+    const plan = result.plannedChanges[0]!;
+    expect(plan.diff.tags_1).toEqual({
+      from: null,
+      to: { tag_ids: [101, 202] },
+      details: {
+        resolved_from: {
+          tokens: [
+            { input: 'launch', resolved_id: '101' },
+            { input: 'priority', resolved_id: '202' },
+          ],
+        },
+      },
+    });
+  });
+});

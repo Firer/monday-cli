@@ -74,6 +74,7 @@ import {
   type MultiColumnValue,
   type PeopleResolutionContext,
   type SelectedMutation,
+  type TagResolutionContext,
   type TranslatedColumnValue,
 } from './column-values.js';
 import type { ParsedSetRawExpression } from './raw-write.js';
@@ -142,6 +143,12 @@ export interface PlanChangesInputs {
    * `translateColumnValueAsync` raises `internal_error` if missing.
    */
   readonly peopleResolution?: PeopleResolutionContext;
+  /**
+   * Tag-resolution context — `resolveTags` (M19+). Required when
+   * any `--set` pair targets a `tags` column;
+   * `translateColumnValueAsync` raises `internal_error` if missing.
+   */
+  readonly tagResolution?: TagResolutionContext;
   /** Cache root + tz from process.env; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
   /** `--no-cache`: skip the column-metadata cache entirely. */
@@ -253,6 +260,9 @@ export const planChanges = async (
     ...(inputs.peopleResolution === undefined
       ? {}
       : { peopleResolution: inputs.peopleResolution }),
+    ...(inputs.tagResolution === undefined
+      ? {}
+      : { tagResolution: inputs.tagResolution }),
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
   });
@@ -394,6 +404,8 @@ const buildNameTranslatedValue = (
   payload: { format: 'simple', value: nameChange },
   resolvedFrom: null,
   peopleResolution: null,
+  tagResolution: null,
+  translatorResolution: null,
 });
 
 export interface PlanClearInputs {
@@ -564,6 +576,7 @@ export interface PlanCreateInputs {
   readonly rawEntries?: readonly ParsedSetRawExpression[];
   readonly dateResolution?: DateResolutionContext;
   readonly peopleResolution?: PeopleResolutionContext;
+  readonly tagResolution?: TagResolutionContext;
   readonly env?: NodeJS.ProcessEnv;
   readonly noCache?: boolean;
 }
@@ -676,6 +689,9 @@ export const planCreate = async (
     ...(inputs.peopleResolution === undefined
       ? {}
       : { peopleResolution: inputs.peopleResolution }),
+    ...(inputs.tagResolution === undefined
+      ? {}
+      : { tagResolution: inputs.tagResolution }),
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
   });
@@ -791,21 +807,7 @@ const buildCreateDiffCell = (
   translated: TranslatedColumnValue,
   to: MultiColumnValue,
 ): DiffCell => {
-  if (translated.resolvedFrom !== null && translated.peopleResolution !== null) {
-    throw new ApiError(
-      'internal_error',
-      `Translator emitted both resolvedFrom and peopleResolution for ` +
-        `column "${translated.columnId}" (type "${translated.columnType}"). ` +
-        `These slots are mutually exclusive in v0.1; a translator setting ` +
-        `both is a wiring bug.`,
-      {
-        details: {
-          column_id: translated.columnId,
-          column_type: translated.columnType,
-        },
-      },
-    );
-  }
+  assertEchoExclusivity(translated);
   if (translated.resolvedFrom !== null) {
     return {
       from: null,
@@ -826,6 +828,20 @@ const buildCreateDiffCell = (
       details: {
         resolved_from: {
           tokens: translated.peopleResolution.tokens.map((t) => ({
+            input: t.input,
+            resolved_id: t.resolved_id,
+          })),
+        },
+      },
+    };
+  }
+  if (translated.tagResolution !== null) {
+    return {
+      from: null,
+      to,
+      details: {
+        resolved_from: {
+          tokens: translated.tagResolution.tokens.map((t) => ({
             input: t.input,
             resolved_id: t.resolved_id,
           })),
@@ -883,27 +899,7 @@ const buildDiffCell = (
   current: RawColumnValue | undefined,
 ): DiffCell => {
   const from: JsonValue = current === undefined ? null : decodeFrom(current);
-  // Echo-slot exclusivity invariant. Today's translators populate
-  // at most one of resolvedFrom (date) / peopleResolution (people).
-  // A future translator that mistakenly sets both would silently
-  // collapse to the date echo (the first branch wins below); fire
-  // an internal_error so the regression is loud, not silent.
-  // Codex pass-2 finding F3.
-  if (translated.resolvedFrom !== null && translated.peopleResolution !== null) {
-    throw new ApiError(
-      'internal_error',
-      `Translator emitted both resolvedFrom and peopleResolution for ` +
-        `column "${translated.columnId}" (type "${translated.columnType}"). ` +
-        `These slots are mutually exclusive in v0.1; a translator setting ` +
-        `both is a wiring bug.`,
-      {
-        details: {
-          column_id: translated.columnId,
-          column_type: translated.columnType,
-        },
-      },
-    );
-  }
+  assertEchoExclusivity(translated);
   if (translated.resolvedFrom !== null) {
     return {
       from,
@@ -931,7 +927,63 @@ const buildDiffCell = (
       },
     };
   }
+  if (translated.tagResolution !== null) {
+    return {
+      from,
+      to,
+      details: {
+        resolved_from: {
+          tokens: translated.tagResolution.tokens.map((t) => ({
+            input: t.input,
+            resolved_id: t.resolved_id,
+          })),
+        },
+      },
+    };
+  }
   return { from, to };
+};
+
+/**
+ * Echo-slot exclusivity invariant. Translators populate at most one
+ * of `resolvedFrom` (date) / `peopleResolution` (people) /
+ * `tagResolution` (M19 tags) — and Commit 3 will add
+ * `relationResolution` (board_relation + dependency). A regression
+ * that mistakenly sets two slots would silently collapse to whichever
+ * branch fires first below; fire an `internal_error` so the bug is
+ * loud, not silent. Codex pass-2 finding F3 (M5b precedent); widened
+ * for M19's new echo slots.
+ */
+const assertEchoExclusivity = (translated: TranslatedColumnValue): void => {
+  const populated = [
+    translated.resolvedFrom !== null ? 'resolvedFrom' : null,
+    translated.peopleResolution !== null ? 'peopleResolution' : null,
+    translated.tagResolution !== null ? 'tagResolution' : null,
+  ].filter((slot): slot is string => slot !== null);
+  /* c8 ignore start — defensive guard against a future translator
+     wiring bug. Today's translators populate at most one echo slot;
+     reaching the multi-populated branch requires constructing a
+     malformed TranslatedColumnValue (bypassing the type system),
+     which no production caller does. The throw exists so a future
+     regression that swaps two slots fires the test loudly rather
+     than silently dropping one echo. */
+  if (populated.length > 1) {
+    throw new ApiError(
+      'internal_error',
+      `Translator emitted multiple resolution echoes for column ` +
+        `"${translated.columnId}" (type "${translated.columnType}"): ` +
+        `${populated.join(', ')}. These slots are mutually exclusive; a ` +
+        `translator setting two is a wiring bug.`,
+      {
+        details: {
+          column_id: translated.columnId,
+          column_type: translated.columnType,
+          populated_slots: populated,
+        },
+      },
+    );
+  }
+  /* c8 ignore stop */
 };
 
 /**

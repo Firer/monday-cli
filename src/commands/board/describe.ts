@@ -117,6 +117,16 @@ export const exampleSetForColumn = (column: BoardColumn): string[] | null => {
       return [
         `--set ${column.id}='+15551234567|US'`,
       ];
+    case 'tags':
+      // M19 friendly translator: comma-split tag-name list resolved
+      // against the per-account directory. NFC + case-fold matching
+      // (same rule as column-token resolution per cli-design §5.3).
+      // Empty input rejected with `usage_error`; misses surface as
+      // `tag_not_found` with `details.tags: misses[]`.
+      return [
+        `--set ${column.id}=launch`,
+        `--set ${column.id}='launch,priority'`,
+      ];
     /* c8 ignore next 2 — unreachable: isWritableColumnType gates the
        entry, so any column.type that lands here is one of the cases
        above. */

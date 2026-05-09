@@ -184,6 +184,8 @@ describe('translateRawColumnValue — happy paths', () => {
       payload: { format: 'rich', value: { label: 'Done' } },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     });
   });
 
@@ -358,6 +360,8 @@ describe('--set-raw → selectMutation round-trip', () => {
       payload: { format: 'rich', value: { label: 'Done' } },
       resolvedFrom: null,
       peopleResolution: null,
+      tagResolution: null,
+      translatorResolution: null,
     };
     const raw = translateRawColumnValue(
       { id: 'tags_1', type: 'tags' },

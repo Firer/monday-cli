@@ -411,6 +411,79 @@ describe('planChanges — resolved_from echo per kind', () => {
     });
   });
 
+  it('emits details.resolved_from for tags inputs (token-by-token, M19)', async () => {
+    // Board fixture: tags-only; carries the tags column the test
+    // resolves against.
+    const tagsBoard = (): { boards: unknown[] } => ({
+      boards: [
+        {
+          ...(board67890().boards[0] as object),
+          columns: [
+            {
+              id: 'tags_1',
+              title: 'Tags',
+              type: 'tags',
+              description: null,
+              archived: false,
+              settings_str: null,
+              width: null,
+            },
+          ],
+        },
+      ],
+    });
+    const tagsItem = (): { items: unknown[] } => ({
+      items: [
+        {
+          id: '12345',
+          name: 'Build it',
+          state: 'active',
+          url: null,
+          created_at: null,
+          updated_at: null,
+          board: { id: '67890' },
+          group: null,
+          parent_item: null,
+          column_values: [
+            {
+              id: 'tags_1',
+              type: 'tags',
+              text: '',
+              value: null,
+              column: { title: 'Tags' },
+            },
+          ],
+        },
+      ],
+    });
+    const stats: Stats = { calls: 0, operations: [] };
+    const client = buildClient([tagsBoard(), tagsItem()], stats);
+    const result = await planChanges({
+      client,
+      boardId: '67890',
+      itemId: '12345',
+      setEntries: [{ token: 'tags_1', value: 'launch,priority' }],
+      env: xdgEnv(),
+      tagResolution: {
+        resolveTags: () =>
+          Promise.resolve({
+            ids: [101, 202],
+            misses: [],
+            source: 'cache',
+            cacheAgeSeconds: 30,
+          }),
+      },
+    });
+    const cell = result.plannedChanges[0]?.diff.tags_1;
+    expect(cell?.to).toEqual({ tag_ids: [101, 202] });
+    expect(cell?.details?.resolved_from).toEqual({
+      tokens: [
+        { input: 'launch', resolved_id: '101' },
+        { input: 'priority', resolved_id: '202' },
+      ],
+    });
+  });
+
   it('emits details.resolved_from for relative date tokens', async () => {
     const stats: Stats = { calls: 0, operations: [] };
     const client = buildClient([board67890(), itemAtBacklog()], stats);

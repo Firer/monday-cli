@@ -48,7 +48,15 @@ export const DEFAULT_CACHE_TTL_SECONDS = DEFAULT_TTL_SECONDS;
 export type CacheKey =
   | { readonly kind: 'board'; readonly boardId: string }
   | { readonly kind: 'users' }
-  | { readonly kind: 'schemaVersion' };
+  | { readonly kind: 'schemaVersion' }
+  // M19: per-account tag directory. Single-account scope (Monday's
+  // tags are account-scoped, not workspace-scoped), so no per-id
+  // discriminant — one cache file per profile under `account_tags/
+  // index.json`. Mirrors the `users` index-file layout. Key kind is
+  // camelCase to match `schemaVersion`'s convention; on-disk path
+  // uses snake_case for a more discoverable directory name + the
+  // `cache list` per-kind label uses snake_case to match the dir.
+  | { readonly kind: 'accountTags' };
 
 export interface CacheRootOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -88,6 +96,8 @@ export const cacheKeyToRelativePath = (key: CacheKey): string => {
       return join('users', 'index.json');
     case 'schemaVersion':
       return join('schema', 'version.json');
+    case 'accountTags':
+      return join('account_tags', 'index.json');
   }
 };
 
@@ -301,12 +311,19 @@ export interface CacheEntryInfo {
   readonly modifiedAt: string;
   readonly ageSeconds: number;
   /**
-   * Best-effort kind classification. `boards`/`users`/`schema` reflect
-   * the layout in §8; an entry that doesn't match any known prefix is
-   * surfaced as `other` rather than dropped — agents see exactly what
-   * `cache clear` would remove.
+   * Best-effort kind classification. `boards`/`users`/`schema`/
+   * `account_tags` reflect the layout in §8; an entry that doesn't
+   * match any known prefix is surfaced as `other` rather than dropped
+   * — agents see exactly what `cache clear` would remove.
+   *
+   * **M19** added `account_tags` for the per-account tag directory
+   * (single-account-scope cache file under `account_tags/index.json`,
+   * mirroring `users/index.json`'s layout). Kind label uses snake-
+   * case to match the on-disk directory name; the `users` /
+   * `boards` / `schema` labels predate the convention but stay as-is
+   * for stability.
    */
-  readonly kind: 'boards' | 'users' | 'schema' | 'other';
+  readonly kind: 'boards' | 'users' | 'schema' | 'account_tags' | 'other';
   readonly id: string | undefined;
 }
 
@@ -327,6 +344,9 @@ const classifyEntry = (
   }
   if (first === 'schema') {
     return { kind: 'schema', id: undefined };
+  }
+  if (first === 'account_tags') {
+    return { kind: 'account_tags', id: undefined };
   }
   return { kind: 'other', id: undefined };
 };
