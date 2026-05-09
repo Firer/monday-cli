@@ -314,7 +314,8 @@ published v0.2.0 tarball.
 **Writer allowlist** (other types return `unsupported_column_type`
 with per-category guidance):
 `status`, `text`, `long_text`, `numbers`, `dropdown`, `date`,
-`people`, plus M8 firm row `link`, `email`, `phone`.
+`people`, plus M8 firm row `link`, `email`, `phone`, plus v0.3-M19
+row `tags`, `board_relation`, `dependency`.
 
 - **M13** ships the full update mutation surface — `monday update
   reply` / `edit` / `delete` / `like` / `unlike` / `pin` / `unpin`
@@ -371,14 +372,24 @@ with per-category guidance):
   audit, README quickstart with `item create` + `item upsert`
   examples, this CHANGELOG, and the version bump to `0.2.0`.
 
-**Deferred to v0.3+:** `tags` / `board_relation` / `dependency`
-friendly translators (slipped from v0.2 tentative at M18 close
-per cli-design §13 + §5.3; usable today via `--set-raw`),
-`monday dev` workflow shortcuts, multi-level subitem creation.
+**v0.3 in progress.** **M19 closed** — `tags`, `board_relation`,
+`dependency` friendly translators (slipped from v0.2 tentative at
+M18 close per cli-design §13 + §5.3) graduated; `monday account
+tags` read verb shipped (closes the §6.5 `tag_not_found.details
+.hint` forward-reference). **Deferred to later v0.3 milestones**:
+`monday item time-track start/stop` (M20), `monday auth login` +
+`~/.monday-cli/config.toml` multi-profile (M21), `monday status` /
+`monday usage` diagnostics (M22), cross-board `item search` +
+`board favorites` (M23), `item history` (M24),
+`item update --continue-on-error` partial-success (M25), `monday
+dev` workflow shortcuts (M26), `notification send` + `webhook list/
+create/delete` (M27), multi-level subitem creation (M28).
 **v0.4:** `monday item watch`, `--concurrency`, asset uploads.
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
-full roadmap and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for
-the v0.2 milestone history.
+full roadmap, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for the
+in-progress v0.3 milestones, and
+[`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for the v0.2 milestone
+history.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 

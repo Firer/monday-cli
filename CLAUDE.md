@@ -11,125 +11,84 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M19 implementation in progress (paused mid-milestone).**
-M0–M18 shipped on `main`; v0.3 plan + M19 pre-flight contract
-diff landed in prior sessions; **M19 implementation Commits
-1+2 of 7 landed this session — Commits 3–7 resume next
-session** (writer expansion close per cli-design §5.3 writer-
+**v0.3-M19 closed.** M0–M18 shipped on `main`; v0.3 plan +
+M19 pre-flight contract diff landed in prior sessions;
+**M19 implementation closed across two sessions** —
+Commits 1+2 last session, Commits 3+4+5+6+7 this session
+(writer-expansion close per cli-design §5.3 writer-
 expansion roadmap + §13 v0.3 entry).
 
-**M19 implementation Commits 1+2 landed this session:**
+**Shipped M19 commits in order:**
 - **Commit 1 — `d6c8651 refactor(m19-fold)`.** Collapsed
-  `unsupportedColumnTypeError` (`column-values.ts:945–1083`)
-  into a 5-way category-table dispatch. Behaviour-preserving;
-  every existing test cassette passes byte-identical. Lifts
-  v0.3-plan §22 non-R-class quality refactor (M19-fold-pointed
-  because the tentative-row reclassification touches the
-  function anyway). New `isV0_2WriterExpansionType` exported
-  helper in `column-types.ts` mirrors the existing
-  `isReadOnlyForeverType` / `isFilesShapedType` pattern.
-- **Commit 2 — `19801f8 feat(m19) tags translator + tag-
-  directory body + accountTags cache key`.** The first M19
-  translator + the first new module body. `tags` graduates
-  from the v0.2 tentative row into `WRITABLE_COLUMN_TYPES`
-  (10 → 11). `tag-directory.ts` body lands alongside (R45
-  cadence). `accountTags` extends `CacheKey`; on-disk path
-  `account_tags/index.json`; `cache list` schema enum +
-  `CacheEntryInfo.kind` widened. Friendly translator emits
-  `{ tag_ids: [N1, N2] }`, populates per-tag echo for
-  dry-run, threads source/cache-age provenance via the new
-  `translatorResolution` slot. Empty input rejects with
-  `usage_error` pointing at `monday item clear` (cli-design
-  §5.3 lines 2375–2386 value-shaping rule). Multi-miss
-  surfaces ONE `tag_not_found` envelope with
-  `details: { tags: misses[], hint }` per cli-design §6.5
-  + Decision 1 (`4c652d5`).
+  `unsupportedColumnTypeError` into a 5-way category-table
+  dispatch. Behaviour-preserving; every existing test
+  cassette passes byte-identical. Lifts v0.3-plan §22 non-
+  R-class quality refactor.
+- **Commit 2 — `19801f8 feat(m19) tags translator`.**
+  First M19 translator + first new module body. `tags`
+  graduates from the v0.2 tentative row into
+  `WRITABLE_COLUMN_TYPES` (10 → 11). `tag-directory.ts`
+  body lands alongside (R45 cadence). `accountTags`
+  extends `CacheKey`; on-disk path `account_tags/
+  index.json`. Pre-flight contract amendments to
+  `d822982`: `ResolveTagsResult` adds `cacheAgeSeconds`,
+  `LoadAccountTagsResult` adds `complexity`, cache key
+  named `accountTags` (camelCase) instead of placeholder
+  `account-tags`.
+- **Commit 2.5 — `b9d9213 docs(m19-mid)`.** Mid-milestone
+  Codex review feedback applied (P1-clean with 3 P2 + 1
+  P3 findings, all addressed inline). Status flipped to
+  "in progress (paused mid-milestone)" — the actual M19
+  close defers to next session.
+- **Commit 3 — `a569590 feat(m19) board_relation`** (this
+  session). `board_relation` graduates;
+  `validateBoardRelationItems` runtime body lands
+  (replacing the pre-flight stub) with success-branch
+  widening to `{ ok: true, items: ValidatedRelationItem[]
+  }` per Codex round-2 P1-3. New `parseRelationItemIds`
+  shared parser per Codex round-1 P2-11 (5 rejection
+  branches: empty / over-cap / non-decimal / unsafe-
+  integer / duplicate). Cross-cutting widenings:
+  `RelationResolution` echo slot, shared
+  `RelationResolutionContext.validateItems` callback,
+  `assertEchoExclusivity` N=4 widening,
+  `buildResolutionContexts` `relationResolution` context,
+  `column-create.ts` settings-maps growth, `describe.ts`
+  `exampleSetForColumn` widening. Deferred Commit 2 P2-2
+  integration cassette (`item set tags=launch` happy
+  path + multi-miss `tag_not_found`) shipped here.
+- **Commit 4 — `53a76ea feat(m19) dependency`** (this
+  session). Sibling translator. `WRITABLE_COLUMN_TYPES`
+  reaches 13; `V0_2_WRITER_EXPANSION_TYPES` becomes empty
+  `[]`. The `v0_2_writer_expansion` category branch in
+  the `unsupportedColumnTypeError` classifier is
+  unreachable through the runtime classifier; retained as
+  documented dead code per the M8-era stability comment.
+  Integration test cascade fired one final time —
+  `dependency`-as-unsupported pins retargeted to
+  `battery` (`future` category).
+- **Commit 5 — `969dc7e feat(m19) monday account tags`**
+  (this session). Read verb. M19-fold mandatory per
+  Codex round-1 P2-9 (closes the §6.5
+  `tag_not_found.details.hint` forward-reference). Output
+  schema `{tags, total}`. Cache-aware via
+  `loadAccountTags`. Registry slot in
+  `src/commands/index.ts:136`.
+- **Commit 6 — Codex implementation review feedback**
+  (this session). Findings from the post-Commit-5 Codex
+  review applied inline. Detail in v0.3-plan §11 M19
+  post-mortem.
+- **Commit 7 — `docs(m19) close M19`** (this session).
+  Status flip + post-mortem + cross-doc sweep (CLAUDE.md
+  / README / cli-design §8 + §4.3 / output-shapes /
+  examples / api-reference / architecture).
 
-**Pre-flight contract amendments to `d822982` landed in
-Commit 2:** `ResolveTagsResult` adds `cacheAgeSeconds: number
-| null` (translator-source aggregation needs it; `'mixed'`
-source carries the cache leg's age as worst-case staleness
-per §6.1 mergeCacheAge contract); `LoadAccountTagsResult`
-adds `complexity: Complexity | null` (mirrors
-`BoardMetadataLoadResult` for `--verbose` reporting); cache
-key named `accountTags` (camelCase TS literal, matching
-`schemaVersion`) instead of placeholder `account-tags`.
-
-**Cross-cutting widenings landed at Commit 2** (shared by
-Commits 3–4 next session — board_relation + dependency
-translators reuse the foundation):
-- `TranslatedColumnValue` gains `tagResolution: TagResolution
-  | null` (echo slot mirroring `peopleResolution`'s shape) +
-  `translatorResolution: { source, cacheAgeSeconds } | null`
-  (provenance aggregation slot consumed by
-  `resolveAndTranslate`'s post-translate merge pass +
-  `item set`'s direct path).
-- `TranslateColumnValueAsyncInputs` gains `tagResolution`
-  context slot. `buildResolutionContexts` widens to produce
-  it (closure over `MondayClient` + env + cache controls).
-- `TranslateColumnValueInputs.column` gains optional
-  `settingsStr`; `item set:326` direct call site threads
-  the value through (Codex round-2 P1-2 fix). `set` was the
-  only direct translator caller outside `resolveAndTranslate`.
-- `ResolvedEntry.settingsStr` widening lifts the carrier
-  across all `resolveAndTranslate` consumers (item update /
-  create / upsert / bulk).
-- `dry-run.ts assertEchoExclusivity` widens from 2-way XOR
-  to N-way; both `buildDiffCell` + `buildCreateDiffCell`
-  get `tagResolution` echo branches.
-- `column-create.ts WRITABLE_SETTINGS_SCHEMAS` +
-  `_EXPECTED_KEYS` grow with `tags` keys (conservative
-  `emptySettingsSchema` mirroring link/email/phone — Monday
-  has no documented `defaults: JSON` shape for tags
-  create-time per cli-design §4.3 column-create).
-
-**Codex coverage this session:**
-- 3-round pre-flight on the implementation plan (rounds 1+2
-  iteratively addressed 18 findings; round 3 returned
-  P1-clean with one P2 about cache-surface naming
-  consistency that resolved into the Commit-2 naming choice
-  (`accountTags` / `account_tags`)).
-- Mid-milestone Codex review of Commits 1+2 returned
-  **P1-clean ✓** with 3 P2 + 1 P3 findings — addressed
-  inline this session as part of the pause-and-review
-  cycle. Findings: P2-1 plan-doc drift on the new contract
-  amendments (fixed in v0.3-plan §3 M19 deliverables
-  paragraph); P2-3 `cacheAgeSeconds` interface comment
-  contradicting the runtime (fixed + assertion added to
-  the partial-cache refresh test); P3-1 over-promising
-  "M19 close" wording in inline comments (tightened to
-  "Commit 2" / "Commit 3 / 4 next session" specificity).
-  P2-2 (no integration happy-path cassette for `item set
-  tags=launch` end-to-end wiring) deferred to Commit 3 next
-  session as an early task — the unit tests stub the
-  callback; the cassette would exercise the full
-  `buildResolutionContexts` → `resolveAndTranslate` →
-  `tagResolution.resolveTags` path against fixture
-  transport.
-
-**Deferred to next session (Commits 3–7):**
-- Commit 3 — `feat(m19) board_relation` translator +
-  `validateBoardRelationItems` body widened to `{ ok: true,
-  items: ValidatedRelationItem[] }` per Codex round-2 P1-3
-  + new `parseRelationItemIds` helper per Codex round-1
-  P2-11. Plus the deferred integration cassette for `item
-  set tags=launch` happy-path wiring.
-- Commit 4 — `feat(m19) dependency` translator (sibling of
-  `board_relation`, reads `column.settings.dependencyBoards`).
-- Commit 5 — `feat(m19) monday account tags` read verb
-  (M19-fold mandatory per Codex round-1 P2-9). Verb
-  registration lives in `src/commands/index.ts:135` (NOT
-  `cli/index.ts` — round 2 P1-1 fix).
-- Commit 6 — Codex implementation rounds + fix-ups.
-- Commit 7 — `docs(m19) close M19`. Includes README +
-  `docs/output-shapes.md` + `docs/cli-design.md` §8 + §4.3
-  sweep for stale "tentative" / "deferred" wording for
-  these three types (Codex round-2 P2-5).
-
-**Test count + coverage at Commit 2 close:** 2308 → 2335
-(+27 net). Coverage 99.10 / 95.68 / 99.42 / 99.18
-(statements / branches / functions / lines), above the
-95/95.45/95/95 floor.
+**Test count + coverage at M19 close:** 2308 (M19 entry,
+post-pre-flight) → 2466 (M19 close), +158 net. Coverage
+99.03 / 95.47 / 99.32 / 99.18 (statements / branches /
+functions / lines), above the 95/95.45/95/95 floor. Floor
+unchanged — branches at 95.47% (0.02pp above floor) didn't
+clear 95.5% with margin.
 
 **Pre-flight gate state at session start** (per
 `docs/v0.3-plan.md` §9 preconditions):

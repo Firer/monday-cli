@@ -231,7 +231,29 @@ export const loadAccountTags = async (
     undefined,
     { operationName: 'AccountTags' },
   );
-  const tagsRaw = response.data.account?.tags ?? [];
+  // Codex post-Commit-5 P1-1 fix: `account === null` is NOT a
+  // successful empty directory — it indicates auth/scope/account-
+  // shape problems (guest token, disabled account, schema drift).
+  // Collapsing it to `[]` would hide the real issue and let later
+  // tag writes fail as `tag_not_found` instead of surfacing the
+  // account-level problem. Surface as `not_found` matching
+  // `account info`'s shape.
+  if (response.data.account === null) {
+    throw new ApiError(
+      'not_found',
+      'Monday returned no account for the supplied token (guest, ' +
+        'disabled, or restricted-scope token?). The per-account tag ' +
+        'directory cannot be loaded without an account.',
+      {
+        details: {
+          hint:
+            'verify the token is for an active account user — try ' +
+            '`monday account whoami` to see the resolved identity.',
+        },
+      },
+    );
+  }
+  const tagsRaw = response.data.account.tags ?? [];
   // Parse-then-wrap (R17 / `validation.md` "Never bubble raw ZodError
   // out of a parse boundary"). Malformed Monday responses surface as
   // typed `internal_error` with `details.issues` rather than a bare

@@ -440,6 +440,7 @@ monday account whoami                                                        v0.
 monday account info                       # account name, plan, limits       v0.1
 monday account version                    # API version in use               v0.1
 monday account complexity                 # remaining complexity budget      v0.1
+monday account tags                       # per-account tag directory (cache-aware) v0.3
 
 # === WORKSPACE ===
 monday workspace list                     # all visible workspaces           v0.1
@@ -4823,6 +4824,9 @@ Some lookups are expensive and rarely change:
   Needed for every item create/update to translate friendly values.
 - **User directory** — id ↔ email/name. Needed for `--set
   owner=alice@x.com`.
+- **Account-tag directory** — id ↔ name (M19+). Needed for `--set
+  tags=launch,priority` to translate tag names to numeric IDs
+  before constructing the wire payload.
 
 Cache lives at `$XDG_CACHE_HOME/monday-cli/` (falling back to
 `~/.cache/monday-cli/`):
@@ -4830,6 +4834,7 @@ Cache lives at `$XDG_CACHE_HOME/monday-cli/` (falling back to
 ```
 boards/<board-id>.json     # full board describe response
 users/index.json           # email → id map
+account_tags/index.json    # tag name → id map (M19+)
 schema/version.json        # API version pin
 ```
 

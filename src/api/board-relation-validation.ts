@@ -297,11 +297,19 @@ export const parseRelationItemIds = (
             column_type: context,
             raw_input: raw,
             token,
+            // Codex post-Commit-5 P2-2 fix: don't suggest --set-raw
+            // here — that path still goes through JSON.parse, which
+            // suffers the same precision corruption for IDs beyond
+            // the safe-integer range. Monday's documented item IDs
+            // fit within 2^53-1; if the token is correct, this is a
+            // data-shape problem we can't safely round-trip.
             hint:
-              `Monday item IDs are within JS safe-integer range; if ` +
-              `this token is correct, use --set-raw ${columnId}=` +
-              `'{"item_ids":[${token}]}' with the literal Monday wire ` +
-              `shape.`,
+              `Monday's documented item IDs fit within JS safe-` +
+              `integer range (2^53 - 1). The friendly translator ` +
+              `cannot safely round-trip this token; --set-raw can't ` +
+              `either (its JSON parse path suffers the same precision ` +
+              `corruption for >2^53 numeric literals). Verify the ` +
+              `item ID is correct before retrying.`,
           },
         },
       );

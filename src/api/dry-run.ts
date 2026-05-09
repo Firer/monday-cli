@@ -35,7 +35,9 @@
  * same source of truth. The `operation` field in each
  * `PlannedChange` reflects what the live call would issue.
  *
- * **Resolved-from echoes.** Two slots, one per kind:
+ * **Resolved-from echoes.** Four slots, one per kind (mutually
+ * exclusive — `assertEchoExclusivity` enforces; populating two
+ * surfaces `internal_error`):
  *   - **Date** — relative tokens carry a `DateResolution`
  *     (`{input, timezone, now}`) on the translated value. Rendered
  *     as `details.resolved_from` on the diff cell.
@@ -43,10 +45,20 @@
  *     `PeopleResolution` (`{tokens: [{input, resolved_id}, ...]}`)
  *     pairing each input token with its resolved Monday user ID.
  *     Rendered as `details.resolved_from` on people diff cells.
+ *   - **Tags (M19)** — the tags translator emits a `TagResolution`
+ *     (same `{tokens: [{input, resolved_id}, ...]}` shape as
+ *     people) pairing each input tag-name with its resolved Monday
+ *     tag ID.
+ *   - **Relation (M19)** — `board_relation` and `dependency`
+ *     translators emit a `RelationResolution` (`{context,
+ *     allowed_boards, items: [{input, resolved_board_id}, ...]}`)
+ *     surfacing the validator's per-item home-board mapping
+ *     alongside the column's allowed-board list.
  *
- * Other types (status / dropdown / text / long_text / numbers and
- * non-relative dates) emit no `details` block — there's nothing to
- * resolve beyond what's already visible in the wire payload.
+ * Other types (status / dropdown / text / long_text / numbers /
+ * link / email / phone and non-relative dates) emit no `details`
+ * block — there's nothing to resolve beyond what's already visible
+ * in the wire payload.
  */
 
 import { ApiError } from '../utils/errors.js';

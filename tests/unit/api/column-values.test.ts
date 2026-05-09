@@ -1534,8 +1534,37 @@ describe('translateColumnValueAsync — board_relation translator (M19)', () => 
     });
   });
 
-  it('fallback: settings.boardId (singular, legacy) → derives allowedBoards: [boardId]', async () => {
+  it('fallback: settings.boardId (singular, legacy numeric) → derives allowedBoards: [boardId]', async () => {
     const legacySettings = JSON.stringify({ boardId: 999 });
+    let captured: readonly number[] | undefined;
+    await translateColumnValueAsync({
+      column: {
+        id: 'rel_1',
+        type: 'board_relation',
+        settingsStr: legacySettings,
+      },
+      value: '12345',
+      relationResolution: {
+        validateItems: (inputs) => {
+          captured = inputs.allowedBoards;
+          return Promise.resolve({
+            ok: true,
+            items: [{ itemId: 12345, boardId: 999 }],
+          });
+        },
+      },
+    });
+    expect(captured).toEqual([999]);
+  });
+
+  it('fallback: settings.boardId (singular, legacy decimal-string) → derives allowedBoards: [boardId] (Codex P1-2 fix)', async () => {
+    // Codex post-Commit-5 P1-2: the legacy singular boardId fallback
+    // dropped decimal-string IDs because the gate was
+    // `typeof === number`. Monday's legacy boards occasionally
+    // return string IDs in settings; routing through the same
+    // safe-integer + decimal-string path the array entries use is
+    // the documented `boardIds ?? [boardId]` fallback semantics.
+    const legacySettings = JSON.stringify({ boardId: '999' });
     let captured: readonly number[] | undefined;
     await translateColumnValueAsync({
       column: {

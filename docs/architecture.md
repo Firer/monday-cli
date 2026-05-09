@@ -173,8 +173,12 @@
   `isFilesShapedType` (gate `--set-raw`'s post-resolution reject
   lists per cli-design §5.3 escape-hatch contract);
   `getColumnRoadmapCategory` (drives the category-accurate
-  `unsupported_column_type` hint — v0.2-tentative writer-expansion
-  / read-only-forever / future). Three consumers:
+  `unsupported_column_type` hint — read-only-forever / future).
+  M19 close graduated the full v0.2 tentative row (`tags` /
+  `board_relation` / `dependency`) into `WRITABLE_COLUMN_TYPES`;
+  the `v0_2_writer_expansion` category branch is now unreachable
+  through the runtime classifier (kept as documented dead code
+  for future tentative-row revival). Three consumers:
   `commands/board/describe.ts` (writable + example_set),
   `api/column-values.ts` (friendly writer), `api/raw-write.ts`
   (M8 escape hatch).

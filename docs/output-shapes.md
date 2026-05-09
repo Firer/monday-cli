@@ -51,7 +51,7 @@ no `data`); see the **Errors** section at the bottom.
 
 | Noun | Verbs |
 |------|-------|
-| [account](#account) | whoami, info, version, complexity |
+| [account](#account) | whoami, info, version, complexity, tags (M19) |
 | [workspace](#workspace) | list, get, folders, create (M14), update (M14), delete (M14), add-users (M14), remove-users (M14) |
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
@@ -122,6 +122,28 @@ points per minute).
 ```json
 { "before": 5000000, "used": 1, "remaining": 4999999, "reset_in_seconds": 30 }
 ```
+
+### `account tags` (M19)
+
+The per-account tag directory. Cache-aware via `loadAccountTags`
+(cache key `accountTags`, on-disk path `account_tags/index.json`).
+The verb closes the §6.5 `tag_not_found.details.hint` forward-
+reference — agents who hit an unknown tag have a self-fulfilling
+next step.
+
+```json
+{
+  "tags": [
+    { "id": "101", "name": "launch" },
+    { "id": "202", "name": "priority" }
+  ],
+  "total": 2
+}
+```
+
+`meta.source` is `cache` for a cache hit, `live` for a cache miss
+or `--no-cache`. `meta.cache_age_seconds` populates on the cache
+path; `meta.complexity` populates on `--verbose`.
 
 ---
 

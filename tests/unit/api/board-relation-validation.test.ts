@@ -173,8 +173,12 @@ describe('parseRelationItemIds — non-decimal token rejection', () => {
 });
 
 describe('parseRelationItemIds — unsafe-integer rejection', () => {
-  it('beyond 2^53-1 → usage_error pointing at --set-raw fallback', () => {
+  it('beyond 2^53-1 → usage_error noting the friendly translator cannot safely round-trip the ID', () => {
     // 2^53 = 9007199254740992 — Number() rounds down to 2^53 here.
+    // Codex post-Commit-5 P2-2 fix: the hint no longer suggests
+    // --set-raw because that path also goes through JSON.parse,
+    // which suffers the same precision corruption for IDs beyond
+    // the safe-integer range.
     expect(() =>
       parseRelationItemIds(
         '9007199254740993',
@@ -186,7 +190,10 @@ describe('parseRelationItemIds — unsafe-integer rejection', () => {
       parseRelationItemIds('9007199254740993', 'rel_1', 'board_relation');
     } catch (err) {
       if (!(err instanceof UsageError)) throw err;
-      expect(err.details?.hint).toMatch(/--set-raw/u);
+      expect(err.details?.hint).toMatch(/safe-integer range/u);
+      // Negative regression: the hint must not steer the agent at
+      // an unsafe escape hatch.
+      expect(err.details?.hint).not.toMatch(/use --set-raw/iu);
     }
   });
 

@@ -524,11 +524,12 @@ describe('monday account tags (integration, M19 Commit 5)', () => {
     expect(env.data).toEqual({ tags: [], total: 0 });
   });
 
-  it('account: null response → benign empty list (the ?? [] fallback)', async () => {
-    // loadAccountTags treats `account: null` as a benign empty tag
-    // list per the implementation's `?? []` fallback (Monday occasionally
-    // returns null for guest tokens / restricted scopes). This pins
-    // the documented null-account semantics.
+  it('account: null response → not_found error envelope (Codex post-Commit-5 P1-1 fix)', async () => {
+    // Pre-fix `loadAccountTags` collapsed `account === null` to a
+    // benign empty list via `?? []`, which hid auth/scope/account-
+    // shape problems and let later tag writes fail as `tag_not_found`
+    // instead of surfacing the real account-level issue. Post-fix
+    // surfaces as `not_found` matching `account info`'s shape.
     const nullAccountInteraction: Interaction = {
       operation_name: 'AccountTags',
       response: { data: { account: null } },
@@ -537,11 +538,10 @@ describe('monday account tags (integration, M19 Commit 5)', () => {
       ['account', 'tags', '--json'],
       { interactions: [nullAccountInteraction] },
     );
-    expect(out.exitCode).toBe(0);
-    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
-      data: AccountTagsData;
-    };
-    expect(env.data).toEqual({ tags: [], total: 0 });
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.message).toMatch(/no account/u);
   });
 });
 

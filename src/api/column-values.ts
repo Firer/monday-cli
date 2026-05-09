@@ -10,20 +10,21 @@
  * **Two entry points.** Most allowlisted types translate purely
  * locally — no network, no clock dependency beyond the date
  * module's injectable clock — and live behind the sync
- * `translateColumnValue`. `people` and (M19+) `tags` are the
- * exceptions: email→ID resolution + tag-name→tag-id resolution can
- * hit the network. Rather than forcing a
+ * `translateColumnValue`. The four async types — `people`,
+ * `tags`, `board_relation`, `dependency` — hit the network during
+ * resolution (email→ID lookup, tag-name→tag-id lookup against the
+ * per-account directory, item-allowed-board membership check via
+ * batched `items(ids: [...])`). Rather than forcing a
  * `Promise<TranslatedColumnValue>` on every call site for the
  * sync types, `translateColumnValueAsync` is the unified async
  * entry point the command layer always calls. It delegates to the
  * sync version for non-async types and dispatches to
- * `translatePeople` / `translateTags` for the async ones. M5b's
- * write surface goes through async exclusively (people / tags may
- * appear in any `--set` bundle).
+ * `translatePeople` / `translateTags` / `translateRelation` for
+ * the async ones. M5b's write surface goes through async
+ * exclusively (any of those four types may appear in a `--set`
+ * bundle).
  *
- * **Scope.** Eleven allowlisted types translate (post-M19 Commit 2;
- * grows to 13 once Commits 3 / 4 land `board_relation` /
- * `dependency`):
+ * **Scope.** Thirteen allowlisted types translate (post-M19 close):
  * `text` / `long_text` / `numbers` (simple-string payloads, M5a
  * skeleton); `status` / `dropdown` (rich-object payloads); `date`
  * (rich, with relative-token resolution against the profile
@@ -31,9 +32,14 @@
  * the M3 `userByEmail` directory cache); the M8 firm additions
  * `link` / `email` / `phone` (pipe-form parsers in `links.ts` /
  * `emails.ts` / `phones.ts`; same `change_column_value` wire path
- * as the v0.1 rich types); and (M19 Commit 2) `tags` (rich, with
+ * as the v0.1 rich types); and the M19 row — `tags` (rich, with
  * tag-name→tag-id resolution via the per-account directory cache
- * in `tag-directory.ts`).
+ * in `tag-directory.ts`), `board_relation` and `dependency`
+ * (rich, with `{item_ids: [N1, N2]}` wire shape and per-item
+ * allowed-boards validation via
+ * `validateBoardRelationItems` in `board-relation-validation.ts`;
+ * `board_relation` reads `column.settings.boardIds`, `dependency`
+ * reads `column.settings.dependencyBoards`).
  *
  * **Date resolution context** (cli-design §5.3 step 3 + the
  * "Relative dates and timezone" subsection). Relative tokens
@@ -1111,7 +1117,12 @@ const deriveAllowedBoards = (
   if (context === 'board_relation') {
     if (Array.isArray(obj.boardIds)) {
       candidates = obj.boardIds as readonly unknown[];
-    } else if (typeof obj.boardId === 'number') {
+    } else if (obj.boardId !== undefined) {
+      // Codex post-Commit-5 P1-2 fix: legacy singular `boardId` may
+      // be a decimal string (Monday occasionally returns string IDs
+      // in legacy boards) — route through the same parse path as the
+      // array entries below rather than gating on `typeof === number`.
+      // The shared filter below tolerates non-matching shapes.
       candidates = [obj.boardId];
     }
   } else if (Array.isArray(obj.dependencyBoards)) {

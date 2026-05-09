@@ -703,6 +703,17 @@ describe('monday item set (integration, M5b)', () => {
           },
           {
             operation_name: 'ItemSetRich',
+            // Codex post-Commit-5 P2-1: pin the wire payload so a
+            // regression that translates `tags=launch` to a wrong
+            // `value` would fail this cassette loud (rather than
+            // silently passing because the transport doesn't validate
+            // un-pinned variables).
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'tags_1',
+              value: { tag_ids: [101] },
+            },
             response: { data: { change_column_value: itemWithTags } },
           },
         ],
@@ -832,6 +843,15 @@ describe('monday item set (integration, M5b)', () => {
           },
           {
             operation_name: 'ItemSetRich',
+            // Codex post-Commit-5 P2-1: pin the wire payload so a
+            // regression that translates relation IDs to a wrong
+            // `value` would fail loud.
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'rel_1',
+              value: { item_ids: [55555, 66666] },
+            },
             response: { data: { change_column_value: itemWithRelation } },
           },
         ],
@@ -903,6 +923,15 @@ describe('monday item set (integration, M5b)', () => {
           },
           {
             operation_name: 'ItemSetRich',
+            // Codex post-Commit-5 P2-1: pin the wire payload so a
+            // regression that translates dependency IDs to a wrong
+            // `value` would fail loud.
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'dep_1',
+              value: { item_ids: [77777] },
+            },
             response: { data: { change_column_value: itemWithDependency } },
           },
         ],

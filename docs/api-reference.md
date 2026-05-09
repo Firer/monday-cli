@@ -298,10 +298,12 @@ friendly translator surfaces (writable allowlist post-M8):
 | `link` (M8) | `{"url": "https://example.com", "text": "Example"}` | pipe-form `url|text` |
 | `email` (M8) | `{"email": "alice@example.test", "text": "Alice"}` | pipe-form `email|text` or bare email |
 | `phone` (M8) | `{"phone": "+14155550100", "countryShortName": "US"}` | E.164 with explicit `phone:countryCode` |
+| `tags` (M19) | `{"tag_ids": [101, 202]}` | comma-split tag names, resolved via per-account directory cache |
+| `board_relation` (M19) | `{"item_ids": [12345, 67890]}` | comma-split item IDs, validated against `column.settings.boardIds` |
+| `dependency` (M19) | `{"item_ids": [12345, 67890]}` | sibling of `board_relation`; reads `column.settings.dependencyBoards` |
 
-Other types (`tags`, `board_relation`, `dependency`,
-`creation_log`, `mirror`, `formula`, `auto_number`, `last_updated`,
-`item_id`, `files`, `battery`, etc.) surface
+Other types (`creation_log`, `mirror`, `formula`, `auto_number`,
+`last_updated`, `item_id`, `files`, `battery`, etc.) surface
 `unsupported_column_type` from the friendly path. The M8
 `--set-raw <col>=<json>` escape hatch accepts the wire JSON
 verbatim; it's gated against read-only-forever and files-shaped

@@ -181,11 +181,20 @@ describe('loadAccountTags — cache-then-live', () => {
     expect(result.source).toBe('live');
   });
 
-  it('handles a null account response (defensive)', async () => {
+  it('throws not_found on a null account response (Codex post-Commit-5 P1-1 fix)', async () => {
+    // Pre-fix: `account === null` collapsed to a benign empty list
+    // via `?? []`, hiding auth/scope/account-shape problems and
+    // letting later tag writes fail as `tag_not_found` instead of
+    // surfacing the real account-level issue. Post-fix surfaces
+    // as `not_found` matching `account info`'s shape.
     const stats: ClientStats = { calls: 0 };
     const client = buildClient([{ account: null }], stats);
-    const result = await loadAccountTags({ client, env: xdgEnv() });
-    expect(result.tags).toEqual([]);
+    await expect(
+      loadAccountTags({ client, env: xdgEnv() }),
+    ).rejects.toMatchObject({
+      code: 'not_found',
+      message: expect.stringMatching(/no account/u) as string,
+    });
   });
 
   it('throws internal_error on a malformed account.tags response', async () => {

@@ -299,11 +299,14 @@ export const getColumnRoadmapCategory = (
  * The three categories — chosen to match the §6 warning shape's
  * `category` enum verbatim — are:
  *   - `'raw_writable'`: Monday accepts `change_column_value` against
- *     the type, but the v0.2 friendly translator (§5.3) doesn't
- *     model it. Agents reach for the `--set-raw <col>=<json>`
- *     escape hatch. Default for any non-writable, non-read-only-
- *     forever, non-files-shaped type (covers `country`, `hour`,
- *     `timeline`, `tags`, `board_relation`, `dependency`, etc.).
+ *     the type, but the friendly translator (§5.3) doesn't model
+ *     it. Agents reach for the `--set-raw <col>=<json>` escape
+ *     hatch. Default for any non-writable, non-read-only-forever,
+ *     non-files-shaped type. Post-M19 close, examples include
+ *     `country`, `hour`, `timeline`, `rating`, `world_clock`,
+ *     `week`, `checkbox`. (`tags` / `board_relation` /
+ *     `dependency` graduated into `WRITABLE_COLUMN_TYPES` at M19
+ *     close and are no longer raw-writable examples.)
  *   - `'read_only_forever'`: Monday computes the type server-side
  *     and never makes it writable via the API. `suggested_write_
  *     path` is `null` (agents can't write at all; the column
