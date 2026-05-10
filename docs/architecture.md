@@ -1092,6 +1092,58 @@ heuristic v0.2-plan §22 documents.
   re-touching the helper — the noun derivation is mechanical
   (`kind.slice(0, -1)`).
 
+- `api/tag-directory.ts` (v0.3 M19 — pre-flight at `d822982`,
+  runtime body filled at M19 implementation `19801f8`).
+  Per-account tag-directory lookup helper for the `tags`
+  friendly translator. Two surfaces: `loadAccountTags` (full
+  directory reader, cache-then-live with on-disk
+  `account_tags/index.json` at mode 0600 per the `accountTags`
+  cache key kind) and `resolveTags` (comma-split name-list →
+  tag-id resolver with NFC + case-fold matching, refresh-on-miss,
+  residual-miss surfacing as `tag_not_found` per cli-design
+  §6.5's array shape). Mirrors the `userByEmail` user-directory
+  pattern in `resolvers.ts:191–402` verbatim — there is no
+  standalone `user-directory.ts` module; the user-directory
+  cache / lookup / refresh-on-miss machinery lives inside
+  `resolvers.ts`. Two consumers post-M19: `column-values.ts
+  translateTags` (friendly translator dispatch) +
+  `commands/account/tags.ts` (the `monday account tags` read
+  verb that closes the §6.5 hint forward-reference).
+
+- `api/board-relation-validation.ts` (v0.3 M19 — pre-flight at
+  `d822982`, runtime body filled at M19 implementation
+  `a569590`). Validates `board_relation` / `dependency` linked-
+  item references against the linked-board's
+  `items(ids: ...)` query. Returns
+  `{ ok: true, items: ValidatedRelationItem[] } | { ok: false,
+  code, details }` (the `items` widening was a Codex round-2
+  P1-3 catch — the dry-run echo needs per-item home boards to
+  render `details.resolved_from.items`). Single batched
+  GraphQL call per validation pass to stay inside Monday's
+  complexity envelope. Two consumers post-M19: `column-values.ts
+  translateRelation` (board_relation + dependency friendly
+  translators share the helper — verbatim shape per the M19
+  R45/R48 ship-the-helper-with-the-first-new-consumer cadence).
+
+- `api/time-tracking.ts` (v0.3 M20 — pre-flight at `a702af2`,
+  runtime body lands at M20 implementation). Verb-shaped
+  column-type extension primitives for the
+  `monday item time-track start / stop` surface (cli-design
+  §5.2 carve-out 2). Two stub-body verbs (`startTimeTracking` /
+  `stopTimeTracking`) under `c8 ignore` until M20 implementation
+  ships. Both throw `usage_error` on invalid pre-state per
+  v0.3-plan §3 M20 Decisions 4.1/4.2 (start-while-running →
+  `details.running: true`; stop-while-not-running →
+  `details.running: false`); both non-idempotent per Decision
+  4.3. `StopTimeTrackingResult.durationSeconds: number | null`
+  — null when Monday omits `started_at` on the just-closed
+  session record (per-session duration uncomputable; SDK 14.0.0
+  exposes only the column-level `TimeTrackingValue.duration`
+  total, not a per-`TimeTrackingHistoryItem` field). No cache
+  surface, no R46 `withBoardInvalidation*` wrapping —
+  `time_tracking` mutations don't affect board structure and
+  the verbs are always-live.
+
 ### Post-M9 command surface (M10–M17)
 
 M10–M17 add ~25 command files following the patterns established
