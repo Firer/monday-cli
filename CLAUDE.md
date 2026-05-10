@@ -243,6 +243,101 @@ minus 1 column-values assertion that consolidated). Coverage
 functions / lines), above the 95/95.45/95/95 floor. Floor
 unchanged. **Full M20 post-mortem at v0.3-plan §12.**
 
+**M21 pre-pre-flight gate — Decision 3 closure + §7.3 OAuth
+flow design shipped this session** (mirrors the `4c652d5`
+Decision 1 closure ahead of M19 + the `1e81b2f` Decision 4
+closure ahead of M20; the M21 pre-flight contract diff —
+`src/config/profiles.ts` + `src/config/credentials.ts` +
+`src/commands/auth/login.ts` + `src/commands/auth/logout.ts`
+module signatures + ERROR_CODES widening for `oauth_failed`
++ empirical OAuth probe per §22 R-watch-item — is the next
+session's work):
+
+- **Commit A — `3eba714 docs(cli-design): flesh out §7.3
+  OAuth flow + add §7.4 credentials cache — v0.3-M21
+  prerequisite`.** Replaces the §7.3 single-paragraph stub
+  with a comprehensive OAuth-flow design (8-step flow
+  shape — per-attempt CSRF state via 32-byte crypto-random
+  + PKCE code_verifier + SHA-256 code_challenge; ephemeral
+  `127.0.0.1:0` listener with 5-min default timeout;
+  `crypto.timingSafeEqual` with explicit length-check
+  guard so length-mismatched buffers route to
+  `oauth_failed.reason: "csrf_mismatch"` rather than
+  `internal_error`; headless-friendly URL-print fallback
+  when no browser opener is found; idempotent silent-
+  overwrite on credentials write; account-id fingerprint
+  in success envelope) + adds §7.4 credentials cache
+  section closing Decision 3 (plain JSON at
+  `~/.monday-cli/credentials` mode `0600`; per-profile
+  `{access_token, obtained_at, expires_at, scopes,
+  account_id}` schema with `schema_version: "1"`; atomic-
+  replace via temp-file `writeFile` + `chmod` + `rename`
+  mirroring `src/api/cache.ts` `writeJsonFile` verbatim;
+  read-time `fs.fstat`-against-open-descriptor TOCTOU-safe
+  permission check; HOME-scoped, never repo-tracked;
+  per-profile token source order pinned —
+  credentials cache > `api_token_env` > `config_error`;
+  OS-keyring deferred to v0.4+ with explicit threat-model
+  commitment) + §7.3.3 error-surface design committing to
+  ONE new ERROR_CODE (`oauth_failed` umbrella with
+  `details.reason` discriminant; mirrors M20 Decision
+  4.1/4.2's "fewer new codes, discriminant-in-details"
+  reasoning; the actual registry widening lands at the
+  M21 pre-flight contract diff alongside the type-level
+  surface) + §7.3.4 mock OAuth helper env-var contract
+  (`__test_oauth_helper` per the §9 precondition's exact
+  wording — fixture supplies `code` only, the CLI's own
+  generated `state` echoes back so CSRF passes by default;
+  three `force_*` flags exercise the local-side failure
+  branches) + §7.3.5 OAuth-only-no-paste-in commitment
+  (paste-in becomes a separate cli-design §7.3 amendment
+  PR with Codex review BEFORE M21's first feat commit if
+  the OAuth flow proves out of budget; never a quiet
+  implementation choice) + §14.5 open-question status
+  flip (auth caching format closed via §7.4). Wire-level
+  semantics that depend on Monday's actual OAuth
+  implementation (redirect-URI matching exactness, whether
+  Monday allows wildcard `127.0.0.1:*` redirect URIs vs
+  requiring a fixed port, exact `/oauth2/token` response
+  shape, scope-string format, PKCE acceptance, whether
+  Monday requires a `client_secret` for the monday-cli
+  OAuth app, code TTL — Monday's docs describe roughly
+  10-minute validity but the exact TTL is probe-time-
+  pinned) tagged as *probe-time confirmation* throughout
+  §7.3 — the M21 pre-flight contract diff runs the
+  empirical probe per the §22 R-watch-item discipline
+  (which fires for the first time at M21 per its own
+  trigger condition). Codex round 1 returned 1 P1 + 5 P2
+  + 1 P3, all addressed inline; round 2 returned 0 P1 +
+  4 P2 residual cross-doc drifts, the cli-design slice
+  addressed inline (the v0.3-plan / CLAUDE.md slice lands
+  in commit B). Net diff this commit: 430 lines added in
+  `docs/cli-design.md`.
+- **Commit B (next commit this session) —
+  `docs(decision-3-close): tick §9 + annotate §8 Decision
+  3 with shipped SHA + apply Codex round-2 cross-doc
+  fixes to v0.3-plan + CLAUDE.md status block`.** The
+  close-docs sweep that backfills `3eba714`'s SHA into
+  v0.3-plan §8 Decision 3 closure annotation + §9 M21
+  preconditions tick (both Decision 3 + OAuth-callback-
+  design boxes, combined since flow shape and credentials
+  shape are inseparable for review purposes) + §3 M21
+  Decision 3 milestone-body status flip (was "open per
+  §14.5") + §3 M21 stub-deliverables wording flip
+  ("filled at M21 kickoff" → "filled at M21 pre-flight
+  contract diff next session, post this PR's §7.3/§7.4
+  design"; deliverables list grows the `oauth_failed`
+  registry widening + cli-design §6.5 row insertion as
+  explicit pre-flight items) + Codex round-2 P2 fixes:
+  `/oauth/authorize` → `/oauth2/authorize` drift fix in
+  §22 R-watch-item, "codes valid for ~10 min" → probe-
+  time-pinned wording in §6 risk register, testing-
+  strategy fixture realignment to match the new §7.3.4
+  `force_*`-flag shape (was "returning a tok-fixture-xxxx
+  token") + this CLAUDE.md hunk. No source-code changes
+  in commit B either; net diff 65 LOC across CLAUDE.md +
+  docs/v0.3-plan.md.
+
 **M11 cross-board flake fix (Node 24 cassette ordering)
 shipped in `7dbcf7e fix(m11): serialise cross-board metadata
 loads`** at session start before M20 work began.
