@@ -1993,16 +1993,23 @@ monday cache stats                                                           v0.
 monday config show                        # resolved config (token redacted) v0.1
 monday config path                        # location(s) considered           v0.1
 
-# === DIAGNOSTICS ===
-monday status                             # connectivity + auth probe        v0.3
-                                          # short-circuits on DNS / TCP / TLS / 401
-                                          # without touching account state;
-                                          # bundles api-version + cache dir +
-                                          # redaction self-test
-monday usage                              # rolling 24h API budget remaining v0.3
-                                          # complements per-query `account
-                                          # complexity`; agents self-throttle
-                                          # ahead of bulk operations
+# === DIAGNOSTICS (see §11.5) ===
+monday status [--no-probe]                # connectivity + auth + local-state v0.3
+                                          # probe matrix (DNS / TCP / TLS /
+                                          # auth + cache writability +
+                                          # redaction self-test + env-var
+                                          # pickup). --no-probe skips the
+                                          # four network probes; local-only
+                                          # probes still run. Decision 7
+                                          # closure (M22 pre-flight).
+monday usage                              # daily operation-budget remaining  v0.3
+                                          # via `platform_api.daily_limit`
+                                          # + `daily_analytics.by_day`
+                                          # (operations per day, NOT
+                                          # complexity points — see §11.5).
+                                          # Complements per-call `account
+                                          # complexity` so agents self-
+                                          # throttle ahead of bulk ops.
 
 # === HELP / VERSION (commander defaults) ===
 monday --help                                                                v0.1
@@ -5958,6 +5965,203 @@ Every error response carries `meta.request_id` and (where applicable)
 they see in the JSON output. Useful for postmortems on flaky
 mutations.
 
+### 11.5 Diagnostics — `monday status` + `monday usage`
+
+The v0.3 diagnostics cluster lands at M22. Two read-shape verbs that
+answer the two questions agents ask before bulk runs:
+
+1. **`monday status`** — *"is everything I need to talk to Monday
+   working?"* A short, deterministic probe matrix that short-circuits
+   on the first network failure without touching account state.
+2. **`monday usage`** — *"have I burned through my daily budget?"*
+   The rolling daily Monday API **operation budget** remaining, so
+   an agent can self-throttle before fanning out a bulk operation.
+
+The cluster is paired because each alone is low-value; together they
+form a coherent "is everything working?" surface (cli-design §13 v0.3
+entry).
+
+#### 11.5.1 `monday status` probe matrix
+
+Per Decision 7 closure: **probe by default; `--no-probe` opts out**.
+The default run executes seven probe steps in {@link src/api/probes.ts
+STATUS_PROBE_ORDER} (DNS → TCP → TLS → auth → cache writability →
+redaction self-test → env-var pickup). The four network probes
+short-circuit on the first failure — once DNS fails, TCP / TLS / auth
+all surface as `'fail'` with `reason: "upstream_failed"` rather than
+re-running. The three local probes always run regardless of the
+network-probe outcome.
+
+`--no-probe` skips the four network probes, surfacing them as
+`ProbeSkipped` entries with `reason: "no_probe_flag"`. The local
+probes (cache / redaction / env-var) still run because they don't
+touch account state and are the v0.3 value of an offline
+configuration check.
+
+**Per-probe error-code mapping (Decision 7 closure — no new
+ERROR_CODE for M22).** Each probe failure maps to an existing §6.5
+code via the verb-level error envelope (the envelope itself is
+emitted on the FIRST hard failure; subsequent probes surface as
+`ProbeFail` slots in the `probes` map but don't change the verb's
+exit code):
+
+| Probe                  | Failure reason          | Maps to       |
+|------------------------|-------------------------|---------------|
+| `dns`                  | `EAI_NONAME` etc.       | `network_error` |
+| `tcp`                  | `ECONNREFUSED` / timeout | `network_error` |
+| `tls`                  | `cert_invalid` / handshake | `network_error` |
+| `auth`                 | 401 (probe-confirmed)   | `unauthorized` |
+| `auth`                 | 5xx / network mid-flight | `network_error` |
+| `cache_writability`    | dir absent / no `W_OK`  | `config_error` |
+| `redaction_self_test`  | canary leaked           | `internal_error` |
+| `env_var_pickup`       | (cannot fail; pure read) | n/a |
+
+**Why no new `probe_failed` umbrella code.** Each probe's failure mode
+is best described by the existing semantic-domain code. An umbrella
+would widen the 29-code registry for marginal benefit — agents
+branching on `error.code` get useful information today (a
+`network_error` from `monday status` means "Monday is unreachable",
+identical to the meaning anywhere else in the CLI).
+
+**Empirical-probe finding pinned (2026-05-10, API `2026-01`).** The
+401 envelope shape `monday status`'s auth probe maps against:
+status `401`, content-type `application/json; charset=utf-8`,
+body `{"errors":[{"message":"Not authenticated","extensions":
+{"code":"NOT_AUTHENTICATED"}}]}`. Identical envelope for missing
+`Authorization` and bad `Authorization`. `Bearer <token>` prefix
+also works alongside bare `<token>`; the
+`.claude/rules/security.md` rule against the prefix is
+precautionary, not API-enforced.
+
+#### 11.5.2 `monday status` envelope shape
+
+```json
+{
+  "ok": true,
+  "data": {
+    "probes": {
+      "dns":                 { "kind": "ok",   "probe": "dns",   "elapsed_ms": 12,  "details": { "address": "1.2.3.4", "family": 4 } },
+      "tcp":                 { "kind": "ok",   "probe": "tcp",   "elapsed_ms": 24,  "details": { "host": "api.monday.com", "port": 443 } },
+      "tls":                 { "kind": "ok",   "probe": "tls",   "elapsed_ms": 67,  "details": { "subject": "*.monday.com", "issuer": "...", "valid_to": "2027-..." } },
+      "auth":                { "kind": "ok",   "probe": "auth",  "elapsed_ms": 89,  "details": { "me_id": "102927371", "api_version": "2026-01" } },
+      "cache_writability":   { "kind": "ok",   "probe": "cache_writability",   "elapsed_ms": 3, "details": { "path": "/home/.../.monday-cli", "mode": "0700" } },
+      "redaction_self_test": { "kind": "ok",   "probe": "redaction_self_test", "elapsed_ms": 1, "details": { "fixture_count": 6 } },
+      "env_var_pickup":      { "kind": "ok",   "probe": "env_var_pickup",      "elapsed_ms": 0, "details": { "set": { "MONDAY_API_TOKEN": true, "MONDAY_PROFILE": false, "MONDAY_API_VERSION": false, "MONDAY_API_URL": false, "MONDAY_OUTPUT": false, "MONDAY_REQUEST_TIMEOUT_MS": false } } }
+    },
+    "overall": "ok",
+    "api_version": "2026-01"
+  },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+`overall` rules:
+- `"ok"` — every non-skipped probe returned `'ok'`.
+- `"degraded"` — the auth probe succeeded AND only **soft local
+  probes** failed (for v0.3, soft = `cache_writability` +
+  `env_var_pickup` — the CLI can still talk to Monday, but a
+  local check turned up something worth surfacing). Verb exit
+  code: 0 (still success); the failed probes' slots carry the
+  detail.
+- `"down"` — any of the following:
+  - A network probe failed (`dns` / `tcp` / `tls` / `auth`).
+  - `redaction_self_test` failed (NEVER degraded — a
+    redaction-layer regression means the CLI may leak
+    secrets, which is a hard halt regardless of network state).
+  - Every network probe was skipped (via `--no-probe`) AND a
+    local probe failed (the network skip already removes the
+    only signal that could have placed the run in `'degraded'`).
+
+  Verb exit code per the §11.5.1 mapping table: 2 (API error)
+  for auth + redaction failures, 3 (config error) for
+  cache-writability failures, 2 (network/api) for DNS/TCP/TLS
+  failures.
+
+**The `'overall' → exit code` rule.** `'down'` promotes the
+verb to the §11.5.1 mapping table's error code; the envelope is
+emitted on stderr (per §6.5 error envelope) and the success-
+shape `probes` map IS NOT emitted on stdout (an agent reading
+`monday status` already gets the per-probe detail under
+`error.details.probes`). `'ok'` / `'degraded'` keep the
+success envelope on stdout and the per-probe details under
+`data.probes`.
+
+**The probe `details.*` payload NEVER contains a token.** Env-var
+values are reported as `{set: boolean}` only; auth probe surfaces
+`me_id` (a numeric account user ID, not a token); redaction self
+test reports only the fixture canary count.
+
+#### 11.5.3 `monday usage` envelope shape
+
+Surfaces Monday's daily **operation** budget (NOT complexity points).
+The empirical probe at M22 pre-flight (2026-05-10, API `2026-01`)
+confirmed Monday's GraphQL schema exposes the daily-budget surface
+under `platform_api.daily_limit` + `platform_api.daily_analytics`,
+NOT `account.complexity` (which doesn't exist on the `Account`
+type — the pre-M22 wording was loose).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "daily_limit": { "base": 200, "total": 200 },
+    "usage_today": 17,
+    "usage_remaining_today": 183,
+    "last_updated": "2026-05-10T22:01:26.377Z"
+  },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+Field semantics:
+- **`daily_limit.base`** — the plan's baseline daily allotment
+  (200 ops for free tier; higher for paid tiers).
+- **`daily_limit.total`** — `base` + any account-specific upgrades.
+  v0.3 surfaces both verbatim so agents on a paid tier see the
+  overage offset; v0.4 may collapse if Monday deprecates the
+  distinction.
+- **`usage_today`** — sum of `platform_api.daily_analytics.by_day
+  [].usage` where `day` matches today's date (timezone semantics
+  confirmed against an account with live activity at M22
+  implementation — pre-flight probe captured an empty list).
+- **`usage_remaining_today`** — derived `max(0, total -
+  usage_today)`. Clamped at zero because Monday's reported `usage`
+  is best-effort and may briefly exceed `total` on a near-cap
+  account (the limit gate enforces server-side at request time,
+  not per-day-boundary).
+- **`last_updated`** — Monday's `daily_analytics.last_updated`
+  field (an `ISO8601DateTime` scalar). Lets agents detect stale
+  analytics data without polling.
+
+**Additive-only per Decision 8 closure.** v0.4 may extend with
+per-minute complexity headroom + concurrency-cap headroom:
+
+```json5
+{
+  "daily_limit": { "base": 200, "total": 200 },
+  "usage_today": 17,
+  "usage_remaining_today": 183,
+  "last_updated": "...",
+  // v0.4 additive extensions:
+  "per_minute_complexity": { "remaining": 9998400, "reset_in_seconds": 47 },
+  "concurrency": { "cap": 10, "in_flight": 2 }
+}
+```
+
+The v0.3 shape is the floor; v0.4 amendments are purely additive.
+Removing or renaming any v0.3 field is the SemVer-major boundary.
+
+**Why not fold per-minute complexity into v0.3.** v0.1's
+`account complexity` already surfaces it (`complexity { before
+after query reset_in_x_seconds }`). The v0.3 `monday usage` verb
+intentionally focuses on the daily-operations surface — the
+distinct quota system Monday tracks. Combining both surfaces in
+one envelope is a v0.4 extension that requires the
+`--concurrency` flag to also land (per cli-design §13 v0.4
+entry).
+
 ## 12. Workflow shortcuts (agent-flavoured)
 
 The killer use case: an agent picking up a task, working it, marking it
@@ -6108,21 +6312,37 @@ scoped idempotent changes, and post comments narrating its work.**
   fixture-pins the existing failure-decoration shape first; the
   partial-success envelope design pass benefits from one milestone
   of operational signal on the fail-fast variant
-- `monday status` — connectivity + auth probe (DNS / TCP / TLS /
-  401) that short-circuits without touching account state. Bundles
-  pinned API version vs. server's reported version, cache dir +
-  writability, redaction self-test, env-var pickup summary. Lands
-  with the v0.3 diagnostics cluster (`auth login`, `dev doctor`,
+- `monday status` — connectivity + auth + local-state probe matrix
+  (DNS / TCP / TLS / auth + cache writability + redaction self-test
+  + env-var pickup summary) that short-circuits without touching
+  account state. **Decision 7 closure (M22 pre-flight):** probe by
+  default; `--no-probe` skips the four network probes (the
+  local-only probes still run). The full probe matrix + per-probe
+  error-code mapping + the empirical 401 envelope shape lives at
+  §11.5. Lands with the v0.3 diagnostics cluster (`auth login`,
   `monday usage`) — solo it's low value once `account whoami`
-  works, but together they form a coherent "is everything working?"
-  surface
-- `monday usage` — rolling 24h API complexity budget remaining.
-  Complements v0.1's per-query `account complexity` (spot probe)
-  with the "have I burned through my daily budget?" shape, so an
-  agent can self-throttle before a bulk run. Minimum-viable shape
-  (24h rolling) lands at v0.3; per-minute rate-limit headroom +
-  concurrency-cap headroom can grow into the same envelope at v0.4
-  alongside `--concurrency` without re-pinning the contract
+  works, but together they form a coherent "is everything
+  working?" surface
+- `monday usage` — daily Monday API **operation** budget remaining.
+  Complements v0.1's per-call `account complexity` (which surfaces
+  per-minute COMPLEXITY POINTS, a separate Monday quota system)
+  with the "have I burned through my daily operation budget?"
+  shape, so an agent can self-throttle before a bulk run.
+  **M22 pre-flight empirical-probe finding (2026-05-10, API
+  `2026-01`):** Monday's daily-budget surface lives at
+  `platform_api.daily_limit { base, total }` +
+  `platform_api.daily_analytics.by_day [{ day, usage }]` — NOT
+  `account.complexity` (the field doesn't exist on the `Account`
+  type). The unit Monday tracks under `platform_api.daily_*` is
+  operations per day (200/day on free tier), not complexity
+  points; the M22 pre-flight reshape pins the accurate envelope
+  shape (Decision 8 closure). Minimum-viable shape lands at
+  v0.3 (`{daily_limit, usage_today, usage_remaining_today,
+  last_updated}`); per-minute complexity headroom (from the
+  v0.1 `complexity` surface) + concurrency-cap headroom can grow
+  into the same envelope at v0.4 alongside `--concurrency`
+  without re-pinning the v0.3 contract (envelope is additive-
+  only per §6.1 + §11.5.3)
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
 - `notification send`

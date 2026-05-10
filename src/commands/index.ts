@@ -133,6 +133,13 @@ import { boardGroupDeleteCommand } from './board/group-delete.js';
 // `src/config/credentials.ts` real bodies.
 import { authLoginCommand } from './auth/login.js';
 import { authLogoutCommand } from './auth/logout.js';
+// M22 (v0.3) — `monday status` + `monday usage` diagnostics cluster.
+// Pre-flight stubs: argv shape pinned for forward-compatibility,
+// runtime probe matrix + `platform_api.daily_*` projection land at
+// M22 implementation alongside `src/api/probes.ts` + `src/api/usage.ts`
+// real bodies.
+import { statusCommand } from './status.js';
+import { usageCommand } from './usage.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -213,6 +220,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateClearAllCommand,
     authLoginCommand,
     authLogoutCommand,
+    statusCommand,
+    usageCommand,
     rawCommand,
     boardDoctorCommand,
   ];

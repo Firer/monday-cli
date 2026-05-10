@@ -11,8 +11,10 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M21 closed.** v0.2.0 published to npm 2026-05-08. v0.3 is
-in progress on `main`; M0–M20 + M21 closed. **M22 unblocked.**
+**v0.3-M21 closed; M22 pre-flight shipped.** v0.2.0 published to
+npm 2026-05-08. v0.3 is in progress on `main`; M0–M21 closed +
+M22 pre-flight contract diff committed (this session). **M22
+implementation unblocked.**
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
@@ -23,22 +25,33 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M21 coverage-push close):**
-- Test count: **2609** across 114 files (was 2602 at M21 close;
-  +7 net in the coverage-push: 2 emit.ts mutation-slot tests +
-  1 buildProgram default-cliDescription test + 2 oauth.ts
-  default-args tests + 1 readCredentials EISDIR-via-dir-at-path
-  test + 1 profile-resolution global-flag-wins test).
-- Coverage: **99.11 / 95.56 / 99.36 / 99.26** (stmts / branches /
+**Live numbers (post-M22 pre-flight):**
+- Test count: **2652** across 117 files (was 2609 at post-M21
+  coverage-push close; +43 net in the M22 pre-flight diff: 16
+  `tests/unit/api/usage.test.ts` schema + helper surface tests,
+  22 `tests/unit/api/probes.test.ts` constants + schema + stub-
+  reachability tests (incl. round-2 schema-drift + additive-
+  catchall pair), 5 `tests/integration/commands/diagnostics.test.ts`
+  stub-rejection tests for `monday status` + `monday usage`).
+- Coverage: **99.12 / 95.57 / 99.36 / 99.26** (stmts / branches /
   fns / lines), above the **95 / 95.45 / 95 / 95** floor. The
-  post-M21 coverage push recovered the 95.45 branches floor
-  (94.5 → 95.45) by writing the seven targeted tests above and
-  folding ten broken multi-line `c8 ignore` directives into the
-  two-line form so v8 honours them. Margin against the new floor
-  is **0.11pp**.
+  M22 pre-flight wraps **API-layer stub bodies** (the per-probe
+  runners in `src/api/probes.ts` + `fetchUsage` in
+  `src/api/usage.ts`) in `c8 ignore start/stop` block-wraps per
+  the post-M21 testing.md convention; **command-action stub
+  bodies** (`src/commands/{status,usage}.ts`) are NOT wrapped
+  because integration tests at `tests/integration/commands/
+  diagnostics.test.ts` drive them via commander and assert on
+  the rejection envelope. Branches floor margin holds at
+  **0.12pp** (unchanged from post-M21's 0.11pp — the +0.01 is
+  rounding noise from the +43 new tests). Pure helpers
+  (`sumUsageForDay`, `projectUsageOutput`) ship as real impl +
+  are branch-tested.
 - ERROR_CODES count: **29** (`oauth_failed` joined at M21
-  pre-flight). Command count: **74** (auth login/logout joined
-  at M21 pre-flight).
+  pre-flight; no new code at M22 pre-flight — probe failures
+  map to existing codes per cli-design §11.5.1). Command
+  count: **76** (`monday status` + `monday usage` joined at
+  M22 pre-flight; auth login/logout joined at M21 pre-flight).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -54,16 +67,38 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M22 pre-flight contract diff** (mirrors the `5c07840` /
-   `d822982` / `a702af2` cadence). New modules
-   `src/api/probes.ts` + `src/api/usage.ts`; new commands
-   `monday status` + `monday usage`; close M22-specific
-   decisions (7 + 8) per `docs/v0.3-plan.md` §3 M22 + §8.
-2. Pre-flight starts with an empirical probe per §22
-   R-watch-item — the `account.complexity` surface for
-   `monday usage` + the status-probe wire shape for
-   `monday status` need verification against `2026-01` before
-   stub bodies land.
+1. **M22 implementation** (mirrors the M21 Part 1 / Part 2
+   shape; may itself split per the M21 post-mortem lesson if
+   probes + usage diverge enough). Replaces the pre-flight
+   stubs in `src/api/probes.ts` + `src/api/usage.ts` with
+   runtime bodies: DNS / TCP / TLS via `node:dns/promises` +
+   `node:net` + `node:tls`; auth probe + `fetchUsage` via
+   the resolved transport; cache-writability via fs primitives;
+   redaction self-test via the canary fold pattern; env-var
+   pickup via a pure-read summariser. Plus the `monday status`
+   + `monday usage` command action bodies that assemble the
+   envelope per cli-design §11.5.2 / §11.5.3.
+2. **Codex implementation review** (1–2 rounds) before
+   declaring done. The review prompt should pre-enumerate
+   the watch-items from the M21 post-mortem: (a) redaction-
+   runtime contract (probe consults both `ctx.env` AND
+   `ctx.runtimeSecrets`); (b) additive-only envelope pin
+   (no v0.4 fields snuck into v0.3); (c) per-probe
+   error-code mapping matches §11.5.1's table.
+3. **`monday usage` timezone semantics** — the M22 pre-flight
+   probe captured an empty `by_day` list on the test account.
+   Implementation kickoff confirms the `day`-field timezone
+   (UTC vs account-local) against an account with live usage
+   activity OR a one-off bootstrap call to populate the
+   series. Pure helpers (`sumUsageForDay`, `projectUsageOutput`)
+   treat `day` as an opaque equality key — the timezone choice
+   only affects what string the command action passes as
+   `today`.
+4. **R-NEW-3 `wrapFsError` factory evaluation** per the M21
+   post-mortem trigger — if the M22 cache-writability probe
+   adds a third named fs-error wrap site beyond the existing
+   credentials.ts + cache.ts sites, R-NEW-3 fires and gets
+   lifted alongside the implementation.
 
 **R-class state (post-M21 coverage-push close)** (full
 detail in `docs/v0.3-plan.md` §22):
