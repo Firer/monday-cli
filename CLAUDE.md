@@ -100,16 +100,33 @@ convention.
    credentials.ts + cache.ts sites, R-NEW-3 fires and gets
    lifted alongside the implementation.
 
-**R-class state (post-M21 coverage-push close)** (full
-detail in `docs/v0.3-plan.md` §22):
+**R-class state (post-M22 pre-flight drift sweep close)**
+(full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
-  (`1c77699`, M21 close).
-- **Open candidates:** R-NEW-2 `credentialsHomeOptions` (fires
-  at `monday auth status`, v0.3.x — the helper now carries a
-  `c8 ignore` on its HOME-undefined branch in both login.ts +
-  logout.ts that the lift can clean up at the lift point);
-  R-NEW-3 `wrapFsError` factory (may fire at M22 if
-  `monday status` adds a third named wrap site).
+  (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
+  `probeResultSchema` import-from-api/probes lift
+  (`0b5af57`, post-M22 pre-flight drift sweep — removed
+  character-identical duplication between
+  `src/commands/status.ts` and `src/api/probes.ts`;
+  `StatusOutput` flipped to `z.infer<typeof
+  statusOutputSchema>` per schema-driven-types rule).
+- **Open candidates:** R-NEW-2 `credentialsHomeOptions`
+  (fires at `monday auth status`, v0.3.x); R-NEW-3
+  `wrapFsError` factory (still waiting on a 3rd named wrap
+  site — M22 pre-flight stubs don't yet have wrap sites;
+  evaluate at M22 implementation when cache_writability +
+  redaction-self-test get real fs/redaction bodies);
+  R-NEW-5 `introspectType()` helper in
+  `scripts/probe/_lib.ts` (fires at M27 webhooks
+  pre-flight if introspecting probe scripts repeat the
+  M22 pattern — well above 3-consumer trigger but
+  consumers are disposable, so carry-cost evaluated at
+  next-pre-flight-time); R-NEW-6 Codex pre-flight review
+  prompt template at `.claude/templates/codex-pre-flight
+  -review.md` (fires at M23 pre-flight if the 7-section
+  prompt structure repeats verbatim across M21+M22+M23 —
+  template would amortise the per-prompt copy-paste at
+  M23-M28).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (single-consumer; second at M22 status probes);
   Post-OAuth fresh-transport pattern (single-consumer; ratified
@@ -119,7 +136,11 @@ detail in `docs/v0.3-plan.md` §22):
   recovery established `c8 ignore start/stop` block-wraps as
   the project default per testing.md); **filesystem-state
   probes** for non-ENOENT fs-error branches (test-pattern;
-  EISDIR-via-dir-at-path probe ratified at `7058754`).
+  EISDIR-via-dir-at-path probe ratified at `7058754`);
+  **empirical-probe-step-in-pre-flight** — fired twice now
+  (M21 OAuth `5c07840` + M22 `platform_api.daily_*`
+  reshape `fbab6b0`), discipline ratified as
+  always-run-for-novel-API-surface pre-flights.
 
 ## Pre-flight contract diff discipline
 
