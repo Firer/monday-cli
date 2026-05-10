@@ -52,6 +52,7 @@ no `data`); see the **Errors** section at the bottom.
 | Noun | Verbs |
 |------|-------|
 | [account](#account) | whoami, info, version, complexity, tags (M19) |
+| [auth](#auth) | login (M21), logout (M21) |
 | [workspace](#workspace) | list, get, folders, create (M14), update (M14), delete (M14), add-users (M14), remove-users (M14) |
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
@@ -144,6 +145,105 @@ next step.
 `meta.source` is `cache` for a cache hit, `live` for a cache miss
 or `--no-cache`. `meta.cache_age_seconds` populates on the cache
 path; `meta.complexity` populates on `--verbose`.
+
+---
+
+## auth
+
+OAuth-issued credentials cache (cli-design §7.3 / §7.4 — shipped at
+v0.3-M21 Part 1). Both verbs require `--profile <name>` (or
+`MONDAY_PROFILE` env). The token itself **never** appears in the
+envelope's `data` per §7.4.3 redaction discipline; it lives only
+on disk at `~/.monday-cli/credentials` with mode `0600`.
+
+### `auth login --profile <name>` (M21)
+
+Runs the OAuth flow (consent URL → local listener on
+`127.0.0.1:9876` → CSRF verify → code exchange → post-exchange
+`account.id` query → atomic credentials-file write) and emits the
+profile entry's contract surface.
+
+```json
+{
+  "profile": "work",
+  "account_id": "34900083",
+  "scopes": [
+    "boards:read",
+    "boards:write",
+    "me:read"
+  ]
+}
+```
+
+`scopes` echoes the granted-scope list from `/oauth2/token`'s
+response (split on space). Agents self-audit ("does this profile
+have `boards:write`?") without re-running the flow. `account_id`
+pins the Monday account the profile authenticates against
+(probe-confirmed string-typed numeric, e.g., `"34900083"`).
+
+`meta.source` is `live` (the OAuth flow + post-exchange GraphQL
+call both hit the wire). `meta.api_version` is the standard
+resolution (flag > env > SDK pin).
+
+**Error envelope.** `error.code = "oauth_failed"` with
+`details.reason` discriminating per failure mode:
+
+- `csrf_mismatch` — redirect's `state` ≠ per-attempt `state`
+  (security signal; never auto-retry; no token-exchange call
+  follows).
+- `user_denied` — Monday's redirect returns
+  `?error=access_denied&state=…`.
+- `authorization_failed` — Monday's redirect returns
+  `?error=<other>&state=…` (e.g., `invalid_scope`,
+  `unauthorized_client`, `temporary_unavailable`).
+  `details.monday_code` carries the redirect's `error` field;
+  `details.monday_description` carries `error_description` if
+  present.
+- `code_exchange_failed` — `/oauth2/token` returns 4xx
+  (probe-confirmed RFC 6749 standard shape).
+  `details.monday_code` + optional `details.monday_description`
+  populate from the response body.
+- `timeout` — listener's 5-min timer fired before the redirect
+  arrived. `retryable: true` (overrides the umbrella default).
+- `port_in_use` — listener can't bind 9876 (concurrent
+  `monday auth login` invocation OR an unrelated process holding
+  the port). `details.port` carries the failed port.
+- `browser_unavailable` — no opener AND the fallback URL print
+  also failed (rare; e.g., closed stderr). `details.url` carries
+  the consent URL so an agent can paste it back.
+
+Reused codes: `network_error` (DNS / TCP / TLS reaching
+`auth.monday.com`); `config_error` (post-exchange credentials-write
+failure); `internal_error` (CLI-side bugs — CSRF-state generation
+failure, malformed Monday response shape).
+
+Exit code: `1` (oauth_failed treats as usage-shaped per cli-design
+§6.5 — agents already branch on the verb invoked, plus
+`details.reason` carries the discriminant).
+
+### `auth logout --profile <name>` (M21)
+
+Deletes the named profile's entry from `~/.monday-cli/credentials`.
+Idempotent — no-op + `ok: true` on a missing profile (or a missing
+file). When the post-delete profiles map is empty the file is
+**still preserved** as `{schema_version: '1', profiles: {}}` rather
+than deleted outright (cli-design §7.3.2 — keeps the schema-version
+pin discoverable; avoids fresh-install-vs-all-logged-out ambiguity).
+
+```json
+{
+  "profile": "work",
+  "was_present": true
+}
+```
+
+`was_present` distinguishes a real delete from a no-op (false →
+no entry existed pre-delete). Re-running on the same profile name
+flips `was_present` to `false` on the second invocation.
+
+`meta.source` is `none` (local-only; no wire call). NOT under the
+destructive-confirmation gate (§3.1) — credential rotation is a
+routine agent operation, not data mutation requiring `--yes`.
 
 ---
 

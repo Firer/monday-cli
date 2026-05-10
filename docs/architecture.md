@@ -52,9 +52,22 @@
 - `cli/run.ts` — testable runner: argv → commander parse → action body
   → envelope → exit code. Combines a caller-supplied abort signal with
   an internal one so SIGINT cancels in-flight work.
-- `cli/program.ts` (M2.5) — commander wiring: program metadata, global
-  flag declarations, command registration. Pulled out of `run.ts` so
-  the runner stays focused on I/O plumbing.
+- `cli/program.ts` (M2.5; profile-resolution preAction hook added at
+  v0.3-M21 Part 1 in `a4cb5b0`) — commander wiring: program metadata,
+  global flag declarations, command registration. Pulled out of
+  `run.ts` so the runner stays focused on I/O plumbing. The preAction
+  hook (originally M2.5 for the api-version commit, extended at M21
+  Part 1) runs before any subcommand action and resolves the active
+  profile when `--profile <name>` or `MONDAY_PROFILE` env is set OR
+  a `config.toml` with `default_profile` exists; injects the resolved
+  token into `ctx.env.MONDAY_API_TOKEN` so downstream `loadConfig` /
+  `resolveClient` calls Just Work via the standard env-var path.
+  Auth verbs (`auth login`, `auth logout`) are exempt — they're the
+  source of credentials, not consumers. Profile-level `api_version`
+  override (cli-design §7.2) threads through the same hook: global
+  `--api-version` flag wins, but profile-set `api_version` lands in
+  `ctx.env.MONDAY_API_VERSION` + `ctx.meta.setApiVersion(...)` when
+  the flag is absent.
 - `cli/envelope-out.ts` (M2.5) — `MetaBuilder` + `writeErrorEnvelope`.
   The error path's source of truth for `meta.api_version` /
   `meta.source` so a thrown action error carries the same meta a
@@ -1126,30 +1139,69 @@ heuristic v0.2-plan §22 documents.
   R45/R48 ship-the-helper-with-the-first-new-consumer cadence).
 
 - `api/oauth.ts` (v0.3 M21 — pre-flight at `5c07840`, runtime
-  body lands at M21 implementation alongside the OAuth-app
-  registration at Monday's developer portal). OAuth wire wrapper
+  bodies landed at M21 Part 1 in `81eec03`). OAuth wire wrapper
   for the `monday auth login` flow per cli-design §7.3. Constants
   pin the wire URLs (`OAUTH_AUTHORIZE_URL`, `OAUTH_TOKEN_URL`,
   `OAUTH_DEFAULT_PORT = 9876`, `OAUTH_CALLBACK_PATH = '/callback'`,
-  `OAUTH_DEFAULT_LISTENER_TIMEOUT_MS`, `OAUTH_SCOPES`). Type
-  surface splits raw-vs-normalized: `RawTokenResponse` is the
-  snake_case `/oauth2/token` success body (Monday's wire shape);
+  `OAUTH_DEFAULT_LISTENER_TIMEOUT_MS`, `OAUTH_SCOPES`,
+  `OAUTH_DEFAULT_REQUESTED_SCOPES`) plus the public-OAuth-client
+  app credentials (`OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` —
+  shipped as `<UNREGISTERED_PENDING_OAUTH_APP>` placeholders that
+  the user swaps with the registered Monday OAuth app's values
+  pre-publish; tests don't depend on the real values since
+  cassettes intercept `/oauth2/token`). Type surface splits
+  raw-vs-normalized: `RawTokenResponse` is the snake_case
+  `/oauth2/token` success body (Monday's wire shape);
   `TokenResponse` is the camelCase normalized shape that
-  `exchangeCode` returns to its callers (M21 implementation owns
-  the snake_case → camelCase normalization). Two real bodies ship
-  in pre-flight: `generateOAuthState` (32-byte CSPRNG → base64url
-  CSRF token) + `verifyCsrf` (length-guard before
-  `crypto.timingSafeEqual` so length-mismatched buffers route to
+  `exchangeCode` returns to its callers. Four runtime bodies:
+  `generateOAuthState` (32-byte CSPRNG → base64url CSRF token);
+  `verifyCsrf` (length-guard before `crypto.timingSafeEqual` so
+  length-mismatched buffers route to
   `oauth_failed.reason: "csrf_mismatch"` rather than
-  `internal_error`). Two stub bodies await M21 implementation:
-  `bindOAuthListener` (HTTP listener + 5-min timer + AbortController
-  for SIGINT cleanup) + `exchangeCode`
-  (`POST /oauth2/token` per RFC 6749 with mandatory `client_secret`
-  per the empirical probe at `5c07840` — 2026-05-10 confirmed
-  Monday rejects the PKCE-only public-client flow with
-  `Missing client_secret param`, status 400). Single consumer
-  post-M21: `commands/auth/login.ts`. PKCE not shipping in v0.3 —
-  documented as a v0.4+ amendment.
+  `internal_error`); `bindOAuthListener` (`node:http` listener
+  on `127.0.0.1:<port>`, single-request handler matching
+  `${OAUTH_CALLBACK_PATH}?code=…&state=…` or `?error=…&state=…`,
+  404 on other paths, 400 on `/callback` with neither code nor
+  error, 5-min timer armed inside `awaitRedirect`'s promise
+  executor with `retryable: true` overriding the umbrella
+  `oauth_failed` floor for `reason: "timeout"`, EADDRINUSE
+  mapping to `oauth_failed.reason: "port_in_use"` with
+  `details.port`, server.address() readback so callers passing
+  `port: 0` get the OS-assigned port back); `exchangeCode`
+  (`POST /oauth2/token` with `application/x-www-form-urlencoded`
+  body per Monday's documented shape + the empirical-probe
+  finding that PKCE-only is rejected with
+  `Missing client_secret param`; 4xx surfaces as
+  `oauth_failed.code_exchange_failed` with `monday_code` +
+  `monday_description`; 5xx surfaces as `network_error`; fetch
+  rejection becomes `network_error`; malformed 200 JSON or
+  schema-mismatch surfaces as `internal_error`). Single consumer:
+  `commands/auth/login.ts`. PKCE not shipping in v0.3 —
+  documented as a v0.4+ amendment per the empirical-probe
+  pin.
+
+- `api/oauth-test-helper.ts` (v0.3 M21 Part 1 — `81eec03`).
+  Test seam for the `__test_oauth_helper` env var per cli-design
+  §7.3.4 (separate file because the helper + fixture-schema
+  surface crosses ~165 LOC, above the inline threshold). Two
+  exports: `readTestOAuthFixture(path)` parses the JSON fixture
+  (zod-validated; rejects with `config_error` on missing /
+  malformed / schema-mismatched files) and `buildTestOAuthListener(
+  fixture, generatedState)` returns a synthetic
+  `OAuthListenerHandle` whose `awaitRedirect` resolves (or
+  rejects) based on the fixture's `force_*` flags
+  (`force_csrf_mismatch` substitutes a different state;
+  `force_user_denied` simulates `?error=access_denied`;
+  `force_authorization_failed` simulates a non-`access_denied`
+  redirect error with `monday_code` + optional
+  `monday_description`; `force_listener_timeout` rejects with
+  `oauth_failed.reason: "timeout"`). The default fixture path
+  (no `force_*` flags) succeeds with the CLI's own state echoed
+  back, so CSRF verification passes — the network-side
+  `/oauth2/token` exchange still goes through cassettes for
+  `code_exchange_failed` coverage. Production callers never see
+  this module; the test seam is opt-in via `ctx.env.
+  __test_oauth_helper`.
 
 - `api/time-tracking.ts` (v0.3 M20 — pre-flight at `a702af2`,
   runtime body landed at M20 implementation as **documentation-
@@ -1237,21 +1289,30 @@ document the verb cluster post-mortems. Briefly:
   `with_updates` argument (unlike `duplicate_item` /
   `duplicate_board`).
 - **`commands/auth/{login,logout}.ts`** (v0.3 M21 — pre-flight
-  at `5c07840`, runtime body at M21 implementation). The OAuth
-  flow + credentials cache verbs per cli-design §7.3 / §7.4.
-  Both verbs read `--profile <name>` from the global flag layer
-  (cli-design §4.4 — auth verbs do NOT redeclare `--profile` at
-  the command level; commander attaches global flags to the
-  parent program); both throw `usage_error` if the flag is
-  missing. Pre-flight stub bodies reject with `internal_error`
-  carrying the M21-pending hint so agent scripts targeting
-  `monday auth login --profile <name>` are stable across the
-  M21 drop-in. M21 implementation replaces the stub bodies with
-  the real OAuth flow (`bindOAuthListener` + `verifyCsrf` +
-  `exchangeCode` + post-exchange `account.id` query +
-  `setProfileCredentials`) for `auth login`; the
-  `deleteProfileCredentials` call for `auth logout` (idempotent
-  per §7.3.2).
+  at `5c07840`, runtime bodies landed at M21 Part 1 in
+  `a4cb5b0`). The OAuth flow + credentials cache verbs per
+  cli-design §7.3 / §7.4. Both verbs read `--profile <name>`
+  from the global flag layer (cli-design §4.4 — auth verbs do
+  NOT redeclare `--profile` at the command level; commander
+  attaches global flags to the parent program); both throw
+  `usage_error` if the flag is missing. `auth login` runs the
+  8-step flow per cli-design §7.3.1 (`generateOAuthState` →
+  `bindOAuthListener` or `buildTestOAuthListener` if
+  `__test_oauth_helper` is set → consent-URL build + best-effort
+  browser open + stderr URL print fallback → `awaitRedirect` →
+  `verifyCsrf` → kind-mapping [`code` → exchange, `error:
+  access_denied` → `user_denied`, other error →
+  `authorization_failed` with `monday_code` + optional
+  `monday_description`] → `exchangeCode` → post-exchange
+  `account { id }` GraphQL via the just-obtained token [single
+  consumer of the fresh-transport pattern; R-watch-item logged
+  for `monday auth refresh` v0.4+] → `setProfileCredentials`)
+  and emits `{profile, account_id, scopes}` (token NEVER in
+  `data` per §7.4.3). `auth logout` calls
+  `deleteProfileCredentials(profileName)` and emits `{profile,
+  was_present}` (idempotent per §7.3.2; the post-delete
+  profiles map is preserved as `{schema_version: '1', profiles:
+  {}}` rather than the file being deleted outright).
 
 ### `config/` (configuration boundary)
 
@@ -1260,37 +1321,52 @@ document the verb cluster post-mortems. Briefly:
   `MONDAY_REQUEST_TIMEOUT_MS` through a zod schema; rejects with
   `config_error` (exit 3) on any failure.
 - `config/credentials.ts` (v0.3 M21 — pre-flight at `5c07840`,
-  runtime body at M21 implementation). Mode-`0600` per-profile
-  credentials cache primitive at `~/.monday-cli/credentials` per
-  cli-design §7.4. Closes v0.3-plan §8 Decision 3. Zod schemas
-  pin the §7.4.1 file shape (`schema_version` literal-pinned to
-  `"1"` at the security floor — defends against future-version
-  files silently passing through; `profileEntrySchema` covers
+  runtime bodies landed at M21 Part 1 in `5c1f7ac`). Mode-`0600`
+  per-profile credentials cache primitive at
+  `~/.monday-cli/credentials` per cli-design §7.4. Closes
+  v0.3-plan §8 Decision 3. Zod schemas pin the §7.4.1 file
+  shape (`schema_version` literal-pinned to `"1"` at the
+  security floor — defends against future-version files
+  silently passing through; `profileEntrySchema` covers
   `{access_token, obtained_at, expires_at: string | null,
-  scopes, account_id}`). Six stub helpers await M21
-  implementation: `resolveCredentialsPath`, `readCredentials`
-  (with `fs.fstat`-against-open-descriptor permission check),
+  scopes, account_id}`). Six runtime helpers:
+  `resolveCredentialsPath`, `readCredentials` (with
+  `fs.fstat`-against-open-descriptor permission check; refuses
+  on `mode & 0o077 !== 0` with `chmod 600` hint),
   `writeCredentials` (atomic-replace mirroring `src/api/cache.ts
-  writeJsonFile` verbatim — secure-file primitive R-candidate
-  is one consumer below threshold), `setProfileCredentials`
-  (read-modify-write convenience for `auth login`),
-  `deleteProfileCredentials` (idempotent for `auth logout`),
-  `resolveProfileToken` (per-profile source-order resolver:
-  `credentials_cache` > `api_token_env` > `config_error`).
+  writeJsonFile` verbatim — `mkdir 0o700` + `chmod 0o700` on
+  parent dir; `writeFile(tmp, payload, {mode: 0o600})` +
+  re-`chmod 0o600` + `rename`; secure-file primitive R-candidate
+  stays below the 3-consumer threshold per cli-design §7.4.2's
+  in-design backstop), `setProfileCredentials` (read-modify-
+  write convenience for `auth login`), `deleteProfileCredentials`
+  (idempotent for `auth logout` — returns `{wasPresent}`;
+  preserves the file with empty `profiles: {}` map after the
+  last delete per §7.3.2), `resolveProfileToken` (per-profile
+  source-order resolver: `credentials_cache` > `api_token_env`
+  > `config_error`).
 - `config/profiles.ts` (v0.3 M21 — pre-flight at `5c07840`,
-  runtime body at M21 implementation). TOML loader for
-  `~/.monday-cli/config.toml` per cli-design §7.2. Zod schemas
-  pin the §7.2 file shape with two layers of defense for the
-  no-token-in-config rule: structural exclusion via `.strict()`
-  rejects unknown keys (`access_token`, `api_token`, `secret`,
-  `token`); value-level shape check via
+  runtime bodies landed at M21 Part 1 in `5c1f7ac`). TOML loader
+  for `~/.monday-cli/config.toml` per cli-design §7.2. Zod
+  schemas pin the §7.2 file shape with two layers of defense
+  for the no-token-in-config rule: structural exclusion via
+  `.strict()` rejects unknown keys (`access_token`, `api_token`,
+  `secret`, `token`); value-level shape check via
   `/^[A-Z_][A-Z0-9_]*$/u` regex on `api_token_env` rejects
-  token-looking values. Three stub helpers:
-  `resolveProfilesConfigPath`, `loadProfilesConfig`,
-  `selectProfile` (§7.2 source-order resolver: `--profile flag`
-  > `MONDAY_PROFILE env` > `default_profile in config` >
-  implicit-v1 mode). M21 implementation adds the TOML-parser
-  dep (`smol-toml` is the leaning choice).
+  token-looking values. Three runtime helpers:
+  `resolveProfilesConfigPath`, `loadProfilesConfig` (parses TOML
+  via `smol-toml` — the dep added at Part 1 per the v0.3-plan
+  §3 M21 leaning, minimal footprint + ESM-native + zero runtime
+  deps), `selectProfile` (§7.2 source-order resolver:
+  `--profile flag` > `MONDAY_PROFILE env` >
+  `default_profile in config` > implicit-v1 mode). One contract
+  widening vs the M21 pre-flight: `selectProfile` returns a
+  synthetic empty `ProfileEntry` when `--profile work` is set
+  but no `config.toml` exists — credentials-cache-only flows
+  (run `monday auth login --profile work` then any other
+  command with `--profile work`) work without requiring a
+  `config.toml` edit. The `config_error` path stays for the
+  genuine "named profile missing from the listed profiles" case.
 
 ### Hard rules
 

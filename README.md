@@ -387,8 +387,19 @@ support time-tracking column writes (`change_simple_column_value`
 time-tracking-related mutations). When Monday ships API support,
 the runtime swap is one-sided in `src/api/time-tracking.ts` —
 agent scripts targeting the verbs are stable across the swap.
-**Deferred to later v0.3 milestones**: `monday auth login` +
-`~/.monday-cli/config.toml` multi-profile (M21), `monday status` /
+**v0.3-M21 Part 1 shipped** (`5c1f7ac` + `81eec03` + `a4cb5b0`):
+`monday auth login --profile <name>` + `monday auth logout
+--profile <name>` runtime bodies, the `~/.monday-cli/credentials`
+mode-`0600` cache, the `~/.monday-cli/config.toml` TOML loader, and
+the `--profile <name>` global flag's resolution wiring through
+`cli/program.ts`'s preAction hook. M21 Part 2 covers the redaction-
+runtime extension + leak-test canary + Codex implementation review
++ the v0.3-plan §3 M21 close-docs sweep. **Pre-publish blocker (Part
+2 → release):** swap the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`
+placeholders in `src/api/oauth.ts` with the registered Monday OAuth
+app's values (one-time external step at https://developer.monday.com/
+apps with redirect URI exactly `http://127.0.0.1:9876/callback`).
+**Deferred to later v0.3 milestones**: `monday status` /
 `monday usage` diagnostics (M22), cross-board `item search` +
 `board favorites` (M23), `item history` (M24),
 `item update --continue-on-error` partial-success (M25), `monday

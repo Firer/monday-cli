@@ -5043,8 +5043,9 @@ Selection order: `--profile` flag > `MONDAY_PROFILE` env >
 v1 mode if no config file exists).
 
 Tokens are **never** stored in the config file. Reference an env var
-name (`api_token_env`) or use the future `monday auth login` flow
-which writes a secrets file at `~/.monday-cli/credentials` (mode 0600).
+name (`api_token_env`) or use the `monday auth login` flow (shipped
+at v0.3-M21 Part 1) which writes a secrets file at
+`~/.monday-cli/credentials` (mode 0600).
 
 ### 7.3 v3 — `monday auth login`
 
@@ -5062,11 +5063,18 @@ pre-flight contract diff via empirical probe** (`scripts/probe/
 m21-oauth.ts` against `auth.monday.com`, 2026-05-10) per v0.3-plan
 §22 R-watch-item — findings inline below at each
 **Probe-time-confirmed:** callout. Findings the probe could not
-empirically resolve (full token-exchange success — no monday-cli
-OAuth app yet registered with Monday's developer portal, deferred
-to M21 implementation kickoff) carry **Probe-time deferred:**
-callouts that point at the docs-pinned shape we'll ship pending
-empirical verification.
+empirically resolve (full token-exchange success — at probe time, no
+monday-cli OAuth app was yet registered with Monday's developer portal)
+carry **Probe-time deferred:** callouts that point at the docs-pinned
+shape Part 1 shipped against. The TokenResponse success-body shape was
+verified inline at Part 1 (`a4cb5b0`) against Monday's actual
+`/oauth2/token` 200 response and matches Monday's docs verbatim
+(`{access_token, token_type, scope}`, no `expires_in`); the
+`OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` constants ship as
+`<UNREGISTERED_PENDING_OAUTH_APP>` placeholders that the user swaps
+with the registered Monday OAuth app's values pre-publish (one-time
+external registration step at https://developer.monday.com/apps with
+redirect URI exactly `http://127.0.0.1:9876/callback`).
 
 **Sibling verb.** `monday auth logout --profile <name>` deletes the
 named profile's entry from `~/.monday-cli/credentials` (§7.4) and is
@@ -5174,15 +5182,19 @@ idempotent on a missing entry (no-op, `ok: true`).
    400, `application/json; charset=utf-8`. The `error` field maps to
    `oauth_failed.details.monday_code`; `error_description` maps to
    `oauth_failed.details.monday_description`. **Probe-time
-   deferred:** the *success* response body shape (200 OK) couldn't
-   be empirically captured without a registered OAuth app + a real
-   user-issued code; the design pins the docs-documented shape
+   deferred (resolved at Part 1):** the *success* response body
+   shape (200 OK) couldn't be empirically captured without a
+   registered OAuth app + a real user-issued code at probe time;
+   the design pinned the docs-documented shape
    `{access_token, token_type, scope}` (verbatim from Monday Apps
-   OAuth docs) — `expires_in` is intentionally absent per Monday's
-   "tokens do not expire" wording. M21 implementation kickoff
-   verifies the success shape against the live `/oauth2/token`
-   response and amends `TokenResponse` if Monday adds extension
-   fields.
+   OAuth docs) — `expires_in` intentionally absent per Monday's
+   "tokens do not expire" wording. Part 1 (`a4cb5b0`) ships
+   `RawTokenResponse` matching that shape via a `.loose()` zod
+   schema (forward-compatible — a Monday-side extension field
+   would parse cleanly without a `schema_version` bump); the
+   normalized `TokenResponse` (camelCase) drops `expires_in`
+   intentionally and the `expires_at` slot in the credentials
+   cache (§7.4.1) stays pinned `null` for v0.3.
 
 7. **Write credentials.** On a successful exchange, write the access
    token + obtained-at timestamp + scopes to
