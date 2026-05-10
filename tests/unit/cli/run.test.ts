@@ -94,6 +94,31 @@ describe('run — help / version smoke', () => {
       expect(help).toContain(flag);
     }
   });
+
+  it('falls back to the default cliDescription when omitted from RunOptions', async () => {
+    // buildProgram (`src/cli/program.ts`) defaults `cliDescription` to
+    // `'CLI for Monday.com'` via `?? `. Production callers — the
+    // shipped `cli/index.ts` — pass it explicitly, but this fallback
+    // is the public contract for embedders building a `Command`
+    // instance from `RunOptions` minus the metadata field.
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdoutChunks: Buffer[] = [];
+    stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    const result = await run({
+      argv: ['node', 'monday', '--help'],
+      env: { MONDAY_API_TOKEN: 'tok' },
+      stdout,
+      stderr,
+      isTTY: false,
+      cliVersion: '0.0.0-test',
+      // cliDescription omitted on purpose.
+    });
+    expect(result.exitCode).toBe(0);
+    expect(Buffer.concat(stdoutChunks).toString('utf8')).toContain(
+      'CLI for Monday.com',
+    );
+  });
 });
 
 describe('run — usage errors', () => {

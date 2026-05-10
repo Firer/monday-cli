@@ -23,16 +23,19 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (M21 close):**
-- Test count: **2602** across 114 files (was 2578 at Part 1 close;
-  +24 net in Part 2: 10 integration credentials-leak scenarios +
-  6 unit envelope-out additions + 7 unit fs.ts additions + 1
-  auth-login regression for the Codex P1 fix).
-- Coverage: **99.x / 95.19 / 99.x / 99.x** (stmts / branches /
-  fns / lines), above the **95 / 94.5 / 95 / 95** floor. Part 1
-  ratcheted the branches floor 95.45 → 94.5 with documented
-  rationale in `vitest.config.ts` — recovery to 95.45 is the
-  **deferred coverage-push session** before M22 pre-flight.
+**Live numbers (post-M21 coverage-push close):**
+- Test count: **2609** across 114 files (was 2602 at M21 close;
+  +7 net in the coverage-push: 2 emit.ts mutation-slot tests +
+  1 buildProgram default-cliDescription test + 2 oauth.ts
+  default-args tests + 1 readCredentials EISDIR-via-dir-at-path
+  test + 1 profile-resolution global-flag-wins test).
+- Coverage: **99.11 / 95.56 / 99.36 / 99.26** (stmts / branches /
+  fns / lines), above the **95 / 95.45 / 95 / 95** floor. The
+  post-M21 coverage push recovered the 95.45 branches floor
+  (94.5 → 95.45) by writing the seven targeted tests above and
+  folding ten broken multi-line `c8 ignore` directives into the
+  two-line form so v8 honours them. Margin against the new floor
+  is **0.11pp**.
 - ERROR_CODES count: **29** (`oauth_failed` joined at M21
   pre-flight). Command count: **74** (auth login/logout joined
   at M21 pre-flight).
@@ -51,16 +54,16 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **Coverage push** to recover the 95.45 branches floor
-   (~30-50 new tests focused on production-only branches in
-   `src/api/oauth.ts` listener + `src/config/credentials.ts`
-   disk-discipline paths). Not a refactor; a focused
-   test-writing session.
-2. **M22 pre-flight contract diff** (mirrors the `5c07840` /
+1. **M22 pre-flight contract diff** (mirrors the `5c07840` /
    `d822982` / `a702af2` cadence). New modules
    `src/api/probes.ts` + `src/api/usage.ts`; new commands
    `monday status` + `monday usage`; close M22-specific
    decisions (7 + 8) per `docs/v0.3-plan.md` §3 M22 + §8.
+2. Pre-flight starts with an empirical probe per §22
+   R-watch-item — the `account.complexity` surface for
+   `monday usage` + the status-probe wire shape for
+   `monday status` need verification against `2026-01` before
+   stub bodies land.
 
 **R-class state at M21 close** (full detail in
 `docs/v0.3-plan.md` §22):

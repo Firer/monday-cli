@@ -56,14 +56,23 @@ export default defineConfig({
         // from a unit test against `127.0.0.1:0` + tmpdir HOMEs.
         // Extensive `/* c8 ignore */` on those paths cuts statement
         // coverage but v8's branch-coverage signal still counts the
-        // associated branch indicators against the percentage. The
-        // 0.95pp margin (94.5 vs measured 95.19) absorbs minor
-        // future drift; coverage push to recover the 95.45 floor
-        // lands at a focused session post-M21 Part 2, alongside the
-        // M2-style leak-test canary discipline. Raise as code lands;
-        // never lower below 94.5.
+        // associated branch indicators against the percentage.
+        //
+        // The post-M21 coverage-push session recovered the 95.45
+        // floor (94.5 → 95.45) by (a) writing six targeted tests
+        // around emit.ts mutation slots, the buildProgram default
+        // cliDescription, the OAuth bindOAuthListener default args,
+        // an EISDIR-via-dir-at-path readCredentials probe, and the
+        // global-flag-wins profile-resolution path; and (b) folding
+        // ten broken multi-line `/* c8 ignore */` directives into
+        // their two-line form (single-line directive + separate
+        // explanation comment) so v8 actually honours them — the
+        // testing.md "c8 ignore syntax gotcha" subsection documents
+        // the multi-line trap. Measured project-wide branches at
+        // recovery: 95.56% with a 0.11pp margin against the new
+        // floor. Raise as code lands; never lower below 94.5.
         lines: 95,
-        branches: 94.5,
+        branches: 95.45,
         functions: 95,
         statements: 95,
       },

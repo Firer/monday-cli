@@ -278,9 +278,10 @@ export const bindOAuthListener = (
           try {
             return new URL(url, `http://127.0.0.1`);
           } catch {
-            /* c8 ignore next — a malformed URL string from Node's
-               http parser is vanishingly rare; the catch guard
-               keeps the listener loud rather than crashing. */
+            // Defensive: a malformed URL string from Node's http parser is
+            // vanishingly rare; the catch guard keeps the listener loud
+            // rather than crashing.
+            /* c8 ignore next */
             return undefined;
           }
         })();
@@ -306,13 +307,15 @@ export const bindOAuthListener = (
             errorDescription,
             state,
           };
+          // Race-window guard; production callers always subscribe
+          // before the redirect arrives.
+          /* c8 ignore start */
           if (redirectResolver !== undefined) {
             redirectResolver(payload);
           } else {
-            /* c8 ignore next — race-window guard; production callers
-               always subscribe before the redirect arrives. */
             pendingPayload = payload;
           }
+          /* c8 ignore stop */
           return;
         }
 
@@ -321,13 +324,15 @@ export const bindOAuthListener = (
           res.setHeader('content-type', 'text/html; charset=utf-8');
           res.end(STATIC_SUCCESS_HTML);
           const payload: RedirectPayload = { kind: 'code', code, state };
+          // Race-window guard; production callers always subscribe
+          // before the redirect arrives.
+          /* c8 ignore start */
           if (redirectResolver !== undefined) {
             redirectResolver(payload);
           } else {
-            /* c8 ignore next — race-window guard; production callers
-               always subscribe before the redirect arrives. */
             pendingPayload = payload;
           }
+          /* c8 ignore stop */
           return;
         }
 
@@ -376,9 +381,10 @@ export const bindOAuthListener = (
         );
         return;
       }
-      /* c8 ignore next 9 — non-EADDRINUSE bind errors are rare
-         (EACCES on privileged ports, ENOMEM, etc.) and not
-         reproducible from a unit test against 127.0.0.1:0. */
+      // Non-EADDRINUSE bind errors are rare (EACCES on privileged
+      // ports, ENOMEM, etc.) and not reproducible from a unit test
+      // against 127.0.0.1:0.
+      /* c8 ignore start */
       rejectBind(
         new ApiError(
           'oauth_failed',
@@ -389,17 +395,21 @@ export const bindOAuthListener = (
           },
         ),
       );
+      /* c8 ignore stop */
     });
 
     server.listen(requestedPort, '127.0.0.1', () => {
       // Resolve the actual bound port — when caller passed `0`, the
       // OS assigned a random free port; tests + the consent URL need
-      // the real one.
+      // the real one. The non-object/null address branch covers Unix-
+      // socket binds that this 127.0.0.1 listener never produces.
       const address = server.address();
+      /* c8 ignore start */
       const actualPort =
         typeof address === 'object' && address !== null
           ? address.port
           : requestedPort;
+      /* c8 ignore stop */
 
       const handle: OAuthListenerHandle = {
         port: actualPort,

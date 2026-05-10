@@ -201,4 +201,41 @@ describe('profile resolution preAction hook (M21)', () => {
     const env = parseEnvelope(captured.stdout());
     expect(env.meta.api_version).toBe('2025-10');
   });
+
+  it('--api-version flag wins over profile api_version (preAction skips the env overwrite)', async () => {
+    // Branch under test: program.ts's profile-section guard
+    // `if (flags.apiVersion === undefined)` — false arm. With the
+    // global flag set, the preAction hook must NOT overwrite
+    // `ctx.env.MONDAY_API_VERSION` with the profile's value. Local-
+    // only `config show` reads `env.MONDAY_API_VERSION` directly, so
+    // a preserved-undefined-env value falls through to the SDK pin
+    // — the inverse signal that the profile branch was correctly
+    // skipped.
+    await writeConfigToml(
+      home,
+      [
+        '[profiles.work]',
+        'api_token_env = "MONDAY_API_TOKEN_WORK"',
+        'api_version = "2025-10"',
+      ].join('\n'),
+    );
+    const { exitCode, captured } = await driveWithProfile(
+      [
+        '--api-version', '2026-04',
+        'config', 'show',
+        '--profile', 'work',
+        '--json',
+      ],
+      home,
+      { MONDAY_API_TOKEN_WORK: 'tok-env-xxxx' },
+    );
+    expect(exitCode).toBe(0);
+    const env = parseEnvelope(captured.stdout());
+    const apiVersionSlot = (env.data as { api_version?: { value?: string } })
+      .api_version;
+    // The profile's `api_version = "2025-10"` was NOT written into
+    // `env.MONDAY_API_VERSION` (config show would have surfaced it
+    // via `data.api_version.value` if it had been). The flag won.
+    expect(apiVersionSlot?.value).not.toBe('2025-10');
+  });
 });

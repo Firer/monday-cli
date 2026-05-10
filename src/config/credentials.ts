@@ -185,8 +185,6 @@ export const readCredentials = async (
     if (isENOENT(err)) {
       return undefined;
     }
-    /* c8 ignore next 3 — non-ENOENT open() errors (EACCES, ENOTDIR)
-       are platform-specific and not reproducible from a tmp-dir test. */
     throw wrapAsConfigError(err, `cannot read credentials file ${fullPath}`, {
       path: fullPath,
     });
@@ -249,11 +247,13 @@ const ensureSecureDir = async (path: string): Promise<void> => {
     await mkdir(path, { recursive: true, mode: 0o700 });
     await chmod(path, 0o700);
   } catch (err) {
-    /* c8 ignore next 3 — disk-full / permissions-denied path; not
-       reproducible from a unit test against a tmp dir. */
+    // Disk-full / permissions-denied path; not reproducible from a
+    // unit test against a tmp dir.
+    /* c8 ignore start */
     throw wrapAsConfigError(err, `cannot prepare credentials directory ${path}`, {
       path,
     });
+    /* c8 ignore stop */
   }
 };
 
@@ -290,12 +290,14 @@ export const writeCredentials = async (
     await chmod(tmpPath, CREDENTIALS_FILE_MODE);
     await rename(tmpPath, fullPath);
   } catch (err) {
-    /* c8 ignore next 5 — disk-full / atomic-rename failure path; not
-       reproducible from a unit test against a tmp dir. */
+    // Disk-full / atomic-rename failure path; not reproducible from a
+    // unit test against a tmp dir.
+    /* c8 ignore start */
     await unlink(tmpPath).catch(() => undefined);
     throw wrapAsConfigError(err, `cannot write credentials file ${fullPath}`, {
       path: fullPath,
     });
+    /* c8 ignore stop */
   }
 };
 

@@ -512,6 +512,58 @@ describe('emitMutation (M5b)', () => {
     expect(env.resolved_ids).toEqual({ status: 'col_a' });
   });
 
+  it('emits a mutation envelope with side_effects slot when sideEffects is supplied', async () => {
+    const sideEffectsModule: CommandModule<unknown, { id: string; name: string }> = {
+      name: 'demo.mutate-side',
+      summary: 'demo mutation with side_effects',
+      examples: ['monday demo mutate-side'],
+      idempotent: true,
+      inputSchema: z.object({}).strict(),
+      outputSchema: z.object({ id: z.string(), name: z.string() }),
+      attach: (program, ctx) => {
+        const noun = ensureSubcommand(program, 'demo', 'Demo commands');
+        noun
+          .command('mutate-side')
+          .description(sideEffectsModule.summary)
+          .action(() => {
+            emitMutation({
+              ctx,
+              data: { id: '1', name: 'X' },
+              schema: sideEffectsModule.outputSchema,
+              programOpts: program.opts(),
+              source: 'live',
+              sideEffects: [{ operation: 'update_created', update_id: '99' }],
+            });
+          });
+      },
+    };
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'mutate-side'],
+      extraCommands: [sideEffectsModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+    const env = JSON.parse(captured.stdout()) as {
+      ok: boolean;
+      side_effects?: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(env.ok).toBe(true);
+    expect(env.side_effects).toEqual([
+      { operation: 'update_created', update_id: '99' },
+    ]);
+  });
+
+  it('forwards the explicit `--output json` flag through emitMutation\'s output ternary', async () => {
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'demo', 'mutate', '--output', 'json'],
+      extraCommands: [mutationModule],
+    });
+    const result = await run(options);
+    expect(result.exitCode).toBe(0);
+    const env = JSON.parse(captured.stdout()) as { ok: boolean };
+    expect(env.ok).toBe(true);
+  });
+
   it('catches outputSchema drift via the R18 wrap (details.issues populated)', async () => {
     const driftModule: CommandModule<unknown, { name: string }> = {
       name: 'demo.drift-mutation',

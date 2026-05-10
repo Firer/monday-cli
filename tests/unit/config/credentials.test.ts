@@ -313,6 +313,28 @@ describe('readCredentials + writeCredentials (runtime I/O)', () => {
     await expect(readCredentials({ home })).rejects.toBeInstanceOf(ConfigError);
   });
 
+  it('readCredentials wraps non-ENOENT fs errors as config_error (EISDIR via dir-at-path)', async () => {
+    // Create a directory where the credentials file should live —
+    // `open(path, O_RDONLY)` throws EISDIR rather than ENOENT, so the
+    // isENOENT-false arm of readCredentials's catch path runs and
+    // wraps the error as `config_error`. Validates the wrapAsConfigError
+    // production-only path that c8 ignore otherwise covers.
+    const { mkdir } = await import('node:fs/promises');
+    const credPath = resolveCredentialsPath({ home });
+    await mkdir(join(home, CREDENTIALS_DIR_NAME), { recursive: true });
+    await mkdir(credPath, { recursive: true });
+    await expect(readCredentials({ home })).rejects.toBeInstanceOf(ConfigError);
+    try {
+      await readCredentials({ home });
+      expect.fail('should have rejected');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const ce = err as ConfigError;
+      expect(ce.code).toBe('config_error');
+      expect(String(ce.details?.path)).toBe(credPath);
+    }
+  });
+
   it('atomic-replace: re-write does not leave a tmp file behind', async () => {
     const file: CredentialsFile = {
       schema_version: '1',

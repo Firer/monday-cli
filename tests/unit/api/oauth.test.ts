@@ -216,6 +216,40 @@ describe('bindOAuthListener (runtime)', () => {
     }
   });
 
+  it('omitted timeoutMs falls back to OAUTH_DEFAULT_LISTENER_TIMEOUT_MS', async () => {
+    // Exercises the `inputs.timeoutMs ?? OAUTH_DEFAULT_LISTENER_TIMEOUT_MS`
+    // default arm. The 5-min default doesn't fire in this test (we
+    // close the handle immediately); the bind itself takes the path.
+    const handle = await bindOAuthListener({ port: 0 });
+    try {
+      expect(typeof handle.port).toBe('number');
+      expect(handle.port).toBeGreaterThan(0);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it('omitted port falls back to OAUTH_DEFAULT_PORT (port_in_use is acceptable)', async () => {
+    // Exercises the `inputs.port ?? OAUTH_DEFAULT_PORT` default arm.
+    // Whether the bind succeeds (test-runner-host has 9876 free) or
+    // rejects with `port_in_use` (a peer holds 9876), the `??` default
+    // executes BEFORE the bind result is determined.
+    let handle: OAuthListenerHandle | undefined;
+    try {
+      handle = await bindOAuthListener({ timeoutMs: 1_000 });
+      expect(handle.port).toBe(OAUTH_DEFAULT_PORT);
+    } catch (err) {
+      // Either outcome covers the default-arm branch; tolerate the
+      // EADDRINUSE case so this test stays deterministic on hosts that
+      // happen to have 9876 bound by an unrelated process.
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe('oauth_failed');
+      expect((err as ApiError).details?.reason).toBe('port_in_use');
+    } finally {
+      handle?.close();
+    }
+  });
+
   it('parses code+state from the callback path', async () => {
     const handle = await bindOAuthListener({ port: 0, timeoutMs: 5_000 });
     try {

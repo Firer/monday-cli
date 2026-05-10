@@ -201,9 +201,10 @@ export const buildProgram = (
     try {
       profileFlag = parseGlobalFlags(program.opts(), ctx.env).profile;
     } catch {
-      /* c8 ignore next 3 — defensive: a global-flag parse failure
-         already surfaced via the earlier api-version commit's catch;
-         duplicate guard keeps profile resolution skipped on that path. */
+      // Defensive: a global-flag parse failure already surfaced via the
+      // earlier api-version commit's catch; duplicate guard keeps
+      // profile resolution skipped on that path.
+      /* c8 ignore next */
       return;
     }
     const envProfile =
@@ -234,13 +235,15 @@ export const buildProgram = (
       config,
     });
 
-    /* c8 ignore next 3 — unreachable type-narrowing guard: by the
-       time we pass the early-return at line 175, at least one of
-       flag/env/default_profile is set, so selectProfile returns
-       'named'. The guard exists to keep the union type safe. */
+    // Unreachable type-narrowing guard: by the time we pass the early-
+    // return above, at least one of flag/env/default_profile is set,
+    // so selectProfile returns 'named'. The guard exists to keep the
+    // union type safe.
+    /* c8 ignore start */
     if (selection.mode === 'implicit_v1') {
       return;
     }
+    /* c8 ignore stop */
 
     const resolved = await resolveProfileToken(
       {

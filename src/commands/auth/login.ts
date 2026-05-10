@@ -122,6 +122,10 @@ const fetchAccountId = async (
   accessToken: string,
   ctx: RunContext,
 ): Promise<string> => {
+  // Tests inject `ctx.transport` (FixtureTransport); production hits
+  // the `createFetchTransport` fallback to issue a fresh client
+  // carrying the just-obtained OAuth token.
+  /* c8 ignore next 8 */
   const transport: Transport =
     ctx.transport ??
     createFetchTransport({
@@ -140,9 +144,10 @@ const fetchAccountId = async (
     operationName: 'AuthLoginAccountId',
   });
   const parsed = accountIdResponseSchema.safeParse(response.data);
-  /* c8 ignore next 14 — defensive: Monday's GraphQL `account { id }`
-     surface is contract-stable; a parse failure here would mean
-     Monday changed the response shape, which is a Part 2 amendment. */
+  // Defensive: Monday's GraphQL `account { id }` surface is contract-
+  // stable; a parse failure here would mean Monday changed the response
+  // shape, which is a Part 2 amendment.
+  /* c8 ignore start */
   if (!parsed.success) {
     throw new ApiError(
       'internal_error',
@@ -158,6 +163,7 @@ const fetchAccountId = async (
       },
     );
   }
+  /* c8 ignore stop */
   return parsed.data.account.id;
 };
 
@@ -165,6 +171,10 @@ const credentialsHomeOptions = (
   ctx: RunContext,
 ): { home?: string; env: NodeJS.ProcessEnv } => {
   const home = ctx.env.HOME;
+  // The HOME-undefined arm falls through to homedir() inside
+  // resolveCredentialsPath; testing it would write to the user's
+  // real ~/.monday-cli/credentials, so the branch is production-only.
+  /* c8 ignore next 3 */
   return home !== undefined && home.length > 0
     ? { home, env: ctx.env }
     : { env: ctx.env };
@@ -236,31 +246,33 @@ export const authLoginCommand: CommandModule<
           const fixture = await readTestOAuthFixture(helperPath);
           listener = buildTestOAuthListener(fixture, state);
         } else {
-          /* c8 ignore next 2 — production-only socket bind path; unit
-             tests use the test seam, integration tests stub the env. */
+          // Production-only socket bind path; unit tests use the test
+          // seam, integration tests stub the env.
+          /* c8 ignore start */
           listener = await bindOAuthListener();
+          /* c8 ignore stop */
         }
 
         try {
           const redirectUri = `http://127.0.0.1:${String(
-            /* c8 ignore next — production listener.port > 0; only the
-               test-helper path (port: 0) reaches the truthy arm. */
+            // Production listener.port > 0; only the test-helper path
+            // (port: 0) reaches the truthy arm.
+            /* c8 ignore next */
             listener.port === 0 ? 9876 : listener.port,
           )}${OAUTH_CALLBACK_PATH}`;
           const consentUrl = buildConsentUrl(state, redirectUri);
 
           // Step 3: open browser + print URL fallback. Skipped under
           // the test seam (no browser to open in tests; the helper
-          // synthesises the redirect directly).
-          /* c8 ignore next 7 — production-only browser-open + stderr
-             URL print path; tests use the helper which short-circuits
-             the consent step. */
+          // synthesises the redirect directly). Production-only path.
+          /* c8 ignore start */
           if (helperPath === undefined) {
             tryOpenBrowser(consentUrl);
             ctx.stderr.write(
               `Open this URL in your browser to continue: ${consentUrl}\n`,
             );
           }
+          /* c8 ignore stop */
 
           // Step 4: wait for redirect.
           const payload = await listener.awaitRedirect();

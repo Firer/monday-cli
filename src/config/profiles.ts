@@ -133,8 +133,9 @@ export const loadProfilesConfig = async (
     if (isENOENT(err)) {
       return undefined;
     }
-    /* c8 ignore next 7 — non-ENOENT readFile errors (EACCES, EISDIR)
-       are platform-specific and not reproducible from a tmp-dir test. */
+    // Non-ENOENT readFile errors (EACCES, EISDIR) are platform-
+    // specific and not reproducible from a tmp-dir test.
+    /* c8 ignore start */
     throw new ConfigError(
       `cannot read profiles config ${fullPath}`,
       {
@@ -142,6 +143,7 @@ export const loadProfilesConfig = async (
         details: { path: fullPath },
       },
     );
+    /* c8 ignore stop */
   }
 
   let tomlParsed: unknown;

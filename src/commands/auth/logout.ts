@@ -41,6 +41,10 @@ const credentialsHomeOptions = (
   ctx: RunContext,
 ): { home?: string; env: NodeJS.ProcessEnv } => {
   const home = ctx.env.HOME;
+  // The HOME-undefined arm falls through to homedir() inside
+  // resolveCredentialsPath; testing it would touch the user's real
+  // ~/.monday-cli/credentials, so the branch is production-only.
+  /* c8 ignore next 3 */
   return home !== undefined && home.length > 0
     ? { home, env: ctx.env }
     : { env: ctx.env };
