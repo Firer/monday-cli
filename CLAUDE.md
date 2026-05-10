@@ -124,6 +124,47 @@ opening — see `docs/v0.3-plan.md` §11 looking-ahead block):
   ticked up 99.18 → 99.19; statements/branches/functions
   unchanged. Floor unchanged at 95/95.45/95/95.
 
+**M20 pre-flight gate — Decision 4 closure shipped this
+session** (mirrors the `4c652d5` Decision 1 closure ahead of
+M19; pre-flight contract diff for M20's `time-tracking.ts`
+module signatures is the next session's work):
+- **Commit A — `1e81b2f docs(cli-design)`.** v0.3-plan §8
+  Decision 4 closed — cli-design §5.2 grows from one carve-out
+  (workflow namespaces, the `dev` namespace) to two,
+  numbered. Carve-out 1 stays the workflow-namespace exception
+  for `dev sprint/epic/release/task` shapes; carve-out 2
+  admits verb-shaped column-type extensions for `<noun>
+  <subnoun> <verb>` (M20's `item time-track start/stop`
+  shape; reserves the slot for any future verb-shaped column
+  type). New "general rule" paragraph articulates the
+  three-token-shape test so future carve-outs aren't ad-hoc;
+  intentionally shape-based (not name-based) so `dev sprint
+  current` (third token "current" is a verb on a workflow
+  concept) and `item time-track start` (third token a verb on
+  a column-type subnoun) both fit. Codex round 1: 1 P1 + 1 P2
+  + 1 P3. P1 caught a name-based generalisation that
+  disqualified carve-out 1 — fixed inline with the shape-based
+  wording. P2 + cli-design slice of P3 inline; v0.3-plan slice
+  of P3 + the P2 plan-doc fix deferred to Commit B.
+- **Commit B (this commit) — close docs.** v0.3-plan §3 M20
+  body now cites carve-out 2 directly (P2 fix); §3 M19
+  glossary row + §3 M26 three-level naming reference now pin
+  to carve-out 1 (P3 fix); §8 Decision 4 annotated with closed
+  SHA + scope; §9 preconditions tick (`M19 closed` + `Decision
+  4 closed`); §3 M26 precondition wording cleaned up to
+  reflect carve-out 1 already in force. CLAUDE.md status block
+  block updated. No source-code changes; net diff
+  docs-only across cli-design.md (Commit A) + v0.3-plan.md
+  (Commit B) + this CLAUDE.md hunk.
+- **M20 unblocked.** Next session ships M20 pre-flight
+  contract diff (mirrors `d822982` cadence — `src/api/
+  time-tracking.ts` module signatures + any new ERROR_CODES
+  + stub bodies) with Codex pre-flight review BEFORE M20's
+  first feat commit. Three open M20-specific decisions
+  (start-while-running semantics, stop-while-not-running
+  semantics, idempotency — see v0.3-plan §3 M20 line 625-637)
+  close at M20 pre-flight, NOT here.
+
 **Pre-flight gate state at session start** (per
 `docs/v0.3-plan.md` §9 preconditions):
 - **Decision 1 (`tag_not_found` registry entry) closed** in
