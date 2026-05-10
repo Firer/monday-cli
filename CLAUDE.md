@@ -93,6 +93,37 @@ functions / lines), above the 95/95.45/95/95 floor. Floor
 unchanged — branches at 95.47% (0.02pp above floor) didn't
 clear 95.5% with margin.
 
+**M19 → M20 cleanup window** (mirrors v0.2's M(N-1) → M(N)
+cadence: R51 between M17–M18, R53 between M18 and v0.3
+opening — see `docs/v0.3-plan.md` §11 looking-ahead block):
+- **Non-R-class — `peopleResolution.resolveEmail` source-
+  aggregation parity fix. Shipped: `2cbf0d3`.** Closes the
+  v0.3-plan §11 M19 post-mortem refactor-backlog candidate.
+  Pre-fix `--set Owner=alice@example.com` against a cache-
+  hit user-directory lookup emitted `meta.source: "live"`
+  because the email-resolution leg never reached the
+  envelope-level aggregate. Post-fix `PeopleResolutionContext.
+  resolveEmail` returns `{id, source, cacheAgeSeconds}`
+  (Option A from the handoff — transparent passthrough of
+  `userByEmail`'s public shape mirroring the M19 tags
+  translator's `resolveTags` callback); `parsePeopleInput`
+  aggregates per-leg via `SourceAggregator` (`me` always
+  'live' — `me { id }` is a network call; emails forward
+  `userByEmail`'s source verbatim); `translatePeople`
+  threads the aggregate into `translatorResolution`; the
+  existing post-translate aggregation loop in
+  `resolution-pass.ts` (already shipped for tags +
+  relations) merges the leg into the envelope automatically.
+  Codex P1-clean (1 P2 stale-comment fix-up at three sites
+  addressed inline in the same commit).
+- **Test count + coverage post-cleanup:** 2387 → 2396 (+9
+  net: 6 unit aggregation in `parsePeopleInput` describe
+  block + 2 unit translator-level + 1 integration cache-hit
+  cassette mirroring `workspace.test.ts:1333` cache-hit
+  pattern). Coverage 99.03 / 95.47 / 99.32 / 99.19 — lines
+  ticked up 99.18 → 99.19; statements/branches/functions
+  unchanged. Floor unchanged at 95/95.45/95/95.
+
 **Pre-flight gate state at session start** (per
 `docs/v0.3-plan.md` §9 preconditions):
 - **Decision 1 (`tag_not_found` registry entry) closed** in
