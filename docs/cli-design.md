@@ -5238,9 +5238,9 @@ introduces **one new error code** rather than a per-failure-mode
 constellation:
 
 - **`oauth_failed`** (registry row added at M21 pre-flight contract
-  diff `<this-commit-SHA>` alongside the type-level widening;
-  brings registry from 28 → 29). Umbrella for OAuth-flow-specific
-  failures, discriminated by `details.reason`:
+  diff `5c07840` alongside the type-level widening; brings registry
+  from 28 → 29). Umbrella for OAuth-flow-specific failures,
+  discriminated by `details.reason`:
 
   | `details.reason` | When | `retryable` | Extra `details` |
   |---|---|---|---|

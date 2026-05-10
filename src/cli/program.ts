@@ -160,13 +160,14 @@ export const buildProgram = (
     // secrets — cached tokens are NOT scrubbed via runtimeSecrets
     // on this path, but the key-based filter still strips
     // `access_token` keys + `Authorization` etc., and the real
-    // read failure surfaces as `config_error` later via
-    // `resolveProfileToken` (the user sees a typed error, not a
-    // silent skip). The deliberate fail-open choice trades a
+    // read failure surfaces as `config_error` via the later
+    // credentials consumer (`resolveProfileToken` for non-auth
+    // verbs; `setProfileCredentials` / `deleteProfileCredentials`
+    // for auth verbs). The deliberate fail-open choice trades a
     // narrow "cached token byte-string leaked via unkeyed
     // Error.message before config_error surfaces" risk for a
     // safer "command always proceeds to a typed-error envelope"
-    // contract. Codex M21 Part 2 P2 review pinned the wording.
+    // contract. Codex M21 Part 2 review pinned the wording.
     const home =
       ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
         ? ctx.env.HOME
