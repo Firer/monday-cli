@@ -1,11 +1,13 @@
 /**
- * Unit tests for the v0.3-M21 pre-flight `src/config/profiles.ts`
- * surface. Schemas validate the documented §7.2 TOML shape; runtime
- * bodies (TOML parse, file I/O, source-order resolution) land at M21
- * implementation.
+ * Unit tests for `src/config/profiles.ts` runtime bodies (v0.3-M21
+ * implementation Part 1). Schemas + constants surface unchanged from
+ * pre-flight.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   PROFILES_CONFIG_FILE_NAME,
   PROFILES_DIR_NAME,
@@ -19,7 +21,7 @@ import {
   type ProfilesConfig,
   type SelectProfileResult,
 } from '../../../src/config/profiles.js';
-import { ApiError } from '../../../src/utils/errors.js';
+import { ConfigError } from '../../../src/utils/errors.js';
 
 describe('profiles — constants', () => {
   it('PROFILES_CONFIG_FILE_NAME is "config.toml"', () => {
@@ -53,9 +55,6 @@ describe('profileEntrySchema', () => {
   });
 
   it('rejects an entry that smuggles a token (no-token-in-config rule, structural exclusion)', () => {
-    // The .strict() mode rejects unknown keys; this test pins the
-    // structural exclusion that defends the security rule against
-    // commonly-named token-bearing fields.
     expect(() =>
       profileEntrySchema.parse({ api_token: 'tok-fixture-xxxx' }),
     ).toThrow();
@@ -71,10 +70,6 @@ describe('profileEntrySchema', () => {
   });
 
   it('rejects token-looking values smuggled under api_token_env (value-level shape check)', () => {
-    // The Codex round-1 P2 catch: structural exclusion alone is not
-    // enough — a user could write `api_token_env = "tok-fixture-xxxx"`
-    // (the literal token value, not an env-var name). The regex
-    // /^[A-Z_][A-Z0-9_]*$/u rejects token-looking values.
     expect(() =>
       profileEntrySchema.parse({ api_token_env: 'tok-fixture-xxxx' }),
     ).toThrow(/env-var name/u);
@@ -105,8 +100,6 @@ describe('profileEntrySchema', () => {
   });
 
   it('regex boundary cases — single uppercase accepted, single lowercase rejected', () => {
-    // Round-2 P3: `A` is a valid (if odd) env-var name; `a` is not
-    // (POSIX-style env vars are conventionally uppercase).
     expect(
       profileEntrySchema.parse({ api_token_env: 'A' }).api_token_env,
     ).toBe('A');
@@ -205,31 +198,275 @@ describe('profiles — type-level surface', () => {
   });
 });
 
-describe('profiles — pre-flight stubs', () => {
-  // All stubs throw `ApiError('internal_error', ...)` per the
-  // M19/M20 pre-flight discipline (Codex round-1 P2 fix-up).
+describe('resolveProfilesConfigPath', () => {
+  it('joins home + .monday-cli + config.toml', () => {
+    expect(resolveProfilesConfigPath({ home: '/tmp/fake-home' })).toBe(
+      '/tmp/fake-home/.monday-cli/config.toml',
+    );
+  });
 
-  it('resolveProfilesConfigPath throws ApiError(internal_error)', () => {
-    expect(() => resolveProfilesConfigPath()).toThrow(ApiError);
+  it('falls back to homedir() when home is omitted', () => {
+    const path = resolveProfilesConfigPath();
+    expect(path.endsWith('/.monday-cli/config.toml')).toBe(true);
+  });
+});
+
+const writeConfigToml = async (home: string, content: string): Promise<void> => {
+  const dir = join(home, PROFILES_DIR_NAME);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(join(dir, PROFILES_CONFIG_FILE_NAME), content, 'utf8');
+};
+
+describe('loadProfilesConfig (runtime TOML parse)', () => {
+  let home: string;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'monday-cli-profiles-'));
+  });
+
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('returns undefined on ENOENT (typical first-run state — implicit v1 mode)', async () => {
+    await expect(loadProfilesConfig({ home })).resolves.toBeUndefined();
+  });
+
+  it('parses a §7.2 multi-profile TOML file', async () => {
+    await writeConfigToml(
+      home,
+      [
+        'default_profile = "work"',
+        '',
+        '[profiles.work]',
+        'api_token_env = "MONDAY_API_TOKEN_WORK"',
+        'api_version = "2026-01"',
+        '',
+        '[profiles.personal]',
+        'api_token_env = "MONDAY_API_TOKEN_PERSONAL"',
+        '',
+      ].join('\n'),
+    );
+    const config = await loadProfilesConfig({ home });
+    expect(config?.default_profile).toBe('work');
+    expect(Object.keys(config?.profiles ?? {})).toEqual(['work', 'personal']);
+    expect(config?.profiles.work?.api_token_env).toBe('MONDAY_API_TOKEN_WORK');
+  });
+
+  it('parses [profiles.<name>.dev] sub-tables', async () => {
+    await writeConfigToml(
+      home,
+      [
+        '[profiles.work]',
+        'api_token_env = "MONDAY_API_TOKEN_WORK"',
+        '',
+        '[profiles.work.dev]',
+        'tasks_board = "987654"',
+        'sprints_board = "987655"',
+        '',
+      ].join('\n'),
+    );
+    const config = await loadProfilesConfig({ home });
+    expect(config?.profiles.work?.dev?.tasks_board).toBe('987654');
+  });
+
+  it('rejects malformed TOML with config_error', async () => {
+    await writeConfigToml(home, '[profiles.work\nno-closing-bracket = "x"');
+    await expect(loadProfilesConfig({ home })).rejects.toBeInstanceOf(
+      ConfigError,
+    );
     try {
-      resolveProfilesConfigPath();
-      expect.fail('should have thrown');
+      await loadProfilesConfig({ home });
+      expect.fail('should have rejected');
     } catch (err) {
-      expect((err as ApiError).code).toBe('internal_error');
+      expect(err).toBeInstanceOf(ConfigError);
+      expect((err as ConfigError).code).toBe('config_error');
+      expect((err as ConfigError).message).toMatch(/malformed TOML/u);
     }
   });
 
-  it('loadProfilesConfig rejects with ApiError(internal_error)', async () => {
-    await expect(loadProfilesConfig()).rejects.toBeInstanceOf(ApiError);
+  it('rejects token smuggled under api_token_env at parse boundary', async () => {
+    await writeConfigToml(
+      home,
+      ['[profiles.work]', 'api_token_env = "tok-fixture-xxxx"'].join('\n'),
+    );
+    await expect(loadProfilesConfig({ home })).rejects.toBeInstanceOf(
+      ConfigError,
+    );
+    try {
+      await loadProfilesConfig({ home });
+      expect.fail('should have rejected');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      expect((err as ConfigError).message).toMatch(/env-var name/u);
+    }
   });
 
-  it('selectProfile throws ApiError(internal_error)', () => {
+  it('rejects unknown top-level keys with config_error', async () => {
+    await writeConfigToml(
+      home,
+      [
+        'unknown_top_level = "rejected"',
+        '[profiles.work]',
+        'api_token_env = "MONDAY_API_TOKEN_WORK"',
+      ].join('\n'),
+    );
+    await expect(loadProfilesConfig({ home })).rejects.toBeInstanceOf(
+      ConfigError,
+    );
+  });
+});
+
+describe('selectProfile', () => {
+  const buildConfig = (overrides: Partial<ProfilesConfig> = {}): ProfilesConfig => ({
+    profiles: {
+      work: { api_token_env: 'MONDAY_API_TOKEN_WORK' },
+      personal: { api_token_env: 'MONDAY_API_TOKEN_PERSONAL' },
+    },
+    ...overrides,
+  });
+
+  it('returns implicit_v1 when nothing names a profile and no config file exists', () => {
+    const result = selectProfile({
+      flag: undefined,
+      env: {},
+      config: undefined,
+    });
+    expect(result.mode).toBe('implicit_v1');
+  });
+
+  it('returns implicit_v1 when config exists but no default_profile and no flag/env', () => {
+    const result = selectProfile({
+      flag: undefined,
+      env: {},
+      config: buildConfig(),
+    });
+    expect(result.mode).toBe('implicit_v1');
+  });
+
+  it('uses --profile flag over MONDAY_PROFILE env (precedence)', () => {
+    const result = selectProfile({
+      flag: 'work',
+      env: { MONDAY_PROFILE: 'personal' },
+      config: buildConfig(),
+    });
+    expect(result.mode).toBe('named');
+    if (result.mode === 'named') {
+      expect(result.name).toBe('work');
+    }
+  });
+
+  it('uses MONDAY_PROFILE env when --profile flag is absent', () => {
+    const result = selectProfile({
+      flag: undefined,
+      env: { MONDAY_PROFILE: 'personal' },
+      config: buildConfig(),
+    });
+    expect(result.mode).toBe('named');
+    if (result.mode === 'named') {
+      expect(result.name).toBe('personal');
+    }
+  });
+
+  it('uses default_profile when no flag and no env', () => {
+    const result = selectProfile({
+      flag: undefined,
+      env: {},
+      config: buildConfig({ default_profile: 'work' }),
+    });
+    expect(result.mode).toBe('named');
+    if (result.mode === 'named') {
+      expect(result.name).toBe('work');
+    }
+  });
+
+  it('returns synthetic empty entry when --profile is set + no config (credentials-cache-only flow)', () => {
+    const result = selectProfile({
+      flag: 'work',
+      env: {},
+      config: undefined,
+    });
+    expect(result.mode).toBe('named');
+    if (result.mode === 'named') {
+      expect(result.name).toBe('work');
+      expect(result.entry).toEqual({});
+    }
+  });
+
+  it('returns synthetic empty entry when MONDAY_PROFILE is set + no config', () => {
+    const result = selectProfile({
+      flag: undefined,
+      env: { MONDAY_PROFILE: 'work' },
+      config: undefined,
+    });
+    expect(result.mode).toBe('named');
+    if (result.mode === 'named') {
+      expect(result.name).toBe('work');
+      expect(result.entry).toEqual({});
+    }
+  });
+
+  it('throws config_error when MONDAY_PROFILE names an unknown profile (env source branch)', () => {
     expect(() =>
       selectProfile({
-        flag: 'work',
-        env: {},
-        config: undefined,
+        flag: undefined,
+        env: { MONDAY_PROFILE: 'unknown' },
+        config: buildConfig(),
       }),
-    ).toThrow(ApiError);
+    ).toThrow(ConfigError);
+    try {
+      selectProfile({
+        flag: undefined,
+        env: { MONDAY_PROFILE: 'unknown' },
+        config: buildConfig(),
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const ce = err as ConfigError;
+      expect(ce.details?.source).toBe('MONDAY_PROFILE env');
+    }
+  });
+
+  it('throws config_error when --profile names an unknown profile in config.profiles', () => {
+    expect(() =>
+      selectProfile({
+        flag: 'unknown',
+        env: {},
+        config: buildConfig(),
+      }),
+    ).toThrow(ConfigError);
+    try {
+      selectProfile({
+        flag: 'unknown',
+        env: {},
+        config: buildConfig(),
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const ce = err as ConfigError;
+      expect(ce.code).toBe('config_error');
+      expect(ce.details?.available_profiles).toEqual(['work', 'personal']);
+    }
+  });
+
+  it('throws config_error when default_profile names an unknown profile', () => {
+    expect(() =>
+      selectProfile({
+        flag: undefined,
+        env: {},
+        config: buildConfig({ default_profile: 'ghost' }),
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it('treats empty-string flag/env as undefined (falls through)', () => {
+    const result = selectProfile({
+      flag: '',
+      env: { MONDAY_PROFILE: '' },
+      config: undefined,
+    });
+    expect(result.mode).toBe('implicit_v1');
   });
 });

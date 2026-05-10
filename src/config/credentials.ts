@@ -31,21 +31,15 @@
  *   3. Read-time `fs.fstat`-against-open-descriptor permission check
  *      (`(stats.mode & 0o077) !== 0` → refuse, surface
  *      `config_error` with `details.path` + `details.hint`).
- *
- * **What's stub vs runtime.** The pre-flight surface lands as
- * `Promise.reject(internal_error)` stubs under `c8 ignore` — M21
- * implementation replaces them with real I/O alongside the
- * `monday auth login` command body. The schema definitions, type
- * exports, file-mode constants, and source-order helper signatures
- * are pinned now so M21 commit reviews land into a Codex-reviewed
- * shape.
  */
 
+import { constants as fsConstants } from 'node:fs';
+import { chmod, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
-
-const STUB_HINT =
-  'M21 implementation kickoff lands the runtime body alongside `monday auth login` / `auth logout` real bodies.';
+import { ConfigError } from '../utils/errors.js';
 
 /**
  * File-mode constant for the credentials file. Mirrors
@@ -78,22 +72,6 @@ export const CREDENTIALS_DIR_NAME = '.monday-cli';
 
 /**
  * Per-profile credentials entry per cli-design §7.4.1.
- *
- * - `access_token` — Monday's opaque OAuth token. Treat as bytes;
- *   never logged, never echoed in `data.*`.
- * - `obtained_at` — ISO-8601 UTC timestamp of the successful token
- *   exchange.
- * - `expires_at` — `null` for v0.3; preserved as `string | null` so
- *   a future refresh-token flow doesn't bump `schema_version`. The
- *   M21 empirical probe confirmed Monday's token response carries
- *   no `expires_in` field; tokens "do not expire" per Monday's docs.
- * - `scopes` — space-separated `scope` field from `/oauth2/token`'s
- *   response, parsed into an array. Agents self-audit
- *   ("does this profile have `boards:write`?") without re-running
- *   the OAuth flow.
- * - `account_id` — pinned at write-time from a post-exchange
- *   `account { id }` query (§7.3.1 step 8). Probe-confirmed
- *   string-typed numeric (e.g., `"34900083"`).
  */
 export const profileEntrySchema = z
   .object({
@@ -109,19 +87,11 @@ export type ProfileEntry = z.infer<typeof profileEntrySchema>;
 
 /**
  * Top-level credentials file shape per cli-design §7.4.1.
- * `profiles` is a record keyed by profile name (the same name used
- * in `~/.monday-cli/config.toml` and the `--profile` flag).
  *
  * **`schema_version` pinned to literal `"1"`** so a future-version
  * credentials file (e.g., `"2"` after a v0.4 schema change) fails
  * parse-time at this security-bearing surface rather than passing
- * through and getting reinterpreted under the v0.3 schema. Mirrors
- * the cache module's "treat a different cache schema as a miss"
- * pattern but tighter — credentials files store secrets, so silent
- * acceptance of a malformed schema risks treating an attacker-
- * supplied future-shape file as authentic. The literal pin forces
- * a future migration path to land an explicit reader (e.g.,
- * `readCredentialsV2`) rather than implicit field-coercion drift.
+ * through and getting reinterpreted under the v0.3 schema.
  */
 export const credentialsFileSchema = z
   .object({
@@ -135,10 +105,7 @@ export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 /**
  * Discriminated union for the per-profile token source. Mirrors the
  * §7.4.1 source order: `credentials cache > api_token_env >
- * config_error`. Consumers pattern-match on `source` to populate
- * `meta.source` in the success envelope (`live` for cache-miss
- * paths, but the source slot itself surfaces *which* credential
- * resolution path won).
+ * config_error`.
  */
 export type ProfileTokenSource = 'credentials_cache' | 'api_token_env';
 
@@ -171,156 +138,239 @@ export interface SetProfileCredentialsInputs {
   readonly entry: ProfileEntry;
 }
 
+const isENOENT = (err: unknown): boolean => {
+  /* c8 ignore next 3 — non-object errors don't reach this guard via
+     fs/promises (every promise rejection wraps a real Error). */
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+  return (err as { code?: unknown }).code === 'ENOENT';
+};
+
+const formatMode = (mode: number): string =>
+  `0${(mode & 0o777).toString(8).padStart(3, '0')}`;
+
+const wrapAsConfigError = (
+  err: unknown,
+  message: string,
+  details: Readonly<Record<string, unknown>> = {},
+): ConfigError => {
+  const cause = err instanceof Error ? err : new Error(String(err));
+  return new ConfigError(message, { cause, details });
+};
+
 /**
  * Resolves the absolute credentials-file path. Pure helper — does
- * not touch the filesystem. Tests pin the resolved path against a
- * tmp `home` to assert directory layout matches §7.4.2.
+ * not touch the filesystem.
  */
-/* c8 ignore next 8 — pre-flight stub. M21 implementation replaces
-   with `path.join(home, CREDENTIALS_DIR_NAME, CREDENTIALS_FILE_NAME)`
-   alongside the runtime read/write. */
 export const resolveCredentialsPath = (
-  _options: CredentialsRootOptions = {},
+  options: CredentialsRootOptions = {},
 ): string => {
-  throw new ApiError(
-    'internal_error',
-    'resolveCredentialsPath is a v0.3-M21 pre-flight stub — M21 implementation lands the path-resolution body.',
-    { details: { hint: STUB_HINT } },
-  );
+  const home = options.home ?? homedir();
+  return join(home, CREDENTIALS_DIR_NAME, CREDENTIALS_FILE_NAME);
 };
+
+const credentialsDirPath = (options: CredentialsRootOptions): string =>
+  join(options.home ?? homedir(), CREDENTIALS_DIR_NAME);
 
 /**
  * Reads the credentials file, parses it through
  * {@link credentialsFileSchema}, and returns the parsed shape.
  *
- * **Read-time discipline (§7.4.2 + .claude/rules/security.md):**
- *
- *   1. `fs.open` with `O_RDONLY`.
- *   2. `fs.fstat` against the open descriptor (TOCTOU-safe — the
- *      stat is locked to the file we'll read, not racing a path-
- *      based check).
- *   3. If `(stats.mode & CREDENTIALS_INSECURE_BITS) !== 0`, refuse:
- *      surface `config_error` with `details.path` +
- *      `details.hint: "permissions must be 0600 — run \`chmod 600
- *      ~/.monday-cli/credentials\`"`.
- *   4. Read body, JSON.parse, zod-parse via
- *      {@link credentialsFileSchema}.
- *
  * Returns `undefined` when the file does not exist (typical first-
- * run state; the credentials cache is opt-in via `monday auth
- * login`). Throws `config_error` for every other failure mode
+ * run state). Throws `config_error` for every other failure mode
  * (insecure mode, malformed JSON, schema mismatch).
  */
-/* c8 ignore next 14 — pre-flight stub. M21 implementation replaces
-   with the real read path. */
-export const readCredentials = (
-  _options: CredentialsRootOptions = {},
-): Promise<CredentialsFile | undefined> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'readCredentials is a v0.3-M21 pre-flight stub — M21 implementation lands the runtime read body.',
-      { details: { hint: STUB_HINT } },
-    ),
-  );
+export const readCredentials = async (
+  options: CredentialsRootOptions = {},
+): Promise<CredentialsFile | undefined> => {
+  const fullPath = resolveCredentialsPath(options);
+
+  let handle;
+  try {
+    handle = await open(fullPath, fsConstants.O_RDONLY);
+  } catch (err) {
+    if (isENOENT(err)) {
+      return undefined;
+    }
+    /* c8 ignore next 3 — non-ENOENT open() errors (EACCES, ENOTDIR)
+       are platform-specific and not reproducible from a tmp-dir test. */
+    throw wrapAsConfigError(err, `cannot read credentials file ${fullPath}`, {
+      path: fullPath,
+    });
+  }
+
+  try {
+    const stats = await handle.stat();
+    if ((stats.mode & CREDENTIALS_INSECURE_BITS) !== 0) {
+      throw new ConfigError(
+        `refusing to read credentials file with insecure permissions ${formatMode(stats.mode)}`,
+        {
+          details: {
+            path: fullPath,
+            mode: formatMode(stats.mode),
+            hint: `permissions must be 0600 — run \`chmod 600 ${fullPath}\``,
+          },
+        },
+      );
+    }
+    const raw = await handle.readFile('utf8');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw wrapAsConfigError(err, `malformed JSON in credentials file ${fullPath}`, {
+        path: fullPath,
+        hint: `delete the file and re-run \`monday auth login --profile <name>\``,
+      });
+    }
+    const result = credentialsFileSchema.safeParse(parsed);
+    if (!result.success) {
+      const issues = result.error.issues.map((i) => ({
+        path: i.path.join('.'),
+        message: i.message,
+        code: i.code,
+      }));
+      throw new ConfigError(
+        `credentials file does not conform to v${CREDENTIALS_SCHEMA_VERSION} schema`,
+        {
+          cause: result.error,
+          details: {
+            path: fullPath,
+            issues,
+            hint: `delete the file and re-run \`monday auth login --profile <name>\``,
+          },
+        },
+      );
+    }
+    return result.data;
+  } finally {
+    await handle.close();
+  }
+};
+
+const ensureSecureDir = async (path: string): Promise<void> => {
+  // mkdir respects umask, so the explicit `mode` is advisory on some
+  // platforms. Re-apply via chmod so a tightened-after-creation
+  // directory doesn't betray credentials to another user.
+  try {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+  } catch (err) {
+    /* c8 ignore next 3 — disk-full / permissions-denied path; not
+       reproducible from a unit test against a tmp dir. */
+    throw wrapAsConfigError(err, `cannot prepare credentials directory ${path}`, {
+      path,
+    });
+  }
+};
 
 /**
  * Atomically writes the credentials file. Mirrors `src/api/cache.ts
- * writeJsonFile` verbatim:
+ * writeEntry` verbatim:
  *
- *   1. `mkdir({ recursive: true, mode: 0o700 })` + `chmod 0o700`
- *      on `~/.monday-cli/`.
- *   2. `writeFile(tmpPath, JSON.stringify(file), { mode: 0o600 })`.
+ *   1. `mkdir({ recursive: true, mode: 0o700 })` + `chmod 0o700`.
+ *   2. `writeFile(tmpPath, payload, { mode: 0o600 })`.
  *   3. `chmod(tmpPath, 0o600)` (re-applied because `writeFile`'s
  *      `mode` is advisory under umask).
  *   4. `rename(tmpPath, finalPath)` (atomic on the same filesystem).
  *
  * Best-effort cleanup of `tmpPath` on any failure so a half-written
  * `.tmp` doesn't accumulate.
- *
- * Surfaces `config_error` on disk-full / permissions / underlying
- * filesystem errors (per cli-design §7.3.3 — `config_error` covers
- * post-exchange persistence failure with exit 3).
  */
-/* c8 ignore next 14 — pre-flight stub. M21 implementation replaces
-   with the real atomic-replace body. */
-export const writeCredentials = (
-  _file: CredentialsFile,
-  _options: CredentialsRootOptions = {},
-): Promise<void> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'writeCredentials is a v0.3-M21 pre-flight stub — M21 implementation lands the runtime write body.',
-      { details: { hint: STUB_HINT } },
-    ),
-  );
+export const writeCredentials = async (
+  file: CredentialsFile,
+  options: CredentialsRootOptions = {},
+): Promise<void> => {
+  // Re-validate before write so a caller passing a malformed shape
+  // (e.g., a hand-built object that bypassed the schema) can't slip
+  // a bad file onto disk.
+  const validated = credentialsFileSchema.parse(file);
+  const fullPath = resolveCredentialsPath(options);
+  const dir = credentialsDirPath(options);
+
+  await ensureSecureDir(dir);
+
+  const payload = JSON.stringify(validated, null, 2);
+  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, payload, { mode: CREDENTIALS_FILE_MODE });
+    await chmod(tmpPath, CREDENTIALS_FILE_MODE);
+    await rename(tmpPath, fullPath);
+  } catch (err) {
+    /* c8 ignore next 5 — disk-full / atomic-rename failure path; not
+       reproducible from a unit test against a tmp dir. */
+    await unlink(tmpPath).catch(() => undefined);
+    throw wrapAsConfigError(err, `cannot write credentials file ${fullPath}`, {
+      path: fullPath,
+    });
+  }
+};
 
 /**
  * Read-modify-write convenience for `monday auth login`'s success
  * path. Loads the existing file (or starts a fresh `{schema_version,
  * profiles: {}}` if absent), inserts/replaces the named profile's
  * entry, and writes the result back via {@link writeCredentials}.
- *
- * **Idempotent at the credentials-write layer** — re-running with
- * the same `(profileName, entry)` produces a byte-identical file
- * (modulo timestamp). cli-design §7.3.2 leans on this idempotency
- * for the post-OAuth-flow contract: "running this verb leaves the
- * named profile authenticated."
  */
-/* c8 ignore next 14 — pre-flight stub. M21 implementation replaces
-   with read-modify-write composing the lower-level helpers. */
-export const setProfileCredentials = (
-  _inputs: SetProfileCredentialsInputs,
-  _options: CredentialsRootOptions = {},
-): Promise<void> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'setProfileCredentials is a v0.3-M21 pre-flight stub — M21 implementation lands the read-modify-write body.',
-      { details: { hint: STUB_HINT } },
-    ),
-  );
+export const setProfileCredentials = async (
+  inputs: SetProfileCredentialsInputs,
+  options: CredentialsRootOptions = {},
+): Promise<void> => {
+  const existing = await readCredentials(options);
+  const next: CredentialsFile = {
+    schema_version: CREDENTIALS_SCHEMA_VERSION,
+    profiles: {
+      ...(existing?.profiles ?? {}),
+      [inputs.profileName]: inputs.entry,
+    },
+  };
+  await writeCredentials(next, options);
+};
 
 /**
  * Idempotent profile delete for `monday auth logout`. Loads the
- * file (no-op + `ok: true` if file is absent OR profile is absent),
- * removes the named profile from `profiles`, writes the result back.
+ * file (no-op if file is absent), removes the named profile from
+ * `profiles`, writes the result back. When the post-delete
+ * `profiles` map is empty, **still writes
+ * `{schema_version, profiles: {}}`** rather than deleting the file
+ * outright (per cli-design §7.3.2 — keeps the schema-version pin
+ * discoverable + avoids a fresh-install vs all-logged-out
+ * ambiguity).
  *
- * **Pre-flight contract**: when the post-delete `profiles` map is
- * empty, the implementation **still writes `{schema_version,
- * profiles: {}}`** rather than deleting the file outright — keeps
- * the schema-version pin discoverable by `monday config show` and
- * avoids a special "fresh-install vs all-logged-out" ambiguity.
- * M21 implementation respects this.
+ * Returns whether the named profile was present pre-delete — the
+ * caller surfaces this in the success envelope's `was_present`
+ * slot.
  */
-/* c8 ignore next 14 — pre-flight stub. M21 implementation replaces
-   with the runtime delete body. */
-export const deleteProfileCredentials = (
-  _profileName: string,
-  _options: CredentialsRootOptions = {},
-): Promise<void> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'deleteProfileCredentials is a v0.3-M21 pre-flight stub — M21 implementation lands the runtime delete body.',
-      { details: { hint: STUB_HINT } },
-    ),
+export const deleteProfileCredentials = async (
+  profileName: string,
+  options: CredentialsRootOptions = {},
+): Promise<{ readonly wasPresent: boolean }> => {
+  const existing = await readCredentials(options);
+  if (existing === undefined) {
+    return { wasPresent: false };
+  }
+  const wasPresent = Object.prototype.hasOwnProperty.call(
+    existing.profiles,
+    profileName,
   );
+  if (!wasPresent) {
+    return { wasPresent: false };
+  }
+  const nextProfiles: Record<string, ProfileEntry> = Object.fromEntries(
+    Object.entries(existing.profiles).filter(([key]) => key !== profileName),
+  );
+  const next: CredentialsFile = {
+    schema_version: CREDENTIALS_SCHEMA_VERSION,
+    profiles: nextProfiles,
+  };
+  await writeCredentials(next, options);
+  return { wasPresent: true };
+};
 
 /**
  * Per-profile token-source resolver per cli-design §7.4.1 source
- * order:
- *
- *   1. **Credentials cache entry** for `profileName` (if present +
- *      mode-check passes via {@link readCredentials}).
- *   2. **`api_token_env`** value from the profile's `config.toml`
- *      entry (if the named env var is populated). Caller passes
- *      `apiTokenEnvName` resolved from the TOML loader; this module
- *      does NOT read the TOML file.
- *   3. Otherwise → `config_error` with `details.hint` pointing at
- *      `monday auth login --profile <profileName>` OR setting the
- *      named env var.
+ * order: credentials cache > `api_token_env` > `config_error`.
  *
  * The credentials cache wins over `api_token_env` because
  * `monday auth login` is the explicit user action that wrote the
@@ -330,25 +380,37 @@ export const deleteProfileCredentials = (
  */
 export interface ResolveProfileTokenInputs {
   readonly profileName: string;
-  /**
-   * The `api_token_env` env-var name the profile's `config.toml`
-   * entry referenced (e.g., `"MONDAY_API_TOKEN_WORK"`). `undefined`
-   * when the profile has no `api_token_env` configured (forces the
-   * credentials-cache-only path).
-   */
   readonly apiTokenEnvName: string | undefined;
 }
 
-/* c8 ignore next 14 — pre-flight stub. M21 implementation lands the
-   real resolution against {@link readCredentials} + env lookup. */
-export const resolveProfileToken = (
-  _inputs: ResolveProfileTokenInputs,
-  _options: CredentialsRootOptions = {},
-): Promise<ResolvedProfileToken> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'resolveProfileToken is a v0.3-M21 pre-flight stub — M21 implementation lands the source-order resolution body.',
-      { details: { hint: STUB_HINT } },
-    ),
+export const resolveProfileToken = async (
+  inputs: ResolveProfileTokenInputs,
+  options: CredentialsRootOptions = {},
+): Promise<ResolvedProfileToken> => {
+  const credentials = await readCredentials(options);
+  const cached = credentials?.profiles[inputs.profileName];
+  if (cached !== undefined) {
+    return { token: cached.access_token, source: 'credentials_cache' };
+  }
+  if (inputs.apiTokenEnvName !== undefined) {
+    const env = options.env ?? process.env;
+    const fromEnv = env[inputs.apiTokenEnvName];
+    if (fromEnv !== undefined && fromEnv.length > 0) {
+      return { token: fromEnv, source: 'api_token_env' };
+    }
+  }
+  const hint =
+    inputs.apiTokenEnvName !== undefined
+      ? `no token for profile \`${inputs.profileName}\` — run \`monday auth login --profile ${inputs.profileName}\` or set ${inputs.apiTokenEnvName}`
+      : `no token for profile \`${inputs.profileName}\` — run \`monday auth login --profile ${inputs.profileName}\``;
+  throw new ConfigError(
+    `no credentials available for profile \`${inputs.profileName}\``,
+    {
+      details: {
+        profile: inputs.profileName,
+        api_token_env: inputs.apiTokenEnvName ?? null,
+        hint,
+      },
+    },
   );
+};

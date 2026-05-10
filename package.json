@@ -69,6 +69,7 @@
     "dotenv": "^17.0.0",
     "graphql": "^16.8.2",
     "ora": "^9.0.0",
+    "smol-toml": "^1.6.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {

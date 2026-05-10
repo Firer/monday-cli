@@ -12,40 +12,26 @@
  *
  * **What this module does NOT own.** The credentials cache (token
  * source-order within a profile) lives in
- * `src/config/credentials.ts`; the TOML parser dependency (`smol-
- * toml` is the leaning choice — minimal footprint, zero runtime
- * deps, ESM-native) is added at M21 implementation kickoff alongside
- * the runtime body. Pre-flight stubs reject every call so the
- * dep-add can land in the same commit that ships the runtime.
+ * `src/config/credentials.ts`.
  *
- * **Token-storage rule (cli-design §7.2 line 5011 + §7.4 + .claude/
- * rules/security.md):** tokens are NEVER stored in `config.toml`.
- * Profile entries reference an env-var name via `api_token_env =
+ * **Token-storage rule (cli-design §7.2 + §7.4 + .claude/rules/
+ * security.md):** tokens are NEVER stored in `config.toml`. Profile
+ * entries reference an env-var name via `api_token_env =
  * "MONDAY_API_TOKEN_<X>"` (the env var's *name*, never its value).
- * The runtime parse path enforces this with two layers of defense:
+ * Two layers of defense:
  *
  *   1. **Structural exclusion** — `.strict()` on the zod object
- *      rejects unknown keys (`api_token`, `access_token`, `secret`,
- *      etc.) at parse time.
+ *      rejects unknown keys (`api_token`, `access_token`, `secret`).
  *   2. **Value-level shape check** — `api_token_env` is constrained
- *      to the env-var-identifier regex `/^[A-Z_][A-Z0-9_]*$/u` so
- *      a pasted opaque token value (which would carry lowercase
- *      letters, digits, and dashes) cannot pass through under the
- *      allowed key. The regex matches POSIX-style env-var names
- *      (`MONDAY_API_TOKEN_WORK`) and rejects token-looking values
- *      (`tok-fixture-xxxx`, `eyJhbGciOi...`).
- *
- * **Schema vs implementation split.** All zod schemas + type exports
- * + interface signatures are pinned in this pre-flight commit.
- * Runtime bodies (TOML parse, file I/O, environment-aware resolution)
- * are stubbed under `c8 ignore` and replaced in M21 implementation.
+ *      to the env-var-identifier regex `/^[A-Z_][A-Z0-9_]*$/u`.
  */
 
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
-
-const STUB_HINT =
-  'M21 implementation kickoff lands the runtime body alongside `monday auth login` / `auth logout` real bodies (and the TOML-parser dep-add — `smol-toml` is the leaning choice).';
+import { ConfigError } from '../utils/errors.js';
 
 /** Filename under `~/.monday-cli/`. Pinned for HOME-scoping. */
 export const PROFILES_CONFIG_FILE_NAME = 'config.toml';
@@ -57,8 +43,7 @@ export const PROFILES_DIR_NAME = '.monday-cli';
  * Optional `[profiles.<name>.dev]` block per cli-design §11.3 (Monday
  * Dev convenience). Pinned here so v0.3-M26 (`monday dev …`) can read
  * the same shape without a fresh schema landing alongside that
- * milestone. The block is wholly optional — profiles without a `dev`
- * sub-table simply have no dev-shortcut configuration.
+ * milestone.
  */
 export const profileDevBlockSchema = z
   .object({
@@ -73,28 +58,10 @@ export const profileDevBlockSchema = z
 export type ProfileDevBlock = z.infer<typeof profileDevBlockSchema>;
 
 /**
- * Per-profile config entry per cli-design §7.2.
- *
- * - `api_token_env` — name of the env var holding this profile's
- *   token. **The env var's name only — never the token value.** If
- *   omitted, the credentials-cache-only path applies (the profile
- *   must have been populated via `monday auth login`).
- * - `api_version` — overrides the global `MONDAY_API_VERSION` for
- *   this profile.
- * - `default_workspace` — surfaces in the per-profile resolved
- *   config; verbs that take an optional `--workspace` flag fall
- *   back to this when the flag is omitted.
- * - `timezone` — overrides the global `MONDAY_TIMEZONE` for this
- *   profile (relative-date resolution per cli-design §5.5).
- * - `dev` — optional Monday-Dev shortcut block (cli-design §11.3 +
- *   v0.3-M26).
- */
-/**
- * Env-var identifier shape (POSIX-style: starts with letter or
- * underscore; subsequent characters are uppercase ASCII / digits /
- * underscores). Rejects token-looking values like `tok-fixture-xxxx`
- * or JWT-looking values like `eyJhbGciOi...` so a user pasting a
- * token under the allowed `api_token_env` key fails at parse time.
+ * Env-var identifier shape (POSIX-style). Rejects token-looking
+ * values like `tok-fixture-xxxx` or JWT-looking values like
+ * `eyJhbGciOi...` so a user pasting a token under the allowed
+ * `api_token_env` key fails at parse time.
  */
 const ENV_VAR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/u;
 
@@ -122,19 +89,6 @@ export type ProfileEntry = z.infer<typeof profileEntrySchema>;
 
 /**
  * Top-level config-file shape per cli-design §7.2.
- *
- *   - `default_profile` — the profile name selected when no
- *     `--profile` flag and no `MONDAY_PROFILE` env are present. If
- *     omitted, the implicit v1 mode applies (uses
- *     `MONDAY_API_TOKEN` env directly without per-profile resolution).
- *   - `profiles` — keyed by profile name. Each entry conforms to
- *     {@link profileEntrySchema}.
- *
- * The `.strict()` mode rejects unknown top-level keys, and per-entry
- * `.strict()` (above) rejects unknown per-profile keys — together
- * they enforce the "no token in config.toml" rule by structural
- * exclusion. A future schema extension (e.g., `[shared]` block at
- * v0.4) lands as an explicit cli-design §7.2 amendment.
  */
 export const profilesConfigSchema = z
   .object({
@@ -145,27 +99,28 @@ export const profilesConfigSchema = z
 
 export type ProfilesConfig = z.infer<typeof profilesConfigSchema>;
 
-/**
- * Resolves the absolute config-file path. Pure helper. Tests pin
- * the resolved path against a tmp `home` to assert directory layout
- * matches §7.2 + §7.4.2.
- */
 export interface ProfilesRootOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly home?: string;
 }
 
-/* c8 ignore next 8 — pre-flight stub. M21 implementation lands the
-   `path.join(home, PROFILES_DIR_NAME, PROFILES_CONFIG_FILE_NAME)`
-   resolution alongside the runtime read body. */
+const isENOENT = (err: unknown): boolean => {
+  /* c8 ignore next 3 — non-object errors don't reach this guard via
+     fs/promises (every promise rejection wraps a real Error). */
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+  return (err as { code?: unknown }).code === 'ENOENT';
+};
+
+/**
+ * Resolves the absolute config-file path. Pure helper.
+ */
 export const resolveProfilesConfigPath = (
-  _options: ProfilesRootOptions = {},
+  options: ProfilesRootOptions = {},
 ): string => {
-  throw new ApiError(
-    'internal_error',
-    'resolveProfilesConfigPath is a v0.3-M21 pre-flight stub — M21 implementation lands the path-resolution body.',
-    { details: { hint: STUB_HINT } },
-  );
+  const home = options.home ?? homedir();
+  return join(home, PROFILES_DIR_NAME, PROFILES_CONFIG_FILE_NAME);
 };
 
 /**
@@ -173,50 +128,77 @@ export const resolveProfilesConfigPath = (
  * when the file does not exist (typical first-run state — implicit
  * v1 mode applies). Throws `config_error` for parse failures (TOML
  * malformed) or schema-validation failures (unknown keys, type
- * mismatch).
- *
- * The runtime body uses `smol-toml` (or `@iarna/toml` — decision
- * lands at M21 implementation kickoff alongside the dep-add); the
- * choice has no impact on the public surface of this module.
+ * mismatch, token-smuggled-as-env-var-name).
  */
-/* c8 ignore next 14 — pre-flight stub. M21 implementation lands the
-   runtime read + parse body. */
-export const loadProfilesConfig = (
-  _options: ProfilesRootOptions = {},
-): Promise<ProfilesConfig | undefined> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'loadProfilesConfig is a v0.3-M21 pre-flight stub — M21 implementation lands the runtime TOML-parse body.',
-      { details: { hint: STUB_HINT } },
-    ),
-  );
+export const loadProfilesConfig = async (
+  options: ProfilesRootOptions = {},
+): Promise<ProfilesConfig | undefined> => {
+  const fullPath = resolveProfilesConfigPath(options);
+  let raw: string;
+  try {
+    raw = await readFile(fullPath, 'utf8');
+  } catch (err) {
+    if (isENOENT(err)) {
+      return undefined;
+    }
+    /* c8 ignore next 7 — non-ENOENT readFile errors (EACCES, EISDIR)
+       are platform-specific and not reproducible from a tmp-dir test. */
+    throw new ConfigError(
+      `cannot read profiles config ${fullPath}`,
+      {
+        cause: err instanceof Error ? err : new Error(String(err)),
+        details: { path: fullPath },
+      },
+    );
+  }
 
-/**
- * Inputs to {@link selectProfile}. The full resolution pipeline:
- *
- *   1. Use `flag` if non-empty (`--profile <name>` from
- *      {@link import('../types/global-flags.js').GlobalFlags}).
- *   2. Else use `env.MONDAY_PROFILE` if non-empty.
- *   3. Else use `config.default_profile` if present.
- *   4. Else return the implicit-v1 sentinel (signalling no per-
- *      profile config; consumers fall back to `MONDAY_API_TOKEN`
- *      env directly per §7.1).
- */
+  let tomlParsed: unknown;
+  try {
+    tomlParsed = parseToml(raw);
+  } catch (err) {
+    throw new ConfigError(
+      `malformed TOML in profiles config ${fullPath}`,
+      {
+        cause: err instanceof Error ? err : new Error(String(err)),
+        details: {
+          path: fullPath,
+          hint: 'check the file for unmatched quotes, missing `=`, or invalid section headers',
+        },
+      },
+    );
+  }
+
+  const result = profilesConfigSchema.safeParse(tomlParsed);
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => ({
+      path: i.path.join('.'),
+      message: i.message,
+      code: i.code,
+    }));
+    const summary = issues
+      .map((i) => (i.path !== '' ? `${i.path}: ${i.message}` : i.message))
+      .join('; ');
+    throw new ConfigError(
+      `invalid profiles config: ${summary}`,
+      {
+        cause: result.error,
+        details: {
+          path: fullPath,
+          issues,
+          hint: 'profile entries must reference an env-var NAME via `api_token_env`, never the token value itself; tokens belong in env vars or the credentials cache (run `monday auth login`).',
+        },
+      },
+    );
+  }
+  return result.data;
+};
+
 export interface SelectProfileInputs {
   readonly flag: string | undefined;
   readonly env: NodeJS.ProcessEnv;
   readonly config: ProfilesConfig | undefined;
 }
 
-/**
- * Result of profile selection. The discriminated `mode` slot lets
- * consumers branch cleanly between "use a named profile" (the v0.3+
- * path) and "use implicit v1 mode" (no config file, no flag, no
- * env — fall back to `MONDAY_API_TOKEN`). Mirroring this through
- * the type system means `cli/run.ts`'s config-load can't accidentally
- * skip the v1-fallback branch.
- */
 export type SelectProfileResult =
   | {
       readonly mode: 'named';
@@ -226,28 +208,87 @@ export type SelectProfileResult =
   | { readonly mode: 'implicit_v1' };
 
 /**
- * Resolves the active profile per cli-design §7.2 source order.
- * Surfaces `usage_error` on a `--profile`/`MONDAY_PROFILE` mismatch
- * (per the existing {@link import('../types/global-flags.js')
- * .parseGlobalFlags} contract — that catch fires before this
- * resolver runs).
+ * Resolves the active profile per cli-design §7.2 source order:
+ *
+ *   1. `flag` (from `--profile <name>`).
+ *   2. `env.MONDAY_PROFILE`.
+ *   3. `config.default_profile`.
+ *   4. Implicit-v1 sentinel.
  *
  * Surfaces `config_error` when:
- *   - `--profile work` names a profile not present in the config
+ *   - any of (1)/(2)/(3) names a profile not present in the config
  *     file, OR
- *   - `default_profile` names a profile not present, OR
- *   - The implicit-v1 path applies but the config file is present
- *     (config-file presence implies the user wants per-profile
- *     resolution; absence implies v1).
+ *   - `flag` / `MONDAY_PROFILE` is set but no config file exists
+ *     (the flag/env imply per-profile resolution that the missing
+ *     config can't fulfil).
  */
-/* c8 ignore next 8 — pre-flight stub. M21 implementation lands the
-   resolution body. */
 export const selectProfile = (
-  _inputs: SelectProfileInputs,
+  inputs: SelectProfileInputs,
 ): SelectProfileResult => {
-  throw new ApiError(
-    'internal_error',
-    'selectProfile is a v0.3-M21 pre-flight stub — M21 implementation lands the source-order resolution body.',
-    { details: { hint: STUB_HINT } },
-  );
+  const flagName =
+    inputs.flag !== undefined && inputs.flag.length > 0
+      ? inputs.flag
+      : undefined;
+  const envName =
+    inputs.env.MONDAY_PROFILE !== undefined &&
+    inputs.env.MONDAY_PROFILE.length > 0
+      ? inputs.env.MONDAY_PROFILE
+      : undefined;
+
+  // (1)/(2): explicit selection. The credentials cache is the
+  // authoritative store for tokens (cli-design §7.4.1), and
+  // `monday auth login --profile <name>` populates it without
+  // requiring a `config.toml` edit. Two cases:
+  //
+  //   - No config file: return a synthetic empty entry. The caller
+  //     resolves the token via `resolveProfileToken`, which checks
+  //     the credentials cache first and surfaces `config_error`
+  //     only if neither cache nor `api_token_env` is populated.
+  //   - Config file present but profile not in `profiles`: error
+  //     loud — the user expressed an explicit `[profiles.<name>]`
+  //     intent that the file doesn't satisfy.
+  const explicit = flagName ?? envName;
+  if (explicit !== undefined) {
+    if (inputs.config === undefined) {
+      return { mode: 'named', name: explicit, entry: {} };
+    }
+    const entry = inputs.config.profiles[explicit];
+    if (entry === undefined) {
+      throw new ConfigError(
+        `profile \`${explicit}\` not found in ~/.monday-cli/config.toml`,
+        {
+          details: {
+            profile: explicit,
+            available_profiles: Object.keys(inputs.config.profiles),
+            source: flagName !== undefined ? '--profile flag' : 'MONDAY_PROFILE env',
+            hint: `add a [profiles.${explicit}] section to ~/.monday-cli/config.toml, OR run \`monday auth login --profile ${explicit}\` to populate the credentials cache directly`,
+          },
+        },
+      );
+    }
+    return { mode: 'named', name: explicit, entry };
+  }
+
+  // (3): default_profile from config.
+  if (inputs.config?.default_profile !== undefined) {
+    const name = inputs.config.default_profile;
+    const entry = inputs.config.profiles[name];
+    if (entry === undefined) {
+      throw new ConfigError(
+        `default_profile \`${name}\` not found in ~/.monday-cli/config.toml`,
+        {
+          details: {
+            profile: name,
+            available_profiles: Object.keys(inputs.config.profiles),
+            source: 'default_profile in config.toml',
+            hint: 'set `default_profile` to one of the listed available_profiles, or remove the `default_profile` line to fall back to the first profile listed',
+          },
+        },
+      );
+    }
+    return { mode: 'named', name, entry };
+  }
+
+  // (4): implicit v1.
+  return { mode: 'implicit_v1' };
 };
