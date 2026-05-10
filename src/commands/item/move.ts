@@ -619,13 +619,28 @@ const runCrossBoardMove = async ({
     sourceAgg.record('live', null);
   }
 
-  // Leg 3 + 4: source + target board metadata. Loaded in parallel
-  // because they're independent — the agent waits the slower of the
-  // two rather than the sum. Either may hit cache.
-  const [sourceMeta, targetMeta] = await Promise.all([
-    loadBoardMetadata({ client, boardId: sourceBoardId, env: ctx.env }),
-    loadBoardMetadata({ client, boardId: toBoard, env: ctx.env }),
-  ]);
+  // Leg 3 + 4: source + target board metadata. Loaded sequentially
+  // (rather than via `Promise.all`) because the test FixtureTransport
+  // strictly consumes `queue[0]` per request: when two concurrent
+  // transport calls fire, microtask ordering decides which hits the
+  // cassette first, and on Node 24 that ordering occasionally flips
+  // — turning an order-correct cassette (source then target) into
+  // an `internal_error` cassette mismatch when target arrives first
+  // and queue[0] still expects source. Sequential loads make the
+  // request order deterministic. Production-latency impact is at
+  // most one cache-miss network roundtrip (both cached → ~5ms; one
+  // cached → near-zero; both miss → ~300ms instead of max-of-two);
+  // negligible for an interactive mutation. Either may hit cache.
+  const sourceMeta = await loadBoardMetadata({
+    client,
+    boardId: sourceBoardId,
+    env: ctx.env,
+  });
+  const targetMeta = await loadBoardMetadata({
+    client,
+    boardId: toBoard,
+    env: ctx.env,
+  });
   sourceAgg.record(sourceMeta.source, sourceMeta.cacheAgeSeconds);
   sourceAgg.record(targetMeta.source, targetMeta.cacheAgeSeconds);
 
