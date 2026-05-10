@@ -687,6 +687,46 @@ describe('monday workspace update (integration, M14)', () => {
     expect(plan?.diff).not.toHaveProperty('description');
   });
 
+  it('--dry-run: --description fires the parsed.description !== undefined branch in the diff builder', async () => {
+    // Companion to the multi-flag dry-run test above — that test
+    // pins name + kind but skips description, leaving the
+    // description-only-in-diff branch (workspace/update.ts:198-203)
+    // uncovered. Pin description-only here so the dry-run diff
+    // builder's third arm fires.
+    const out = await drive(
+      [
+        'workspace', 'update', '12345',
+        '--description', 'Now in the EU region',
+        '--dry-run', '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'WorkspaceUpdatePreflight',
+            match_variables: { ids: ['12345'] },
+            response: { data: { workspaces: [currentWorkspace] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly {
+        operation: string;
+        diff: Record<string, { from: unknown; to: unknown }>;
+      }[];
+    };
+    expect(env.data).toBeNull();
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('update_workspace');
+    expect(plan?.diff).toEqual({
+      description: { from: 'EU campaigns', to: 'Now in the EU region' },
+    });
+    expect(plan?.diff).not.toHaveProperty('name');
+    expect(plan?.diff).not.toHaveProperty('kind');
+  });
+
   it('--dry-run: surfaces not_found when the preflight read returns []', async () => {
     // Per cli-design §6.4 workspace-update variant: "When the
     // preflight read returns not_found, the dry-run surfaces

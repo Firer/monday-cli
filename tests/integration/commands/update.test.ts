@@ -1519,6 +1519,33 @@ describe('monday update clear-all (integration, M13 — partial-success envelope
     expect(env.error?.code).toBe('confirmation_required');
   });
 
+  it('--dry-run: surfaces not_found when Monday returns items: [] on the first page', async () => {
+    // Per `clear-all.ts:166-176` (mirrors `update list`'s rule at
+    // list.ts:158): only the first page can hand a not_found.
+    // Empty items[] from page 1 means the item ID itself is unknown
+    // — distinct from "item exists with zero updates" (which returns
+    // `[{...}]` with empty `updates`) and from "later pages return
+    // empty" (a normal page-walk terminator).
+    const out = await drive(
+      ['update', 'clear-all', '99999', '--dry-run', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateClearAllRead',
+            match_variables: { itemIds: ['99999'], page: 1 },
+            response: { data: { items: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { item_id?: string } };
+    };
+    expect(env.error?.code).toBe('not_found');
+    expect(env.error?.details?.item_id).toBe('99999');
+  });
+
   it('--dry-run: page-walks then emits {operation: clear_all_updates, item_id, update_ids}; no delete fires', async () => {
     const out = await drive(
       ['update', 'clear-all', '12345', '--dry-run', '--json'],
