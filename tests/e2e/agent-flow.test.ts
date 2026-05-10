@@ -211,7 +211,7 @@ describe('M6 e2e — agent flow (v0.1 fallback path + M18 v0.2 extension)', () =
   });
 
   // 5 sequential spawns at ~1.2s each push the wall-clock cost
-  // of this test close to the 5s vitest default. Bumping to 15s
+  // of this test close to the 5s vitest default. Bumping to 30s
   // gives headroom against system-load flakes (the agent-flow E2E
   // runs on Node 22/24 in CI and occasionally trips the default
   // when tsx import + commander registration are both warming up).
@@ -219,10 +219,17 @@ describe('M6 e2e — agent flow (v0.1 fallback path + M18 v0.2 extension)', () =
   // command (item.create) and tipped the scale by ~50ms. M10 Session
   // B added duplicate (registry now 40 entries vs 39); under heavy
   // concurrent test load the 10s budget started flaking, so the
-  // ceiling lifts to 15s. CLAUDE.md predicted this — the headroom
-  // bump is the documented response. M18 added a 5th spawn (item
-  // create); the 15s ceiling holds.
-  it('create → list backlog → start → done → comment, contract holds across 5 spawns spanning v0.1+v0.2', { timeout: 15000 }, async () => {
+  // ceiling lifted to 15s; M18 added a 5th spawn (item create) and
+  // the 15s ceiling held until M21-prep when full-suite-under-load
+  // crossed it (registry now 72 entries — every spawn pays the
+  // commander registration cost; 5x sequential under contention
+  // exceeded 15s on a multi-worker run). The headroom bump to 30s
+  // continues the documented response. `retry: 1` is the
+  // belt-and-braces — wall-clock-under-load flakes are
+  // non-deterministic by definition, and a deterministic test bug
+  // would still fail both attempts. In isolation the test runs in
+  // ~2s, so retry budget is generous against the 30s ceiling.
+  it('create → list backlog → start → done → comment, contract holds across 5 spawns spanning v0.1+v0.2', { timeout: 30000, retry: 1 }, async () => {
     // M18 release-prep: `item create` (v0.2 / M9) is the new
     // first step. The created item's ID `5001` flows into every
     // subsequent step — the spawn is load-bearing, not smoke-only
