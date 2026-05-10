@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { ConfigError } from '../utils/errors.js';
+import { isENOENT } from '../utils/fs.js';
 
 /** Filename under `~/.monday-cli/`. Pinned for HOME-scoping. */
 export const PROFILES_CONFIG_FILE_NAME = 'config.toml';
@@ -103,15 +104,6 @@ export interface ProfilesRootOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly home?: string;
 }
-
-const isENOENT = (err: unknown): boolean => {
-  /* c8 ignore next 3 — non-object errors don't reach this guard via
-     fs/promises (every promise rejection wraps a real Error). */
-  if (typeof err !== 'object' || err === null) {
-    return false;
-  }
-  return (err as { code?: unknown }).code === 'ENOENT';
-};
 
 /**
  * Resolves the absolute config-file path. Pure helper.

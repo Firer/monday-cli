@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CacheError } from '../utils/errors.js';
+import { isENOENT } from '../utils/fs.js';
 
 /**
  * Local cache for board metadata, the user directory, and the
@@ -161,13 +162,6 @@ const wrapFsError = (
 ): CacheError => {
   const cause = err instanceof Error ? err : new Error(String(err));
   return new CacheError(message, { cause, details });
-};
-
-const isENOENT = (err: unknown): boolean => {
-  if (typeof err !== 'object' || err === null) {
-    return false;
-  }
-  return (err as { code?: unknown }).code === 'ENOENT';
 };
 
 const ensureSecureDir = async (path: string): Promise<void> => {
