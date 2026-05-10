@@ -385,7 +385,10 @@ passing both is a `usage_error`. So is asking for `--full` with
 ## 4. Command surface
 
 Two-level structure: `monday <noun> <verb> [args] [flags]`. Two levels
-deep is the cap — agents lose track of three-level trees.
+deep is the default cap — agents lose track of three-level trees. Two
+explicit carve-outs at three levels exist (the `dev` workflow
+namespace and `item time-track <verb>` for verb-shaped column-type
+extensions); see §5.2 for the rule and §5.9 / §4.3 for the surfaces.
 
 ### 4.1 Top-level nouns
 

@@ -594,8 +594,10 @@ reasoning (and per-subsystem implementation detail) lives in
   2 API/network, 3 config, 130 SIGINT.
 - **No interactive prompts ever.** Destructive ops without `--yes`
   return `confirmation_required`. (§3.1)
-- **Two-level command depth** (`monday <noun> <verb>`); `dev` namespace
-  carved out at three levels. (§5.2)
+- **Two-level command depth** (`monday <noun> <verb>`); two carve-outs
+  at three levels — `dev` namespace (workflow shortcuts; carve-out 1)
+  and `item time-track <verb>` (verb-shaped column-type extensions;
+  carve-out 2). (§5.2)
 - **Cursor pagination expires at 60 min — fail fast with
   `stale_cursor`, never silently re-issue.** (§5.6)
 - **Column-value abstraction** is what makes `--set` work. Writable
