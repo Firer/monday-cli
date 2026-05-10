@@ -82,7 +82,9 @@ export const renderNdjson = (
  *   (typically `ctx.stdout`).
  * - `secrets` — token bytes the redactor scrubs from every emitted
  *   line (per `.claude/rules/security.md` "value-scanning filter").
- *   Caller passes `collectSecrets(ctx.env)`.
+ *   Caller passes `collectSecrets(ctx.env, ctx.runtimeSecrets)`
+ *   (the v0.3-M21 §7.4.3 redaction-runtime extension folds
+ *   credentials-cache `access_token` values in via the second arg).
  * - `project` — per-item projection callback. Decouples the helper
  *   from per-noun output shape: item list/search projects raw
  *   Monday rows through `projectFromRaw`; update list runs items

@@ -318,6 +318,18 @@ export const authLoginCommand: CommandModule<
             clientSecret: OAUTH_CLIENT_SECRET,
           });
 
+          // Fold the just-obtained token into the value-scan secret
+          // bag BEFORE any subsequent emission can echo it. The
+          // preAction redaction-runtime preload (program.ts) runs
+          // BEFORE the OAuth exchange so the new token isn't in
+          // `ctx.runtimeSecrets` yet; if the post-exchange
+          // `account { id }` probe below fails with a GraphQL
+          // error.message echoing the presented Authorization
+          // header, the error envelope's value-scan layer needs
+          // this entry to scrub it (cli-design §7.4.3 — Codex
+          // M21 Part 2 P1 finding).
+          ctx.runtimeSecrets.push(tokenResponse.accessToken);
+
           // Step 8: post-exchange `account { id }`.
           const accountId = await fetchAccountId(
             tokenResponse.accessToken,

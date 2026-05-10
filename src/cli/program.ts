@@ -151,12 +151,22 @@ export const buildProgram = (
     //
     // Scrubs every profile's token, not just the active one — an
     // agent running with `--profile work` may have a stale
-    // `personal` entry that mustn't leak either. Fail-closed: a
+    // `personal` entry that mustn't leak either.
+    //
+    // **Best-effort redaction preload** (fail-open posture): a
     // credentials-read failure (insecure permissions, malformed
-    // file, schema mismatch) is swallowed here so the redaction
-    // layer falls back to env-only secrets; the read fires again
-    // inside `resolveProfileToken` below for the per-profile path,
-    // and a real read failure surfaces as `config_error` from there.
+    // file, schema mismatch) is swallowed here so the command can
+    // continue. The value-scan layer then falls back to env-only
+    // secrets — cached tokens are NOT scrubbed via runtimeSecrets
+    // on this path, but the key-based filter still strips
+    // `access_token` keys + `Authorization` etc., and the real
+    // read failure surfaces as `config_error` later via
+    // `resolveProfileToken` (the user sees a typed error, not a
+    // silent skip). The deliberate fail-open choice trades a
+    // narrow "cached token byte-string leaked via unkeyed
+    // Error.message before config_error surfaces" risk for a
+    // safer "command always proceeds to a typed-error envelope"
+    // contract. Codex M21 Part 2 P2 review pinned the wording.
     const home =
       ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
         ? ctx.env.HOME

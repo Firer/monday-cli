@@ -18,7 +18,8 @@
  *   - success envelope on stdout (JSON + table renderers)
  *   - error envelope on stderr (runner catch-all)
  *   - retried-request error decoration (cause chain)
- *   - --verbose debug payload
+ *   - verbose mode (--verbose): cached token in response payload
+ *     body scrubbed before envelope render
  *   - auth verbs (login / logout flows — those READ credentials too)
  *   - config_error path from insecure permissions (the cause must
  *     not echo the loaded token)
@@ -178,7 +179,7 @@ describe('credentials-cache leak hardening — M21 §7.4.3', () => {
     collected.push(result.captured.stdout(), result.captured.stderr());
   });
 
-  it('--verbose: cached token in payload body scrubbed', async () => {
+  it('verbose mode: cached token in response payload body scrubbed', async () => {
     const result = await driveWithCredHome(
       ['--verbose', 'account', 'whoami', '--profile', 'work', '--json'],
       home,

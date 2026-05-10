@@ -306,6 +306,57 @@ describe('monday auth login (integration, M21 implementation)', () => {
     expect(captured.stdout()).not.toContain(LEAK_CANARY);
   });
 
+  it('post-exchange GraphQL probe echoing the just-obtained token does not leak (cli-design §7.4.3)', async () => {
+    // Codex M21 Part 2 P1 finding: on a fresh-install auth login,
+    // neither MONDAY_API_TOKEN nor `ctx.runtimeSecrets` carries
+    // the OAuth-obtained token at preAction-hook time (profile
+    // resolution is skipped for auth verbs; credentials cache is
+    // empty pre-login). If the post-exchange `account { id }`
+    // probe surfaces a GraphQL error.message that echoes back the
+    // Authorization header, the error envelope's value-scan layer
+    // can only scrub it when login.ts pushes the just-obtained
+    // token into `ctx.runtimeSecrets` BEFORE calling fetchAccountId.
+    const justObtained = 'tok-just-obtained-canary-aabbccdd';
+    await writeFixture(env.fixturePath, { code: 'fake-auth-code' });
+    const fetchStub = buildOAuthFetchStub({
+      access_token: justObtained,
+      token_type: 'Bearer',
+      scope: 'boards:read me:read',
+    });
+    vi.stubGlobal('fetch', fetchStub);
+
+    const { exitCode, captured } = await driveAuth(
+      ['auth', 'login', '--profile', 'work', '--json'],
+      env,
+      {
+        interactions: [
+          {
+            operation_name: 'AuthLoginAccountId',
+            http_status: 401,
+            response: {
+              errors: [
+                {
+                  // Simulate Monday echoing the Authorization
+                  // header value back in the error body — what we
+                  // genuinely fear when probing a freshly-issued
+                  // token.
+                  message: `Authentication rejected: ${justObtained}`,
+                  extensions: {
+                    code: 'AUTHENTICATION_ERROR',
+                    presented_token: justObtained,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(exitCode).toBe(2);
+    expect(captured.stdout()).not.toContain(justObtained);
+    expect(captured.stderr()).not.toContain(justObtained);
+  });
+
   it('exchange-failed: surfaces oauth_failed.code_exchange_failed when /oauth2/token returns 400', async () => {
     await writeFixture(env.fixturePath, { code: 'fake-code' });
     const fetchStub = buildOAuthFetchStub(
