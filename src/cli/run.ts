@@ -107,6 +107,18 @@ export interface RunContext {
    * `envelope-out.ts` (M2.5 R2).
    */
   readonly meta: MetaBuilder;
+  /**
+   * Per-run accumulator of literal secret values to scrub from every
+   * emitted byte (cli-design §7.4.3 redaction-runtime extension). The
+   * `program.ts` preAction hook pushes every loaded credentials-file
+   * `access_token` value here once, before any command action runs;
+   * `collectSecrets(ctx.env, ctx.runtimeSecrets)` then folds those
+   * values into the secret-bag passed to `redact()` on every emission
+   * path. The field is a mutable array via a `readonly` reference —
+   * commands never reassign it, but the preAction hook pushes into
+   * it during context setup.
+   */
+  readonly runtimeSecrets: string[];
 }
 
 const isSigintReason = (reason: unknown): boolean => {
@@ -152,6 +164,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     cliVersion: options.cliVersion,
     signal: combinedSignal,
     meta,
+    runtimeSecrets: [],
   };
 
   const program = buildProgram(options, ctx);
@@ -181,6 +194,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     writeErrorEnvelope(cliError, {
       stderr: options.stderr,
       env: options.env,
+      runtimeSecrets: ctx.runtimeSecrets,
       meta: buildBaseMeta({
         snapshot: meta.snapshot(),
         env: options.env,

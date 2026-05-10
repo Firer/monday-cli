@@ -349,7 +349,7 @@ export const updateListCommand: CommandModule<
         if (format === 'ndjson') {
           const stream = startNdjsonStream<unknown>({
             stream: ctx.stdout,
-            secrets: collectSecrets(ctx.env),
+            secrets: collectSecrets(ctx.env, ctx.runtimeSecrets),
             // Project through the per-update schema so NDJSON output
             // matches JSON-mode shape. A raw Monday update that
             // doesn't conform fails here loud rather than emitting

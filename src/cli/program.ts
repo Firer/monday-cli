@@ -25,7 +25,10 @@ import {
   loadProfilesConfig,
   selectProfile,
 } from '../config/profiles.js';
-import { resolveProfileToken } from '../config/credentials.js';
+import {
+  readCredentials,
+  resolveProfileToken,
+} from '../config/credentials.js';
 import type { RunContext, RunOptions } from './run.js';
 
 /**
@@ -134,6 +137,44 @@ export const buildProgram = (
       // tries best-effort.
     }
 
+    // Redaction-runtime extension per cli-design §7.4.3 (v0.3-M21).
+    // Reads the credentials file once and folds every per-profile
+    // `access_token` into `ctx.runtimeSecrets` so any unkeyed string
+    // occurrence (e.g., a cached token landing in `Error.message` /
+    // `Error.stack`) is scrubbed by the value-scan layer in
+    // `redact()`. Runs for EVERY command including auth verbs — an
+    // auth-login failure may surface a token in cause/stack, and the
+    // M21 canary leak-test discipline requires the secret-bag to be
+    // populated for those paths too. Auth verbs ARE exempt from the
+    // profile-resolution step below, but the redaction read runs
+    // first because it's profile-independent.
+    //
+    // Scrubs every profile's token, not just the active one — an
+    // agent running with `--profile work` may have a stale
+    // `personal` entry that mustn't leak either. Fail-closed: a
+    // credentials-read failure (insecure permissions, malformed
+    // file, schema mismatch) is swallowed here so the redaction
+    // layer falls back to env-only secrets; the read fires again
+    // inside `resolveProfileToken` below for the per-profile path,
+    // and a real read failure surfaces as `config_error` from there.
+    const home =
+      ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
+        ? ctx.env.HOME
+        : undefined;
+    const homeOptions: { home?: string; env: NodeJS.ProcessEnv } =
+      home !== undefined ? { home, env: ctx.env } : { env: ctx.env };
+
+    try {
+      const credentials = await readCredentials(homeOptions);
+      if (credentials !== undefined) {
+        for (const entry of Object.values(credentials.profiles)) {
+          ctx.runtimeSecrets.push(entry.access_token);
+        }
+      }
+    } catch {
+      // intentionally swallowed — see above.
+    }
+
     // Profile resolution per cli-design §7.2 / §7.4 (v0.3-M21).
     // Skipped for `auth login` / `auth logout` — those verbs are the
     // source of credentials, not consumers; running profile
@@ -160,17 +201,10 @@ export const buildProgram = (
         ? ctx.env.MONDAY_PROFILE
         : undefined;
 
-    // Optimisation: if neither flag nor env names a profile, skip the
-    // file I/O unless a config file actually exists (which means
-    // `default_profile` may apply). Reading a non-existent file is
-    // cheap (single ENOENT), so this is mostly readability.
-    const home =
-      ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
-        ? ctx.env.HOME
-        : undefined;
-    const homeOptions: { home?: string; env: NodeJS.ProcessEnv } =
-      home !== undefined ? { home, env: ctx.env } : { env: ctx.env };
-
+    // Reuses the `homeOptions` resolved above for the redaction-
+    // runtime extension — same HOME-discovery shape, same env
+    // threading. Reading a non-existent config file is cheap (single
+    // ENOENT) so the implicit-v1 path doesn't pay for the I/O.
     const config = await loadProfilesConfig(homeOptions);
 
     if (

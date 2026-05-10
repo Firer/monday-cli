@@ -280,7 +280,7 @@ export const itemListCommand: CommandModule<
         if (format === 'ndjson') {
           const stream = startNdjsonStream<unknown>({
             stream: ctx.stdout,
-            secrets: collectSecrets(ctx.env),
+            secrets: collectSecrets(ctx.env, ctx.runtimeSecrets),
             project: (raw) => projectFromRaw(raw, titles, { omitColumnTitles: true }),
           });
           const result = await paginate<unknown, ItemsPagePayload<unknown>>({

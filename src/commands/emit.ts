@@ -142,8 +142,10 @@ const renderForFormat = <T>(
   // The redactor strips both keyed sensitive values (Authorization,
   // apiToken, ...) and any literal occurrence of the runtime token —
   // so a secret loaded from `.env` mid-action is still scrubbed,
-  // matching the runner's error-path behaviour.
-  const secrets = collectSecrets(ctx.env);
+  // matching the runner's error-path behaviour. `ctx.runtimeSecrets`
+  // carries credentials-cache `access_token` values populated by the
+  // program.ts preAction hook (cli-design §7.4.3 — v0.3-M21).
+  const secrets = collectSecrets(ctx.env, ctx.runtimeSecrets);
   const redacted = redact(envelope, { secrets });
   const redactedData = redact(data, { secrets });
 
@@ -426,7 +428,7 @@ export const emitDryRun = (options: EmitDryRunOptions): void => {
   });
 
   const envelope = buildDryRun(options.plannedChanges, meta, warnings);
-  const secrets = collectSecrets(ctx.env);
+  const secrets = collectSecrets(ctx.env, ctx.runtimeSecrets);
   const redacted = redact(envelope, { secrets });
   // Forced JSON regardless of `--output` / TTY — dry-run output is
   // structured-only. cli-design §6.4 doesn't document a non-JSON

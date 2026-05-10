@@ -113,14 +113,29 @@ export const createMetaBuilder = (): MetaBuilder => {
  * file (Codex review §1 follow-up). `env` is shared by reference
  * with the runner; re-reading at emit time observes any side-
  * effecting load.
+ *
+ * `extraSecrets` carries the v0.3-M21 cli-design §7.4.3 redaction-
+ * runtime extension — `program.ts`'s preAction hook reads the
+ * credentials file once and pushes every per-profile `access_token`
+ * onto `ctx.runtimeSecrets`; callers thread that array through so a
+ * cached token landing in `Error.message` / `Error.stack` is scrubbed
+ * even when no env token is set (e.g., the credentials-cache-only
+ * flow where `monday auth login --profile work` is the user's only
+ * token source).
  */
 export const collectSecrets = (
   env: NodeJS.ProcessEnv,
+  extraSecrets: readonly string[] = [],
 ): readonly string[] => {
   const out: string[] = [];
   const token = env.MONDAY_API_TOKEN;
   if (token !== undefined && token.length > 0) {
     out.push(token);
+  }
+  for (const extra of extraSecrets) {
+    if (extra.length > 0) {
+      out.push(extra);
+    }
   }
   return out;
 };
@@ -157,6 +172,14 @@ export interface WriteErrorEnvelopeOptions {
   readonly stderr: NodeJS.WritableStream;
   readonly env: NodeJS.ProcessEnv;
   readonly meta: Meta;
+  /**
+   * Extra literal secrets to scrub via the value-scan layer (cli-
+   * design §7.4.3). The runner threads `ctx.runtimeSecrets` here so
+   * a credentials-cache `access_token` that landed in an error's
+   * `cause`/`message` chain is scrubbed even when no env token is
+   * set.
+   */
+  readonly runtimeSecrets?: readonly string[];
 }
 
 /**
@@ -171,7 +194,7 @@ export const writeErrorEnvelope = (
 ): void => {
   const envelope = buildError(err, options.meta);
   const redacted = redact(envelope, {
-    secrets: collectSecrets(options.env),
+    secrets: collectSecrets(options.env, options.runtimeSecrets),
   });
   options.stderr.write(`${JSON.stringify(redacted, null, 2)}\n`);
 };

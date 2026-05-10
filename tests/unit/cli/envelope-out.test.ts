@@ -77,6 +77,43 @@ describe('collectSecrets', () => {
     // turn every empty string in the envelope into [REDACTED].
     expect(collectSecrets({ MONDAY_API_TOKEN: '' })).toEqual([]);
   });
+
+  it('appends extraSecrets after the env token (cli-design §7.4.3)', () => {
+    // The runtime-extension contract: credentials-cache access_token
+    // values are added to the secret-bag alongside the env token.
+    expect(
+      collectSecrets(
+        { MONDAY_API_TOKEN: 'env-tok' },
+        ['cred-tok-a', 'cred-tok-b'],
+      ),
+    ).toEqual(['env-tok', 'cred-tok-a', 'cred-tok-b']);
+  });
+
+  it('returns only extraSecrets when env token is unset', () => {
+    // Credentials-cache-only flow (`monday auth login --profile work`
+    // is the user's only token source) — the runtime extension still
+    // populates the bag for the value-scan layer to consume.
+    expect(collectSecrets({}, ['cred-tok-a'])).toEqual(['cred-tok-a']);
+  });
+
+  it('skips empty entries in extraSecrets', () => {
+    // Same reasoning as the empty-env-token case — scrubbing "" would
+    // turn every empty string in the envelope into [REDACTED].
+    expect(
+      collectSecrets(
+        { MONDAY_API_TOKEN: 'env-tok' },
+        ['', 'cred-tok-a', ''],
+      ),
+    ).toEqual(['env-tok', 'cred-tok-a']);
+  });
+
+  it('defaults extraSecrets to an empty list when omitted', () => {
+    // Backward-compatible signature: pre-§7.4.3 callers passing only
+    // env keep working.
+    expect(collectSecrets({ MONDAY_API_TOKEN: 'env-tok' })).toEqual([
+      'env-tok',
+    ]);
+  });
 });
 
 describe('buildBaseMeta', () => {
@@ -209,6 +246,53 @@ describe('writeErrorEnvelope', () => {
     const out = read();
     expect(out).not.toContain(literal);
     expect(out).toContain('[REDACTED]');
+  });
+
+  it('redacts runtimeSecrets via the value-scan layer (cli-design §7.4.3)', () => {
+    // Credentials-cache-only flow: no env token, but a cached
+    // access_token leaked into the error chain through, e.g., a
+    // post-login `account { id }` probe whose error.message echoed
+    // back the auth header value.
+    const cached = 'tok-cred-leak-deadbeef-canary';
+    const { stderr, read } = captureStderr();
+    writeErrorEnvelope(
+      new ApiError(
+        'unauthorized',
+        `request failed with cached creds ${cached}`,
+      ),
+      {
+        stderr,
+        env: {},
+        runtimeSecrets: [cached],
+        meta: buildMetaForTest(),
+      },
+    );
+    const out = read();
+    expect(out).not.toContain(cached);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('redacts both env token and runtimeSecrets simultaneously', () => {
+    // Mixed flow: env token set AND a credentials-cache profile
+    // present. Both must scrub.
+    const envTok = 'tok-env-aaaabbbbcccc';
+    const credTok = 'tok-cred-ddddeeeeffff';
+    const { stderr, read } = captureStderr();
+    writeErrorEnvelope(
+      new ApiError(
+        'forbidden',
+        `presented env=${envTok} cached=${credTok}`,
+      ),
+      {
+        stderr,
+        env: { MONDAY_API_TOKEN: envTok },
+        runtimeSecrets: [credTok],
+        meta: buildMetaForTest(),
+      },
+    );
+    const out = read();
+    expect(out).not.toContain(envTok);
+    expect(out).not.toContain(credTok);
   });
 
   it('threads the supplied meta through to the envelope', () => {
