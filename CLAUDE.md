@@ -165,11 +165,86 @@ module signatures is the next session's work):
   semantics, idempotency — see v0.3-plan §3 M20 line 625-637)
   close at M20 pre-flight, NOT here.
 
-**M20 pre-flight contract diff shipped this session**
-(mirrors the `d822982` M19 cadence — pin the contract surface
-ahead of any feat commit so M20 implementation lands into a
-Codex-reviewed shape rather than churning on contract drift
-mid-implementation):
+**M20 closed (documentation-only verbs).** Empirical probe at
+M20 implementation kickoff (2026-05-10, against API version
+`2026-01`) confirmed Monday's public GraphQL API does not
+currently support writing to `time_tracking` columns:
+
+- `change_simple_column_value` rejects every candidate value
+  (`"true"`, `"false"`, `"start"`, `"stop"`) with
+  `CorrectedValueException`: *"DurationColumn does not support
+  simple column value writes"*.
+- `change_column_value` rejects every candidate JSON shape
+  (`{running:true}`, `{running:false}`, `{started_at:...}`,
+  `{ended_at:...}`, `{}`) with `InvalidColumnTypeException`:
+  *"This column type is not supported yet in the API"*.
+- Full mutation-root introspection (152 mutations) found zero
+  time-tracking-related mutations.
+
+The pre-flight contract assumed `change_simple_column_value`
+would route through; that assumption was empirically wrong.
+M20 ships the verbs as **forward-compatibility markers** —
+`monday item time-track start <iid>` / `... stop <iid>` are
+registered in the CLI surface so agent scripts targeting the
+verbs are stable across the eventual swap when Monday ships
+API support — and reject every invocation today with
+`usage_error` carrying the empirical-probe context (date,
+API version, Monday's exact error codes for each candidate
+wire shape) so an agent reading `details.hint` can self-verify
+the limitation. The four pre-flight `*Inputs` / `*Result`
+interfaces stay verbatim; when Monday ships API support, the
+runtime body swap is one-sided in `src/api/time-tracking.ts`.
+
+**Shipped M20 commits:**
+- **Commit 1 (this commit) — `feat(m20): documentation-only
+  time-track start/stop verbs`.** Bundles runtime-body update
+  in `src/api/time-tracking.ts` (rejection swap; pre-flight
+  interfaces preserved) + new `src/commands/item/time-track/
+  start.ts` + `... /stop.ts` (three-level command depth per
+  cli-design §5.2 carve-out 2; `--board` resolution preserved
+  for invalid-item `not_found` UX consistency, `--column`
+  resolution intentionally skipped) + registry slots in
+  `src/commands/index.ts` (70 → 72 commands) + the
+  `unsupportedColumnTypeError` time_tracking-branch hint
+  update in `src/api/column-values.ts` (now points at the
+  documentation-only verbs by argv shape with the
+  empirical-probe caveat) + tests/unit expansion (9 → 16) +
+  new `tests/integration/commands/item-time-track.test.ts`
+  (8 cassettes — `--board` supplied, `--board` omitted with
+  valid item, invalid item with `not_found`, parse-boundary
+  `usage_error`, omitted `--column` echoes empty string,
+  token redaction, symmetric for `stop`) + envelope-snapshot
+  `command_count: 70 → 72` + close-docs sweep (cli-design
+  §4.3 + §6.4, output-shapes.md, v0.3-plan §3 M20 status
+  flip, this CLAUDE.md hunk).
+
+**Test count + coverage at M20 close:** 2407 (M20 entry,
+post-pre-flight + Node 24 flake fix) → 2422 (M20 close), +15
+net (8 unit time-tracking + 8 integration item-time-track,
+minus 1 column-values assertion that consolidated). Coverage
+99.05 / 95.49 / 99.32 / 99.21 (statements / branches /
+functions / lines), above the 95/95.45/95/95 floor. Floor
+unchanged.
+
+**M11 cross-board flake fix (Node 24 cassette ordering)
+shipped in `7dbcf7e fix(m11): serialise cross-board metadata
+loads`** at session start before M20 work began.
+`runCrossBoardMove` loaded source + target board metadata via
+`Promise.all`; on Node 24 microtask scheduling occasionally
+flips that order, and the test `FixtureTransport` strictly
+consumes `queue[0]` per request — when target arrives before
+source, queue[0]'s `match_variables: {ids: ['111']}` fails
+and the runner maps the `cassette mismatch` to
+`internal_error`. Fix: serialise the two loads. Production-
+latency cost is at most one cache-miss network roundtrip
+(~300ms instead of max-of-two); negligible for an
+interactive mutation. The alternative (out-of-order matching
+in `FixtureTransport`) would weaken cassette-as-strict-
+sequence semantics across 105 test files for the benefit of
+one Promise.all call site; the narrower fix wins.
+
+**M20 pre-flight contract diff shipped previous session**
+(mirrors the `d822982` M19 cadence):
 
 - **`src/api/time-tracking.ts` module signatures landed.**
   Four exported interfaces (`StartTimeTrackingInputs` /

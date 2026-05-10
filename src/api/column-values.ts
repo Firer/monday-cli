@@ -1733,14 +1733,27 @@ const UNSUPPORTED_TABLE: Readonly<
       `Column "${columnId}" has type "time_tracking", which Monday ` +
       `mutates via start/stop verbs rather than column-value writes. ` +
       `The friendly --set translator and --set-raw both target ` +
-      `change_column_value-shaped types; time_tracking needs a ` +
-      `verb-shaped extension pinned for v0.3.`,
+      `change_column_value-shaped types; time_tracking surfaces ` +
+      `as the verb-shaped \`monday item time-track start/stop\` ` +
+      `pair (v0.3 M20, cli-design §5.2 carve-out 2).`,
     details: () => ({
+      // v0.3 ships the verb names as documentation-only — empirical
+      // probe (2026-05-10, API version 2026-01) confirmed Monday's
+      // public API does not currently support time_tracking writes
+      // via either change_simple_column_value or change_column_value.
+      // The `deferred_to` slot tracks the milestone the verb pair
+      // landed at, not the milestone the wire mutation will ship at
+      // (which is on Monday's roadmap, not ours).
       deferred_to: 'v0.3',
       hint:
         'time_tracking uses start/stop verbs, not column-value ' +
-        'writes. v0.3 plans a dedicated surface; until then there ' +
-        'is no friendly or raw write path.',
+        'writes. The verbs `monday item time-track start <iid>` / ' +
+        '`monday item time-track stop <iid>` are registered for ' +
+        'forward-compatibility but currently throw `usage_error` — ' +
+        "Monday's public API does not yet expose a write path for " +
+        'time_tracking columns (probed 2026-05-10). Use Monday\'s ' +
+        'UI to start/stop time-tracking sessions until API support ' +
+        'ships.',
     }),
   },
   future: {

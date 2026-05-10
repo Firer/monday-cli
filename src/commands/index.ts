@@ -92,6 +92,14 @@ import { itemDuplicateCommand } from './item/duplicate.js';
 import { itemMoveCommand } from './item/move.js';
 // M12 (v0.2) — item upsert (idempotency-cluster verb).
 import { itemUpsertCommand } from './item/upsert.js';
+// M20 (v0.3) — item time-track start/stop (verb-shaped column-type
+// extension per cli-design §5.2 carve-out 2). Documentation-only at
+// v0.3: empirical probe (2026-05-10, API version 2026-01) confirmed
+// Monday's public API does not currently support time_tracking
+// column writes. The verbs ship with `usage_error` rejections so the
+// CLI surface is stable when Monday eventually ships API support.
+import { itemTimeTrackStartCommand } from './item/time-track/start.js';
+import { itemTimeTrackStopCommand } from './item/time-track/stop.js';
 // M14 (v0.2) — workspace lifecycle: create / update / delete /
 // add-users / remove-users.
 import { workspaceCreateCommand } from './workspace/create.js';
@@ -186,6 +194,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemDuplicateCommand,
     itemMoveCommand,
     itemUpsertCommand,
+    itemTimeTrackStartCommand,
+    itemTimeTrackStopCommand,
     updateCreateCommand,
     updateReplyCommand,
     updateEditCommand,

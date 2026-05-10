@@ -1126,23 +1126,33 @@ heuristic v0.2-plan §22 documents.
   R45/R48 ship-the-helper-with-the-first-new-consumer cadence).
 
 - `api/time-tracking.ts` (v0.3 M20 — pre-flight at `a702af2`,
-  runtime body lands at M20 implementation). Verb-shaped
-  column-type extension primitives for the
-  `monday item time-track start / stop` surface (cli-design
-  §5.2 carve-out 2). Two stub-body verbs (`startTimeTracking` /
-  `stopTimeTracking`) under `c8 ignore` until M20 implementation
-  ships. Both throw `usage_error` on invalid pre-state per
-  v0.3-plan §3 M20 Decisions 4.1/4.2 (start-while-running →
-  `details.running: true`; stop-while-not-running →
-  `details.running: false`); both non-idempotent per Decision
-  4.3. `StopTimeTrackingResult.durationSeconds: number | null`
-  — null when Monday omits `started_at` on the just-closed
-  session record (per-session duration uncomputable; SDK 14.0.0
+  runtime body landed at M20 implementation as **documentation-
+  only verbs**). Verb-shaped column-type extension primitives
+  for the `monday item time-track start / stop` surface
+  (cli-design §5.2 carve-out 2). Two consumers:
+  `commands/item/time-track/start.ts` + `... /stop.ts` (three-
+  level command depth via nested `ensureSubcommand`). The api
+  primitives `startTimeTracking` / `stopTimeTracking` reject
+  every invocation today with `usage_error` carrying the
+  `API_UNSUPPORTED_HINT` constant — empirical probe at M20
+  implementation kickoff (2026-05-10, against API version
+  `2026-01`) confirmed Monday's public GraphQL API does not
+  currently expose any mutation for writing to time_tracking
+  columns: `change_simple_column_value` rejects with
+  `CorrectedValueException` for every candidate value;
+  `change_column_value` rejects with `InvalidColumnTypeException`
+  for every candidate JSON shape; the mutation root has zero
+  time-tracking-related mutations. The four pre-flight
+  `*Inputs` / `*Result` interfaces stay verbatim so the
+  runtime body swap is one-sided when Monday ships API support
+  (replace the rejection with the wire call; no consumer
+  change). `StopTimeTrackingResult.durationSeconds: number |
+  null` — null when Monday omits `started_at` on the just-
+  closed session (per-session duration uncomputable; SDK 14.0.0
   exposes only the column-level `TimeTrackingValue.duration`
-  total, not a per-`TimeTrackingHistoryItem` field). No cache
-  surface, no R46 `withBoardInvalidation*` wrapping —
-  `time_tracking` mutations don't affect board structure and
-  the verbs are always-live.
+  total). No cache surface, no R46 `withBoardInvalidation*`
+  wrapping — `time_tracking` mutations don't affect board
+  structure.
 
 ### Post-M9 command surface (M10–M17)
 

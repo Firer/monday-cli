@@ -2,83 +2,77 @@
  * Time-tracking start/stop verb primitives for the v0.3-M20
  * `monday item time-track start / stop` surface (cli-design §5.2
  * carve-out 2 — verb-shaped column-type extensions surface as
- * `<noun> <subnoun> <verb>`). The `time_tracking` column models a
- * state machine rather than a settable value, so the standard
- * `--set` grammar can't address it; M20 ships a dedicated verb
- * pair instead.
+ * `<noun> <subnoun> <verb>`).
+ *
+ * **Documentation-only verbs at v0.3.** An empirical probe against a
+ * real Monday workspace on 2026-05-10 against API version `2026-01`
+ * confirmed that Monday's public GraphQL API exposes **no mutation
+ * for writing to `time_tracking` columns**:
+ *
+ *   - `change_simple_column_value` rejects every candidate value
+ *     (`"true"`, `"false"`, `"start"`, `"stop"`) with
+ *     `CorrectedValueException`. Verbatim Monday response: *"column
+ *     type DurationColumn is not supporting changing the column
+ *     value with simple column value, please check our API
+ *     documentation for the correct data structure for this
+ *     column."* — paraphrased elsewhere for brevity.
+ *   - `change_column_value` rejects every candidate JSON shape
+ *     (`{running:true}`, `{running:false}`, `{started_at}`,
+ *     `{ended_at}`, `{}`) with `InvalidColumnTypeException`.
+ *     Verbatim Monday response: *"This column type is not supported
+ *     yet in the API"* (`actual_type: "DurationColumn"`).
+ *   - Full mutation-root introspection (152 mutations) found zero
+ *     time-tracking-related mutations matching
+ *     `/time|track|session|duration|start|stop|play|pause|timer/i`.
+ *
+ * The pre-flight contract assumed `change_simple_column_value` would
+ * route through; that assumption was empirically wrong. M20 ships the
+ * verbs **as documentation-only** so the CLI surface is stable when
+ * Monday eventually exposes the underlying mutation: agents can
+ * grep for `monday item time-track start` and see a registered verb
+ * that today rejects with a clear `usage_error` and a hint pointing
+ * at Monday's UI as the only write path.
  *
  * **Two surfaces.**
  *
  *   - `startTimeTracking({client, boardId, itemId, columnId, env?})`
- *     — flips the column from stopped → running, opening a new
- *     session whose `started_at` is Monday's wall-clock. Throws
- *     `usage_error` per v0.3-plan §3 M20 Decision 4.1 if the column
- *     is already running.
+ *     — when Monday's API supports it, will flip the column from
+ *     stopped → running. Today, rejects with `usage_error` per the
+ *     `API_UNSUPPORTED_HINT` constant below.
  *   - `stopTimeTracking({client, boardId, itemId, columnId, env?})`
- *     — flips the column from running → stopped, closing the
- *     just-running session and recording its `ended_at` +
- *     `duration_seconds`. Throws `usage_error` per v0.3-plan §3 M20
- *     Decision 4.2 if the column is not running.
+ *     — when Monday's API supports it, will flip the column from
+ *     running → stopped. Today, rejects with the same `usage_error`.
  *
- * **Pre-flight contract diff (this commit) lands type-level
- * signatures only.** Both exported functions throw at runtime to
- * pin the surface ahead of M20's first feat commit; the bodies
- * land at M20 implementation alongside `src/commands/item/time-
- * track/start.ts` + `stop.ts`. The wire-level mutation choice
- * (likely `change_simple_column_value` with the documented Monday
- * time-tracking JSON shape — SDK 14.0.0 does not expose dedicated
- * `start_time_tracking` / `stop_time_tracking` mutations, so the
- * verb pair routes through the generic column-value mutation) is
- * M20-implementation territory; pre-flight pins the internal
- * module surface only.
+ * The four exported `*Inputs` / `*Result` interfaces are kept verbatim
+ * from the pre-flight (`a702af2`) so when Monday ships the mutation,
+ * the api-layer change is small: replace the rejection bodies with
+ * the actual wire call against the pinned input shape. The
+ * `commands/item/time-track/{start,stop}.ts` command files will need
+ * follow-up wiring at the same time — column resolution against board
+ * metadata, `--dry-run` branching to emit `planned_changes`, and an
+ * `emitMutation` call against the primitive's success result.
  *
- * **Why pre-flight pins the signatures.** v0.3-plan §9 preconditions
- * require the M20 contract diff to land before any feat commit so
- * Codex pre-flight can review the contract surface without behaviour
- * changes. Mirrors the `d822982` (M19) / `bed75c6` (M17) / `c0efab5`
- * (M16) cadence.
+ * **Decisions 4.1 / 4.2 / 4.3 (v0.3-plan §3 M20)** stay closed but
+ * unenforceable today — the verb rejects before any state-machine
+ * branch is reachable. They describe the future behavior:
  *
- * **State-conflict semantics — v0.3-plan §3 M20 Decisions 4.1 / 4.2 /
- * 4.3, closed this commit:**
+ *   - **4.1 — `start` against a running column:** future
+ *     `usage_error` with `details.running: true` (state-discriminant);
+ *     hint will point at the stop verb.
+ *   - **4.2 — `stop` against a non-running column:** future
+ *     symmetric `usage_error` with `details.running: false`.
+ *   - **4.3 — Idempotency:** future verbs will be non-idempotent
+ *     (start opens a new session each time; stop closes the open one
+ *     — both throw on invalid pre-state).
  *
- *   - **Decision 4.1 — `start` against a running column:** throws
- *     `usage_error` (reuses the existing code rather than
- *     introducing `time_tracking_already_running`; agents already
- *     branch on the verb they invoked, and `details.running: true`
- *     carries the discriminant — adding a per-state-bug code widens
- *     ERROR_CODES for marginal benefit).
- *   - **Decision 4.2 — `stop` against a non-running column:** throws
- *     `usage_error` symmetric to 4.1; `details.running: false`
- *     carries the discriminant. Same reasoning as 4.1 — no
- *     `time_tracking_not_running` code.
- *   - **Decision 4.3 — Idempotency:** both verbs are non-idempotent.
- *     `start` always opens a new session in valid pre-state (each
- *     call against a stopped column appends a new history entry);
- *     `stop` always closes the just-running session in valid
- *     pre-state. Symmetric: both verbs assume valid pre-state and
- *     surface `usage_error` on invalid pre-state. Agents needing
- *     best-effort `stop` swallow the typed error envelope (the
- *     `details.running: false` discriminant) — `monday item get`
- *     does NOT surface the time-tracking running flag in the
- *     v0.3-M20-pre-flight item-read projection (M20 implementation
- *     may widen the projection per v0.3-plan §3 M20 implementation
- *     deliverables; the typed envelope discriminant is the primary
- *     path either way). The alternative `stop` shape (no-op-on-
- *     stopped, idempotent retry-safe) is defensible but breaks
- *     symmetry with `start` and hides state from agents that branch
- *     on the response.
+ * Today, every invocation throws the same `usage_error` regardless
+ * of pre-state, so the discriminants don't surface yet.
  *
- * **No cache surface.** `time_tracking` columns don't cache — each
- * start/stop is a live mutation that immediately invalidates any
- * stale view of the column anyway. The `env` slot in the inputs is
- * preserved for parity with sibling primitives (test-isolation
- * via tmp `XDG_CACHE_HOME` etc.), not for cache-key resolution.
- *
- * **No board-invalidation fan-out.** `time_tracking` mutations
- * don't affect board structure (rows / columns / groups), so the
- * R46 `withBoardInvalidation*` wrappers don't apply. Time-track
- * verbs invalidate at most the per-item time-entry view — and
- * v0.3 doesn't model that as a cache-keyed surface.
+ * **No cache surface, no board-invalidation fan-out.**
+ * `time_tracking` columns don't cache and don't affect board
+ * structure; the `env` slot in the inputs is preserved for parity
+ * with sibling primitives (test-isolation), not for cache-key
+ * resolution.
  */
 
 import type { MondayClient } from './client.js';
@@ -86,18 +80,14 @@ import type { BoardId, ItemId } from '../types/ids.js';
 import { ApiError } from '../utils/errors.js';
 
 /**
- * Inputs to the `startTimeTracking` primitive. The wire mutation
- * (M20-implementation choice — see file-level docstring) needs the
- * `(board_id, item_id, column_id)` triple — `board_id` is required
- * to scope the column-value mutation per Monday's
- * `change_simple_column_value` signature; the standard `--board
- * <bid>` resolution from cli-design §5.3 step 1 applies (explicit
- * `--board` skips the implicit item-board lookup).
+ * Inputs to the `startTimeTracking` primitive. Pinned at pre-flight
+ * (`a702af2`); kept unchanged so M20-implementation's documentation-
+ * only rejection becomes a one-sided swap to a real wire call when
+ * Monday ships API support.
  *
- * `client` is required because the runtime body fires a live
- * GraphQL mutation; mirrors the M19 pre-flight pattern from
- * `tag-directory.ts` + the `userByEmail` precedent in
- * `resolvers.ts:238`.
+ * `client` + `env` are unused today — the rejection is constructed
+ * synchronously in the body — but the contract retains them so
+ * future implementation has a stable signature.
  */
 export interface StartTimeTrackingInputs {
   readonly client: MondayClient;
@@ -109,8 +99,9 @@ export interface StartTimeTrackingInputs {
 
 /**
  * Inputs to the `stopTimeTracking` primitive. Same shape as
- * `StartTimeTrackingInputs` — the verb pair routes through the
- * same `(board_id, item_id, column_id)` triple at the wire layer.
+ * `StartTimeTrackingInputs` — the verb pair will route through the
+ * same `(board_id, item_id, column_id)` triple at the wire layer
+ * once Monday exposes the mutation.
  */
 export interface StopTimeTrackingInputs {
   readonly client: MondayClient;
@@ -121,15 +112,14 @@ export interface StopTimeTrackingInputs {
 }
 
 /**
- * Result of a successful `startTimeTracking` call. `running: true`
- * is a literal — verb-success implies the column state flipped to
- * running. `startedAt` carries Monday's authoritative
- * session-start timestamp (mirrors `TimeTrackingValue.started_at`
- * from SDK 14.0.0 `index.d.ts:2783` — ISO 8601 datetime string).
+ * Result of a `startTimeTracking` call once Monday's API supports
+ * time-tracking writes. **Aspirational at v0.3** — the verb rejects
+ * today, so this shape never materialises on the wire. Pinned so
+ * agents grepping the type surface see the documented future shape.
  *
- * `itemId` and `columnId` echo the inputs verbatim so the
- * `monday item time-track start` envelope's `data` block can be
- * built from this result alone (no second read leg).
+ * `running: true` is a literal — verb-success implies the column
+ * state flipped to running. `startedAt` carries Monday's
+ * authoritative session-start timestamp.
  */
 export interface StartTimeTrackingResult {
   readonly itemId: string;
@@ -139,23 +129,17 @@ export interface StartTimeTrackingResult {
 }
 
 /**
- * Result of a successful `stopTimeTracking` call. `running: false`
- * is a literal — verb-success implies the column state flipped to
- * stopped. `startedAt` carries the just-stopped session's start
- * timestamp (mirrors `TimeTrackingHistoryItem.started_at` — `null`
- * when Monday omits it on the just-closed session record, e.g.
- * sessions added by automation that never recorded a `started_at`);
- * `endedAt` is the stop wall-clock.
+ * Result of a `stopTimeTracking` call once Monday's API supports
+ * time-tracking writes. **Aspirational at v0.3** — see
+ * `StartTimeTrackingResult`.
  *
- * `durationSeconds` is the just-stopped session's duration in
- * seconds, computed by M20 implementation as
- * `endedAt - startedAt`. **`null` when `startedAt` is `null`** —
- * SDK 14.0.0 exposes no per-`TimeTrackingHistoryItem` duration
- * field (only `TimeTrackingValue.duration` for the column-level
- * total), so without a `startedAt` the per-session duration is
- * uncomputable. The `null` is meaningful (distinguishes "Monday
- * omitted the start" from a zero-length session) per the
- * `.claude/rules/typescript.md` `null`-with-meaning rule.
+ * `startedAt` mirrors `TimeTrackingHistoryItem.started_at` (`null`
+ * when Monday omits it on the just-closed session record);
+ * `endedAt` is the stop wall-clock; `durationSeconds` is the
+ * just-stopped session's duration in seconds, **`null` when
+ * `startedAt` is `null`** — SDK 14.0.0 exposes no per-history
+ * duration field, so without a `startedAt` the per-session duration
+ * is uncomputable.
  */
 export interface StopTimeTrackingResult {
   readonly itemId: string;
@@ -166,63 +150,81 @@ export interface StopTimeTrackingResult {
   readonly durationSeconds: number | null;
 }
 
-const NOT_IMPLEMENTED_HINT =
-  'time-tracking start/stop bodies land at M20 implementation ' +
-  'alongside the `monday item time-track start / stop` command ' +
-  'files. The pre-flight contract diff pins the public surface ' +
-  'only — see docs/v0.3-plan.md §3 M20 + §9 preconditions for the ' +
-  'implementation-session sequencing.';
+/**
+ * Hint string shipped on every documentation-only rejection. Names
+ * the empirical probe (date + API version + the exact error codes
+ * Monday returned for each candidate wire shape) so an agent reading
+ * the envelope's `details.hint` can self-verify the limitation
+ * without re-running the probe themselves.
+ */
+const API_UNSUPPORTED_HINT =
+  "Monday's public GraphQL API does not currently expose a " +
+  'mutation for writing to time_tracking columns. Empirical probe ' +
+  '(2026-05-10, API version 2026-01): change_simple_column_value ' +
+  "rejects every candidate value with CorrectedValueException " +
+  '("DurationColumn does not support simple column value writes"); ' +
+  'change_column_value rejects every candidate JSON shape with ' +
+  'InvalidColumnTypeException ("This column type is not supported ' +
+  'yet in the API"); the mutation root has no time-tracking-' +
+  'related mutation. Use Monday\'s UI to start/stop time-tracking ' +
+  'sessions until Monday ships API support — the verb is ' +
+  'registered for forward-compatibility so agent scripts targeting ' +
+  '`monday item time-track start/stop` are stable across the ' +
+  'eventual swap.';
 
 /**
- * Starts the `time_tracking` column's running session. In valid
- * pre-state (column not running), opens a new history entry with
- * `started_at` = Monday's wall-clock and flips `running: true`.
- * Throws `usage_error` per Decision 4.1 if the column is already
- * running (`details.running: true` discriminant; hint points at
- * `monday item time-track stop`).
+ * Documentation-only `start` verb. Rejects with `usage_error` on
+ * every invocation; the inputs are echoed in `details` so agents
+ * inspecting the envelope can confirm the call site they intended.
  *
- * **Stub body — implementation lands at M20.**
+ * When Monday ships the underlying mutation, replace the body with
+ * the wire call (likely `change_simple_column_value` once Monday
+ * extends DurationColumn's accepted-value enum, or a new dedicated
+ * `start_time_tracking` mutation if Monday exposes one).
  */
-/* c8 ignore start — stub body rejects on every path; M20
-   implementation replaces this with the change_simple_column_value
-   sequence. The non-async signature with `Promise.reject` matches
-   the M20 surface (callers `await` the result) without tripping
-   the require-await lint on a body that has no await yet. */
 export const startTimeTracking = (
-  _inputs: StartTimeTrackingInputs,
+  inputs: StartTimeTrackingInputs,
 ): Promise<StartTimeTrackingResult> =>
   Promise.reject(
     new ApiError(
-      'internal_error',
-      'startTimeTracking is a v0.3-M20 pre-flight stub — the runtime ' +
-        'body lands when the time-track verb pair ships at M20 ' +
-        'implementation.',
-      { details: { hint: NOT_IMPLEMENTED_HINT } },
+      'usage_error',
+      "`monday item time-track start` is registered for forward-" +
+        "compatibility but cannot fire today — Monday's public API " +
+        'does not currently support writing to time_tracking columns.',
+      {
+        details: {
+          board_id: inputs.boardId,
+          item_id: inputs.itemId,
+          column_id: inputs.columnId,
+          hint: API_UNSUPPORTED_HINT,
+        },
+      },
     ),
   );
-/* c8 ignore stop */
 
 /**
- * Stops the `time_tracking` column's running session. In valid
- * pre-state (column running), closes the open history entry with
- * `ended_at` = Monday's wall-clock, records `duration_seconds`,
- * and flips `running: false`. Throws `usage_error` per Decision
- * 4.2 if the column is not running (`details.running: false`
- * discriminant; hint points at `monday item time-track start`).
- *
- * **Stub body — implementation lands at M20.**
+ * Documentation-only `stop` verb. Mirrors `startTimeTracking`'s
+ * rejection shape; differs only in the verb name in the
+ * envelope's `error.message` (so agents grepping the envelope
+ * for "time-track stop" vs "time-track start" can disambiguate
+ * the call site they invoked).
  */
-/* c8 ignore start — stub body rejects on every path. */
 export const stopTimeTracking = (
-  _inputs: StopTimeTrackingInputs,
+  inputs: StopTimeTrackingInputs,
 ): Promise<StopTimeTrackingResult> =>
   Promise.reject(
     new ApiError(
-      'internal_error',
-      'stopTimeTracking is a v0.3-M20 pre-flight stub — the runtime ' +
-        'body lands when the time-track verb pair ships at M20 ' +
-        'implementation.',
-      { details: { hint: NOT_IMPLEMENTED_HINT } },
+      'usage_error',
+      "`monday item time-track stop` is registered for forward-" +
+        "compatibility but cannot fire today — Monday's public API " +
+        'does not currently support writing to time_tracking columns.',
+      {
+        details: {
+          board_id: inputs.boardId,
+          item_id: inputs.itemId,
+          column_id: inputs.columnId,
+          hint: API_UNSUPPORTED_HINT,
+        },
+      },
     ),
   );
-/* c8 ignore stop */

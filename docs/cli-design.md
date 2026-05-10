@@ -1761,31 +1761,55 @@ monday item history <iid>                 # activity log: status / col / assign 
                                           # changes + comments, chronological
 
 # Time tracking — verb-shaped column-type extension (§5.2 carve-out 2)
+# DOCUMENTATION-ONLY at v0.3-M20: an empirical probe (2026-05-10,
+# API version 2026-01) confirmed Monday's public GraphQL API does
+# not currently support writing to time_tracking columns —
+# `change_simple_column_value` rejects with CorrectedValueException
+# ("DurationColumn does not support simple column value writes"),
+# `change_column_value` rejects with InvalidColumnTypeException
+# ("This column type is not supported yet in the API"), and the
+# mutation root has no time-tracking-related mutation. The verbs
+# below are registered for forward-compatibility so agent scripts
+# targeting `monday item time-track start/stop` are stable across
+# the eventual swap; today they reject every invocation with a
+# `usage_error` carrying the empirical-probe hint pointing at
+# Monday's UI as the only write path. The argv shapes pin the
+# future behaviour — when Monday ships API support, the CLI swap
+# is one-sided in `src/api/time-tracking.ts`.
 monday item time-track start <iid> [--column <col>] [--board <bid>] [--dry-run]   v0.3
-                                          # Flips the time_tracking column on the
-                                          # named item from stopped → running, opening
-                                          # a new history session whose `started_at`
-                                          # is Monday's wall-clock.  --column <col>
-                                          # selects the time_tracking column when an
-                                          # item carries more than one; omitted when
-                                          # the item has exactly one (resolved via
-                                          # board metadata). --board <bid> follows the
-                                          # standard §5.3 step-1 contract — explicit
-                                          # is authoritative, implicit looks up the
-                                          # item's board and caches for the process.
-                                          # `usage_error` (exit 1) when the column is
-                                          # already running per Decision 4.1
+                                          # FUTURE behaviour: flips the time_tracking
+                                          # column on the named item from stopped →
+                                          # running, opening a new history session
+                                          # whose `started_at` is Monday's wall-clock.
+                                          # --column <col> selects the time_tracking
+                                          # column when an item carries more than one;
+                                          # omitted when the item has exactly one
+                                          # (resolved via board metadata). --board
+                                          # <bid> follows the standard §5.3 step-1
+                                          # contract — explicit is authoritative,
+                                          # implicit looks up the item's board and
+                                          # caches for the process. Future error
+                                          # surface: `usage_error` (exit 1) when the
+                                          # column is already running per Decision 4.1
                                           # (`details.running: true` discriminates;
                                           # hint points at `monday item time-track
                                           # stop`). Idempotent: NO — each successful
                                           # call against a stopped column appends a
                                           # new history session. NOT destructive
                                           # (no --yes gate).
+                                          # CURRENT behaviour (v0.3): every invocation
+                                          # rejects with `usage_error` carrying the
+                                          # empirical-probe hint; the --board lookup
+                                          # still fires (so invalid item IDs surface
+                                          # as `not_found` for agent UX consistency
+                                          # across item verbs); --column resolution
+                                          # is intentionally skipped (the api
+                                          # primitive throws regardless).
 monday item time-track stop <iid> [--column <col>] [--board <bid>] [--dry-run]    v0.3
-                                          # Flips the time_tracking column from
-                                          # running → stopped, closing the open
-                                          # history session with `ended_at` =
-                                          # Monday's wall-clock + `duration_seconds`
+                                          # FUTURE behaviour: flips the time_tracking
+                                          # column from running → stopped, closing
+                                          # the open history session with `ended_at`
+                                          # = Monday's wall-clock + `duration_seconds`
                                           # for the just-stopped session
                                           # (`duration_seconds: null` when Monday
                                           # omits `started_at` per
@@ -1793,19 +1817,19 @@ monday item time-track stop <iid> [--column <col>] [--board <bid>] [--dry-run]  
                                           # Maybe<Date>` — per-session duration is
                                           # uncomputable without a start). Same
                                           # --column / --board semantics as `start`.
-                                          # `usage_error` (exit 1) when the column is
-                                          # not running per Decision 4.2
-                                          # (`details.running: false` discriminates;
-                                          # hint points at `monday item time-track
-                                          # start`). Idempotent: NO — re-running
-                                          # against a now-stopped column surfaces
-                                          # `usage_error`; agents needing best-effort
-                                          # stop swallow the typed envelope (the
-                                          # `details.running: false` discriminant)
-                                          # rather than rely on a pre-check, since
-                                          # `monday item get` does not surface the
-                                          # time-tracking running flag in the
-                                          # v0.3-M20-pre-flight item-read projection.
+                                          # Future error surface: `usage_error`
+                                          # (exit 1) when the column is not running
+                                          # per Decision 4.2 (`details.running:
+                                          # false` discriminates; hint points at
+                                          # `monday item time-track start`).
+                                          # Idempotent: NO per Decision 4.3 — agents
+                                          # needing best-effort stop swallow the
+                                          # typed envelope.
+                                          # CURRENT behaviour (v0.3): mirrors
+                                          # `start` — rejects with `usage_error`
+                                          # carrying the same `API_UNSUPPORTED_HINT`
+                                          # (single source-of-truth in
+                                          # `src/api/time-tracking.ts`).
 
 # Subitems
 monday item subitems <iid>                # list children                    v0.1
@@ -4470,25 +4494,50 @@ mutation verbs produce different planned-change shapes; the
 
 - **Time-track shape** (`item time-track start` / `item
   time-track stop`; v0.3 M20). Verb-shaped column-type
-  extension per §5.2 carve-out 2. Carries `operation:
-  "start_time_tracking"` / `"stop_time_tracking"`,
-  `item_id`, `column_id`, and a `current_state` slot
-  echoing the column's pre-mutation state read from
-  `TimeTrackingValue.{running, started_at}` for the
-  verb-specific discriminant (`{running: false}` for the
-  `start` dry-run; `{running: true, started_at}` for the
-  `stop` dry-run). Two-leg dry-run (item-read for state
-  + column-metadata resolution); `meta.source` is
-  `'live'` or `'mixed'` depending on whether the column-
-  metadata leg hit cache. The `current_state` shape
+  extension per §5.2 carve-out 2.
+  **Documentation-only at v0.3** — empirical probe
+  (2026-05-10, API version 2026-01) confirmed Monday's
+  public API does not currently support writing to
+  time_tracking columns; the verbs ship as forward-
+  compatibility markers and reject every invocation with
+  `usage_error`. The envelope shapes below describe the
+  FUTURE behaviour that will materialise when Monday
+  ships API support and the api primitive's rejection
+  body is replaced with the real wire call.
+
+  Future live envelope: `operation: "start_time_tracking"
+  / "stop_time_tracking"`, `item_id`, `column_id`,
+  `running` literal, plus `started_at` (start) or
+  `started_at`/`ended_at`/`duration_seconds` (stop).
+  `ended_at` is always populated on stop-success
+  (Monday's wall-clock when the session closed);
+  `started_at` and `duration_seconds` are nullable —
+  Monday omits `started_at` on automation-added
+  sessions per `TimeTrackingHistoryItem.started_at:
+  Maybe<Date>`, and per-session duration is
+  uncomputable without a start timestamp.
+
+  Future dry-run envelope: carries a `current_state`
+  slot echoing the column's pre-mutation state read
+  from `TimeTrackingValue.{running, started_at}`. Both
+  verbs surface both fields verbatim — `{running:
+  false, started_at: null}` for `start` dry-run (the
+  column was stopped, so `started_at` from the open
+  session is by definition null);
+  `{running: true, started_at: <iso>}` for `stop` dry-
+  run (the column is running, so `started_at` is
+  populated). Two-leg dry-run (item-read for state +
+  column-metadata resolution); `meta.source` is
+  `'live'` or `'mixed'` depending on cache hits in the
+  column-metadata leg. The `current_state` shape
   mirrors `item-archive`'s `item: <projected source
   snapshot>` slot in role (preview the pre-mutation
-  state) but ships a minimal verb-specific subset rather
-  than a full single-resource projection — time_tracking
-  state is a two-field discriminant (`running` +
-  `started_at`), so a full item projection would carry
-  every other column's value verbatim and add visual
-  noise without preview signal:
+  state) but ships a minimal verb-specific subset
+  rather than a full single-resource projection —
+  time_tracking state is a two-field discriminant.
+
+  Future shape (will materialise when Monday ships
+  API support):
 
   ```json
   {
@@ -4507,14 +4556,30 @@ mutation verbs produce different planned-change shapes; the
   }
   ```
 
-  Live envelope diverges from the dry-run shape — `data`
-  is the §6.2 single-resource shape echoing what the
-  verb just changed (operation + item_id + column_id +
-  running + started_at; `stop` adds ended_at +
-  duration_seconds, both nullable when Monday omits
-  started_at on the just-closed session). See output-
-  shapes.md `item (mutations)` § for the full live + dry-
-  run envelopes.
+  Current shape (v0.3 — every invocation, including
+  `--dry-run`, surfaces the same `usage_error`):
+
+  ```json
+  {
+    "ok": false,
+    "error": {
+      "code": "usage_error",
+      "message": "`monday item time-track start` is registered for forward-compatibility but cannot fire today — Monday's public API does not currently support writing to time_tracking columns.",
+      "request_id": "...",
+      "details": {
+        "board_id": "111",
+        "item_id": "12345",
+        "column_id": "duration",
+        "hint": "Monday's public GraphQL API does not currently expose a mutation for writing to time_tracking columns. Empirical probe (2026-05-10, API version 2026-01): change_simple_column_value rejects every candidate value with CorrectedValueException ...; change_column_value rejects every candidate JSON shape with InvalidColumnTypeException ...; the mutation root has no time-tracking-related mutation. Use Monday's UI to start/stop time-tracking sessions until Monday ships API support — the verb is registered for forward-compatibility so agent scripts targeting `monday item time-track start/stop` are stable across the eventual swap."
+      }
+    },
+    "meta": { ..., "source": "live", ... }
+  }
+  ```
+
+  See output-shapes.md `item (mutations)` § for the
+  full live + dry-run envelopes (future) and the
+  current-state error envelope.
 
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than

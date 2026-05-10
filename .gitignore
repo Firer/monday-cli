@@ -44,3 +44,8 @@ npm-debug.log*
 # Per-session handover artifacts — preserved for the next agent run,
 # not committed.
 .session-handover/
+
+# Throwaway probes (M20: scripts/probe-{bootstrap,time-tracking}.ts
+# poke a real Monday workspace to pin wire shapes). Local only —
+# never committed.
+scripts/

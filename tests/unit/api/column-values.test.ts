@@ -691,11 +691,13 @@ describe('translateColumnValue — future-roadmap types', () => {
     }
   });
 
-  it('time_tracking → unsupported_column_type with deferred_to: "v0.3" (Codex M18 round-2 P2)', () => {
+  it('time_tracking → unsupported_column_type with deferred_to: "v0.3" + verb-pointing hint (M20)', () => {
     // cli-design §5.3 writer-expansion roadmap row: time_tracking
     // uses start/stop verbs, not value writes. Pinned as a v0.3
-    // candidate. Pre-fix the runtime sent it through the generic
-    // `future` branch; the M18 round-2 fix special-cased it.
+    // candidate. M18 round-2 special-cased it; M20 sharpened the
+    // hint to point at the documentation-only verbs (registered at
+    // M20 implementation, throwing `usage_error` until Monday's API
+    // ships time_tracking writes — probed 2026-05-10).
     expect(() => translate('time_tracking', 'whatever', 'col_z')).toThrow(
       /start\/stop verbs/u,
     );
@@ -709,6 +711,16 @@ describe('translateColumnValue — future-roadmap types', () => {
         type: 'time_tracking',
         deferred_to: 'v0.3',
       });
+      // M20 verb-pointing hint: names the start + stop verbs by
+      // their documented argv shape so an agent reading the hint
+      // has a copy-pasteable next command, plus the
+      // documentation-only caveat so the agent knows the verbs
+      // currently throw rather than silently failing.
+      const hint = err.details?.hint as string;
+      expect(hint).toMatch(/monday item time-track start/u);
+      expect(hint).toMatch(/monday item time-track stop/u);
+      expect(hint).toMatch(/forward-compatibility/u);
+      expect(hint).toMatch(/2026-05-10/u);
     }
   });
 

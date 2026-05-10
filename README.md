@@ -376,8 +376,17 @@ row `tags`, `board_relation`, `dependency`.
 `dependency` friendly translators (slipped from v0.2 tentative at
 M18 close per cli-design §13 + §5.3) graduated; `monday account
 tags` read verb shipped (closes the §6.5 `tag_not_found.details
-.hint` forward-reference). **Deferred to later v0.3 milestones**:
-`monday item time-track start/stop` (M20), `monday auth login` +
+.hint` forward-reference). **M20 closed (documentation-only)**
+— `monday item time-track start <iid>` / `... stop <iid>` are
+registered for forward-compatibility but reject today with
+`usage_error`: an empirical probe (2026-05-10, against API version
+`2026-01`) confirmed Monday's public API does not currently
+support time-tracking column writes (`change_simple_column_value`
++ `change_column_value` both reject; the mutation root has zero
+time-tracking-related mutations). When Monday ships API support,
+the runtime swap is one-sided in `src/api/time-tracking.ts` —
+agent scripts targeting the verbs are stable across the swap.
+**Deferred to later v0.3 milestones**: `monday auth login` +
 `~/.monday-cli/config.toml` multi-profile (M21), `monday status` /
 `monday usage` diagnostics (M22), cross-board `item search` +
 `board favorites` (M23), `item history` (M24),
