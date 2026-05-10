@@ -5004,8 +5004,423 @@ which writes a secrets file at `~/.monday-cli/credentials` (mode 0600).
 
 ### 7.3 v3 — `monday auth login`
 
-OAuth flow. Opens a browser, listens on a localhost port, exchanges the
-code, writes credentials. Out of scope for this design's first pass.
+The agent-facing UX for obtaining a Monday API token without ever
+pasting one into a shell. `monday auth login --profile <name>` opens
+the user's default browser to Monday's OAuth consent screen, listens
+on an ephemeral `127.0.0.1` port for the redirect, exchanges the
+authorisation code for an access token, and writes the token to the
+credentials cache (§7.4).
+
+The wire-level flow (state-CSRF expectations, redirect URI matching
+exactness, scope strings, exact response shapes from
+`/oauth2/authorize` and `/oauth2/token`) is **confirmed at M21
+pre-flight contract diff via empirical probe** per v0.3-plan §22
+R-watch-item. This section pins the agent-facing UX + the local-side
+flow shape; wire-level semantics that depend on Monday's actual OAuth
+implementation are tagged as *probe-time confirmation* below.
+
+**Sibling verb.** `monday auth logout --profile <name>` deletes the
+named profile's entry from `~/.monday-cli/credentials` (§7.4) and is
+idempotent on a missing entry (no-op, `ok: true`).
+
+#### 7.3.1 Flow shape
+
+1. **Generate per-attempt secrets.** A 32-byte cryptographically-random
+   `state` token (anti-CSRF) + a PKCE `code_verifier` (43–128 chars,
+   `[A-Za-z0-9-._~]` per RFC 7636) + the matching SHA-256
+   `code_challenge`. Both live only in process memory; never written
+   to disk. **Probe-time confirmation:** Monday's published OAuth
+   docs at the time of writing list `client_id` + `client_secret` +
+   `code` for the token exchange but do not explicitly document
+   PKCE acceptance (`code_challenge` / `code_verifier` parameters).
+   The M21 pre-flight contract diff probes whether
+   `/oauth2/authorize` accepts `code_challenge` + `code_challenge_method=S256`
+   without rejection AND whether `/oauth2/token` accepts a
+   matching `code_verifier`. Two probe outcomes:
+   - **PKCE accepted** (preferred): the design ships verbatim;
+     `client_secret` becomes optional.
+   - **PKCE not accepted**: the design falls back to `client_secret`-
+     only authentication of the token-exchange call, with the
+     secret pinned in source per the public-OAuth-client convention
+     (the secret authenticates the *app*, not the user; the user's
+     flow is protected by `state` CSRF + the listener-bound
+     `redirect_uri`). The `code_verifier` / `code_challenge` lines
+     drop from the §7.3.1 wire body.
+
+2. **Bind the local listener.** `127.0.0.1:0` (kernel-assigned
+   ephemeral port via `node:net`'s `server.listen(0, '127.0.0.1', …)`).
+   Read the resolved port from `server.address()`. Random-port binding
+   prevents two concurrent `monday auth login` invocations from
+   colliding and avoids requiring users to free a fixed well-known
+   port. **Probe-time confirmation:** Monday's OAuth app must accept
+   `http://127.0.0.1:<port>` with a wildcard / port-range redirect URI
+   pattern; if Monday only accepts a single fixed redirect URI, the
+   M21 pre-flight contract diff falls back to a fixed-port design
+   (`127.0.0.1:9876/callback` is the leaning fixed port) and the
+   parallel-invocation collision becomes a documented limitation.
+
+3. **Open the browser.** Build the consent URL:
+   `https://auth.monday.com/oauth2/authorize?client_id=<cli_client_id>&redirect_uri=http://127.0.0.1:<port>/callback&state=<state>&code_challenge=<challenge>&code_challenge_method=S256&scope=<scopes>`.
+   Open via `open` (macOS) / `xdg-open` (Linux) / `start` (Windows)
+   through `node:child_process`'s `spawn` with `detached: true`.
+   **Fallback:** if no opener is found OR the spawn fails, the CLI
+   prints the consent URL to stderr (never stdout — stdout carries the
+   final envelope) with the wording *"Open this URL in your browser to
+   continue: <url>"* and **continues to listen** for the redirect; the
+   listener is the source of truth, the browser-open is a convenience.
+   This means `monday auth login` works on headless boxes (CI, agent
+   runtimes, SSH sessions) — the user pastes the URL into a browser on
+   another machine that can reach the listening host (typically via
+   SSH port forwarding).
+
+4. **Wait for the redirect.** The listener accepts a single GET request
+   matching `/callback?code=…&state=…` (or `?error=…&state=…` on user
+   denial); reject every other path with `404` and every other state
+   value with `403`. Default listener timeout: **5 minutes** (one
+   in-process timer cancellable via `AbortController` so SIGINT closes
+   the listener cleanly per cli.md "Signal handling"). The listener
+   answers the browser with a static "*You can close this tab now.*"
+   HTML page (no JS, no external resources, no token reflection); the
+   CLI then closes the listener.
+
+5. **Verify CSRF.** The redirect's `state` query param must equal the
+   per-attempt `state` byte-for-byte (`crypto.timingSafeEqual` to avoid
+   timing oracles). Length-mismatched buffers cause
+   `crypto.timingSafeEqual` to throw, so the CSRF-verification path
+   guards on `Buffer.byteLength` equality first AND wraps the
+   comparison so any throw routes to
+   `oauth_failed.reason: "csrf_mismatch"` rather than
+   `internal_error` — a length-mismatched `state` is itself a CSRF
+   signal, not a CLI bug. Mismatch → `oauth_failed` with
+   `details.reason: "csrf_mismatch"`; no token-exchange call follows.
+   `state` is treated as a query param (not a fragment) — this matches
+   Monday's published `redirect_uri` examples; **probe-time
+   confirmation** at M21 pre-flight verifies the encoding.
+
+6. **Exchange the code.** `POST https://auth.monday.com/oauth2/token`
+   with `application/x-www-form-urlencoded` body
+   `grant_type=authorization_code&code=<code>&code_verifier=<verifier>&client_id=<cli_client_id>&redirect_uri=http://127.0.0.1:<port>/callback`.
+   Authorisation codes are documented as short-lived (Monday's docs
+   describe roughly 10-minute validity at the time of writing —
+   **probe-time confirmation** at M21 pre-flight pins the exact TTL
+   from the `/oauth2/token` rejection-response timing); the exchange
+   is the immediate next step after CSRF verification, no user
+   interaction in between. **Probe-time confirmation:** exact
+   response body shape (`{access_token, token_type, scope, …}` vs.
+   Monday-specific extensions) + exact error response shape on
+   rejection (4xx body schema) + whether Monday requires a
+   `client_secret` for public clients (PKCE-only is the leaning shape;
+   if Monday requires a secret for the monday-cli OAuth app, the
+   secret ships pinned in source — public OAuth-client convention,
+   acceptable because the secret authenticates the *app*, not the
+   user, and PKCE protects the user's flow against secret theft).
+
+7. **Write credentials.** On a successful exchange, write the access
+   token + obtained-at timestamp + scopes to
+   `~/.monday-cli/credentials` per §7.4. The write is **silent
+   overwrite** for the named profile — re-running
+   `monday auth login --profile work` after a token rotation refreshes
+   the entry without a confirmation gate; OAuth-token refresh is a
+   normal lifecycle event, not a destructive operation per §3.1's
+   confirmation rule.
+
+8. **Emit the envelope.** Success envelope per §6.1 with
+   `data: { profile: "<name>", account_id: "<id>", scopes: [...] }`.
+   The token itself is **never** in `data` (per §7.4 redaction
+   discipline + .claude/rules/security.md). The success envelope's
+   `account_id` requires one post-exchange `account.id` query so the
+   envelope reports *which* Monday account the OAuth flow authorised
+   against — agents drive this back into a `--profile` selection
+   without re-fetching.
+
+#### 7.3.2 Idempotency
+
+`monday auth login` is **idempotent at the credentials-write layer**
+— re-running with the same `--profile` overwrites the entry. The
+*OAuth flow itself* is non-idempotent (the `code` is single-use per
+OAuth's spec), but agents key off the credentials file's post-write
+state, not the flow's mid-execution state, so the contract-level
+shape is "running this verb leaves the named profile authenticated."
+
+`monday auth logout` is fully idempotent: deletes the named profile
+entry; no-op + `ok: true` on a missing entry.
+
+Both verbs are explicitly **not** under §3.1's destructive-confirmation
+gate — credential rotation is a routine agent operation, not a
+data-mutation that requires `--yes`.
+
+#### 7.3.3 Error surface
+
+Per the M20 Decision 4.1/4.2 reasoning ("agents already branch on the
+verb invoked, plus discriminant in details"), the OAuth flow
+introduces **one new error code** rather than a per-failure-mode
+constellation:
+
+- **`oauth_failed`** (registry row added at M21 pre-flight contract
+  diff alongside the type-level widening; brings registry from 28 →
+  29). Umbrella for OAuth-flow-specific failures, discriminated by
+  `details.reason`:
+
+  | `details.reason` | When | `retryable` | Extra `details` |
+  |---|---|---|---|
+  | `csrf_mismatch` | Redirect's `state` ≠ per-attempt `state` | `false` (security signal — never auto-retry) | — |
+  | `user_denied` | Monday's redirect returns `?error=access_denied&state=…` | `false` | — |
+  | `code_exchange_failed` | `/oauth2/token` returns 4xx | `false` (caller-driven retry of full flow only) | `monday_code` (Monday's error string) |
+  | `timeout` | Listener's 5-min timer fired before redirect arrived | `true` (the underlying user can simply re-run) | — |
+  | `browser_unavailable` | No opener AND the fallback URL print also failed (rare; e.g., closed stderr) | `false` | `url` (the consent URL, so an agent can paste it back) |
+
+Reused codes (NOT new):
+
+- **`network_error`** — DNS / TCP / TLS failures reaching
+  `auth.monday.com`. Same retryable semantics as everywhere.
+- **`timeout`** — HTTP-level request timeout on the `/oauth2/token`
+  POST (distinct from `oauth_failed.reason: "timeout"` which is the
+  listener-wait timeout).
+- **`config_error`** — credentials cache write fails (disk full,
+  permissions, etc.) AFTER a successful exchange. The exchange itself
+  succeeded; the persistence didn't. Agents see exit 3.
+- **`internal_error`** — CLI-side bugs (PKCE generation failure, JSON
+  parse failure on Monday's response, etc.).
+
+#### 7.3.4 Mock OAuth helper for tests
+
+The `__test_oauth_helper` env var (lowercase with leading
+double-underscore — the leading `_` discourages production use; tests
+set it explicitly) opts the CLI into a **fixture-driven** flow that
+bypasses the browser-open + listener steps:
+
+- When set, its value is the path to a JSON fixture file containing
+  `{ "code": "<fixture-code>", "force_csrf_mismatch"?: true, "force_user_denied"?: true, "force_listener_timeout"?: true }`.
+  The fixture **does NOT** carry `state` or `redirect_uri` — both
+  are randomly generated per invocation (32-byte `state` + ephemeral
+  `127.0.0.1:0` port resolution), so tests cannot pre-know them; the
+  helper simulates the redirect arriving with the CLI's *own*
+  generated `state` echoed back, so CSRF verification passes by
+  default.
+- **Default fixture path** (no `force_*` keys set): the CLI generates
+  `state` + `code_verifier` per §7.3.1 step 1, binds the listener per
+  step 2, then short-circuits steps 3–4 (browser-open + listener
+  wait) by directly invoking the same internal handler the real
+  listener would have invoked, with the synthetic redirect carrying
+  the fixture's `code` + the CLI's generated `state`. The flow then
+  proceeds to CSRF verification (step 5, passes) + token exchange
+  (step 6, hits the network boundary).
+- **`force_csrf_mismatch: true`** — the helper substitutes a different
+  random `state` for the simulated redirect, exercising the
+  `oauth_failed.reason: "csrf_mismatch"` path. No token exchange
+  follows.
+- **`force_user_denied: true`** — the helper simulates a
+  `?error=access_denied&state=<echoed-state>` redirect, exercising
+  the `oauth_failed.reason: "user_denied"` path.
+- **`force_listener_timeout: true`** — the helper does not simulate
+  any redirect; the 5-min listener timer fires (test infra fast-
+  forwards via `vi.useFakeTimers()` rather than waiting), exercising
+  the `oauth_failed.reason: "timeout"` path.
+- The token exchange itself still goes through the network boundary
+  (so cassette-driven integration tests cover it via the same
+  `FixtureTransport` discipline as every other API call;
+  `oauth_failed.reason: "code_exchange_failed"` is exercised by a
+  cassette returning the appropriate 4xx response, NOT by a
+  `force_*` fixture key).
+- The env var's *value* (the fixture path) is never echoed to the
+  output envelope, never logged at any verbosity level, and is
+  scrubbed from `--debug` output the same way `MONDAY_API_TOKEN` is.
+
+Production users never set this env var; documenting it in §7.3 makes
+its existence explicit + auditable rather than leaving it as an
+undocumented test-only escape hatch.
+
+#### 7.3.5 OAuth-only at v0.3 — no paste-in fallback
+
+`monday auth login` is OAuth-only at v0.3. There is **no paste-in
+fallback verb** (e.g., `monday auth login --token <value>`); the
+existing `MONDAY_API_TOKEN` env var path (§7.1) is the no-OAuth route
+for users who already have a token in another credential manager.
+Adding paste-in to `auth login` would conflict with cli.md's "CLI
+flags must NOT accept the token" rule (tokens-on-argv leak through
+`ps` / shell history / crash dumps).
+
+If the OAuth flow proves out-of-budget at M21 implementation, paste-in
+becomes a **separate cli-design §7.3 amendment PR with Codex review
+BEFORE M21's first feat commit** — never a quiet implementation
+choice. v0.3-plan §3 M21 already pins this commitment.
+
+### 7.4 Credentials cache
+
+Closes v0.3-plan §8 Decision 3 (auth caching format). Stored as
+plain JSON at `~/.monday-cli/credentials` with mode `0600`; not a
+binary or `gh`/`aws`-style helper format.
+
+#### 7.4.1 File format
+
+```json
+{
+  "schema_version": "1",
+  "profiles": {
+    "work": {
+      "access_token": "<opaque-monday-token>",
+      "obtained_at": "2026-05-10T12:00:00Z",
+      "expires_at": null,
+      "scopes": ["boards:read", "boards:write", "users:read"],
+      "account_id": "12345678"
+    },
+    "personal": {
+      "access_token": "<opaque-monday-token>",
+      "obtained_at": "2026-05-09T08:30:00Z",
+      "expires_at": null,
+      "scopes": ["boards:read"],
+      "account_id": "98765432"
+    }
+  }
+}
+```
+
+Field semantics:
+
+- **`schema_version`** — pinned at `"1"` for v0.3. Reserved for a
+  future migration if the per-profile shape grows incompatibly.
+  Mirrors the `schema/version.json` cache discipline (§8).
+- **`profiles`** — keyed by the profile name from
+  `~/.monday-cli/config.toml`. The credentials file is the
+  authoritative store for tokens; the config file references profiles
+  by name + (optionally) per-profile env-var name (`api_token_env`)
+  for users who prefer env-only credentials.
+- **`profiles.<name>.access_token`** — Monday's opaque OAuth token
+  (no documented internal structure; the CLI treats it as bytes).
+- **`profiles.<name>.obtained_at`** — ISO-8601 UTC timestamp of the
+  successful token exchange. Surfaced via `monday status` (§13 v0.3
+  diagnostics cluster) so agents can self-check token freshness
+  without parsing the credentials file.
+- **`profiles.<name>.expires_at`** — `null` for v0.3 (Monday's
+  documented OAuth tokens don't expire; **probe-time confirmation**
+  at M21 pre-flight verifies whether `/oauth2/token`'s response
+  carries an `expires_in` value, in which case the slot is populated
+  from the response). The slot is preserved as a `string | null`
+  union so a future refresh-token flow doesn't bump
+  `schema_version`.
+- **`profiles.<name>.scopes`** — the granted scopes from
+  `/oauth2/token`'s response. Agents can self-audit ("does this
+  profile have `boards:write`?") without re-running the OAuth flow.
+- **`profiles.<name>.account_id`** — pinned at write-time from the
+  post-exchange `account.id` query (§7.3.1 step 8). Decouples
+  profile-name (user-chosen) from account-identity (Monday-assigned)
+  so a `monday auth status` future verb can show "*profile `work`
+  authenticates against account 12345678*" without an extra round-
+  trip.
+
+**Per-profile token source order.** §7.2 pins the *profile selection*
+order (`--profile` flag > `MONDAY_PROFILE` env > `default_profile` in
+config > implicit v1 mode if no config file). Once a profile is
+selected, the *token source* order within that profile is:
+
+1. **Credentials cache entry** for the named profile in
+   `~/.monday-cli/credentials`, if present + the read-time
+   `fs.fstat`-against-open-descriptor permission check passes
+   (§7.4.2).
+2. **`api_token_env`** reference in the profile's `config.toml` entry,
+   if the named env var is present + populated.
+3. Otherwise → `config_error` with
+   `details.hint: "no token for profile <name> — run \`monday auth login --profile <name>\` or set <api_token_env>"`.
+
+The credentials cache wins over `api_token_env` because
+`monday auth login` is the explicit user action that wrote the cache
+entry; honouring it without requiring a `config.toml` edit is the
+agent-ergonomic default. Users who prefer env-only credentials run
+`monday auth logout --profile <name>` to delete the cache entry,
+which restores the `api_token_env` fallback path. The reverse design
+(env wins over cache) would surprise users who ran
+`monday auth login` and saw their old `api_token_env` value still in
+effect.
+
+#### 7.4.2 Disk discipline
+
+- **Path:** `~/.monday-cli/credentials` (the parent directory is
+  created via `mkdir({ recursive: true, mode: 0o700 })` followed by
+  an explicit `chmod(0o700)` if absent — `mkdir`'s `mode` is
+  advisory under umask on some platforms; mirrors the
+  `src/api/cache.ts` directory-creation pattern).
+- **Mode + atomic write:** every write goes through the same
+  atomic-replace pattern as `src/api/cache.ts`'s `writeJsonFile`:
+  `writeFile(tmpPath, payload, { mode: 0o600 })` →
+  `chmod(tmpPath, 0o600)` (re-applied explicitly because
+  `writeFile`'s `mode` is advisory under umask on some platforms)
+  → `rename(tmpPath, finalPath)` (atomic on the same filesystem).
+  The final path is **never** opened or truncated directly; rename
+  is the only way bytes appear at the final path. A crash mid-write
+  leaves the on-disk credentials file in its prior state.
+- **Read-time verification:** open the file with `fs.open`, then
+  `fs.fstat(fd)` against the open descriptor (TOCTOU-safe — the
+  stat is locked to the file we'll read, not racing a path-based
+  check); if `mode & 0o077 !== 0` (group- or world-readable), the
+  CLI refuses to use the file and surfaces `config_error` with
+  `details.path: "~/.monday-cli/credentials"` +
+  `details.hint: "permissions must be 0600 — run \`chmod 600 ~/.monday-cli/credentials\`"`.
+  Mirrors the `.claude/rules/security.md` "File permissions" rule.
+- **HOME-scoped, never repo-tracked.** The credentials file lives
+  under the user's HOME, outside any project tree the CLI is
+  invoked from — there is no path under which a normal `git add`
+  or `git status` would surface it. Test fixtures that simulate
+  the file (M21 leak-test discipline, §7.4.3) live in
+  `tests/fixtures/` per project convention with synthetic
+  canary tokens; the production credentials path is never
+  shadowed into the repo.
+
+#### 7.4.3 Redaction discipline
+
+The credentials cache content **never** appears in any CLI output
+path. Specifically:
+
+- **`access_token`** values are scrubbed from `--debug` output, error
+  envelopes (`error.details.*`, `error.message`, `error.cause.*`),
+  `monday cache list` output, `monday config show` output, and any
+  future diagnostic verb. Two scrubbing layers per
+  `.claude/rules/security.md` "Redaction in output":
+  1. Key-based filter — `access_token` joins the existing
+     sensitive-key list (`apiToken`, `Authorization`,
+     `MONDAY_API_TOKEN`, generic `(token|secret|password|api[-_]?key)`
+     regex).
+  2. Value-scanning filter — when the CLI has loaded credentials
+     from the file at startup, every loaded `access_token` value is
+     added to the runtime's secret-bag passed to
+     `redact()`, so any unkeyed string occurrence (e.g., a token
+     accidentally appearing in `Error.message`) is replaced with
+     `[REDACTED]`.
+- **Test coverage:** the M21 leak-test surface mirrors M2's discipline
+  — a fixture credentials file with a canary token (`tok-cred-leak-
+  xxxx`); every emission path of every command run against that
+  fixture asserts the canary is absent from every emitted byte.
+- **`monday config show`** displays per-profile metadata
+  (`obtained_at`, `scopes`, `account_id`) but NEVER the
+  `access_token` value — the resolved-config output reports
+  `access_token: "<set>"` / `"<unset>"`, never bytes.
+
+#### 7.4.4 Threat model
+
+Mode `0600` + single-user-CLI ownership is the v0.3 threat model
+floor. The CLI is a single-user tool running on the user's own
+machine with their own UID; the threat model does **not** cover:
+
+- **Shared-account / multi-user-machine attackers.** A second user
+  on the same machine with `root` or the same UID can read the file.
+  Mitigation belongs to the OS, not the CLI.
+- **Disk imaging / backup leaks.** Backup tools that snapshot HOME
+  capture the credentials file. Users who care should exclude
+  `~/.monday-cli/credentials` from their backup tool, the same way
+  they exclude `~/.aws/credentials` or `~/.npmrc`.
+- **OS keyring integration (macOS Keychain, Windows Credential
+  Manager, libsecret).** Deferred to v0.4+ if a multi-user / shared-
+  machine threat model emerges. The keyring-vs-file decision is
+  cleanly orthogonal to v0.3's contract surface — a future
+  `keyring`-backed implementation reads + writes the same
+  per-profile shape via different storage primitives without
+  bumping `schema_version`.
+- **Process-memory dumps.** Tokens live in process memory during
+  any CLI invocation that calls a Monday API. Memory-dump attackers
+  are out of scope for a CLI tool.
+
+The threat model is deliberately documented so future Codex passes /
+security reviews can challenge it explicitly; "we considered and
+deferred OS-keyring" is a stronger contract than silence.
 
 ## 8. Caching
 
@@ -5684,10 +6099,13 @@ So an agent reading the contract knows what's *not* there yet:
    that's 100 req/min just from polling. Cap concurrent watches
    per profile? Single-process backoff if Monday signals
    `concurrency_exceeded`?
-5. **Auth caching format (v0.3).** `monday auth login` should
-   produce a file compatible with `gh`/`aws`-style credentials
-   helpers, or use our own format? Lean toward our own JSON for
-   simplicity, file mode 0600.
+5. **Auth caching format (v0.3).** **Closed:** plain JSON at
+   `~/.monday-cli/credentials` with mode `0600`; not
+   `gh`/`aws`-style. File format pinned in §7.4 ahead of M21 with
+   Codex-reviewed extension PR (closes v0.3-plan §8 Decision 3).
+   OS-keyring integration deferred to v0.4+ if a multi-user
+   threat model emerges; see §7.4.4 for the explicit threat-model
+   commitment.
 6. **Deterministic pagination resume.** Today (§5.6) we fail-fast
    on `stale_cursor`. A future enhancement: the CLI emits a "resume
    token" in the failure that includes the last-seen item ID and a
