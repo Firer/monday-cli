@@ -404,6 +404,7 @@ extensions); see §5.2 for the rule and §5.9 / §4.3 for the surfaces.
 | `doc` | Document | Read-only in v1. |
 | `notification` | Notification | Send only. |
 | `dev` | Monday Dev convenience | Sprint, epic, release shortcuts. |
+| `auth` | OAuth-issued credentials cache | `login` / `logout` per profile (v0.3-M21; see §7.3 / §7.4). |
 | `cache` | Local board-metadata cache | Inspect, clear. |
 | `config` | Effective config | Show resolved env, mask token. |
 | `raw` | Arbitrary GraphQL escape hatch | For agents that need a query the CLI doesn't surface. |
@@ -1964,6 +1965,15 @@ monday dev task list [--mine] [--status not_done] [--sprint current]         v0.
 monday dev task start <iid>               # status → "Working on it"         v0.3
 monday dev task done <iid> [--message <m>] # status → "Done" + optional update v0.3
 monday dev task block <iid> --reason <r>  # status → "Stuck" + comment       v0.3
+
+# === AUTH (per-profile OAuth credentials cache; see §7.3 / §7.4) ===
+monday auth login --profile <name>        # OAuth dance + writes credentials v0.3
+                                          # cache entry (mode 0600). Headless-
+                                          # friendly URL-print fallback when
+                                          # no browser opener is found
+monday auth logout --profile <name>       # delete the named profile's        v0.3
+                                          # credentials cache entry; idempotent
+                                          # on missing entry
 
 # === RAW (escape hatch) ===
 monday raw <query> [--vars <json>] [--allow-mutation] [--operation-name <n>] v0.1
