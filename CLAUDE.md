@@ -65,19 +65,26 @@ convention.
    `monday status` need verification against `2026-01` before
    stub bodies land.
 
-**R-class state at M21 close** (full detail in
-`docs/v0.3-plan.md` §22):
+**R-class state (post-M21 coverage-push close)** (full
+detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close).
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions` (fires
-  at `monday auth status`, v0.3.x); R-NEW-3 `wrapFsError`
-  factory (may fire at M22 if `monday status` adds a third
-  named wrap site).
+  at `monday auth status`, v0.3.x — the helper now carries a
+  `c8 ignore` on its HOME-undefined branch in both login.ts +
+  logout.ts that the lift can clean up at the lift point);
+  R-NEW-3 `wrapFsError` factory (may fire at M22 if
+  `monday status` adds a third named wrap site).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (single-consumer; second at M22 status probes);
   Post-OAuth fresh-transport pattern (single-consumer; ratified
   by Codex M21 P1); `c8 ignore` vs v8 branch-coverage friction
-  (tooling).
+  (tooling — recovered at `7058754` without provider switch;
+  watch-item stays open for the next floor cycle, but the
+  recovery established `c8 ignore start/stop` block-wraps as
+  the project default per testing.md); **filesystem-state
+  probes** for non-ENOENT fs-error branches (test-pattern;
+  EISDIR-via-dir-at-path probe ratified at `7058754`).
 
 ## Pre-flight contract diff discipline
 

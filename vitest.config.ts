@@ -59,18 +59,21 @@ export default defineConfig({
         // associated branch indicators against the percentage.
         //
         // The post-M21 coverage-push session recovered the 95.45
-        // floor (94.5 → 95.45) by (a) writing six targeted tests
-        // around emit.ts mutation slots, the buildProgram default
-        // cliDescription, the OAuth bindOAuthListener default args,
+        // floor (94.5 → 95.45) by (a) writing seven targeted tests
+        // around emit.ts mutation slots (`output` + `sideEffects`
+        // ternaries), buildProgram's default cliDescription
+        // fallback, the OAuth bindOAuthListener default-args paths,
         // an EISDIR-via-dir-at-path readCredentials probe, and the
         // global-flag-wins profile-resolution path; and (b) folding
-        // ten broken multi-line `/* c8 ignore */` directives into
-        // their two-line form (single-line directive + separate
-        // explanation comment) so v8 actually honours them — the
-        // testing.md "c8 ignore syntax gotcha" subsection documents
-        // the multi-line trap. Measured project-wide branches at
-        // recovery: 95.56% with a 0.11pp margin against the new
-        // floor. Raise as code lands; never lower below 94.5.
+        // ten broken multi-line `/* c8 ignore next N */` directives
+        // into the `/* c8 ignore start */` / `/* c8 ignore stop */`
+        // block-wrap form so v8 actually honours them — the
+        // testing.md "c8 ignore syntax gotcha" subsection (and its
+        // new "block-wrap" subsection) documents the multi-line
+        // trap and the recovery's preferred discipline. Measured
+        // project-wide branches at recovery: 95.56% with a 0.11pp
+        // margin against the new floor. Raise as code lands; never
+        // lower below 94.5.
         lines: 95,
         branches: 95.45,
         functions: 95,

@@ -61,7 +61,53 @@ closing `*/`, so embedding prose inside the directive comment confuses
 the parser. Symptom: a defensively-guarded branch shows up as uncovered
 even though the directive looks correct. M12's upsert.ts lift recovered
 8 branches across 4 sites by converting multi-line directives to the
-single-line form.
+single-line form. The post-M21 coverage push (`7058754`) recovered
+~14 branches across the OAuth / credentials / profiles / cli/program
+modules using the same conversion plus the block-wrap form below.
+
+### `c8 ignore start/stop` block-wrap (preferred for production-only blocks)
+
+For production-only conditional branches — `if (err.code === 'EADDRINUSE')`
+where only the truthy arm is reachable from a unit test, race-window
+guards in async event handlers, the `ctx.transport ?? createFetchTransport(...)`
+fresh-transport pattern in `src/commands/auth/login.ts:fetchAccountId` —
+prefer the block-wrap form over single-line `/* c8 ignore next N */`:
+
+```ts
+// Non-EADDRINUSE bind errors are rare (EACCES on privileged ports,
+// ENOMEM, etc.) and not reproducible from a unit test against
+// 127.0.0.1:0; the EADDRINUSE arm has a dedicated test.
+/* c8 ignore start */
+rejectBind(
+  new ApiError(
+    'oauth_failed',
+    `local OAuth listener failed to bind 127.0.0.1:${String(requestedPort)}: ${err.message}`,
+    { details: { reason: 'port_in_use', port: requestedPort }, cause: err },
+  ),
+);
+/* c8 ignore stop */
+```
+
+Why prefer block-wrap over `c8 ignore next N`:
+
+- **Self-delimiting.** No `N` to drift when surrounding code is added
+  or removed. A stale `N` silently un-ignores statements that should
+  still be ignored.
+- **Survives refactors.** Reformatting the wrapped block (line-wrap
+  changes, parameter reordering) doesn't break the directive.
+- **Both arms ignored.** For `if (production-condition) { ... } else { ... }`
+  patterns where the test path covers only one arm, the wrap removes
+  both the covered + uncovered branch indicators from v8's count —
+  net positive for the branches percentage and avoids a misleading
+  "1 of 2 paths covered" signal that hides the production-only nature.
+
+Single-line `/* c8 ignore next */` (no `N`) stays fine for one-line
+ignores where line-count drift can't bite (e.g., the `req.url ?? '/'`
+defensive default below the directive). The block-wrap is for blocks
+of statements OR conditionals where you want both arms ignored.
+
+The testing.md syntax-gotcha rule still applies inside block-wraps:
+explanation comments go on separate lines from the directive markers.
 
 ## Test layers
 
