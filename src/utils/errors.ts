@@ -7,10 +7,16 @@
  * close prerequisite (cli-design §6.5 entry landed at `4c652d5`); the
  * runtime throw site lands at M19 implementation when the `tags`
  * friendly translator + `tag-directory.ts` ship — but the union
- * widens here in the M19 pre-flight contract diff so M19 feat commits
- * throw into a stable typed surface (28 total). `dev_*` codes ship
- * in v0.3 but are listed here so the M5b agent doesn't need to
- * backfill the type.
+ * widens at the M19 pre-flight contract diff so M19 feat commits
+ * throw into a stable typed surface (28 total). `oauth_failed` joined
+ * at the v0.3-M21 pre-flight contract diff as the `monday auth login`
+ * umbrella per cli-design §7.3.3 (29 total) — `details.reason`
+ * discriminates the failure mode (`csrf_mismatch`, `user_denied`,
+ * `authorization_failed`, `code_exchange_failed`, `timeout`,
+ * `port_in_use`, `browser_unavailable`); the runtime throw sites land
+ * at M21 implementation when `src/api/oauth.ts` + `src/commands/auth/*`
+ * ship their wire bodies. `dev_*` codes ship in v0.3 but are listed here
+ * so the M5b agent doesn't need to backfill the type.
  */
 
 export const ERROR_CODES = [
@@ -35,6 +41,7 @@ export const ERROR_CODES = [
   'resource_locked',
   'validation_failed',
   'stale_cursor',
+  'oauth_failed',
   'config_error',
   'cache_error',
   'network_error',
@@ -128,6 +135,7 @@ export const CODE_RETRYABLE_DEFAULT: Readonly<Record<ErrorCode, boolean>> = Obje
   resource_locked: true,
   validation_failed: false,
   stale_cursor: false,
+  oauth_failed: false,
   config_error: false,
   cache_error: true,
   network_error: true,
@@ -169,6 +177,7 @@ export const CODE_TYPICAL_HTTP_STATUS: Readonly<Record<ErrorCode, number | null>
   resource_locked: 423,
   validation_failed: 200,
   stale_cursor: 200,
+  oauth_failed: null,
   config_error: null,
   cache_error: null,
   network_error: null,
@@ -260,6 +269,7 @@ export const exitCodeForError = (code: ErrorCode): ExitCode => {
   switch (code) {
     case 'usage_error':
     case 'confirmation_required':
+    case 'oauth_failed':
       return 1;
     case 'config_error':
       return 3;

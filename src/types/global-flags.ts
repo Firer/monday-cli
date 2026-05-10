@@ -23,8 +23,20 @@ import { UsageError } from '../utils/errors.js';
  *    schema, then projects into the normalised `GlobalFlags` shape
  *    the rest of the codebase consumes (`noCache`, `noColor`,
  *    `columns: string[]`). Also resolves `--profile` against
- *    `MONDAY_PROFILE` env per the §8 decision-5 deferral
- *    (accept absent or `default`; anything else is `usage_error`).
+ *    `MONDAY_PROFILE` env per cli-design §7.2 (`--profile` flag >
+ *    `MONDAY_PROFILE` env; mismatch is `usage_error`). The actual
+ *    profile-config + credentials-cache lookup happens later in
+ *    `cli/run.ts`'s config-load step at v0.3-M21 implementation;
+ *    pre-flight only widens the structural acceptance.
+ *
+ * **v0.3-M21 pre-flight widening.** Pre-v0.3 the resolver rejected
+ * any profile name other than `default` with a v0.3 hint; with the
+ * §7.2 / §7.3 / §7.4 surface in force from M21 onwards, any non-
+ * empty profile name parses through structurally. The actual
+ * resolution-to-token step (cache > api_token_env > config_error)
+ * lands at M21 implementation in `cli/run.ts`; until then, non-auth
+ * commands using `--profile work` silently use the implicit-v1
+ * (`MONDAY_API_TOKEN`) token.
  *
  * Codex review §4–§6 caught the original schema's drift — it
  * declared `noCache: boolean` and `columns: string[]` and tested
@@ -32,10 +44,6 @@ import { UsageError } from '../utils/errors.js';
  * This rewrite uses commander's actual shape on the input boundary
  * and produces the consumer-friendly shape on the output boundary.
  */
-
-const PROFILE_V03_HINT =
-  'Multi-profile support lands in v0.3 (`monday auth login`). ' +
-  'For now, omit --profile/MONDAY_PROFILE or set them to `default`.';
 
 const apiVersionSchema = z
   .string()
@@ -115,7 +123,7 @@ export interface GlobalFlags {
   readonly noColor: boolean;
   readonly noCache: boolean;
 
-  readonly profile: 'default' | undefined;
+  readonly profile: string | undefined;
   readonly apiVersion: string | undefined;
   readonly timeout: number | undefined;
   readonly retry: number;
@@ -138,15 +146,24 @@ const splitColumns = (raw: string | undefined): readonly string[] | undefined =>
 };
 
 /**
- * `--profile` deferral (`v0.1-plan.md` §8 decision 5). Accept absent
- * or the literal `default`; anything else is `usage_error` with a
- * v0.3 hint. `MONDAY_PROFILE` env is treated identically — flag and
- * env must agree if both are set.
+ * `--profile` source-priority resolver per cli-design §7.2.
+ *
+ * Returns the chosen profile name (or `undefined` when neither flag
+ * nor env is set, signalling the implicit-v1 path). The flag wins
+ * over the env when both are set to the same value; a mismatch
+ * surfaces `usage_error` per the same rule.
+ *
+ * **v0.3-M21 pre-flight surface.** Any non-empty string parses
+ * through; the actual lookup (does the named profile exist in
+ * `~/.monday-cli/config.toml`? does `~/.monday-cli/credentials`
+ * have an entry for it? is the named `api_token_env` populated?)
+ * is M21 implementation work in `cli/run.ts`'s config-load step.
+ * `parseGlobalFlags` does NOT touch the filesystem.
  */
 const resolveProfile = (
   flagValue: string | undefined,
   envValue: string | undefined,
-): 'default' | undefined => {
+): string | undefined => {
   const fromFlag = flagValue !== undefined && flagValue.length > 0
     ? flagValue
     : undefined;
@@ -164,17 +181,7 @@ const resolveProfile = (
       },
     );
   }
-  const chosen = fromFlag ?? fromEnv;
-  if (chosen === undefined) {
-    return undefined;
-  }
-  if (chosen !== 'default') {
-    throw new UsageError(
-      `profile "${chosen}" is not supported in v0.1`,
-      { details: { hint: PROFILE_V03_HINT } },
-    );
-  }
-  return 'default';
+  return fromFlag ?? fromEnv;
 };
 
 const formatZodIssues = (

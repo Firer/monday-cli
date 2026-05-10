@@ -4796,7 +4796,14 @@ M18) reused the existing codes without adding new ones. v0.3-M19
 adds `tag_not_found` (28 total) — registered pre-M19 as the
 writer-expansion close requires it (the `tags` friendly translator's
 per-account directory-miss surface), so the registry entry lands
-ahead of the M19 implementation feat commits.
+ahead of the M19 implementation feat commits. v0.3-M21 adds
+`oauth_failed` (29 total) — the umbrella code for the
+`monday auth login` flow per §7.3.3, with `details.reason`
+discriminating per failure mode (`csrf_mismatch`, `user_denied`,
+`code_exchange_failed`, `timeout`, `port_in_use`,
+`browser_unavailable`). The registry entry lands at the M21
+pre-flight contract diff so M21 implementation feat commits throw
+into a stable typed surface.
 
 | Code | Origin | Retryable? |
 |------|--------|------------|
@@ -4821,6 +4828,7 @@ ahead of the M19 implementation feat commits.
 | `resource_locked` | HTTP 423 | Yes |
 | `validation_failed` | Monday rejected payload (bad status label, etc.) | No |
 | `stale_cursor` | Pagination cursor expired | No (caller restarts) |
+| `oauth_failed` | `monday auth login` failure (M21+ — see §7.3.3 reason discriminant) | No |
 | `config_error` | Bad config (missing token, etc.) | No |
 | `cache_error` | Local cache I/O failure | Yes (auto-retried without cache) |
 | `network_error` | Transport failure | Yes |
@@ -4946,6 +4954,32 @@ slots that ship in v0.1 across multiple codes:
     resolves to a single item. The list is capped at 10 because the
     cursor-walked match set can grow unbounded; the typed error is
     a recovery signal, not a paginated read surface.
+- `oauth_failed` (M21+ — `monday auth login` flow failure
+  umbrella per §7.3.3):
+  - `reason: "csrf_mismatch" | "user_denied" |
+    "authorization_failed" | "code_exchange_failed" | "timeout" |
+    "port_in_use" | "browser_unavailable"` — discriminator. Agents
+    key off this rather than `error.message`.
+  - `monday_code: string` — present on
+    `reason: "code_exchange_failed"` (Monday's RFC 6749 `error`
+    field from the `/oauth2/token` rejection response —
+    probe-confirmed shape: `invalid_request`, `invalid_grant`,
+    etc., HTTP 400, `application/json` body) AND on
+    `reason: "authorization_failed"` (Monday's `error` field from
+    the `/oauth2/authorize` redirect query — documented codes
+    include `invalid_scope`, `unauthorized_client`,
+    `server_error`, `temporary_unavailable`).
+  - `monday_description: string` — present on the same two
+    reasons as `monday_code`; carries Monday's `error_description`
+    field verbatim.
+  - `port: number` — present only on
+    `reason: "port_in_use"`; carries the port the listener tried
+    to bind (typically `9876` per §7.3.1 step 2).
+  - `url: string` — present only on
+    `reason: "browser_unavailable"`; carries the consent URL the
+    user can paste into a browser on another machine (e.g., via
+    SSH port forwarding) to complete the flow without the local
+    listener.
 - `usage_error` for `--board` / item-board mismatch (dry-run
   only — see §5.3 step 1):
   - `item_board_id: string` — the item's actual `board.id`.
@@ -5017,17 +5051,22 @@ which writes a secrets file at `~/.monday-cli/credentials` (mode 0600).
 The agent-facing UX for obtaining a Monday API token without ever
 pasting one into a shell. `monday auth login --profile <name>` opens
 the user's default browser to Monday's OAuth consent screen, listens
-on an ephemeral `127.0.0.1` port for the redirect, exchanges the
-authorisation code for an access token, and writes the token to the
-credentials cache (§7.4).
+on `127.0.0.1:9876` for the redirect (fixed port per §7.3.1 step 2),
+exchanges the authorisation code for an access token, and writes the
+token to the credentials cache (§7.4).
 
 The wire-level flow (state-CSRF expectations, redirect URI matching
 exactness, scope strings, exact response shapes from
-`/oauth2/authorize` and `/oauth2/token`) is **confirmed at M21
-pre-flight contract diff via empirical probe** per v0.3-plan §22
-R-watch-item. This section pins the agent-facing UX + the local-side
-flow shape; wire-level semantics that depend on Monday's actual OAuth
-implementation are tagged as *probe-time confirmation* below.
+`/oauth2/authorize` and `/oauth2/token`) was **confirmed at M21
+pre-flight contract diff via empirical probe** (`scripts/probe/
+m21-oauth.ts` against `auth.monday.com`, 2026-05-10) per v0.3-plan
+§22 R-watch-item — findings inline below at each
+**Probe-time-confirmed:** callout. Findings the probe could not
+empirically resolve (full token-exchange success — no monday-cli
+OAuth app yet registered with Monday's developer portal, deferred
+to M21 implementation kickoff) carry **Probe-time deferred:**
+callouts that point at the docs-pinned shape we'll ship pending
+empirical verification.
 
 **Sibling verb.** `monday auth logout --profile <name>` deletes the
 named profile's entry from `~/.monday-cli/credentials` (§7.4) and is
@@ -5035,42 +5074,47 @@ idempotent on a missing entry (no-op, `ok: true`).
 
 #### 7.3.1 Flow shape
 
-1. **Generate per-attempt secrets.** A 32-byte cryptographically-random
-   `state` token (anti-CSRF) + a PKCE `code_verifier` (43–128 chars,
-   `[A-Za-z0-9-._~]` per RFC 7636) + the matching SHA-256
-   `code_challenge`. Both live only in process memory; never written
-   to disk. **Probe-time confirmation:** Monday's published OAuth
-   docs at the time of writing list `client_id` + `client_secret` +
-   `code` for the token exchange but do not explicitly document
-   PKCE acceptance (`code_challenge` / `code_verifier` parameters).
-   The M21 pre-flight contract diff probes whether
-   `/oauth2/authorize` accepts `code_challenge` + `code_challenge_method=S256`
-   without rejection AND whether `/oauth2/token` accepts a
-   matching `code_verifier`. Two probe outcomes:
-   - **PKCE accepted** (preferred): the design ships verbatim;
-     `client_secret` becomes optional.
-   - **PKCE not accepted**: the design falls back to `client_secret`-
-     only authentication of the token-exchange call, with the
-     secret pinned in source per the public-OAuth-client convention
-     (the secret authenticates the *app*, not the user; the user's
-     flow is protected by `state` CSRF + the listener-bound
-     `redirect_uri`). The `code_verifier` / `code_challenge` lines
-     drop from the §7.3.1 wire body.
+1. **Generate per-attempt CSRF state.** A 32-byte
+   cryptographically-random `state` token (`crypto.randomBytes`,
+   base64url-encoded). Lives only in process memory; never written
+   to disk. **Probe-time-confirmed (2026-05-10):** Monday's
+   `/oauth2/authorize` accepts arbitrary query params and JWT-encodes
+   them all into an `oauth_payload_token` redirect target — the
+   `state` round-trips through verbatim (echoed back at the
+   redirect step per RFC 6749). PKCE (`code_challenge` /
+   `code_verifier`) is **not load-bearing for v0.3**: Monday's
+   `/oauth2/token` rejects the public-client (PKCE-only) shape with
+   `{"error":"invalid_request","error_description":"Missing client_secret param"}`
+   (status 400) — `client_secret` is mandatory regardless. v0.3
+   ships `client_secret`-only authentication of the token-exchange
+   call, with the secret pinned in source per the public-OAuth-client
+   convention (the secret authenticates the *app* — `monday-cli` —
+   not the user; the user's flow is protected by `state` CSRF + the
+   listener-bound `redirect_uri`). A future PKCE upgrade is a
+   separate cli-design §7.3 amendment with its own Codex review.
 
-2. **Bind the local listener.** `127.0.0.1:0` (kernel-assigned
-   ephemeral port via `node:net`'s `server.listen(0, '127.0.0.1', …)`).
-   Read the resolved port from `server.address()`. Random-port binding
-   prevents two concurrent `monday auth login` invocations from
-   colliding and avoids requiring users to free a fixed well-known
-   port. **Probe-time confirmation:** Monday's OAuth app must accept
-   `http://127.0.0.1:<port>` with a wildcard / port-range redirect URI
-   pattern; if Monday only accepts a single fixed redirect URI, the
-   M21 pre-flight contract diff falls back to a fixed-port design
-   (`127.0.0.1:9876/callback` is the leaning fixed port) and the
-   parallel-invocation collision becomes a documented limitation.
+2. **Bind the local listener.** Fixed port — `127.0.0.1:9876` by
+   default (`OAUTH_DEFAULT_PORT` constant in `src/api/oauth.ts`).
+   The OAuth app's redirect URI configuration pins this port.
+   **Probe-time-confirmed (2026-05-10):** Monday's published OAuth
+   docs require redirect URIs to match exactly ("must match the
+   authorization request value") — wildcard / port-range patterns
+   are not documented. v0.3 ships a fixed port; the
+   parallel-invocation collision (two concurrent `monday auth login`
+   invocations on the same machine) surfaces as
+   `oauth_failed.reason: "port_in_use"` with `details.port: 9876`
+   rather than `internal_error`, so an agent gets a clean recovery
+   signal. **Probe-time deferred:** whether the OAuth app
+   configuration accepts a *list* of redirect URIs (multiple ports)
+   to escape the parallel-invocation collision is verifiable only
+   after the OAuth app is registered at M21 implementation kickoff;
+   the v0.3 design ships single-port-only and revisits the
+   multi-port option as a v0.4+ amendment if the limitation proves
+   load-bearing.
 
 3. **Open the browser.** Build the consent URL:
-   `https://auth.monday.com/oauth2/authorize?client_id=<cli_client_id>&redirect_uri=http://127.0.0.1:<port>/callback&state=<state>&code_challenge=<challenge>&code_challenge_method=S256&scope=<scopes>`.
+   `https://auth.monday.com/oauth2/authorize?client_id=<cli_client_id>&redirect_uri=http://127.0.0.1:9876/callback&state=<state>&scope=<scopes>`.
+   No `code_challenge` / `code_challenge_method` per §7.3.1 step 1.
    Open via `open` (macOS) / `xdg-open` (Linux) / `start` (Windows)
    through `node:child_process`'s `spawn` with `detached: true`.
    **Fallback:** if no opener is found OR the spawn fails, the CLI
@@ -5081,7 +5125,11 @@ idempotent on a missing entry (no-op, `ok: true`).
    This means `monday auth login` works on headless boxes (CI, agent
    runtimes, SSH sessions) — the user pastes the URL into a browser on
    another machine that can reach the listening host (typically via
-   SSH port forwarding).
+   SSH port forwarding). Total stderr-print failure (no opener AND
+   stderr is closed/erroring) surfaces
+   `oauth_failed.reason: "browser_unavailable"` with `details.url`
+   carrying the consent URL so an agent can paste it back through
+   another channel.
 
 4. **Wait for the redirect.** The listener accepts a single GET request
    matching `/callback?code=…&state=…` (or `?error=…&state=…` on user
@@ -5097,33 +5145,44 @@ idempotent on a missing entry (no-op, `ok: true`).
    per-attempt `state` byte-for-byte (`crypto.timingSafeEqual` to avoid
    timing oracles). Length-mismatched buffers cause
    `crypto.timingSafeEqual` to throw, so the CSRF-verification path
-   guards on `Buffer.byteLength` equality first AND wraps the
-   comparison so any throw routes to
+   guards on `Buffer.byteLength` equality first AND returns `false`
+   on length mismatch — a length-mismatched `state` routes to
    `oauth_failed.reason: "csrf_mismatch"` rather than
-   `internal_error` — a length-mismatched `state` is itself a CSRF
-   signal, not a CLI bug. Mismatch → `oauth_failed` with
-   `details.reason: "csrf_mismatch"`; no token-exchange call follows.
-   `state` is treated as a query param (not a fragment) — this matches
-   Monday's published `redirect_uri` examples; **probe-time
-   confirmation** at M21 pre-flight verifies the encoding.
+   `internal_error`, treating it as a CSRF signal not a CLI bug.
+   The `verifyCsrf` helper in `src/api/oauth.ts` exports this
+   discipline as a pure function (no I/O). Mismatch →
+   `oauth_failed` with `details.reason: "csrf_mismatch"`; no
+   token-exchange call follows. **Probe-time-confirmed
+   (2026-05-10):** `state` round-trips as a query parameter
+   (URL-encoded into the `oauth_payload_token` JWT and echoed back
+   on the redirect) — confirms the §7.3.1 step 5 encoding
+   assumption.
 
 6. **Exchange the code.** `POST https://auth.monday.com/oauth2/token`
    with `application/x-www-form-urlencoded` body
-   `grant_type=authorization_code&code=<code>&code_verifier=<verifier>&client_id=<cli_client_id>&redirect_uri=http://127.0.0.1:<port>/callback`.
-   Authorisation codes are documented as short-lived (Monday's docs
-   describe roughly 10-minute validity at the time of writing —
-   **probe-time confirmation** at M21 pre-flight pins the exact TTL
-   from the `/oauth2/token` rejection-response timing); the exchange
-   is the immediate next step after CSRF verification, no user
-   interaction in between. **Probe-time confirmation:** exact
-   response body shape (`{access_token, token_type, scope, …}` vs.
-   Monday-specific extensions) + exact error response shape on
-   rejection (4xx body schema) + whether Monday requires a
-   `client_secret` for public clients (PKCE-only is the leaning shape;
-   if Monday requires a secret for the monday-cli OAuth app, the
-   secret ships pinned in source — public OAuth-client convention,
-   acceptable because the secret authenticates the *app*, not the
-   user, and PKCE protects the user's flow against secret theft).
+   `grant_type=authorization_code&code=<code>&client_id=<cli_client_id>&client_secret=<cli_client_secret>&redirect_uri=http://127.0.0.1:9876/callback`.
+   **Probe-time-confirmed (2026-05-10):** `client_secret` is
+   mandatory; the PKCE-only shape (`code_verifier` instead of
+   `client_secret`) is rejected with
+   `{"error":"invalid_request","error_description":"Missing client_secret param"}`.
+   Authorisation code TTL is **10 minutes** per Monday's published
+   docs ("the generated authorization code. Valid for 10 minutes");
+   the exchange is the immediate next step after CSRF verification,
+   no user interaction in between. Rejection-response shape pinned
+   to RFC 6749 standard:
+   `{"error": "<code>", "error_description": "<text>"}` with status
+   400, `application/json; charset=utf-8`. The `error` field maps to
+   `oauth_failed.details.monday_code`; `error_description` maps to
+   `oauth_failed.details.monday_description`. **Probe-time
+   deferred:** the *success* response body shape (200 OK) couldn't
+   be empirically captured without a registered OAuth app + a real
+   user-issued code; the design pins the docs-documented shape
+   `{access_token, token_type, scope}` (verbatim from Monday Apps
+   OAuth docs) — `expires_in` is intentionally absent per Monday's
+   "tokens do not expire" wording. M21 implementation kickoff
+   verifies the success shape against the live `/oauth2/token`
+   response and amends `TokenResponse` if Monday adds extension
+   fields.
 
 7. **Write credentials.** On a successful exchange, write the access
    token + obtained-at timestamp + scopes to
@@ -5167,17 +5226,31 @@ introduces **one new error code** rather than a per-failure-mode
 constellation:
 
 - **`oauth_failed`** (registry row added at M21 pre-flight contract
-  diff alongside the type-level widening; brings registry from 28 →
-  29). Umbrella for OAuth-flow-specific failures, discriminated by
-  `details.reason`:
+  diff `<this-commit-SHA>` alongside the type-level widening;
+  brings registry from 28 → 29). Umbrella for OAuth-flow-specific
+  failures, discriminated by `details.reason`:
 
   | `details.reason` | When | `retryable` | Extra `details` |
   |---|---|---|---|
-  | `csrf_mismatch` | Redirect's `state` ≠ per-attempt `state` | `false` (security signal — never auto-retry) | — |
+  | `csrf_mismatch` | Redirect's `state` ≠ per-attempt `state` (length-mismatched buffers also route here, NOT to `internal_error`) | `false` (security signal — never auto-retry) | — |
   | `user_denied` | Monday's redirect returns `?error=access_denied&state=…` | `false` | — |
-  | `code_exchange_failed` | `/oauth2/token` returns 4xx | `false` (caller-driven retry of full flow only) | `monday_code` (Monday's error string) |
-  | `timeout` | Listener's 5-min timer fired before redirect arrived | `true` (the underlying user can simply re-run) | — |
+  | `authorization_failed` | Monday's redirect returns `?error=<other>&state=…` (e.g., `invalid_scope`, `unauthorized_client`, `server_error`, `temporary_unavailable` per Monday's documented authorize-endpoint error codes) | `false` (operator fixes the OAuth-app config or retries on `temporary_unavailable`) | `monday_code` (Monday's `error` field from the redirect query), `monday_description` (Monday's `error_description` if present) |
+  | `code_exchange_failed` | `/oauth2/token` returns 4xx (probe-confirmed RFC 6749 standard shape: `{"error", "error_description"}` body) | `false` (caller-driven retry of full flow only) | `monday_code` (Monday's `error` field), `monday_description` (Monday's `error_description` field) |
+  | `timeout` | Listener's 5-min timer fired before redirect arrived | `true` (M21 implementation overrides the umbrella default — see footnote below) | — |
+  | `port_in_use` | Listener can't bind the fixed port (typically `9876` per §7.3.1 step 2) — usually a concurrent `monday auth login` invocation OR an unrelated process holding the port | `false` (caller resolves the conflict before retry) | `port` (the port that failed to bind) |
   | `browser_unavailable` | No opener AND the fallback URL print also failed (rare; e.g., closed stderr) | `false` | `url` (the consent URL, so an agent can paste it back) |
+
+The `error.retryable` field on the envelope reflects the per-reason
+column above, not the umbrella `oauth_failed` default. The
+`CODE_RETRYABLE_DEFAULT.oauth_failed = false` floor is what an agent
+sees if it consumes a hand-constructed `oauth_failed` without a
+specific reason — the M21 implementation overrides this at every
+throw site. Specifically: `reason: "timeout"` constructs the
+`ApiError` with `retryable: true` (mirrors the M2-era `cache_error`
+override-at-throw-site precedent for the same pattern); every other
+reason inherits the `false` default. Agents can still discriminate
+on `details.reason` if they need finer-grained per-reason logic
+than the boolean affords.
 
 Reused codes (NOT new):
 
@@ -5189,8 +5262,8 @@ Reused codes (NOT new):
 - **`config_error`** — credentials cache write fails (disk full,
   permissions, etc.) AFTER a successful exchange. The exchange itself
   succeeded; the persistence didn't. Agents see exit 3.
-- **`internal_error`** — CLI-side bugs (PKCE generation failure, JSON
-  parse failure on Monday's response, etc.).
+- **`internal_error`** — CLI-side bugs (CSRF-state generation failure,
+  JSON parse failure on Monday's response shape, etc.).
 
 #### 7.3.4 Mock OAuth helper for tests
 
@@ -5200,21 +5273,22 @@ set it explicitly) opts the CLI into a **fixture-driven** flow that
 bypasses the browser-open + listener steps:
 
 - When set, its value is the path to a JSON fixture file containing
-  `{ "code": "<fixture-code>", "force_csrf_mismatch"?: true, "force_user_denied"?: true, "force_listener_timeout"?: true }`.
-  The fixture **does NOT** carry `state` or `redirect_uri` — both
-  are randomly generated per invocation (32-byte `state` + ephemeral
-  `127.0.0.1:0` port resolution), so tests cannot pre-know them; the
+  `{ "code": "<fixture-code>", "force_csrf_mismatch"?: true, "force_user_denied"?: true, "force_authorization_failed"?: { "error": string; "error_description"?: string }, "force_listener_timeout"?: true }`.
+  The fixture **does NOT** carry `state` — it's randomly generated
+  per invocation (32-byte `state`), so tests cannot pre-know it; the
   helper simulates the redirect arriving with the CLI's *own*
   generated `state` echoed back, so CSRF verification passes by
-  default.
+  default. `redirect_uri` is the fixed `http://127.0.0.1:9876/callback`
+  per §7.3.1 step 2 — known to both CLI and test, no per-invocation
+  randomness.
 - **Default fixture path** (no `force_*` keys set): the CLI generates
-  `state` + `code_verifier` per §7.3.1 step 1, binds the listener per
-  step 2, then short-circuits steps 3–4 (browser-open + listener
-  wait) by directly invoking the same internal handler the real
-  listener would have invoked, with the synthetic redirect carrying
-  the fixture's `code` + the CLI's generated `state`. The flow then
-  proceeds to CSRF verification (step 5, passes) + token exchange
-  (step 6, hits the network boundary).
+  `state` per §7.3.1 step 1, binds the listener per step 2, then
+  short-circuits steps 3–4 (browser-open + listener wait) by directly
+  invoking the same internal handler the real listener would have
+  invoked, with the synthetic redirect carrying the fixture's `code`
+  + the CLI's generated `state`. The flow then proceeds to CSRF
+  verification (step 5, passes) + token exchange (step 6, hits the
+  network boundary).
 - **`force_csrf_mismatch: true`** — the helper substitutes a different
   random `state` for the simulated redirect, exercising the
   `oauth_failed.reason: "csrf_mismatch"` path. No token exchange
@@ -5222,6 +5296,13 @@ bypasses the browser-open + listener steps:
 - **`force_user_denied: true`** — the helper simulates a
   `?error=access_denied&state=<echoed-state>` redirect, exercising
   the `oauth_failed.reason: "user_denied"` path.
+- **`force_authorization_failed: { error: <code>, error_description?: <text> }`**
+  — the helper simulates a non-`access_denied` redirect error
+  (e.g., `?error=invalid_scope&error_description=...&state=<echoed-state>`),
+  exercising the `oauth_failed.reason: "authorization_failed"`
+  path. The fixture's `error` field maps to
+  `details.monday_code`; `error_description` maps to
+  `details.monday_description`.
 - **`force_listener_timeout: true`** — the helper does not simulate
   any redirect; the 5-min listener timer fires (test infra fast-
   forwards via `vi.useFakeTimers()` rather than waiting), exercising
@@ -5301,22 +5382,28 @@ Field semantics:
   successful token exchange. Surfaced via `monday status` (§13 v0.3
   diagnostics cluster) so agents can self-check token freshness
   without parsing the credentials file.
-- **`profiles.<name>.expires_at`** — `null` for v0.3 (Monday's
-  documented OAuth tokens don't expire; **probe-time confirmation**
-  at M21 pre-flight verifies whether `/oauth2/token`'s response
-  carries an `expires_in` value, in which case the slot is populated
-  from the response). The slot is preserved as a `string | null`
-  union so a future refresh-token flow doesn't bump
-  `schema_version`.
+- **`profiles.<name>.expires_at`** — `null` for v0.3.
+  **Probe-time-confirmed (2026-05-10):** Monday's published OAuth
+  docs explicitly state "tokens do not expire and are valid until
+  the user uninstalls your app"; the documented success-response
+  body shape carries no `expires_in` field. The slot is preserved
+  as a `string | null` union so a future refresh-token flow
+  doesn't bump `schema_version`. M21 implementation reaffirms
+  the absence by inspecting the live `/oauth2/token` response (a
+  Monday-specific extension field would only widen `TokenResponse`
+  forward-compatibly).
 - **`profiles.<name>.scopes`** — the granted scopes from
   `/oauth2/token`'s response. Agents can self-audit ("does this
   profile have `boards:write`?") without re-running the OAuth flow.
 - **`profiles.<name>.account_id`** — pinned at write-time from the
-  post-exchange `account.id` query (§7.3.1 step 8). Decouples
+  post-exchange `account { id }` query (§7.3.1 step 8). Decouples
   profile-name (user-chosen) from account-identity (Monday-assigned)
   so a `monday auth status` future verb can show "*profile `work`
   authenticates against account 12345678*" without an extra round-
-  trip.
+  trip. **Probe-time-confirmed (2026-05-10):** the GraphQL
+  `account.id` field returns a string-typed numeric ID
+  (e.g., `"34900083"`) — not a JS `number`. The schema slot ships
+  as `z.string().min(1)` to match.
 
 **Per-profile token source order.** §7.2 pins the *profile selection*
 order (`--profile` flag > `MONDAY_PROFILE` env > `default_profile` in

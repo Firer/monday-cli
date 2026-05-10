@@ -47,5 +47,14 @@ npm-debug.log*
 
 # Throwaway probes (M20: scripts/probe-{bootstrap,time-tracking}.ts
 # poke a real Monday workspace to pin wire shapes). Local only —
-# never committed.
-scripts/
+# never committed. The shared `_lib.ts` scaffold (R-candidate fired
+# at v0.3-M21 second consumer) is the one tracked exception so probe
+# scripts can `import` from it; per-probe scripts stay local.
+#
+# Pattern note: gitignore can't re-include a file under an excluded
+# directory, so we list every per-file pattern individually rather
+# than excluding the whole `scripts/` directory.
+scripts/*
+scripts/*/*
+!scripts/probe/
+!scripts/probe/_lib.ts

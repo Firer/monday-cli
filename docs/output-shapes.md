@@ -2598,7 +2598,7 @@ Every error envelope has the same shape (cli-design §6.5):
 }
 ```
 
-The 28 stable error codes (post-v0.3-M19 prerequisite) —
+The 29 stable error codes (post-v0.3-M21 pre-flight) —
 `usage_error`, `confirmation_required`, `not_found`,
 `ambiguous_name`, `ambiguous_column`, `ambiguous_match` (M12),
 `column_not_found`, `user_not_found`, `tag_not_found` (M19+),
@@ -2606,18 +2606,22 @@ The 28 stable error codes (post-v0.3-M19 prerequisite) —
 `forbidden`, `rate_limited`, `complexity_exceeded`,
 `daily_limit_exceeded`, `concurrency_exceeded`, `ip_rate_limited`,
 `resource_locked`, `validation_failed`, `stale_cursor`,
-`config_error`, `cache_error`, `network_error`, `timeout`,
-`dev_not_configured`, `dev_board_misconfigured`, `internal_error`.
-v0.1 shipped 26; M12's `item upsert` added `ambiguous_match` (27
-total). Subsequent v0.2 milestones (M13–M18) reused the existing
-codes without adding new ones. v0.3-M19 adds `tag_not_found` (28
+`oauth_failed` (M21+), `config_error`, `cache_error`,
+`network_error`, `timeout`, `dev_not_configured`,
+`dev_board_misconfigured`, `internal_error`. v0.1 shipped 26;
+M12's `item upsert` added `ambiguous_match` (27 total).
+Subsequent v0.2 milestones (M13–M18) reused the existing codes
+without adding new ones. v0.3-M19 added `tag_not_found` (28
 total) — registered pre-M19 as the writer-expansion close
 prerequisite (the `tags` friendly translator's per-account
 directory-miss surface; cli-design §6.5 entry landed at
 `4c652d5`, runtime widening alongside the M19 pre-flight contract
-diff). The two `dev_*` codes are reserved for the v0.3 `monday
-dev` namespace — listed but inactive on the v0.1/v0.2/v0.3-M19
-surface. Warning
+diff). v0.3-M21 adds `oauth_failed` (29 total) — the umbrella
+code for `monday auth login` flow failures, with `details.reason`
+discriminating per failure mode (cli-design §7.3.3 row landed
+alongside the M21 pre-flight contract diff). The two `dev_*`
+codes are reserved for the v0.3 `monday dev` namespace — listed
+but inactive on the v0.1/v0.2/v0.3-M21 surface. Warning
 codes (`stale_cache_refreshed`, `pagination_cap_reached`,
 `column_token_collision`, etc.) live in `warnings[]`, not
 `error`. See [cli-design.md §6.5](./cli-design.md#65-error) for

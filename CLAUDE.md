@@ -338,6 +338,151 @@ session's work):
   in commit B either; net diff 65 LOC across CLAUDE.md +
   docs/v0.3-plan.md.
 
+**M21 pre-flight contract diff shipped this session**
+(mirrors the `d822982` M19 / `a702af2` M20 cadence — the
+biggest pre-flight to date by surface count: 4 new
+modules + 2 new commands + ERROR_CODES widening + first
+empirical probe under v0.3-plan §22's "empirical-probe
+step in pre-flight for novel API surfaces" discipline +
+first second-consumer fire of the
+`scripts/probe/` R-candidate):
+
+- **Empirical probe shipped first** per the §22
+  R-watch-item discipline that fires for the first time
+  at M21. `scripts/probe/_lib.ts` lifted as the shared
+  scaffold (under a one-off `.gitignore` exclusion since
+  the rest of `scripts/` stays local); `scripts/probe/
+  m21-oauth.ts` (gitignored) ran the probe matrix
+  against `auth.monday.com` on 2026-05-10. Findings
+  baked into module docstrings + cli-design §7.3
+  probe-time-confirmation tags + v0.3-plan §3 M21
+  deliverables. **Three load-bearing findings:** (1)
+  Monday's `/oauth2/token` rejects the PKCE-only shape
+  with `{"error":"invalid_request","error_description":"Missing client_secret param"}`
+  — `client_secret` is mandatory; PKCE is non-load-
+  bearing for v0.3 and dropped from the design. (2)
+  `/oauth2/authorize` accepts arbitrary query params
+  (encodes them all into a JWT-signed
+  `oauth_payload_token` redirect target) — `state`
+  round-trips through verbatim per RFC 6749. (3)
+  Rejection-response shape is RFC 6749 standard
+  (`{"error", "error_description"}`, status 400,
+  `application/json`) — maps verbatim to
+  `oauth_failed.details.{monday_code, monday_description}`.
+  GraphQL `account.id` returns string-typed numeric
+  (e.g., `"34900083"`); `expires_in` absent per
+  Monday's "tokens do not expire" pin.
+
+- **Four new module bodies (all stub `Promise.reject`
+  under `c8 ignore`).** `src/api/oauth.ts` (constants +
+  type surface + `generateOAuthState` + `verifyCsrf` as
+  real bodies; `bindOAuthListener` + `exchangeCode` as
+  stubs). `src/config/credentials.ts` (zod schemas for
+  the §7.4.1 file shape; constants
+  `CREDENTIALS_FILE_MODE = 0o600` etc.; six stub helpers
+  for read/write/set/delete/path/resolve). `src/config/
+  profiles.ts` (zod schemas for the §7.2 TOML shape;
+  three stub helpers for path/load/select). `src/utils/
+  redact.ts` (extends `DEFAULT_SENSITIVE_KEYS` with
+  `'access_token'` per §7.4.3; runtime
+  value-scanning extension lands at M21 implementation).
+  Coverage held at 99.06 / 95.51 / 99.33 / 99.22 (above
+  95/95.45/95/95 floor) — new files at 100% per-file via
+  `c8 ignore` on stubs + surface-import tests.
+
+- **Two new commands (registry 72 → 74).**
+  `src/commands/auth/login.ts` + `src/commands/auth/
+  logout.ts`. Both read `--profile` from the global-flag
+  layer (per cli-design §4.4 — auth verbs do NOT
+  redeclare `--profile` at the command level) and
+  reject with `internal_error` carrying the M21-pending
+  hint. Action handlers are async (mirrors M20 time-track
+  stub-action pattern — sync throws can get swallowed by
+  commander's own error path).
+
+- **ERROR_CODES widened 28 → 29 with `oauth_failed`.**
+  First widening since M19. `CODE_RETRYABLE_DEFAULT.
+  oauth_failed = false`; `CODE_TYPICAL_HTTP_STATUS.
+  oauth_failed = null` (varies by reason);
+  `exitCodeForError(oauth_failed) = 1` (treating it as
+  usage-shaped per the M20 Decision 4.1/4.2 reasoning —
+  agents already branch on the verb invoked, plus
+  `details.reason` carries the discriminant).
+
+- **`src/types/global-flags.ts` widened.**
+  `--profile <name>` structurally accepts any non-empty
+  string (was 'default'-only with v0.3 hint pre-M21);
+  the `MONDAY_PROFILE` env / flag-conflict check stays.
+  The actual resolution-to-token step (cache >
+  `api_token_env` > `config_error` per §7.4.1) lands at
+  M21 implementation in `cli/run.ts`'s config-load step.
+
+- **Cli-design §7.3 amendments inline.** §7.3.1 step 1
+  drops PKCE-as-primary (probe-pinned to
+  `client_secret`-only); §7.3.1 step 2 pins fixed port
+  `9876` (probe-pinned to docs' "exact match"
+  redirect URI); §7.3.1 step 3 drops `code_challenge` /
+  `code_challenge_method` from the consent URL; §7.3.1
+  step 5 confirms `state` round-trips as a query param;
+  §7.3.1 step 6 drops `code_verifier`, adds
+  `client_secret`, pins 10-min code TTL, pins RFC 6749
+  rejection shape; §7.3.3 error-table grows
+  `port_in_use` reason for fixed-port collision; §7.4.1
+  `account_id` confirms string-typed numeric (probe);
+  §7.4.1 `expires_at` confirms `null` for v0.3.
+
+- **Cross-doc count bumps (4 sites).** README.md (lines
+  21 + 189), output-shapes.md (line 2601 + alphabetical
+  list), architecture.md (line 1241 + 1254), CLAUDE.md
+  status block (this hunk). Cli-design §6.5 grows the
+  `oauth_failed` row + per-code `details` schema +
+  count-narrative bump.
+
+- **Test count + coverage at gate:** 2422 (M20 close +
+  cleanup) → 2494 (M21 pre-flight close), +72 net (~30
+  surface tests across `tests/unit/api/oauth.test.ts` +
+  `tests/unit/config/credentials.test.ts` +
+  `tests/unit/config/profiles.test.ts`; ~30 across
+  `tests/integration/commands/auth.test.ts`; widened
+  `tests/unit/types/global-flags.test.ts` for the
+  any-name-acceptance + `tests/unit/utils/{errors,
+  redact}.test.ts` for the new code + key; 1
+  envelope-snapshot regenerated to bake `command_count:
+  72 → 74` + `oauth_failed` row in alphabetical
+  position). Coverage held at 99.06 / 95.51 / 99.33 /
+  99.22 above the 95/95.45/95/95 floor; floor unchanged.
+
+- **R-candidate fired.**
+  `scripts/probe/` reusable probe infrastructure
+  (v0.3-plan §22) hits its second consumer at this
+  pre-flight. The `_lib.ts` shared scaffold ships under
+  a one-off `.gitignore` exclusion (`scripts/*` +
+  `scripts/*/*` excluded; `!scripts/probe/` +
+  `!scripts/probe/_lib.ts` re-included) so per-probe
+  scripts stay local while the helpers themselves
+  version. The next consumer (M27 webhooks probe per
+  §22 likely-affected-milestones list) reuses
+  `_lib.ts` from day one.
+
+- **R-candidate stays below threshold.**
+  Secure-file primitive shared between cache +
+  credentials (v0.3-plan §22) is at 2 consumers
+  (`src/api/cache.ts` + `src/config/credentials.ts`);
+  3-consumer threshold not met. The §7.4.2 "mirror
+  verbatim" wording is the in-design backstop —
+  `src/config/credentials.ts` does NOT consolidate;
+  M21 implementation copies `writeJsonFile`'s body
+  verbatim per the explicit-duplication discipline.
+
+- **R-watch-item logged.** `__test_oauth_helper` as a
+  generalised "headless flow" test seam pattern
+  (v0.3-plan §22 from `aa5d93c`) stays single-consumer
+  at M21; documented for future `wait for external
+  callback` flows. No code lift this session.
+
+- **Codex pre-flight: 2 rounds expected.** Mirrors the
+  M19 / M20 cadence; results land in commit B.
+
 **M11 cross-board flake fix (Node 24 cassette ordering)
 shipped in `7dbcf7e fix(m11): serialise cross-board metadata
 loads`** at session start before M20 work began.
@@ -794,7 +939,7 @@ R45 shipped at M16 implementation start):
 The three binding documents — read in this order before writing code:
 
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
-   contract: command surface, output envelope, 28 stable error codes,
+   contract: command surface, output envelope, 29 stable error codes,
    deferral list, every binding decision. Changes land via PRs that
    argue for the change, not by drift.
 2. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — active plan:
@@ -883,12 +1028,15 @@ reasoning (and per-subsystem implementation detail) lives in
   `source: "live"|"cache"|"mixed"|"none"`, `cache_age_seconds`,
   `retrieved_at`. Adding fields is non-breaking; removing/renaming is
   major. (§6.1)
-- **28 stable error codes** (`usage_error` / `not_found` /
+- **29 stable error codes** (`usage_error` / `not_found` /
   `ambiguous_column` / `ambiguous_match` / `column_archived` /
   `unsupported_column_type` / `rate_limited` / `complexity_exceeded` /
-  `stale_cursor` / `tag_not_found` / etc. — `ambiguous_match` joined
-  the registry at M12; `tag_not_found` joined as a v0.3-M19
-  prerequisite ahead of the `tags` friendly translator).
+  `stale_cursor` / `tag_not_found` / `oauth_failed` / etc. —
+  `ambiguous_match` joined the registry at M12; `tag_not_found`
+  joined as a v0.3-M19 prerequisite ahead of the `tags` friendly
+  translator; `oauth_failed` joined at the v0.3-M21 pre-flight
+  contract diff as the `monday auth login` umbrella per cli-design
+  §7.3.3, with `details.reason` discriminating per failure mode).
   Errors carry `code`, `message`, `http_status`, `monday_code`,
   `request_id`, `retryable`, `retry_after_seconds`. Agents key off
   `code`, never English. (§6.5)

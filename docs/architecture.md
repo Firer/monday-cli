@@ -1238,20 +1238,20 @@ Every command must support:
   `3` config error, `130` SIGINT, `>3` reserved.
 
 The full envelope contract — `meta` skeleton, error fields, the
-**28 stable error codes** (v0.1 froze 26; v0.2-M12 added
+**29 stable error codes** (v0.1 froze 26; v0.2-M12 added
 `ambiguous_match` → 27; v0.3-M19 added `tag_not_found` → 28; v0.3-M21
-will add `oauth_failed` → 29 at M21 pre-flight, post the §7.3 OAuth
-flow design that landed in `3eba714`) — lives in `cli-design.md` §6
-and is enforced by the integration suite's envelope-contract
-assertion (`assertEnvelopeContract`) on every M2+ command's output.
-Adding fields to `meta` or `data` is non-breaking; removing or
-renaming is a major version bump.
+added `oauth_failed` → 29 at the M21 pre-flight contract diff per
+§7.3.3) — lives in `cli-design.md` §6 and is enforced by the
+integration suite's envelope-contract assertion
+(`assertEnvelopeContract`) on every M2+ command's output. Adding
+fields to `meta` or `data` is non-breaking; removing or renaming
+is a major version bump.
 
 ## Error model
 
 Thrown errors are instances of the typed family in `src/utils/errors.ts`,
 all sharing a base class with a stable `code` from the registry
-(28 codes today; v0.1 froze the initial 26 + v0.2/v0.3 milestones
+(29 codes today; v0.1 froze the initial 26 + v0.2/v0.3 milestones
 extended it):
 
 - `UsageError` — bad flags / missing required positionals / mutually

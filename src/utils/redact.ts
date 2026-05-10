@@ -26,10 +26,19 @@
  * thrown error that could leak in a stack trace.
  */
 
+// `access_token` joins the list at v0.3-M21 pre-flight per cli-design
+// §7.4.3 — the credentials cache (§7.4.1) keys per-profile entries
+// under `access_token: <opaque-monday-token>`, so any path that
+// emits a credentials-cache excerpt (debug bundle, error envelopes
+// rooted in a credentials-read failure) scrubs the value via this
+// list. The runtime value-scanning extension that loads + folds
+// credentials values into the secret-bag lands at M21 implementation
+// alongside the `monday auth login` body.
 const DEFAULT_SENSITIVE_KEYS: readonly string[] = [
   'apiToken',
   'Authorization',
   'MONDAY_API_TOKEN',
+  'access_token',
 ];
 
 // Negative lookahead `(?!s)` excludes plural forms (`tokens`,

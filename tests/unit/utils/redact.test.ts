@@ -57,6 +57,19 @@ describe('redact — defaults', () => {
     });
   });
 
+  it('redacts access_token (added at v0.3-M21 pre-flight per cli-design §7.4.3)', () => {
+    // The credentials cache (§7.4.1) keys per-profile entries under
+    // `access_token`. Adding the key to the static sensitive-keys
+    // list defends against any path that emits a credentials-cache
+    // excerpt (debug bundle, error envelopes rooted in a credentials-
+    // read failure). The runtime value-scanning extension that loads
+    // credentials values into the secret-bag lands at M21
+    // implementation alongside `monday auth login`'s real body.
+    expect(redact({ access_token: 'tok-fixture-xxxx' })).toEqual({
+      access_token: '[REDACTED]',
+    });
+  });
+
   it('does not redact plural container keys (tokens / secrets / passwords / api_keys)', () => {
     // The `tokens` plural is the people-resolution echo slot and
     // the cross-token duplicate-resolved-id `details.tokens` array

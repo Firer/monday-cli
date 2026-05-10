@@ -15,8 +15,8 @@ import {
 } from '../../../src/utils/errors.js';
 
 describe('ERROR_CODES', () => {
-  it('contains exactly the 28 stable codes (26 v0.1 + 1 v0.2 M12 + 1 v0.3 M19 prerequisite)', () => {
-    expect(ERROR_CODES).toHaveLength(28);
+  it('contains exactly the 29 stable codes (26 v0.1 + 1 v0.2 M12 + 1 v0.3 M19 prerequisite + 1 v0.3 M21 pre-flight)', () => {
+    expect(ERROR_CODES).toHaveLength(29);
   });
 
   it('includes column_archived (precondition resolved per §6.5)', () => {
@@ -29,6 +29,10 @@ describe('ERROR_CODES', () => {
 
   it('includes tag_not_found (M19+ — registered pre-M19 as the writer-expansion close prerequisite)', () => {
     expect(ERROR_CODES).toContain('tag_not_found');
+  });
+
+  it('includes oauth_failed (M21 pre-flight — `monday auth login` umbrella per cli-design §7.3.3)', () => {
+    expect(ERROR_CODES).toContain('oauth_failed');
   });
 
   it('has no duplicates', () => {
@@ -134,6 +138,11 @@ describe('exitCodeForError', () => {
   it('maps usage-class codes to exit 1', () => {
     expect(exitCodeForError('usage_error')).toBe(1);
     expect(exitCodeForError('confirmation_required')).toBe(1);
+    // M21 pre-flight: oauth_failed maps to exit 1 (treating it as
+    // usage-shaped per the M20 Decision 4.1/4.2 reasoning — agents
+    // already branch on the verb invoked, plus details.reason
+    // carries the discriminant).
+    expect(exitCodeForError('oauth_failed')).toBe(1);
   });
 
   it('maps config_error to exit 3', () => {
@@ -144,6 +153,7 @@ describe('exitCodeForError', () => {
     const usageOrConfig = new Set<ErrorCode>([
       'usage_error',
       'confirmation_required',
+      'oauth_failed',
       'config_error',
     ]);
     for (const code of ERROR_CODES) {

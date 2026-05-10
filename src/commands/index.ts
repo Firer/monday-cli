@@ -127,6 +127,12 @@ import { boardGroupUpdateCommand } from './board/group-update.js';
 import { boardGroupArchiveCommand } from './board/group-archive.js';
 import { boardGroupDuplicateCommand } from './board/group-duplicate.js';
 import { boardGroupDeleteCommand } from './board/group-delete.js';
+// M21 (v0.3) — `monday auth login` + `auth logout`. Pre-flight stubs:
+// argv shape pinned for forward-compatibility, runtime OAuth + cache
+// bodies land at M21 implementation alongside `src/api/oauth.ts` +
+// `src/config/credentials.ts` real bodies.
+import { authLoginCommand } from './auth/login.js';
+import { authLogoutCommand } from './auth/logout.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -205,6 +211,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updatePinCommand,
     updateUnpinCommand,
     updateClearAllCommand,
+    authLoginCommand,
+    authLogoutCommand,
     rawCommand,
     boardDoctorCommand,
   ];

@@ -3,7 +3,17 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['node_modules/', 'dist/', 'coverage/', '*.js', '*.mjs'],
+    // `scripts/` is the throwaway-probe directory (M20 / M21 onwards).
+    // The shared `scripts/probe/_lib.ts` scaffold ships under a one-
+    // off `.gitignore` exclusion but is **intentionally** outside the
+    // production-code lint + typecheck surface (also excluded from
+    // tsconfig.eslint.json's `include` list): per-probe scripts that
+    // import it stay local + gitignored, so a CI lint run against
+    // probe code would only churn on the intentional `process.exit`
+    // / `console.log` patterns the probes use. Quality of these
+    // helpers is enforced by manual review at probe-write time, not
+    // CI gates.
+    ignores: ['node_modules/', 'dist/', 'coverage/', 'scripts/', '*.js', '*.mjs'],
   },
   {
     linterOptions: {

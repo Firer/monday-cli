@@ -203,7 +203,13 @@ describe('parseGlobalFlags — api version', () => {
   });
 });
 
-describe('parseGlobalFlags — profile (v0.3 deferral)', () => {
+describe('parseGlobalFlags — profile (v0.3-M21 widened acceptance)', () => {
+  // M21 pre-flight: any non-empty `--profile` / `MONDAY_PROFILE`
+  // value parses through structurally. The actual resolution-to-
+  // token step (cache > api_token_env > config_error per
+  // cli-design §7.4.1) lands at M21 implementation in cli/run.ts;
+  // until then, non-auth commands using `--profile work` silently
+  // use the implicit-v1 (`MONDAY_API_TOKEN`) token.
   it('absent profile → undefined', () => {
     expect(runArgv([]).profile).toBeUndefined();
   });
@@ -212,15 +218,12 @@ describe('parseGlobalFlags — profile (v0.3 deferral)', () => {
     expect(runArgv(['--profile', 'default']).profile).toBe('default');
   });
 
-  it('--profile work → UsageError with v0.3 hint', () => {
-    try {
-      runArgv(['--profile', 'work']);
-      expect.fail('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(UsageError);
-      const ue = err as UsageError;
-      expect(String(ue.details?.hint)).toMatch(/v0\.3/u);
-    }
+  it('--profile work → "work" (any non-empty name structurally accepted post-M21)', () => {
+    expect(runArgv(['--profile', 'work']).profile).toBe('work');
+  });
+
+  it('--profile personal → "personal"', () => {
+    expect(runArgv(['--profile', 'personal']).profile).toBe('personal');
   });
 
   it('reads MONDAY_PROFILE env when --profile not set', () => {
@@ -230,25 +233,18 @@ describe('parseGlobalFlags — profile (v0.3 deferral)', () => {
       .toBe('default');
   });
 
-  it('rejects MONDAY_PROFILE=work even without --profile', () => {
+  it('reads MONDAY_PROFILE=work env (any non-empty name accepted post-M21)', () => {
     const program = buildProgram();
     program.parse([], { from: 'user' });
-    try {
-      parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'work' });
-      expect.fail('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(UsageError);
-      const ue = err as UsageError;
-      expect(ue.message).toMatch(/profile "work"/u);
-      expect(String(ue.details?.hint)).toMatch(/v0\.3/u);
-    }
+    expect(parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'work' }).profile)
+      .toBe('work');
   });
 
   it('accepts agreement between --profile and MONDAY_PROFILE', () => {
     const program = buildProgram();
-    program.parse(['--profile', 'default'], { from: 'user' });
-    expect(parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'default' }).profile)
-      .toBe('default');
+    program.parse(['--profile', 'work'], { from: 'user' });
+    expect(parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'work' }).profile)
+      .toBe('work');
   });
 
   it('rejects disagreement between --profile and MONDAY_PROFILE', () => {
@@ -257,6 +253,19 @@ describe('parseGlobalFlags — profile (v0.3 deferral)', () => {
     expect(() =>
       parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'other' }),
     ).toThrow(/conflicts/u);
+  });
+
+  it('disagreement still surfaces UsageError with hint', () => {
+    const program = buildProgram();
+    program.parse(['--profile', 'default'], { from: 'user' });
+    try {
+      parseGlobalFlags(program.opts(), { MONDAY_PROFILE: 'other' });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UsageError);
+      const ue = err as UsageError;
+      expect(String(ue.details?.hint)).toMatch(/--profile and MONDAY_PROFILE/u);
+    }
   });
 });
 

@@ -2694,7 +2694,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 72,
+    "command_count": 74,
     "error_codes": [
       {
         "code": "usage_error",
@@ -2821,6 +2821,12 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
         "exit_code": 2,
         "retryable": false,
         "typical_http_status": 200,
+      },
+      {
+        "code": "oauth_failed",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
       },
       {
         "code": "config_error",
@@ -3224,6 +3230,12 @@ exports[`envelope snapshot — schema > schema config.show — single-command na
         "exit_code": 2,
         "retryable": false,
         "typical_http_status": 200,
+      },
+      {
+        "code": "oauth_failed",
+        "exit_code": 1,
+        "retryable": false,
+        "typical_http_status": null,
       },
       {
         "code": "config_error",
