@@ -3,30 +3,24 @@
  * entry from the credentials cache per cli-design §7.3.2 (v0.3-plan
  * §3 M21).
  *
- * **v0.3-M21 pre-flight stub.** Sibling to `auth login`; rejects
- * every invocation today with `internal_error` carrying the M21-
- * pending hint. The argv shape (`--profile <name>` global flag) is
- * the final shape the M21 implementation ships against.
- *
- * **Idempotent.** Per cli-design §7.3.2 — deletes the named profile
- * entry; no-op + `ok: true` on a missing entry. NOT under the
+ * Idempotent — deletes the named profile entry; no-op + `ok: true`
+ * with `was_present: false` on a missing entry. NOT under the
  * destructive-confirmation gate (§3.1) — credential rotation is a
  * routine agent operation, not data mutation requiring `--yes`.
  *
- * **Output schema** is the future-shape envelope: `{profile,
- * was_present}`. The `was_present` slot tells agents whether the
- * delete actually removed an entry vs. ran against an absent
- * profile — useful for "is this profile authenticated?" probing
- * without a separate `auth status` verb (planned for v0.3.x).
- *
- * **What lands at M21 implementation:** call
- * {@link import('../../config/credentials.js').deleteProfileCredentials}
- * + emit the success envelope.
+ * When the post-delete profiles map is empty, the credentials file
+ * is **still written** as `{schema_version: '1', profiles: {}}`
+ * rather than deleted outright (cli-design §7.3.2 — keeps the
+ * schema-version pin discoverable + avoids fresh-install ambiguity).
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
+import { UsageError } from '../../utils/errors.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitSuccess } from '../emit.js';
+import { deleteProfileCredentials } from '../../config/credentials.js';
+import { PINNED_API_VERSION } from '../../api/client.js';
+import type { RunContext } from '../../cli/run.js';
 
 const inputSchema = z
   .object({
@@ -43,13 +37,21 @@ const logoutOutputSchema = z
 
 export type AuthLogoutOutput = z.infer<typeof logoutOutputSchema>;
 
+const credentialsHomeOptions = (
+  ctx: RunContext,
+): { home?: string; env: NodeJS.ProcessEnv } => {
+  const home = ctx.env.HOME;
+  return home !== undefined && home.length > 0
+    ? { home, env: ctx.env }
+    : { env: ctx.env };
+};
+
 export const authLogoutCommand: CommandModule<
   z.infer<typeof inputSchema>,
   AuthLogoutOutput
 > = {
   name: 'auth.logout',
-  summary:
-    'Delete a profile\'s credentials cache entry (v0.3-M21 pre-flight stub — runtime body lands at M21 implementation)',
+  summary: 'Delete a profile\'s credentials cache entry',
   examples: [
     'monday auth logout --profile work',
     'monday auth logout --profile personal',
@@ -64,13 +66,11 @@ export const authLogoutCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'auth',
-      'OAuth-issued credentials cache (v0.3-M21; cli-design §7.3 / §7.4)',
+      'OAuth-issued credentials cache (cli-design §7.3 / §7.4)',
     );
     noun
       .command('logout')
       .description(authLogoutCommand.summary)
-      // `--profile <name>` is the global flag (cli-design §4.4) — see
-      // `login.ts` for the rationale.
       .addHelpText(
         'after',
         [
@@ -78,14 +78,8 @@ export const authLogoutCommand: CommandModule<
           'Examples:',
           ...authLogoutCommand.examples.map((e) => `  ${e}`),
           '',
-          'NOTE: Pre-flight stub — runtime body lands at v0.3-M21',
-          'implementation. The verb registers the argv shape so agent',
-          'scripts targeting `monday auth logout --profile <name>` are',
-          'stable across the M21 drop-in.',
-          '',
         ].join('\n'),
       )
-      // Async action — see `login.ts` for the rationale.
       .action(async () => {
         const flags = parseGlobalFlags(program.opts(), ctx.env);
         if (flags.profile === undefined || flags.profile.length === 0) {
@@ -99,18 +93,24 @@ export const authLogoutCommand: CommandModule<
           );
         }
         authLogoutCommand.inputSchema.parse({ profile: flags.profile });
-        await Promise.reject(
-          new ApiError(
-            'internal_error',
-            '`monday auth logout` is a v0.3-M21 pre-flight stub — runtime body lands at M21 implementation alongside the credentials-cache delete primitive.',
-            {
-              details: {
-                profile: flags.profile,
-                hint: 'M21 implementation kickoff lands `deleteProfileCredentials` + replaces this stub with the real action body.',
-              },
-            },
-          ),
+
+        const result = await deleteProfileCredentials(
+          flags.profile,
+          credentialsHomeOptions(ctx),
         );
+
+        emitSuccess({
+          ctx,
+          data: {
+            profile: flags.profile,
+            was_present: result.wasPresent,
+          },
+          schema: authLogoutCommand.outputSchema,
+          programOpts: program.opts(),
+          source: 'none',
+          apiVersion: PINNED_API_VERSION,
+          cacheAgeSeconds: null,
+        });
       });
   },
 };

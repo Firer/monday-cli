@@ -2,43 +2,56 @@
  * `monday auth login --profile <name>` — OAuth flow + credentials cache
  * write per cli-design §7.3 / §7.4 (v0.3-plan §3 M21).
  *
- * **v0.3-M21 pre-flight stub.** The verb is registered for forward-
- * compatibility — agent scripts targeting `monday auth login` are
- * stable across the M21 implementation drop — and rejects every
- * invocation today with `internal_error` carrying the M21-pending
- * hint. The argv shape (`--profile <name>` global flag, no
- * positional) is the final shape the M21 implementation ships
- * against; only the action body changes.
+ * **Flow shape (cli-design §7.3.1):**
  *
- * **Output schema is the future-shape envelope** (per §7.3.1 step 8):
- * `{profile, account_id, scopes}`. Today the verb always rejects so
- * this schema never validates a real payload — it ships for the
- * `monday schema` introspection surface and the future drop-in.
- *
- * **What lands at M21 implementation:**
- *   - Generate per-attempt `state` via {@link generateOAuthState}.
- *   - Bind the listener via {@link bindOAuthListener} (fixed port —
- *     {@link OAUTH_DEFAULT_PORT}).
- *   - Open the browser to the consent URL; print the URL to stderr
- *     as a headless-friendly fallback (cli-design §7.3.1 step 3).
- *   - Wait for the redirect, verify CSRF via {@link verifyCsrf},
- *     exchange the code via {@link exchangeCode}.
- *   - Post-exchange `account { id }` query for the success-envelope
- *     `account_id` (probe-confirmed string-typed: e.g.,
- *     `"34900083"`).
- *   - Persist via
- *     {@link import('../../config/credentials.js').setProfileCredentials}.
- *   - Emit success envelope per §7.3.1 step 8.
- *
- * **The token itself never appears in `data`** per §7.4.3 redaction
- * discipline + .claude/rules/security.md. The success envelope's
- * `account_id` + `scopes` echo the OAuth-app-granted scope set so
- * agents can self-audit without re-running the flow.
+ *   1. Generate per-attempt CSRF state.
+ *   2. Bind a local listener on `127.0.0.1:9876` (or call the
+ *      `__test_oauth_helper` seam when set).
+ *   3. Build the consent URL + open the browser; print the URL to
+ *      stderr as a headless-friendly fallback.
+ *   4. Wait for the redirect.
+ *   5. Verify CSRF (constant-time compare; length mismatches route to
+ *      `csrf_mismatch`, NOT `internal_error`).
+ *   6. Map redirect kind: `code` → exchange; `error: 'access_denied'`
+ *      → `oauth_failed.user_denied`; any other error →
+ *      `oauth_failed.authorization_failed`.
+ *   7. Exchange the code at `/oauth2/token`.
+ *   8. Query `account { id }` with the new token to populate the
+ *      success envelope's `account_id`.
+ *   9. Persist via {@link setProfileCredentials}.
+ *  10. Emit success envelope (token NEVER in `data` per §7.4.3).
  */
+import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitSuccess } from '../emit.js';
+import {
+  bindOAuthListener,
+  exchangeCode,
+  generateOAuthState,
+  verifyCsrf,
+  OAUTH_AUTHORIZE_URL,
+  OAUTH_CALLBACK_PATH,
+  OAUTH_CLIENT_ID,
+  OAUTH_CLIENT_SECRET,
+  OAUTH_DEFAULT_REQUESTED_SCOPES,
+  type OAuthListenerHandle,
+} from '../../api/oauth.js';
+import {
+  buildTestOAuthListener,
+  readTestOAuthFixture,
+  TEST_OAUTH_HELPER_ENV_VAR,
+} from '../../api/oauth-test-helper.js';
+import {
+  setProfileCredentials,
+  type ProfileEntry,
+} from '../../config/credentials.js';
+import { createFetchTransport } from '../../api/transport.js';
+import { MondayClient, PINNED_API_VERSION } from '../../api/client.js';
+import type { Transport } from '../../api/transport.js';
+import type { RunContext } from '../../cli/run.js';
 
 const inputSchema = z
   .object({
@@ -56,23 +69,129 @@ const loginOutputSchema = z
 
 export type AuthLoginOutput = z.infer<typeof loginOutputSchema>;
 
+const accountIdQuery = 'query AuthLoginAccountId { account { id } }';
+
+const accountIdResponseSchema = z
+  .object({
+    account: z
+      .object({
+        id: z.string().min(1),
+      })
+      .loose(),
+  })
+  .loose();
+
+/**
+ * Best-effort browser-open via the platform's default opener. Spawned
+ * detached + unref'd so a missing opener doesn't keep the parent
+ * process alive. Returns `true` if the spawn appeared to start; the
+ * fallback URL print runs regardless so headless boxes still see the
+ * link.
+ */
+/* c8 ignore start — production-only browser-open path; tests bypass
+   it via the __test_oauth_helper seam. */
+const tryOpenBrowser = (url: string): boolean => {
+  const opener =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'win32'
+        ? 'start'
+        : 'xdg-open';
+  try {
+    const child = spawn(opener, [url], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    child.on('error', () => {
+      // Swallow — the URL print covers headless boxes.
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+/* c8 ignore stop */
+
+/**
+ * Fetches `account { id }` with the just-obtained token. Honours
+ * `ctx.transport` if present (test path) — production builds a fresh
+ * `FetchTransport` carrying the new token.
+ */
+const fetchAccountId = async (
+  accessToken: string,
+  ctx: RunContext,
+): Promise<string> => {
+  const transport: Transport =
+    ctx.transport ??
+    createFetchTransport({
+      endpoint: 'https://api.monday.com/v2',
+      apiToken: accessToken,
+      apiVersion: PINNED_API_VERSION,
+      timeoutMs: 30_000,
+    });
+  const client = new MondayClient({
+    transport,
+    signal: ctx.signal,
+    retries: 0,
+    verbose: false,
+  });
+  const response = await client.raw<unknown>(accountIdQuery, undefined, {
+    operationName: 'AuthLoginAccountId',
+  });
+  const parsed = accountIdResponseSchema.safeParse(response.data);
+  /* c8 ignore next 14 — defensive: Monday's GraphQL `account { id }`
+     surface is contract-stable; a parse failure here would mean
+     Monday changed the response shape, which is a Part 2 amendment. */
+  if (!parsed.success) {
+    throw new ApiError(
+      'internal_error',
+      'post-OAuth `account { id }` response did not match the expected shape',
+      {
+        cause: parsed.error,
+        details: {
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+        },
+      },
+    );
+  }
+  return parsed.data.account.id;
+};
+
+const credentialsHomeOptions = (
+  ctx: RunContext,
+): { home?: string; env: NodeJS.ProcessEnv } => {
+  const home = ctx.env.HOME;
+  return home !== undefined && home.length > 0
+    ? { home, env: ctx.env }
+    : { env: ctx.env };
+};
+
+const buildConsentUrl = (state: string, redirectUri: string): string => {
+  const url = new URL(OAUTH_AUTHORIZE_URL);
+  url.searchParams.set('client_id', OAUTH_CLIENT_ID);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('state', state);
+  url.searchParams.set('scope', OAUTH_DEFAULT_REQUESTED_SCOPES.join(' '));
+  return url.toString();
+};
+
 export const authLoginCommand: CommandModule<
   z.infer<typeof inputSchema>,
   AuthLoginOutput
 > = {
   name: 'auth.login',
-  summary:
-    'OAuth flow that writes a per-profile credentials cache entry (v0.3-M21 pre-flight stub — runtime body lands at M21 implementation)',
+  summary: 'OAuth flow that writes a per-profile credentials cache entry',
   examples: [
     'monday auth login --profile work',
     'monday auth login --profile personal',
   ],
-  // OAuth flow itself is non-idempotent (each `code` is single-use
-  // per OAuth's spec) — but the credentials-write layer is
-  // idempotent (re-running overwrites the named profile entry per
-  // §7.3.2). The contract-level shape is "running this verb leaves
-  // the named profile authenticated" so we report `idempotent: true`
-  // — agent retries against the same `--profile` are safe.
+  // OAuth flow itself is non-idempotent (each `code` is single-use per
+  // OAuth's spec) but the credentials-write layer is idempotent
+  // (re-running overwrites the named profile entry per §7.3.2).
   idempotent: true,
   inputSchema,
   outputSchema: loginOutputSchema,
@@ -80,16 +199,11 @@ export const authLoginCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'auth',
-      'OAuth-issued credentials cache (v0.3-M21; cli-design §7.3 / §7.4)',
+      'OAuth-issued credentials cache (cli-design §7.3 / §7.4)',
     );
     noun
       .command('login')
       .description(authLoginCommand.summary)
-      // `--profile <name>` is the global flag (cli-design §4.4); this
-      // command does NOT redeclare it — commander attaches global
-      // flags to the parent `program`. The action reads
-      // `program.opts().profile` and surfaces `usage_error` when
-      // missing.
       .addHelpText(
         'after',
         [
@@ -97,18 +211,8 @@ export const authLoginCommand: CommandModule<
           'Examples:',
           ...authLoginCommand.examples.map((e) => `  ${e}`),
           '',
-          'NOTE: Pre-flight stub — runtime OAuth body lands at v0.3-M21',
-          'implementation. The verb registers the argv shape so agent',
-          'scripts targeting `monday auth login --profile <name>` are',
-          'stable across the M21 drop-in.',
-          '',
         ].join('\n'),
       )
-      // The action is async even though the body is synchronous —
-      // commander routes async-rejection-shaped errors through to
-      // the runner's catch-all envelope mapper, while sync throws
-      // can be swallowed by commander's own error path. Mirrors the
-      // M20 time-track stub's async-action pattern.
       .action(async () => {
         const flags = parseGlobalFlags(program.opts(), ctx.env);
         if (flags.profile === undefined || flags.profile.length === 0) {
@@ -121,25 +225,138 @@ export const authLoginCommand: CommandModule<
             },
           );
         }
-        // Validate the resolved profile name through the input
-        // schema so any future tightening of the rules (e.g.,
-        // disallowed characters) lives in one place.
         authLoginCommand.inputSchema.parse({ profile: flags.profile });
-        // Pre-flight stub — every invocation rejects. M21
-        // implementation replaces this with the real OAuth flow per
-        // cli-design §7.3.1.
-        await Promise.reject(
-          new ApiError(
-            'internal_error',
-            '`monday auth login` is a v0.3-M21 pre-flight stub — runtime OAuth body lands at M21 implementation alongside the listener + token-exchange wire calls.',
-            {
-              details: {
-                profile: flags.profile,
-                hint: 'M21 implementation kickoff (next session) registers the OAuth app at Monday\'s developer portal, lands the listener + token-exchange in `src/api/oauth.ts`, and replaces this stub with the real action body.',
+
+        const state = generateOAuthState();
+
+        // Step 2: bind listener (or test seam).
+        const helperPath = ctx.env[TEST_OAUTH_HELPER_ENV_VAR];
+        let listener: OAuthListenerHandle;
+        if (helperPath !== undefined && helperPath.length > 0) {
+          const fixture = await readTestOAuthFixture(helperPath);
+          listener = buildTestOAuthListener(fixture, state);
+        } else {
+          /* c8 ignore next 2 — production-only socket bind path; unit
+             tests use the test seam, integration tests stub the env. */
+          listener = await bindOAuthListener();
+        }
+
+        try {
+          const redirectUri = `http://127.0.0.1:${String(
+            /* c8 ignore next — production listener.port > 0; only the
+               test-helper path (port: 0) reaches the truthy arm. */
+            listener.port === 0 ? 9876 : listener.port,
+          )}${OAUTH_CALLBACK_PATH}`;
+          const consentUrl = buildConsentUrl(state, redirectUri);
+
+          // Step 3: open browser + print URL fallback. Skipped under
+          // the test seam (no browser to open in tests; the helper
+          // synthesises the redirect directly).
+          /* c8 ignore next 7 — production-only browser-open + stderr
+             URL print path; tests use the helper which short-circuits
+             the consent step. */
+          if (helperPath === undefined) {
+            tryOpenBrowser(consentUrl);
+            ctx.stderr.write(
+              `Open this URL in your browser to continue: ${consentUrl}\n`,
+            );
+          }
+
+          // Step 4: wait for redirect.
+          const payload = await listener.awaitRedirect();
+
+          // Step 5: verify CSRF.
+          if (!verifyCsrf(payload.state, state)) {
+            throw new ApiError(
+              'oauth_failed',
+              'CSRF state mismatch on OAuth redirect — refusing to exchange code',
+              {
+                details: {
+                  reason: 'csrf_mismatch',
+                  hint: 're-run `monday auth login --profile <name>` to start a fresh OAuth flow',
+                },
               },
+            );
+          }
+
+          // Step 6: map error redirects.
+          if (payload.kind === 'error') {
+            if (payload.error === 'access_denied') {
+              throw new ApiError(
+                'oauth_failed',
+                'OAuth authorization was denied at the consent screen',
+                {
+                  details: {
+                    reason: 'user_denied',
+                    hint: 're-run `monday auth login --profile <name>` and approve the consent screen',
+                  },
+                },
+              );
+            }
+            throw new ApiError(
+              'oauth_failed',
+              `OAuth authorization failed: ${payload.error}${payload.errorDescription !== undefined ? ` — ${payload.errorDescription}` : ''}`,
+              {
+                mondayCode: payload.error,
+                details: {
+                  reason: 'authorization_failed',
+                  monday_code: payload.error,
+                  ...(payload.errorDescription !== undefined
+                    ? { monday_description: payload.errorDescription }
+                    : {}),
+                  hint: 'check the OAuth app configuration (scopes / client settings) and retry; for `temporary_unavailable`, retry shortly',
+                },
+              },
+            );
+          }
+
+          // Step 7: exchange code.
+          const tokenResponse = await exchangeCode({
+            code: payload.code,
+            redirectUri,
+            clientId: OAUTH_CLIENT_ID,
+            clientSecret: OAUTH_CLIENT_SECRET,
+          });
+
+          // Step 8: post-exchange `account { id }`.
+          const accountId = await fetchAccountId(
+            tokenResponse.accessToken,
+            ctx,
+          );
+
+          // Step 9: persist credentials.
+          const scopesArray = tokenResponse.scope
+            .split(' ')
+            .filter((s) => s.length > 0);
+          const entry: ProfileEntry = {
+            access_token: tokenResponse.accessToken,
+            obtained_at: ctx.clock().toISOString(),
+            expires_at: null,
+            scopes: scopesArray,
+            account_id: accountId,
+          };
+          await setProfileCredentials(
+            { profileName: flags.profile, entry },
+            credentialsHomeOptions(ctx),
+          );
+
+          // Step 10: emit success envelope. Token NEVER in `data`.
+          emitSuccess({
+            ctx,
+            data: {
+              profile: flags.profile,
+              account_id: accountId,
+              scopes: scopesArray,
             },
-          ),
-        );
+            schema: authLoginCommand.outputSchema,
+            programOpts: program.opts(),
+            source: 'live',
+            apiVersion: PINNED_API_VERSION,
+            cacheAgeSeconds: null,
+          });
+        } finally {
+          listener.close();
+        }
       });
   },
 };

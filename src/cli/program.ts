@@ -21,6 +21,11 @@ import { Command } from 'commander';
 import { getCommandRegistry } from '../commands/index.js';
 import { parseGlobalFlags } from '../types/global-flags.js';
 import { PINNED_API_VERSION } from '../api/client.js';
+import {
+  loadProfilesConfig,
+  selectProfile,
+} from '../config/profiles.js';
+import { resolveProfileToken } from '../config/credentials.js';
 import type { RunContext, RunOptions } from './run.js';
 
 /**
@@ -115,7 +120,7 @@ export const buildProgram = (
   // > SDK pin. We don't load config here (that surfaces a separate
   // `config_error` if the token is missing); the apiVersion override
   // is independent of token resolution.
-  program.hook('preAction', () => {
+  program.hook('preAction', async (_thisCommand, actionCommand) => {
     try {
       const flags = parseGlobalFlags(program.opts(), ctx.env);
       const resolvedVersion =
@@ -127,6 +132,95 @@ export const buildProgram = (
       // Bad global-flag shape is already a usage_error path the
       // runner's catch-all will surface; the preAction hook just
       // tries best-effort.
+    }
+
+    // Profile resolution per cli-design §7.2 / §7.4 (v0.3-M21).
+    // Skipped for `auth login` / `auth logout` — those verbs are the
+    // source of credentials, not consumers; running profile
+    // resolution against a fresh-install (no token anywhere yet)
+    // would surface `config_error` BEFORE the login command had a
+    // chance to populate the cache.
+    const parent = actionCommand.parent;
+    if (parent !== null && parent.name() === 'auth') {
+      return;
+    }
+
+    let profileFlag: string | undefined;
+    try {
+      profileFlag = parseGlobalFlags(program.opts(), ctx.env).profile;
+    } catch {
+      /* c8 ignore next 3 — defensive: a global-flag parse failure
+         already surfaced via the earlier api-version commit's catch;
+         duplicate guard keeps profile resolution skipped on that path. */
+      return;
+    }
+    const envProfile =
+      ctx.env.MONDAY_PROFILE !== undefined &&
+      ctx.env.MONDAY_PROFILE.length > 0
+        ? ctx.env.MONDAY_PROFILE
+        : undefined;
+
+    // Optimisation: if neither flag nor env names a profile, skip the
+    // file I/O unless a config file actually exists (which means
+    // `default_profile` may apply). Reading a non-existent file is
+    // cheap (single ENOENT), so this is mostly readability.
+    const home =
+      ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
+        ? ctx.env.HOME
+        : undefined;
+    const homeOptions: { home?: string; env: NodeJS.ProcessEnv } =
+      home !== undefined ? { home, env: ctx.env } : { env: ctx.env };
+
+    const config = await loadProfilesConfig(homeOptions);
+
+    if (
+      profileFlag === undefined &&
+      envProfile === undefined &&
+      config?.default_profile === undefined
+    ) {
+      // Implicit-v1 path — no profile resolution needed; commands
+      // read MONDAY_API_TOKEN directly via loadConfig.
+      return;
+    }
+
+    const selection = selectProfile({
+      flag: profileFlag,
+      env: ctx.env,
+      config,
+    });
+
+    /* c8 ignore next 3 — unreachable type-narrowing guard: by the
+       time we pass the early-return at line 175, at least one of
+       flag/env/default_profile is set, so selectProfile returns
+       'named'. The guard exists to keep the union type safe. */
+    if (selection.mode === 'implicit_v1') {
+      return;
+    }
+
+    const resolved = await resolveProfileToken(
+      {
+        profileName: selection.name,
+        apiTokenEnvName: selection.entry.api_token_env,
+      },
+      homeOptions,
+    );
+
+    // Inject the resolved token into ctx.env so downstream
+    // `loadConfig`/`resolveClient` calls pick it up via the standard
+    // MONDAY_API_TOKEN env path. This is the M21 wiring contract;
+    // profile resolution is a one-shot transformation that replaces
+    // the env's token slot with the per-profile resolved value.
+    ctx.env.MONDAY_API_TOKEN = resolved.token;
+
+    // Profile-level api_version override (cli-design §7.2). The
+    // global `--api-version` flag still wins (already committed
+    // above); this fills the env slot so loadConfig sees it.
+    if (selection.entry.api_version !== undefined) {
+      const flags = parseGlobalFlags(program.opts(), ctx.env);
+      if (flags.apiVersion === undefined) {
+        ctx.env.MONDAY_API_VERSION = selection.entry.api_version;
+        ctx.meta.setApiVersion(selection.entry.api_version);
+      }
     }
   });
 
