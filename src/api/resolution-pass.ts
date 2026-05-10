@@ -430,12 +430,15 @@ export const resolveAndTranslate = async (
   // M19 post-translate aggregation: merge each translator's
   // translatorResolution.source / .cacheAgeSeconds into the envelope-
   // level aggregate. Translators that don't hit a cache leg (date /
-  // people / status / dropdown / simple types / link / email /
-  // phone) emit `null` here, which `mergeSource` / `mergeCacheAge`
-  // treat as a no-op. The `tags` translator emits the tag-directory
-  // resolver's source/age; future relation translators (Commits 3 /
-  // 4) emit `{source: 'live', cacheAgeSeconds: null}` for symmetry
-  // (the validator is always live).
+  // status / dropdown / simple types / link / email / phone) emit
+  // `null` here, which `mergeSource` / `mergeCacheAge` treat as a
+  // no-op. The `tags` translator emits the tag-directory resolver's
+  // source/age; the `people` translator (M19→M20 cleanup-window)
+  // threads `userByEmail`'s per-leg source through the widened
+  // `resolveEmail` callback (`me` always 'live', email per cache
+  // hit/miss); the relation translators emit `{source: 'live',
+  // cacheAgeSeconds: null}` for symmetry (the validator is always
+  // live).
   for (const t of translated) {
     const tr = t.translatorResolution;
     if (tr === null) continue;

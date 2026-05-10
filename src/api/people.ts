@@ -60,6 +60,7 @@
 import { ApiError, UsageError } from '../utils/errors.js';
 import { DECIMAL_USER_ID_PATTERN } from '../types/ids.js';
 import { isMeToken } from './me-token.js';
+import { SourceAggregator, type EnvelopeSource } from './source-aggregator.js';
 
 /**
  * Wire payload shape for a `people` column. Matches Monday's
@@ -112,8 +113,35 @@ export interface PeopleResolutionContext {
    * translator forwards the verbatim email so the unmatched-email
    * detail in any thrown `user_not_found` echoes what the agent
    * typed.
+   *
+   * **M19→M20 cleanup-window widening.** Pre-widening the callback
+   * returned just the `id` string and the people translator emitted
+   * `translatorResolution: null`, which meant `--set Owner=alice@x`
+   * against a cache-hit user-directory lookup surfaced
+   * `meta.source: "live"` because the email-resolution leg's source
+   * never reached the envelope-level aggregate. Post-widening, the
+   * callback returns the full `userByEmail` provenance (`source` +
+   * `cacheAgeSeconds`) and the translator threads it into
+   * `translatorResolution` for envelope-level merge — same shape the
+   * M19 tags translator uses for its `resolveTags` callback (see
+   * `TagResolutionContext.resolveTags` in `column-values.ts`).
    */
-  readonly resolveEmail: (email: string) => Promise<string>;
+  readonly resolveEmail: (email: string) => Promise<ResolveEmailResult>;
+}
+
+/**
+ * Per-email resolution result returned by `PeopleResolutionContext.
+ * resolveEmail`. Mirrors `userByEmail`'s public shape one-for-one
+ * (same field names, same union for `source`) so the
+ * `buildResolutionContexts` closure is a transparent passthrough.
+ */
+export interface ResolveEmailResult {
+  /** Resolved Monday user ID (decimal non-negative integer string). */
+  readonly id: string;
+  /** `'cache'` when the directory cache served the email; `'live'` after a network refresh. */
+  readonly source: 'cache' | 'live';
+  /** Cache age in seconds for `source: 'cache'`; `null` after a live refresh. */
+  readonly cacheAgeSeconds: number | null;
 }
 
 /**
@@ -154,6 +182,32 @@ export interface ParsedPeopleInput {
    * a v0.1-plan §3 M5a spec gap for cli-design backfill.
    */
   readonly resolution: PeopleResolution;
+  /**
+   * Aggregated source across every resolution leg this call fired —
+   * one leg per non-empty token. `me` tokens record `'live'` (the
+   * `me { id }` query is always a network call; the per-call
+   * `cachedMe` memo amortises N `me` tokens to one network round-
+   * trip but the leg itself is live). Email tokens record the
+   * `userByEmail` callback's `source` verbatim. `mergeSource`'s rule
+   * promotes `cache` + `live` → `mixed`. Always populated; empty
+   * input throws before this slot is built.
+   *
+   * Threaded into `translatorResolution.source` by `translatePeople`
+   * so the envelope-level `meta.source` aggregate reflects the
+   * email-resolution leg (M19→M20 cleanup-window parity fix per
+   * v0.3-plan §11 post-mortem).
+   */
+  readonly source: EnvelopeSource;
+  /**
+   * Worst-case staleness across legs that hit cache (the OLDEST
+   * `cacheAgeSeconds` seen). `null` when no leg hit cache (every
+   * email resolved live AND no leg contributed an age). Threaded
+   * into `translatorResolution.cacheAgeSeconds` by `translatePeople`
+   * so the envelope-level `meta.cache_age_seconds` reflects the
+   * worst-case staleness across the column-resolution leg + the
+   * people-resolution leg.
+   */
+  readonly cacheAgeSeconds: number | null;
 }
 
 /**
@@ -210,6 +264,16 @@ export const parsePeopleInput = async (
     return cachedMe;
   };
 
+  // Source/cache-age aggregator for the envelope-level meta.source
+  // pathway (M19→M20 cleanup-window parity fix). Each token records
+  // one leg: `me` always 'live' (`me { id }` is a network call —
+  // the per-call cachedMe memo amortises duplicates but the leg is
+  // still live), email tokens forward the userByEmail callback's
+  // {source, cacheAgeSeconds} verbatim. Translated downstream by
+  // translatePeople into translatorResolution; the envelope-level
+  // mergeSource rule promotes cache + live → mixed.
+  const sourceAgg = new SourceAggregator();
+
   const entries: PeoplePayloadEntry[] = [];
   const resolutionTokens: PeopleResolutionToken[] = [];
   for (const token of tokens) {
@@ -220,17 +284,29 @@ export const parsePeopleInput = async (
       // gap in v0.1-plan.md §3 M5a.
       throw numericPeopleTokenError(columnId, token, raw);
     }
-    const id =
-      isMeToken(token)
-        ? await resolveMeOnce()
-        : await ctx.resolveEmail(token);
+    let id: string;
+    if (isMeToken(token)) {
+      id = await resolveMeOnce();
+      sourceAgg.record('live', null);
+    } else {
+      const resolved = await ctx.resolveEmail(token);
+      id = resolved.id;
+      sourceAgg.record(resolved.source, resolved.cacheAgeSeconds);
+    }
     entries.push({ id: idStringToNumber(id, columnId, token), kind: 'person' });
     resolutionTokens.push({ input: token, resolved_id: id });
   }
 
+  // tokens.length > 0 guaranteed (empty input throws above), so the
+  // aggregator always has at least one leg recorded; `result()`'s
+  // fallback is unreachable here but the default ('live') stays as
+  // a defensive seed for the type narrowing.
+  const aggregate = sourceAgg.result();
   return {
     payload: { personsAndTeams: entries },
     resolution: { tokens: resolutionTokens },
+    source: aggregate.source,
+    cacheAgeSeconds: aggregate.cacheAgeSeconds,
   };
 };
 

@@ -65,6 +65,12 @@ export const buildResolutionContexts = (
   };
   const peopleResolution: PeopleResolutionContext = {
     resolveMe: resolveMeFactory(client),
+    // M19→M20 cleanup-window: forward userByEmail's full provenance
+    // (id + source + cacheAgeSeconds) so parsePeopleInput can
+    // aggregate the email-resolution leg into the envelope-level
+    // meta.source. Pre-widening this returned just `result.user.id`
+    // and cache hits silently dropped from the aggregate (v0.3-plan
+    // §11 post-mortem parity gap).
     resolveEmail: async (email) => {
       const result = await userByEmail({
         client,
@@ -72,7 +78,11 @@ export const buildResolutionContexts = (
         env: ctx.env,
         noCache: globalFlags.noCache,
       });
-      return result.user.id;
+      return {
+        id: result.user.id,
+        source: result.source,
+        cacheAgeSeconds: result.cacheAgeSeconds,
+      };
     },
   };
   const tagResolution: TagResolutionContext = {

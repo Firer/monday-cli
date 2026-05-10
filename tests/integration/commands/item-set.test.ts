@@ -8,6 +8,7 @@
  *     refresh, validation_failed → column_archived remap.
  */
 import { describe, expect, it } from 'vitest';
+import { resolveCacheRoot, writeEntry } from '../../../src/api/cache.js';
 import {
   assertEnvelopeContract,
   FIXTURE_API_URL,
@@ -645,6 +646,95 @@ describe('monday item set (integration, M5b)', () => {
       },
     );
     expect(out.exitCode).toBe(0);
+  });
+
+  it('cache-hit: people column resolves email from user-directory cache → meta.source: "mixed" (M19→M20 cleanup-window parity fix)', async () => {
+    // Closes the v0.3-plan §11 M19 post-mortem parity gap. Pre-fix
+    // this exact scenario emitted meta.source: "live" because the
+    // email-resolution cache leg never reached the envelope-level
+    // aggregate. Post-fix translatePeople threads the per-leg source
+    // through translatorResolution, which resolution-pass.ts merges
+    // into the aggregate. The mutation itself is always a live leg,
+    // so cache + live → mixed per source-aggregator.ts mergeSource.
+    //
+    // Test shape: seed user-directory cache with a known email, then
+    // run `item set Owner=alice@example.com`. The cassette has NO
+    // UsersByEmail interaction — if the cache hit didn't fire, the
+    // exhausted cassette would error loudly.
+    const cacheRoot = resolveCacheRoot({ env: { XDG_CACHE_HOME: xdgRoot() } });
+    await writeEntry(
+      cacheRoot,
+      { kind: 'users' },
+      [{ id: '555', name: 'Alice', email: 'alice@example.com' }],
+    );
+    const peopleBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'owner_p',
+          title: 'Owner',
+          type: 'people',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const itemWithPeople = {
+      ...sampleItem,
+      column_values: [
+        {
+          id: 'owner_p',
+          type: 'people',
+          text: 'Alice',
+          value: '{"personsAndTeams":[{"id":555,"kind":"person"}]}',
+          column: { title: 'Owner' },
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'owner_p=alice@example.com',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [peopleBoard] } },
+          },
+          // No UsersByEmail interaction — cache hit. The mutation
+          // itself fires live; the email-resolution leg fires from
+          // cache. Aggregate → mixed.
+          {
+            operation_name: 'ItemSetRich',
+            match_variables: {
+              itemId: '12345',
+              boardId: '111',
+              columnId: 'owner_p',
+              value: { personsAndTeams: [{ id: 555, kind: 'person' }] },
+            },
+            response: { data: { change_column_value: itemWithPeople } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    // Post-fix assertion: cache leg landed in the envelope. Pre-fix
+    // this would have been 'live' (translator dropped the cache leg).
+    expect(env.meta.source).toBe('mixed');
+    // cacheAgeSeconds should be a non-null number — the cache leg
+    // contributes its age. Exact age depends on filesystem timing
+    // (mtime granularity), so just pin it as numeric + non-negative.
+    expect(typeof env.meta.cache_age_seconds).toBe('number');
+    expect(env.meta.cache_age_seconds!).toBeGreaterThanOrEqual(0);
   });
 
   it('live: tags column resolves names via account-tag directory and emits projected item (M19 Commit 2 happy path)', async () => {

@@ -378,12 +378,15 @@ export const itemSetCommand: CommandModule<
         // Source aggregation across three legs (M19 widening of the
         // pre-M19 column-resolution-only path):
         //   1. Column metadata resolution (cache | live | mixed).
-        //   2. Translator resolution (M19+ — `tags` reads the per-
-        //      account directory; relation translators are always
-        //      live). Carried on `translated.translatorResolution`;
-        //      `null` for translators with no cache leg (date /
-        //      people / status / dropdown / simple types / link /
-        //      email / phone / --set-raw escape).
+        //   2. Translator resolution. `tags` reads the per-account
+        //      directory; `people` (M19→M20 cleanup-window) threads
+        //      `userByEmail`'s per-leg source (`me` always 'live',
+        //      each email per cache hit/miss); relation translators
+        //      are always live. Carried on
+        //      `translated.translatorResolution`; `null` for
+        //      translators with no cache leg (date / status /
+        //      dropdown / simple types / link / email / phone /
+        //      --set-raw escape).
         //   3. The mutation itself — always live.
         // mergeSource handles the precedence: any 'live' + 'cache'
         // mix produces 'mixed'; any 'live' alone stays 'live'.

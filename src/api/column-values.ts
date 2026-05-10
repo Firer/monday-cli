@@ -238,13 +238,14 @@ export interface RelationResolutionItem {
  * Translator-side source/cache-age provenance for the
  * `meta.source` + `meta.cache_age_seconds` aggregation pathway.
  * Populated by translators whose resolution may hit the cache
- * (`tags` reads from the per-account directory cache;
- * `board_relation` / `dependency` always live, populating
- * `{source: 'live', cacheAgeSeconds: null}` for the symmetry).
- * `null` for every other type — date / people / status / dropdown
- * / text / long_text / numbers / link / email / phone don't have
- * a per-translator cache leg today (people's `userByEmail` is a
- * pre-existing parity gap logged for §22 cleanup-window).
+ * (`tags` reads from the per-account directory cache; `people`
+ * threads `userByEmail`'s `source`/`cacheAgeSeconds` through the
+ * widened `resolveEmail` callback — M19→M20 cleanup-window parity
+ * fix per v0.3-plan §11; `board_relation` / `dependency` always
+ * live, populating `{source: 'live', cacheAgeSeconds: null}` for
+ * the symmetry). `null` for every other type — date / status /
+ * dropdown / text / long_text / numbers / link / email / phone
+ * don't have a per-translator cache leg today.
  *
  * The dispatcher (`resolveAndTranslate` in `resolution-pass.ts`)
  * merges each translated value's `translatorResolution` into the
@@ -315,12 +316,14 @@ export interface TranslatedColumnValue {
   readonly relationResolution: RelationResolution | null;
   /**
    * Source + cache-age provenance for the translator's resolution
-   * leg. `null` for translators that don't hit a cache leg
-   * (date / people / status / dropdown / simple types). Populated
-   * by `tags` (reads the per-account tag directory) and the
-   * relation translators (always live). Aggregated into envelope-
-   * level `meta.source` by `resolveAndTranslate`'s post-translate
-   * merge pass.
+   * leg. `null` for translators that don't hit a cache leg (date /
+   * status / dropdown / simple types / link / email / phone).
+   * Populated by `tags` (reads the per-account tag directory),
+   * `people` (M19→M20 cleanup-window — `me` token is always live;
+   * each email leg threads `userByEmail`'s `{source,
+   * cacheAgeSeconds}`), and the relation translators (always live,
+   * for symmetry). Aggregated into envelope-level `meta.source`
+   * by `resolveAndTranslate`'s post-translate merge pass.
    */
   readonly translatorResolution: TranslatorResolutionInfo | null;
 }
@@ -784,7 +787,15 @@ const translatePeople = async (
     peopleResolution: parsed.resolution,
     tagResolution: null,
     relationResolution: null,
-    translatorResolution: null,
+    // M19→M20 cleanup-window parity fix: thread the people
+    // resolution's aggregated source/age into translatorResolution
+    // so envelope-level meta.source reflects cache-hit email
+    // lookups. Pre-fix this slot was `null` and cache hits silently
+    // dropped from the aggregate (v0.3-plan §11 post-mortem).
+    translatorResolution: {
+      source: parsed.source,
+      cacheAgeSeconds: parsed.cacheAgeSeconds,
+    },
   };
 };
 

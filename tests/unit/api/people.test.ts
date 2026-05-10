@@ -4,7 +4,24 @@ import {
   parsePeopleInput,
   type ParsedPeopleInput,
   type PeopleResolutionContext,
+  type ResolveEmailResult,
 } from '../../../src/api/people.js';
+
+/**
+ * Lifts a bare ID string into the M19→M20 cleanup-window-widened
+ * `ResolveEmailResult` shape (`{id, source, cacheAgeSeconds}`). Most
+ * tests in this file don't care about the source slot — they're
+ * pinning payload / echo / ID-validation behaviour that's orthogonal
+ * to source aggregation. `liveId('42')` keeps the call sites
+ * one-line and provides a sensible default (`source: 'live'`). The
+ * source-aggregation tests at the bottom of the file override the
+ * default to assert mixed / cache shapes.
+ */
+const liveId = (id: string): ResolveEmailResult => ({
+  id,
+  source: 'live',
+  cacheAgeSeconds: null,
+});
 
 // Factory for a deterministic resolution context. Tests that don't
 // care which callback fires can stub both with success values; tests
@@ -18,7 +35,7 @@ const ctx = (
     // Default email→ID stub: hash by length so multiple emails
     // produce distinct IDs without per-test wiring. Tests that
     // need specific IDs override this.
-    return Promise.resolve(String(100 + email.length));
+    return Promise.resolve(liveId(String(100 + email.length)));
   },
   ...overrides,
 });
@@ -29,7 +46,7 @@ describe('parsePeopleInput — single token', () => {
       resolveMe: () => Promise.reject(new Error('should not be called')),
       resolveEmail: (email: string) => {
         expect(email).toBe('alice@example.com');
-        return Promise.resolve('42');
+        return Promise.resolve(liveId('42'));
       },
     });
     expect(out).toEqual<ParsedPeopleInput>({
@@ -39,6 +56,8 @@ describe('parsePeopleInput — single token', () => {
       resolution: {
         tokens: [{ input: 'alice@example.com', resolved_id: '42' }],
       },
+      source: 'live',
+      cacheAgeSeconds: null,
     });
   });
 
@@ -48,7 +67,7 @@ describe('parsePeopleInput — single token', () => {
     // serialise `"42"` (with quotes), which Monday's people column
     // rejects as validation_failed. Pin via typeof.
     const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
-      resolveEmail: () => Promise.resolve('42'),
+      resolveEmail: () => Promise.resolve(liveId('42')),
     }));
     const entry = out.payload.personsAndTeams[0];
     if (entry === undefined) throw new Error('expected one entry');
@@ -103,9 +122,9 @@ describe('parsePeopleInput — multiple tokens', () => {
       'owner',
       ctx({
         resolveEmail: (email: string) => {
-          if (email === 'alice@example.com') return Promise.resolve('1');
-          if (email === 'bob@example.com') return Promise.resolve('2');
-          if (email === 'carol@example.com') return Promise.resolve('3');
+          if (email === 'alice@example.com') return Promise.resolve(liveId('1'));
+          if (email === 'bob@example.com') return Promise.resolve(liveId('2'));
+          if (email === 'carol@example.com') return Promise.resolve(liveId('3'));
           return Promise.reject(new Error(`unexpected: ${email}`));
         },
       }),
@@ -122,7 +141,7 @@ describe('parsePeopleInput — multiple tokens', () => {
       resolveMe: () => Promise.resolve('7'),
       resolveEmail: (email: string) => {
         expect(email).toBe('alice@example.com');
-        return Promise.resolve('42');
+        return Promise.resolve(liveId('42'));
       },
     });
     expect(out.payload.personsAndTeams).toEqual([
@@ -134,7 +153,7 @@ describe('parsePeopleInput — multiple tokens', () => {
   it('email,me ordering preserved (resolveMe fires when its slot comes up)', async () => {
     const out = await parsePeopleInput('alice@example.com,me', 'owner', {
       resolveMe: () => Promise.resolve('7'),
-      resolveEmail: () => Promise.resolve('42'),
+      resolveEmail: () => Promise.resolve(liveId('42')),
     });
     expect(out.payload.personsAndTeams).toEqual([
       { id: 42, kind: 'person' },
@@ -151,7 +170,7 @@ describe('parsePeopleInput — multiple tokens', () => {
           // Whitespace is stripped by the parser; resolveEmail
           // never sees it.
           expect(email.trim()).toBe(email);
-          return Promise.resolve(email === 'alice@example.com' ? '1' : '2');
+          return Promise.resolve(liveId(email === 'alice@example.com' ? '1' : '2'));
         },
       }),
     );
@@ -170,7 +189,7 @@ describe('parsePeopleInput — multiple tokens', () => {
       'owner',
       ctx({
         resolveEmail: (email: string) =>
-          Promise.resolve(email === 'alice@example.com' ? '1' : '2'),
+          Promise.resolve(liveId(email === 'alice@example.com' ? '1' : '2')),
       }),
     );
     expect(out.payload.personsAndTeams).toEqual([
@@ -250,7 +269,9 @@ describe('parsePeopleInput — empty / whitespace input', () => {
 
   it('does not call resolveMe / resolveEmail when input is empty', async () => {
     const resolveMe = vi.fn(() => Promise.resolve('999'));
-    const resolveEmail = vi.fn((email: string) => Promise.resolve(`${email}-id`));
+    const resolveEmail = vi.fn((email: string) =>
+      Promise.resolve(liveId(`${email}-id`)),
+    );
     await expect(
       parsePeopleInput('', 'owner', { resolveMe, resolveEmail }),
     ).rejects.toThrow(UsageError);
@@ -371,7 +392,7 @@ describe('parsePeopleInput — user_not_found bubbles from resolveEmail', () => 
     // (alice + ghost). Pin the short-circuit so a future "best-
     // effort" refactor surfaces the regression.
     const resolveEmail = vi.fn((email: string) => {
-      if (email === 'alice@example.com') return Promise.resolve('1');
+      if (email === 'alice@example.com') return Promise.resolve(liveId('1'));
       return Promise.reject(
         new ApiError('user_not_found', `unknown email ${email}`, {
           details: { email },
@@ -405,17 +426,17 @@ describe('parsePeopleInput — safe-integer guard on resolved IDs', () => {
     const huge = '9'.repeat(20); // 20-digit string well past 2^53
     await expect(
       parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(huge),
+        resolveEmail: () => Promise.resolve(liveId(huge)),
       })),
     ).rejects.toThrow(UsageError);
     await expect(
       parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(huge),
+        resolveEmail: () => Promise.resolve(liveId(huge)),
       })),
     ).rejects.toThrow(/exceeds JavaScript's safe-integer range/u);
     try {
       await parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(huge),
+        resolveEmail: () => Promise.resolve(liveId(huge)),
       }));
     } catch (err) {
       if (!(err instanceof UsageError)) throw err;
@@ -439,7 +460,7 @@ describe('parsePeopleInput — safe-integer guard on resolved IDs', () => {
   it('resolved ID at MAX_SAFE_INTEGER boundary still works', async () => {
     const max = String(Number.MAX_SAFE_INTEGER);
     const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
-      resolveEmail: () => Promise.resolve(max),
+      resolveEmail: () => Promise.resolve(liveId(max)),
     }));
     expect(out.payload.personsAndTeams).toEqual([
       { id: Number.MAX_SAFE_INTEGER, kind: 'person' },
@@ -482,12 +503,12 @@ describe('parsePeopleInput — defensive resolver-side ID validation', () => {
   ])('rejects malformed resolved ID (%s: %j) → internal_error', async (_label, malformedId) => {
     await expect(
       parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(malformedId),
+        resolveEmail: () => Promise.resolve(liveId(malformedId)),
       })),
     ).rejects.toThrow(ApiError);
     try {
       await parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(malformedId),
+        resolveEmail: () => Promise.resolve(liveId(malformedId)),
       }));
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
@@ -526,7 +547,7 @@ describe('parsePeopleInput — defensive resolver-side ID validation', () => {
     // future "non-zero only" refactor surfaces.
     for (const id of ['0', '1', '42', String(Number.MAX_SAFE_INTEGER)]) {
       const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
-        resolveEmail: () => Promise.resolve(id),
+        resolveEmail: () => Promise.resolve(liveId(id)),
       }));
       expect(out.payload.personsAndTeams[0]?.id).toBe(Number(id));
     }
@@ -540,7 +561,7 @@ describe('parsePeopleInput — JSON scalar discipline', () => {
     // at the boundary; double-stringifying would round-trip as the
     // literal string `'{"personsAndTeams":[{"id":42,"kind":"person"}]}'`.
     const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
-      resolveEmail: () => Promise.resolve('42'),
+      resolveEmail: () => Promise.resolve(liveId('42')),
     }));
     expect(typeof out.payload).toBe('object');
     expect(out.payload).not.toBeInstanceOf(String);
@@ -571,8 +592,8 @@ describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () =>
       {
         resolveMe: () => Promise.resolve('7'),
         resolveEmail: (email: string) => {
-          if (email === 'alice@example.com') return Promise.resolve('1');
-          if (email === 'bob@example.com') return Promise.resolve('2');
+          if (email === 'alice@example.com') return Promise.resolve(liveId('1'));
+          if (email === 'bob@example.com') return Promise.resolve(liveId('2'));
           return Promise.reject(new Error(`unexpected: ${email}`));
         },
       },
@@ -587,7 +608,7 @@ describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () =>
   it('input field is the post-trim verbatim token (preserves casing)', async () => {
     const out = await parsePeopleInput('  ME  ,  alice@example.com  ', 'owner', {
       resolveMe: () => Promise.resolve('7'),
-      resolveEmail: () => Promise.resolve('42'),
+      resolveEmail: () => Promise.resolve(liveId('42')),
     });
     expect(out.resolution.tokens).toEqual([
       { input: 'ME', resolved_id: '7' },
@@ -605,7 +626,7 @@ describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () =>
       'owner',
       ctx({
         resolveEmail: (email: string) =>
-          Promise.resolve(email === 'alice@example.com' ? '1' : '2'),
+          Promise.resolve(liveId(email === 'alice@example.com' ? '1' : '2')),
       }),
     );
     expect(out.payload.personsAndTeams).toHaveLength(2);
@@ -621,7 +642,7 @@ describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () =>
     // precision loss. JSON.stringify({"id":9007199254740993}) loses
     // precision; {"resolved_id":"9007199254740993"} doesn't.
     const out = await parsePeopleInput('alice@example.com', 'owner', ctx({
-      resolveEmail: () => Promise.resolve('42'),
+      resolveEmail: () => Promise.resolve(liveId('42')),
     }));
     const echo = out.resolution.tokens[0];
     if (echo === undefined) throw new Error('expected one echo entry');
@@ -644,5 +665,104 @@ describe('parsePeopleInput — resolution echo (dry-run engine consumer)', () =>
       { input: 'me', resolved_id: '7' },
       { input: 'me', resolved_id: '7' },
     ]);
+  });
+});
+
+describe('parsePeopleInput — source/cache-age aggregation (M19→M20 cleanup-window)', () => {
+  // Closes the parity gap identified in v0.3-plan §11 M19 post-mortem:
+  // pre-fix, --set Owner=alice@example.com against a cache-hit user-
+  // directory lookup emitted meta.source: "live" because the email-
+  // resolution leg's source never reached the envelope-level
+  // aggregate. Post-fix, parsePeopleInput aggregates per-leg source
+  // via SourceAggregator and exposes the result in {source,
+  // cacheAgeSeconds} for translatePeople to thread into
+  // translatorResolution. The mergeSource rule (cache + live → mixed,
+  // mixed contagious) and mergeCacheAge rule (worst-case staleness
+  // wins) are the source-aggregator.ts contract.
+
+  it('single email cache-hit → source: "cache", cacheAgeSeconds: <hit age>', async () => {
+    const out = await parsePeopleInput('alice@example.com', 'owner', {
+      resolveMe: () => Promise.reject(new Error('unused')),
+      resolveEmail: () =>
+        Promise.resolve({ id: '42', source: 'cache', cacheAgeSeconds: 60 }),
+    });
+    expect(out.source).toBe('cache');
+    expect(out.cacheAgeSeconds).toBe(60);
+  });
+
+  it('single email live-fetch → source: "live", cacheAgeSeconds: null', async () => {
+    const out = await parsePeopleInput('alice@example.com', 'owner', {
+      resolveMe: () => Promise.reject(new Error('unused')),
+      resolveEmail: () => Promise.resolve(liveId('42')),
+    });
+    expect(out.source).toBe('live');
+    expect(out.cacheAgeSeconds).toBeNull();
+  });
+
+  it('mixed cache + live emails → source: "mixed", cacheAgeSeconds: oldest cache age', async () => {
+    // alice serves from cache (age 30), bob is a live refresh, carol
+    // serves from cache (age 90). mergeSource: cache+live → mixed,
+    // mixed contagious. mergeCacheAge: oldest age wins → 90.
+    const out = await parsePeopleInput(
+      'alice@example.com,bob@example.com,carol@example.com',
+      'owner',
+      {
+        resolveMe: () => Promise.reject(new Error('unused')),
+        resolveEmail: (email: string) => {
+          if (email === 'alice@example.com') {
+            return Promise.resolve({ id: '1', source: 'cache', cacheAgeSeconds: 30 });
+          }
+          if (email === 'bob@example.com') {
+            return Promise.resolve({ id: '2', source: 'live', cacheAgeSeconds: null });
+          }
+          return Promise.resolve({ id: '3', source: 'cache', cacheAgeSeconds: 90 });
+        },
+      },
+    );
+    expect(out.source).toBe('mixed');
+    expect(out.cacheAgeSeconds).toBe(90);
+  });
+
+  it('me + cache-hit email → source: "mixed" (me leg is live)', async () => {
+    // The `me` token resolves through `me { id }`, which is always a
+    // network call. Pin it as a `live` leg so a single-`me`-plus-
+    // cache-hit-email input correctly surfaces as `mixed` rather than
+    // silently downgrading to `cache`.
+    const out = await parsePeopleInput('me,alice@example.com', 'owner', {
+      resolveMe: () => Promise.resolve('7'),
+      resolveEmail: () =>
+        Promise.resolve({ id: '42', source: 'cache', cacheAgeSeconds: 15 }),
+    });
+    expect(out.source).toBe('mixed');
+    expect(out.cacheAgeSeconds).toBe(15);
+  });
+
+  it('only me tokens → source: "live", cacheAgeSeconds: null (me is always live)', async () => {
+    const out = await parsePeopleInput('me,me', 'owner', {
+      resolveMe: () => Promise.resolve('7'),
+      resolveEmail: () => Promise.reject(new Error('unused')),
+    });
+    expect(out.source).toBe('live');
+    expect(out.cacheAgeSeconds).toBeNull();
+  });
+
+  it('all-cache emails → source: "cache", cacheAgeSeconds: oldest', async () => {
+    // No live leg fired → aggregate stays 'cache'. The envelope-level
+    // merge later combines this with the column-resolution / mutation
+    // legs to promote upstream when needed.
+    const out = await parsePeopleInput(
+      'alice@example.com,bob@example.com',
+      'owner',
+      {
+        resolveMe: () => Promise.reject(new Error('unused')),
+        resolveEmail: (email: string) =>
+          email === 'alice@example.com'
+            ? Promise.resolve({ id: '1', source: 'cache', cacheAgeSeconds: 100 })
+            : Promise.resolve({ id: '2', source: 'cache', cacheAgeSeconds: 50 }),
+      },
+    );
+    expect(out.source).toBe('cache');
+    // Worst-case staleness: 100 wins over 50.
+    expect(out.cacheAgeSeconds).toBe(100);
   });
 });

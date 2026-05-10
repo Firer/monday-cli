@@ -1119,7 +1119,8 @@ describe('translateColumnValueAsync — surface contract', () => {
       value: 'alice@example.com',
       peopleResolution: {
         resolveMe: () => Promise.resolve('999'),
-        resolveEmail: (_email: string) => Promise.resolve('42'),
+        resolveEmail: (_email: string) =>
+          Promise.resolve({ id: '42', source: 'live', cacheAgeSeconds: null }),
       },
     });
     expect(out).toEqual<TranslatedColumnValue>({
@@ -1136,7 +1137,13 @@ describe('translateColumnValueAsync — surface contract', () => {
       },
       tagResolution: null,
       relationResolution: null,
-      translatorResolution: null,
+      // M19→M20 cleanup-window: people translator threads source/age
+      // from resolveEmail through translatorResolution. This stub
+      // returns `source: 'live', cacheAgeSeconds: null`, so the
+      // aggregated leg is `'live'` (single-token input). Cache-hit
+      // paths surface as `'cache'` / `'mixed'` per the source-
+      // aggregation tests below + the integration cassette.
+      translatorResolution: { source: 'live', cacheAgeSeconds: null },
     });
   });
 
@@ -1165,6 +1172,44 @@ describe('translateColumnValueAsync — surface contract', () => {
         column_type: 'people',
       });
     }
+  });
+
+  it('cache-hit email resolution surfaces translatorResolution: { source: "cache", cacheAgeSeconds: <age> } (M19→M20 parity fix)', async () => {
+    // Closes the v0.3-plan §11 M19 post-mortem parity gap. Pre-fix
+    // the translator emitted translatorResolution: null and cache
+    // hits silently dropped from envelope-level meta.source. Post-
+    // fix the people translator threads the parsePeopleInput
+    // aggregate through, so a cache-served userByEmail leg lands
+    // in the envelope merge.
+    const out = await translateColumnValueAsync({
+      column: { id: 'owner', type: 'people' },
+      value: 'alice@example.com',
+      peopleResolution: {
+        resolveMe: () => Promise.reject(new Error('unused')),
+        resolveEmail: () =>
+          Promise.resolve({ id: '42', source: 'cache', cacheAgeSeconds: 60 }),
+      },
+    });
+    expect(out.translatorResolution).toEqual({
+      source: 'cache',
+      cacheAgeSeconds: 60,
+    });
+  });
+
+  it('mixed me + cache email translator resolution surfaces source: "mixed"', async () => {
+    const out = await translateColumnValueAsync({
+      column: { id: 'owner', type: 'people' },
+      value: 'me,alice@example.com',
+      peopleResolution: {
+        resolveMe: () => Promise.resolve('7'),
+        resolveEmail: () =>
+          Promise.resolve({ id: '42', source: 'cache', cacheAgeSeconds: 30 }),
+      },
+    });
+    expect(out.translatorResolution).toEqual({
+      source: 'mixed',
+      cacheAgeSeconds: 30,
+    });
   });
 
   it('non-people column ignores peopleResolution silently (parity with dateResolution)', async () => {
@@ -1400,7 +1445,8 @@ describe('translateColumnValueAsync — tags translator (M19)', () => {
       value: 'alice@example.com',
       peopleResolution: {
         resolveMe: () => Promise.resolve('999'),
-        resolveEmail: () => Promise.resolve('42'),
+        resolveEmail: () =>
+          Promise.resolve({ id: '42', source: 'live', cacheAgeSeconds: null }),
       },
     });
     const out = selectMutation([t]);

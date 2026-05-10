@@ -389,7 +389,13 @@ describe('planChanges — resolved_from echo per kind', () => {
       peopleResolution: {
         resolveMe: () => Promise.resolve('7'),
         resolveEmail: (email: string) => {
-          if (email === 'alice@example.com') return Promise.resolve('42');
+          if (email === 'alice@example.com') {
+            return Promise.resolve({
+              id: '42',
+              source: 'live' as const,
+              cacheAgeSeconds: null,
+            });
+          }
           return Promise.reject(new ApiError('user_not_found', `unknown: ${email}`));
         },
       },
