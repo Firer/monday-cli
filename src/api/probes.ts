@@ -113,33 +113,6 @@ export interface ProbeSkipped {
 
 export type ProbeResult = ProbeOk | ProbeFail | ProbeSkipped;
 
-/**
- * The `monday status` envelope shape (`data` payload). Each probe
- * gets one slot keyed by its {@link ProbeName}; the order is the
- * declaration order in {@link STATUS_PROBE_ORDER} for stable
- * table-formatter output on TTY.
- *
- * Additive-only per cli-design §6.1: future probes (e.g., a
- * `cache_freshness` check) land as new keys in this record without
- * breaking v0.3 consumers.
- */
-export interface StatusOutput {
-  readonly probes: Readonly<Record<ProbeName, ProbeResult>>;
-  /**
-   * Overall verdict — `'ok'` when every non-skipped probe returned
-   * `'ok'`; `'degraded'` when at least one probe failed but the auth
-   * probe succeeded (the CLI can still talk to Monday); `'down'` when
-   * the auth probe failed or every network probe was skipped via
-   * `--no-probe` AND a local probe failed.
-   */
-  readonly overall: 'ok' | 'degraded' | 'down';
-  /**
-   * Pinned API version + the version the server reports back at the
-   * auth-probe step. Diverging values surface as `meta.warnings`
-   * rather than blocking the verb.
-   */
-  readonly api_version: string;
-}
 
 /**
  * Stable iteration order for the status envelope's `probes` record.
@@ -444,3 +417,19 @@ export const statusOutputSchema = z
     api_version: z.string().min(1),
   })
   .strict();
+
+/**
+ * The `monday status` envelope shape (`data` payload). Derived from
+ * {@link statusOutputSchema} above per `.claude/rules/validation.md`
+ * "schema-driven types" — the schema is the source of truth.
+ *
+ * `probes` is keyed by {@link ProbeName} with every
+ * {@link STATUS_PROBE_ORDER} entry required; additional probe names
+ * land via the schema's `catchall` so future probes (e.g.,
+ * `cache_freshness`) are additive per cli-design §6.1. `overall`
+ * rules + the per-probe error-code mapping live in cli-design §11.5.2
+ * + §11.5.1's table; M22 implementation surfaces a server-reported
+ * `api_version` when the auth probe succeeds so agents detect drift
+ * between the pin and server.
+ */
+export type StatusOutput = z.infer<typeof statusOutputSchema>;

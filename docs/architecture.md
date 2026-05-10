@@ -1203,6 +1203,65 @@ heuristic v0.2-plan §22 documents.
   this module; the test seam is opt-in via `ctx.env.
   __test_oauth_helper`.
 
+- `api/probes.ts` (v0.3 M22 — pre-flight at `fbab6b0`; runtime
+  bodies land at M22 implementation). Per-probe primitives for
+  the `monday status` verb per cli-design §11.5. Type surface
+  pins the {@link ProbeName} enum (`dns | tcp | tls | auth |
+  cache_writability | redaction_self_test | env_var_pickup`), the
+  `ProbeResult` discriminated union (`ok | fail | skipped`), the
+  `StatusOutput` envelope (derived from `statusOutputSchema` —
+  schema-as-source-of-truth per `.claude/rules/validation.md`).
+  Constants pin `STATUS_PROBE_ORDER`, `NO_PROBE_SKIP_SET` (the
+  four network-probe names skipped under `--no-probe`),
+  `ENV_VAR_PICKUP_KEYS`, `REDACTION_SELF_TEST_FIXTURE_TOKEN` (the
+  leak-scan canary). Seven probe runners (`runDnsProbe`,
+  `runTcpProbe`, `runTlsProbe`, `runAuthProbe`,
+  `runCacheWritabilityProbe`, `runRedactionSelfTest`,
+  `summariseEnvVarPickup`) ship as `Promise.reject(internal_error)`
+  stubs under `c8 ignore start/stop` block-wraps; M22
+  implementation replaces them with `node:dns/promises.lookup` +
+  `node:net.createConnection` + `node:tls.connect` + the
+  `me { id }` GraphQL auth probe + `fs.stat / access(W_OK) /
+  probe-write` cache-writability dance + the canary-fold
+  redaction self-test + the pure env-var-pickup summariser. The
+  mockable-seam pattern mirrors the M21 `__test_oauth_helper`
+  env-seam: each probe accepts an injectable helper so tests
+  don't bind real sockets / open real fetch handles.
+  `RedactionSelfTestInputs` takes BOTH `env` and `runtimeSecrets`
+  per cli-design §7.4.3 (Codex M21 P1 ratification) — the probe
+  exercises the same two-layer redaction the production emission
+  paths use via `collectSecrets(env, runtimeSecrets)`. Single
+  consumer: `commands/status.ts`.
+
+- `api/usage.ts` (v0.3 M22 — pre-flight at `fbab6b0`; runtime
+  body lands at M22 implementation). Daily-operation budget for
+  the `monday usage` verb per cli-design §11.5.3 / §13 v0.3
+  entry. Empirical-probe finding (2026-05-10, API `2026-01`):
+  Monday's daily-budget surface lives at `platform_api.daily_limit
+  { base total }` + `platform_api.daily_analytics.by_day [{ day,
+  usage }]` — NOT `account.complexity` (the field doesn't exist
+  on the `Account` type; the cli-design pre-M22 wording was
+  loose). The unit Monday tracks under `platform_api.daily_*` is
+  **operations per day** (200/day on free tier), NOT complexity
+  points; per-minute complexity is a SEPARATE quota system
+  already surfaced by v0.1's `account complexity`. Type surface
+  pins `RawDailyLimit { base, total }`, `RawDailyAnalyticsByDay
+  { day, usage }`, the `UsageOutput` envelope `{daily_limit,
+  usage_today, usage_remaining_today, last_updated}` (additive-
+  only per Decision 8 closure — v0.4 may extend with per-minute
+  complexity + concurrency cap WITHOUT breaking), and the
+  `USAGE_QUERY` GraphQL document. Two pure helpers ship as
+  REAL impl + branch-tested: `sumUsageForDay(byDay, today)`
+  (sum-where-day-equals, opaque string equality on the `day`
+  field), `projectUsageOutput(parsed, today)` (clamps
+  `usage_remaining_today` at zero — Monday's reported `usage` is
+  best-effort and may briefly exceed `total` on a near-cap
+  account). `fetchUsage(inputs)` ships as a `Promise.reject
+  (internal_error)` stub under `c8 ignore start/stop`; M22
+  implementation issues `USAGE_QUERY` via the transport, parses
+  with `usageQueryResponseSchema`, projects via
+  `projectUsageOutput`. Single consumer: `commands/usage.ts`.
+
 - `api/time-tracking.ts` (v0.3 M20 — pre-flight at `a702af2`,
   runtime body landed at M20 implementation as **documentation-
   only verbs**). Verb-shaped column-type extension primitives
@@ -1288,6 +1347,30 @@ document the verb cluster post-mortems. Briefly:
   Monday's `duplicate_group` wire signature has no
   `with_updates` argument (unlike `duplicate_item` /
   `duplicate_board`).
+- **`commands/{status,usage}.ts`** (v0.3 M22 — pre-flight at
+  `fbab6b0`; runtime bodies land at M22 implementation). The
+  diagnostics-cluster verbs per cli-design §11.5. Both ship
+  as documentation-only stubs (mirrors the M20 time-track + M21
+  pre-flight auth-stub patterns): the argv shape (status takes
+  `--no-probe`; usage takes no flags beyond globals), the
+  `inputSchema.parse(opts)` call, and the
+  `Promise.reject(new ApiError('internal_error', ...))` action
+  body. Command-action stubs are intentionally NOT `c8 ignore`-
+  wrapped — integration tests at
+  `tests/integration/commands/diagnostics.test.ts` drive them
+  via commander's argv parse + assert on the rejection envelope
+  shape (wrapping would suppress real coverage of the
+  input-schema parse leg + the rejection assertion). `status`
+  imports `statusOutputSchema` + `StatusOutput` from
+  `src/api/probes.ts` (single source of truth for the envelope
+  shape); `usage` defines its own `usageOutputSchema` locally
+  (no shared helper — the envelope is verb-specific). M22
+  implementation replaces both action bodies with the real
+  probe matrix / `fetchUsage` + envelope assembly per cli-design
+  §11.5.2 / §11.5.3. `status` is a top-level verb (not a noun-
+  verb shape) — mirrors `schema` / `raw`; the §5.2 two-level
+  rule already permits single-level verbs.
+
 - **`commands/auth/{login,logout}.ts`** (v0.3 M21 — pre-flight
   at `5c07840`, runtime bodies landed at M21 Part 1 in
   `a4cb5b0`). The OAuth flow + credentials cache verbs per
@@ -1398,7 +1481,9 @@ The full envelope contract — `meta` skeleton, error fields, the
 **29 stable error codes** (v0.1 froze 26; v0.2-M12 added
 `ambiguous_match` → 27; v0.3-M19 added `tag_not_found` → 28; v0.3-M21
 added `oauth_failed` → 29 at the M21 pre-flight contract diff per
-§7.3.3) — lives in `cli-design.md` §6 and is enforced by the
+§7.3.3; v0.3-M22 added NO new codes — probe failures map to existing
+codes per cli-design §11.5.1's per-probe mapping table) — lives in
+`cli-design.md` §6 and is enforced by the
 integration suite's envelope-contract assertion
 (`assertEnvelopeContract`) on every M2+ command's output. Adding
 fields to `meta` or `data` is non-breaking; removing or renaming

@@ -42,6 +42,7 @@
 import { z } from 'zod';
 import type { CommandModule } from './types.js';
 import { ApiError } from '../utils/errors.js';
+import { statusOutputSchema, type StatusOutput } from '../api/probes.js';
 
 const inputSchema = z
   .object({
@@ -49,47 +50,7 @@ const inputSchema = z
   })
   .strict();
 
-const probeResultEnvelopeSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('ok'),
-    probe: z.string().min(1),
-    elapsed_ms: z.number().nonnegative(),
-    details: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
-    kind: z.literal('fail'),
-    probe: z.string().min(1),
-    elapsed_ms: z.number().nonnegative(),
-    reason: z.string().min(1),
-    message: z.string().min(1),
-    details: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
-    kind: z.literal('skipped'),
-    probe: z.string().min(1),
-    reason: z.string().min(1),
-  }),
-]);
-
-const statusOutputSchema = z
-  .object({
-    probes: z
-      .object({
-        dns: probeResultEnvelopeSchema,
-        tcp: probeResultEnvelopeSchema,
-        tls: probeResultEnvelopeSchema,
-        auth: probeResultEnvelopeSchema,
-        cache_writability: probeResultEnvelopeSchema,
-        redaction_self_test: probeResultEnvelopeSchema,
-        env_var_pickup: probeResultEnvelopeSchema,
-      })
-      .catchall(probeResultEnvelopeSchema),
-    overall: z.enum(['ok', 'degraded', 'down']),
-    api_version: z.string().min(1),
-  })
-  .strict();
-
-export type StatusOutput = z.infer<typeof statusOutputSchema>;
+export type { StatusOutput };
 
 export const statusCommand: CommandModule<
   z.infer<typeof inputSchema>,

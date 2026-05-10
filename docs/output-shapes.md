@@ -63,6 +63,7 @@ no `data`); see the **Errors** section at the bottom.
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
 | [schema](#schema) | (no verb) |
+| [diagnostics](#diagnostics) | status (M22 pre-flight), usage (M22 pre-flight) |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -2674,6 +2675,123 @@ Emits JSON Schema 2020-12 for every shipped command. Two-level:
 `monday schema <command>` narrows to one. `meta.source: "none"`
 (local-only). Use this as the agent-facing introspection surface;
 no `--help` scraping needed.
+
+---
+
+## diagnostics
+
+The v0.3 diagnostics cluster (cli-design §11.5; pre-flight at
+v0.3-M22 — `fbab6b0`). Two read-shape verbs. Both ship as
+**pre-flight stubs at v0.3-M22**: the argv surface + the output
+envelope are pinned for forward-compatibility, but every invocation
+rejects with `internal_error` carrying the M22-implementation-
+pending hint. The shapes below are what M22 implementation lands
+against; agent scripts targeting `monday status` / `monday usage`
+are stable across the drop-in.
+
+### `monday status [--no-probe]` (M22 pre-flight stub)
+
+Connectivity + auth + local-state probe matrix per cli-design
+§11.5.1. Default invocation runs seven probes in
+`STATUS_PROBE_ORDER` (DNS → TCP → TLS → auth → cache_writability →
+redaction_self_test → env_var_pickup); `--no-probe` skips the four
+network-touching probes (they surface as `ProbeSkipped` slots) but
+local probes still run.
+
+```json
+{
+  "probes": {
+    "dns":                 { "kind": "ok",   "probe": "dns",   "elapsed_ms": 12,  "details": { "address": "1.2.3.4", "family": 4 } },
+    "tcp":                 { "kind": "ok",   "probe": "tcp",   "elapsed_ms": 24,  "details": { "host": "api.monday.com", "port": 443 } },
+    "tls":                 { "kind": "ok",   "probe": "tls",   "elapsed_ms": 67,  "details": { "subject": "*.monday.com", "valid_to": "2027-..." } },
+    "auth":                { "kind": "ok",   "probe": "auth",  "elapsed_ms": 89,  "details": { "me_id": "102927371", "api_version": "2026-01" } },
+    "cache_writability":   { "kind": "ok",   "probe": "cache_writability",   "elapsed_ms": 3, "details": { "path": "/home/.../.monday-cli", "mode": "0700" } },
+    "redaction_self_test": { "kind": "ok",   "probe": "redaction_self_test", "elapsed_ms": 1, "details": { "fixture_count": 6 } },
+    "env_var_pickup":      { "kind": "ok",   "probe": "env_var_pickup",      "elapsed_ms": 0, "details": { "set": { "MONDAY_API_TOKEN": true, "MONDAY_PROFILE": false, "MONDAY_API_VERSION": false, "MONDAY_API_URL": false, "MONDAY_OUTPUT": false, "MONDAY_REQUEST_TIMEOUT_MS": false } } }
+  },
+  "overall": "ok",
+  "api_version": "2026-01"
+}
+```
+
+Each probe slot is one of:
+- `{ kind: 'ok', probe, elapsed_ms, details }` — probe-specific
+  `details` shape; never carries a token value.
+- `{ kind: 'fail', probe, elapsed_ms, reason, message, details }` —
+  `reason` is a stable snake_case discriminant (e.g.,
+  `unauthorized`, `cert_invalid`, `port_unreachable`); agents key
+  off `reason`, never the English `message`.
+- `{ kind: 'skipped', probe, reason }` — `--no-probe` invocations
+  emit `reason: "no_probe_flag"` for the four network probes.
+
+`overall` rules (cli-design §11.5.2):
+- `"ok"` — every non-skipped probe returned `'ok'`.
+- `"degraded"` — auth probe succeeded AND only **soft local probes**
+  (`cache_writability` + `env_var_pickup`) failed. Verb exit 0.
+- `"down"` — any network probe failed, `redaction_self_test`
+  failed (NEVER degraded — CLI may leak secrets), or every network
+  probe was skipped (via `--no-probe`) AND a local probe failed.
+  Promotes the verb to the §11.5.1 mapping table's error code:
+  - DNS / TCP / TLS / auth(5xx) → `network_error` (exit 2)
+  - auth(401) → `unauthorized` (exit 2)
+  - cache_writability → `config_error` (exit 3)
+  - redaction_self_test → `internal_error` (exit 2)
+
+`meta.source: "live"` for default runs; `"none"` for
+`--no-probe` runs that don't touch the wire. **Empirical-probe
+finding pinned (2026-05-10, API `2026-01`):** the 401 envelope shape
+the auth probe maps against is `{"errors":[{"message":"Not
+authenticated","extensions":{"code":"NOT_AUTHENTICATED"}}]}`
+(status 401, content-type `application/json; charset=utf-8`);
+same envelope for missing- and bad-`Authorization`. `Bearer
+<token>` prefix also works alongside bare `<token>`.
+
+### `monday usage` (M22 pre-flight stub)
+
+Daily Monday API **operation** budget remaining per cli-design
+§11.5.3 / §13 v0.3 entry. Complements v0.1's per-call
+`account complexity` (which surfaces per-minute COMPLEXITY POINTS
+— a separate Monday quota system). The empirical-probe finding at
+M22 pre-flight (2026-05-10, API `2026-01`) confirmed Monday's
+daily-budget GraphQL surface lives at `platform_api.daily_limit`
++ `platform_api.daily_analytics.by_day` (operations per day, 200
+per day on free tier), NOT `account.complexity` (which doesn't
+exist on the `Account` type).
+
+```json
+{
+  "daily_limit": { "base": 200, "total": 200 },
+  "usage_today": 17,
+  "usage_remaining_today": 183,
+  "last_updated": "2026-05-10T22:01:26.377Z"
+}
+```
+
+- **`daily_limit.base`** — the plan's baseline daily allotment
+  (200 ops on free tier; higher for paid tiers).
+- **`daily_limit.total`** — `base` + account-specific upgrades.
+  v0.3 surfaces both verbatim so paid-tier agents see the overage
+  offset.
+- **`usage_today`** — sum of `platform_api.daily_analytics
+  .by_day[].usage` where `day` matches today.
+- **`usage_remaining_today`** — derived `max(0, total -
+  usage_today)`. Clamped at zero (Monday's reported `usage` is
+  best-effort and may briefly exceed `total` on a near-cap
+  account; the limit enforces server-side at request time, not
+  per-day-boundary).
+- **`last_updated`** — Monday's `daily_analytics.last_updated`
+  field (`ISO8601DateTime` scalar). Lets agents detect stale
+  analytics data without polling.
+
+**Additive-only envelope per Decision 8 closure.** v0.4 may
+extend with per-minute complexity headroom + concurrency-cap
+fields (`per_minute_complexity`, `concurrency`) WITHOUT
+breaking the v0.3 shape. Removing or renaming any v0.3 field is
+the SemVer-major boundary.
+
+`meta.source: "live"` (the `platform_api` GraphQL query hits the
+wire each invocation; the daily-analytics surface is server-
+authoritative).
 
 ---
 
