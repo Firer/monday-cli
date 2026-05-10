@@ -1876,7 +1876,7 @@ monday doc get <did>                                                         v0.
 # === NOTIFICATION ===
 monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>   v0.3
 
-# === DEV (workflow shortcuts; see §5.2 carve-out, §5.9) ===
+# === DEV (workflow shortcuts; see §5.2 carve-out 1, §5.9) ===
 monday dev discover [--apply]             # auto-detect & write config       v0.3
 monday dev configure [--tasks-board <bid>] [--sprints-board <bid>] ...       v0.3
 monday dev doctor                         # diagnostics; see §11.3           v0.3
@@ -1984,7 +1984,7 @@ Monday's mutation names are inconsistent: `create_item`,
 (`create`, `update`, `set`, `move`, `archive`, `add-users`, …). One
 concept = one verb across nouns.
 
-### 5.2 Two-level depth, not three (with one carve-out)
+### 5.2 Two-level depth, not three (with carve-outs)
 
 Monday models things like "the column values of an item of a board".
 That's three levels deep. The CLI flattens:
@@ -1996,7 +1996,7 @@ That's three levels deep. The CLI flattens:
 Cost: a few flags carry information that's structural in GraphQL.
 Benefit: every CRUD command stays under ~3 positional args.
 
-**Carve-out: workflow namespaces may be three levels deep.** The
+**Carve-out 1: workflow namespaces may be three levels deep.** The
 `dev` namespace (and any future workflow shortcuts like `service` or
 `crm`) explicitly opts into a third level — `monday dev sprint
 current`, `monday dev task done <iid>`. The reasoning: workflow
@@ -2006,8 +2006,34 @@ surface, and their value comes from naming a workflow concept
 entity. Flattening them to `monday dev-sprint current` would lose the
 hierarchy that makes them discoverable. The two-level rule applies to
 the CRUD surface (`account`, `board`, `item`, `update`, `user`,
-`webhook`, `doc`, etc.); workflow namespaces are the explicit
+`webhook`, `doc`, etc.); workflow namespaces are an explicit
 exception, not the default.
+
+**Carve-out 2: verb-shaped column-type extensions surface as
+`<noun> <subnoun> <verb>`.** Some Monday column types model state
+machines rather than settable values — `time_tracking` is the
+canonical case (start a timer, stop a timer; the column has no
+single "value" the `--set` grammar can model). The CLI exposes these
+as a third-level verb on the column-type subnoun: `monday item
+time-track start <iid>`, `monday item time-track stop <iid>`. The
+reasoning: collapsing to `monday item time-track-start <iid>` would
+compose two verbs into one hyphenated noun, hiding the start/stop
+pair from `--help` output and tab completion; keeping the verb at
+the third level preserves the discoverable pair and reserves the
+slot for future verb-shaped column types. This carve-out differs in
+shape from carve-out 1: workflow namespaces compose a *workflow
+vocabulary* over CRUD; verb-shaped extensions surface a *column-
+type's state machine* that the standard `--set` grammar can't model.
+
+**The general rule.** A third level is permitted only when the
+three-token shape names something the two-level surface structurally
+can't: a workflow namespace plus a workflow concept that isn't a
+Monday entity (carve-out 1 — `dev <concept> <verb>` shape), or a
+column-type subnoun plus a verb for a column-type with no single
+settable value (carve-out 2 — `<noun> <subnoun> <verb>` shape). Two
+levels remains the default for everything else; new carve-outs land
+via a §5.2 amendment PR with the structural justification spelled
+out, not by precedent alone.
 
 ### 5.3 The column-value abstraction (the big one)
 
@@ -2763,7 +2789,8 @@ would create inconsistent filter semantics across the surfaces.
 
 Monday Dev's "sprint", "epic", "release", "bug", "task" concepts
 are board conventions, not API entities. The CLI's `dev` namespace
-is the explicit three-level carve-out called out in §5.2.
+is the workflow-namespace three-level carve-out called out in §5.2
+(carve-out 1).
 
 Mechanics:
 
