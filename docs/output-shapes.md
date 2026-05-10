@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
 | [item (reads)](#item-reads) | list, get, find, search, subitems |
-| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk), create, archive, delete, duplicate, move, upsert (M12) |
+| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
@@ -2254,6 +2254,175 @@ re-running on the target board is undefined SDK behaviour;
 conservative bound across all paths mirrors `monday item create`.
 Agents needing idempotent dup-or-update use `monday item upsert`
 (M12).
+
+### `item time-track start <iid> [--column <col>] [--board <bid>] [--dry-run]` (M20)
+
+Verb-shaped column-type extension per cli-design §5.2 carve-out 2.
+Flips the `time_tracking` column on the named item from
+stopped → running, opening a new history session whose `started_at`
+is Monday's wall-clock.
+
+`--column <col>` selects the time_tracking column when an item
+carries more than one (the standard column-resolver collision-
+checking pattern from cli-design §5.3 step 2 applies — ambiguity
+between two `time_tracking` columns surfaces `ambiguous_column`
+with a candidates list); when an item carries exactly one
+time_tracking column the flag may be omitted and resolution falls
+back to board metadata. `--board <bid>` follows the standard §5.3
+step-1 contract — explicit is authoritative; implicit looks up
+the item's board and caches per process.
+
+Live envelope (single-resource — `data` echoes the just-started
+session shape; `meta.source` is `"live"` or `"mixed"` — the
+mutation leg is always live, but the column-metadata resolution
+leg may hit cache, which collapses the aggregate to `"mixed"`
+with `cache_age_seconds` per §6.1 source-merge rules; matches the
+existing item-mutation precedent — see `item move`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "start_time_tracking",
+    "item_id": "12345",
+    "column_id": "time_tracking_a",
+    "running": true,
+    "started_at": "2026-05-10T12:00:00Z"
+  },
+  "meta": { ..., "source": "mixed", "cache_age_seconds": 42, ... },
+  "warnings": []
+}
+```
+
+Dry-run envelope (`data: null`, `meta.dry_run: true`,
+`planned_changes: [{operation: "start_time_tracking", item_id,
+column_id, current_state: {running: false, ...}}]`):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "start_time_tracking",
+      "item_id": "12345",
+      "column_id": "time_tracking_a",
+      "current_state": { "running": false, "started_at": null }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Error surfaces:
+
+- `usage_error` (exit 1) when the column is already running per
+  v0.3-plan §3 M20 Decision 4.1 — `details.running: true`
+  discriminates from other usage errors; hint points at `monday
+  item time-track stop`. Reuses the existing `usage_error` code
+  (no new ERROR_CODE) — agents branch on the verb they invoked
+  plus `details.running`.
+- `not_found` (exit 2) when the item ID doesn't exist or the
+  token has no access (mirrors `item get`).
+- `column_not_found` (exit 2) when `--column <col>` doesn't
+  resolve against the item's board (mirrors `item set` /
+  `item clear`'s column-resolver surface; cli-design §5.3 step
+  2). Includes `id:`-prefixed misses.
+- `column_archived` (exit 2) when the resolved time_tracking
+  column has been archived on the board. The standard mutation
+  resolver pathway (`resolveColumnWithRefresh` with
+  `includeArchived: true`) preserves the surface per cli-design
+  §6.5; time-track verbs inherit the same exit 2 / details
+  shape (`column_id` / `column_title` / `column_type` /
+  `board_id`) as the existing item-mutation cluster.
+- `ambiguous_column` (exit 2) when the item carries more than
+  one `time_tracking` column and `--column <col>` is omitted, or
+  the supplied token matches multiple columns. `details.candidates`
+  lists matching columns; agent retries with `--column id:<col_id>`.
+- `usage_error` (exit 1) when `--column <col>` resolves to a
+  non-`time_tracking` column. `details.column_type` carries the
+  resolved type so agents can branch; hint points at `--set` /
+  `--set-raw` for value-shaped column types.
+
+Idempotent: NO — each successful call against a stopped column
+appends a new history session per Decision 4.3.
+
+### `item time-track stop <iid> [--column <col>] [--board <bid>] [--dry-run]` (M20)
+
+Sibling of `item time-track start` — same argv, same column /
+board resolution. Flips the `time_tracking` column from
+running → stopped, closing the open history session with
+`ended_at` = Monday's wall-clock and recording
+`duration_seconds` for the just-stopped session.
+
+Live envelope (`meta.source` semantics same as `start` — `"live"`
+or `"mixed"` depending on whether column metadata resolved from
+cache):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "stop_time_tracking",
+    "item_id": "12345",
+    "column_id": "time_tracking_a",
+    "running": false,
+    "started_at": "2026-05-10T12:00:00Z",
+    "ended_at": "2026-05-10T12:30:00Z",
+    "duration_seconds": 1800
+  },
+  "meta": { ..., "source": "mixed", "cache_age_seconds": 42, ... },
+  "warnings": []
+}
+```
+
+`data.started_at` is `null` when Monday omits a `started_at` on
+the just-closed session record (e.g. for sessions added by
+automation that never recorded a start time per the SDK's
+`TimeTrackingHistoryItem.started_at: Maybe<Date>` shape);
+`data.duration_seconds` is `null` in that case (per-session
+duration is uncomputable without a start timestamp — SDK 14.0.0
+exposes no per-history duration field, only the column-level
+total `TimeTrackingValue.duration` which would conflate sessions).
+
+Dry-run envelope:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { ..., "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+  "planned_changes": [
+    {
+      "operation": "stop_time_tracking",
+      "item_id": "12345",
+      "column_id": "time_tracking_a",
+      "current_state": { "running": true, "started_at": "2026-05-10T12:00:00Z" }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Error surfaces (mirror `start`'s set, with state-discriminant
+flipped):
+
+- `usage_error` (exit 1) when the column is not running per
+  v0.3-plan §3 M20 Decision 4.2 — `details.running: false`
+  discriminates; hint points at `monday item time-track start`.
+- `not_found` / `column_not_found` / `column_archived` /
+  `ambiguous_column` / `usage_error` (type mismatch) — same
+  surfaces as `start` (see above).
+
+Idempotent: NO per Decision 4.3 — re-running against a now-stopped
+column surfaces `usage_error`; agents needing best-effort stop
+swallow the typed error envelope (the `details.running: false`
+discriminant) rather than relying on a pre-check, since
+`monday item get` does not surface the time-tracking running
+flag in the v0.3-M20-pre-flight item-read projection (M20
+implementation may widen the projection; see v0.3-plan §3 M20
+implementation deliverables).
 
 ---
 

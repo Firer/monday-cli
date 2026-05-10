@@ -1760,6 +1760,53 @@ monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.
 monday item history <iid>                 # activity log: status / col / assign  v0.3
                                           # changes + comments, chronological
 
+# Time tracking — verb-shaped column-type extension (§5.2 carve-out 2)
+monday item time-track start <iid> [--column <col>] [--board <bid>] [--dry-run]   v0.3
+                                          # Flips the time_tracking column on the
+                                          # named item from stopped → running, opening
+                                          # a new history session whose `started_at`
+                                          # is Monday's wall-clock.  --column <col>
+                                          # selects the time_tracking column when an
+                                          # item carries more than one; omitted when
+                                          # the item has exactly one (resolved via
+                                          # board metadata). --board <bid> follows the
+                                          # standard §5.3 step-1 contract — explicit
+                                          # is authoritative, implicit looks up the
+                                          # item's board and caches for the process.
+                                          # `usage_error` (exit 1) when the column is
+                                          # already running per Decision 4.1
+                                          # (`details.running: true` discriminates;
+                                          # hint points at `monday item time-track
+                                          # stop`). Idempotent: NO — each successful
+                                          # call against a stopped column appends a
+                                          # new history session. NOT destructive
+                                          # (no --yes gate).
+monday item time-track stop <iid> [--column <col>] [--board <bid>] [--dry-run]    v0.3
+                                          # Flips the time_tracking column from
+                                          # running → stopped, closing the open
+                                          # history session with `ended_at` =
+                                          # Monday's wall-clock + `duration_seconds`
+                                          # for the just-stopped session
+                                          # (`duration_seconds: null` when Monday
+                                          # omits `started_at` per
+                                          # `TimeTrackingHistoryItem.started_at:
+                                          # Maybe<Date>` — per-session duration is
+                                          # uncomputable without a start). Same
+                                          # --column / --board semantics as `start`.
+                                          # `usage_error` (exit 1) when the column is
+                                          # not running per Decision 4.2
+                                          # (`details.running: false` discriminates;
+                                          # hint points at `monday item time-track
+                                          # start`). Idempotent: NO — re-running
+                                          # against a now-stopped column surfaces
+                                          # `usage_error`; agents needing best-effort
+                                          # stop swallow the typed envelope (the
+                                          # `details.running: false` discriminant)
+                                          # rather than rely on a pre-check, since
+                                          # `monday item get` does not surface the
+                                          # time-tracking running flag in the
+                                          # v0.3-M20-pre-flight item-read projection.
+
 # Subitems
 monday item subitems <iid>                # list children                    v0.1
                                           # subitem creation = item create --parent <iid> (v0.2)
@@ -4420,6 +4467,54 @@ mutation verbs produce different planned-change shapes; the
   already knows what they're deleting via the positional).
   The destructive-no-read pattern matches the uniform
   shape across the delete cluster.
+
+- **Time-track shape** (`item time-track start` / `item
+  time-track stop`; v0.3 M20). Verb-shaped column-type
+  extension per §5.2 carve-out 2. Carries `operation:
+  "start_time_tracking"` / `"stop_time_tracking"`,
+  `item_id`, `column_id`, and a `current_state` slot
+  echoing the column's pre-mutation state read from
+  `TimeTrackingValue.{running, started_at}` for the
+  verb-specific discriminant (`{running: false}` for the
+  `start` dry-run; `{running: true, started_at}` for the
+  `stop` dry-run). Two-leg dry-run (item-read for state
+  + column-metadata resolution); `meta.source` is
+  `'live'` or `'mixed'` depending on whether the column-
+  metadata leg hit cache. The `current_state` shape
+  mirrors `item-archive`'s `item: <projected source
+  snapshot>` slot in role (preview the pre-mutation
+  state) but ships a minimal verb-specific subset rather
+  than a full single-resource projection — time_tracking
+  state is a two-field discriminant (`running` +
+  `started_at`), so a full item projection would carry
+  every other column's value verbatim and add visual
+  noise without preview signal:
+
+  ```json
+  {
+    "ok": true,
+    "data": null,
+    "meta": { "dry_run": true, "source": "mixed", "cache_age_seconds": 42, ... },
+    "planned_changes": [
+      {
+        "operation": "stop_time_tracking",
+        "item_id": "12345",
+        "column_id": "time_tracking_a",
+        "current_state": { "running": true, "started_at": "2026-05-10T12:00:00Z" }
+      }
+    ],
+    "warnings": []
+  }
+  ```
+
+  Live envelope diverges from the dry-run shape — `data`
+  is the §6.2 single-resource shape echoing what the
+  verb just changed (operation + item_id + column_id +
+  running + started_at; `stop` adds ended_at +
+  duration_seconds, both nullable when Monday omits
+  started_at on the just-closed session). See output-
+  shapes.md `item (mutations)` § for the full live + dry-
+  run envelopes.
 
 Future mutation verbs may add new shapes; `operation` stays the
 discriminator. Agents should switch on `operation` rather than

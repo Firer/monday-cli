@@ -165,6 +165,121 @@ module signatures is the next session's work):
   semantics, idempotency — see v0.3-plan §3 M20 line 625-637)
   close at M20 pre-flight, NOT here.
 
+**M20 pre-flight contract diff shipped this session**
+(mirrors the `d822982` M19 cadence — pin the contract surface
+ahead of any feat commit so M20 implementation lands into a
+Codex-reviewed shape rather than churning on contract drift
+mid-implementation):
+
+- **`src/api/time-tracking.ts` module signatures landed.**
+  Four exported interfaces (`StartTimeTrackingInputs` /
+  `StartTimeTrackingResult` / `StopTimeTrackingInputs` /
+  `StopTimeTrackingResult`) + two stub-body verbs
+  (`startTimeTracking` / `stopTimeTracking`) that
+  `Promise.reject` an `internal_error` ApiError under
+  `c8 ignore` until M20 implementation lands the runtime
+  bodies. Module file ~210 LOC; mirrors the M19
+  `tag-directory.ts` pre-flight cadence verbatim.
+  Inputs carry `client: MondayClient` + branded `boardId:
+  BoardId` / `itemId: ItemId` + `columnId: string`
+  (`ColumnIdSchema` / `ColumnId` exist in
+  `src/types/ids.ts` but no consumer call site uses them
+  — every existing API consumer passes plain `string` for
+  column IDs; `time-tracking.ts` matches the consumer
+  precedent rather than introducing a one-off branded
+  call site) + optional `env` for parity. Results
+  literal `running: true` (start) / `running: false`
+  (stop) — verb-success implies the state flip. Stop's
+  `startedAt: string | null` + `durationSeconds: number
+  | null` track the SDK's
+  `TimeTrackingHistoryItem.started_at: Maybe<Date>` —
+  automation-added sessions can omit `started_at`, and
+  per-session duration is uncomputable without it (SDK
+  14.0.0 exposes no per-history `duration` field; only
+  the column-level `TimeTrackingValue.duration` total,
+  which would conflate sessions). The nullable
+  `durationSeconds` was a Codex round-1 P1 catch:
+  `number` would've shipped a slot the implementation
+  can't reliably fill. 9 surface tests in
+  `tests/unit/api/time-tracking.test.ts` cover
+  type-import compile checks + stub-throw + hint-content
+  assertions.
+- **Three M20-specific decisions closed (v0.3-plan §3 M20):**
+  4.1 start-while-running → `usage_error` (reused; no
+  new ERROR_CODE) with `details.running: true` discriminant
+  + hint pointing at stop verb. 4.2 stop-while-not-running
+  → `usage_error` symmetric to 4.1 with
+  `details.running: false`. 4.3 idempotency → BOTH
+  non-idempotent; symmetry over no-op convenience. The
+  `--restart` flag mention from the original v0.3-plan
+  recommendation dropped — forward-looking flag we
+  haven't designed; the two-step stop-then-start path is
+  the agent's recovery surface.
+- **No ERROR_CODES widening.** Decisions 4.1 / 4.2 reuse
+  the existing `usage_error` rather than adding
+  `time_tracking_already_running` /
+  `time_tracking_not_running`. Reasoning: agents already
+  branch on the verb they invoked, and `details.running`
+  carries the discriminant; new codes per state-machine
+  bug widens the contract surface for marginal benefit.
+  `ERROR_CODES.length` stays at 28; no count-bumps in
+  CLAUDE.md / README.md / output-shapes.md / cli-design
+  §6.5.
+- **No cache surface, no board-invalidation fan-out.**
+  `time_tracking` columns don't cache (each start/stop
+  is a live mutation; no on-disk surface) and don't
+  affect board structure (no `withBoardInvalidation*`
+  wrapper applies). The pre-flight intentionally does
+  NOT extend `CacheKey`; the `env` slot in the inputs is
+  preserved for parity (test-isolation), not for cache-key
+  resolution.
+- **`column-values.ts` `unsupportedColumnTypeError`
+  time_tracking-branch hint NOT touched in pre-flight.**
+  The current generic hint ("v0.3 plans a dedicated
+  surface; until then there is no friendly or raw write
+  path") is more accurate for the pre-flight state than
+  a verb-pointing hint would be — the verbs aren't yet
+  wired (no command file ships in pre-flight; calling
+  `monday item time-track start` would surface
+  `usage_error: unknown command`). The hint update
+  lands at M20 implementation alongside the command
+  files, not here.
+- **Cross-doc surface:** cli-design §4.3 grows two new
+  rows in the item section (between `item history` and
+  `# Subitems`); §5.2 carve-out 2 unchanged (Decision 4
+  closed it last session in `1e81b2f`); §6.4 grows a
+  "Time-track shape" planned-changes bullet between
+  `Group-delete shape` and the "Future mutation verbs..."
+  closing paragraph (Codex round-1 P2-3 fix — the
+  `current_state` dry-run slot is canonical-§6.4 not just
+  output-shapes.md); output-shapes.md ToC + `item
+  (mutations)` section grows two new per-command entries
+  (live + dry-run envelopes for both verbs, with full
+  error-surface enumeration including `column_archived`
+  per Codex round-2 P2-1 fix); v0.3-plan §3 M20
+  deliverables wording flipped from "Stub deliverables
+  (filled at M20 kickoff)" to "Stub deliverables (shipped
+  in pre-flight, this commit)" with the three closed
+  decisions inline + a structured "Deliverables landing
+  at M20 implementation kickoff" enumeration that grows
+  an OPTIONAL item-read projection-widening bullet
+  (Codex round-1 P2-4 fix — the verb's docs no longer
+  promise a `monday item get` pre-check the projection
+  doesn't deliver).
+- **Codex pre-flight: two rounds, P1-clean at round 2.**
+  Round 1 returned 1 P1 + 4 P2 + 1 P3. P1 caught a
+  `durationSeconds: number` slot the implementation
+  can't reliably fill — SDK 14.0.0 exposes no per-
+  `TimeTrackingHistoryItem` duration field, only the
+  column-level `TimeTrackingValue.duration` total —
+  fixed inline by widening to `number | null`. Round 2
+  returned 0 P1 + 2 P2 (`column_archived` missing from
+  the time-track error-surface enumeration; stale
+  `monday item get` pre-check guidance lingering in
+  `time-tracking.ts` source docstring after the
+  user-facing docs were softened) + 0 P3. All 8
+  findings across both rounds addressed inline.
+
 **Pre-flight gate state at session start** (per
 `docs/v0.3-plan.md` §9 preconditions):
 - **Decision 1 (`tag_not_found` registry entry) closed** in
