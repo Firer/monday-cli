@@ -299,19 +299,44 @@
   also returns a `resolution: PeopleResolution` echo (one
   `{input, resolved_id}` entry per non-empty input token) the
   dry-run engine renders as `details.resolved_from` on the diff
-  cell.
+  cell. **M19→M20 cleanup-window widening (`2cbf0d3`):**
+  `resolveEmail` was widened to return
+  `ResolveEmailResult = {id, source, cacheAgeSeconds}` —
+  transparent passthrough of `userByEmail`'s public shape,
+  mirroring the M19 tags translator's `resolveTags` callback.
+  `parsePeopleInput` aggregates per-leg via `SourceAggregator`
+  (R21) — `me` records `'live'` (`me { id }` is always a
+  network call), email tokens forward `userByEmail`'s
+  `{source, cacheAgeSeconds}` verbatim — and exposes the
+  aggregate on `ParsedPeopleInput`'s new `source` +
+  `cacheAgeSeconds` slots. The people translator threads the
+  aggregate into `translatorResolution` for envelope-level
+  merge by the post-translate aggregation loop in
+  `resolution-pass.ts`. Closes the v0.3-plan §11 M19 post-
+  mortem parity gap where cache-hit email lookups didn't
+  contribute to `meta.source`.
 
 - `api/resolution-context.ts` (M9.5 R24) —
   `buildResolutionContexts({client, ctx, globalFlags}) →
-  {dateResolution, peopleResolution}`. Builds the two contexts every
+  {dateResolution, peopleResolution, tagResolution,
+  relationResolution}`. Builds the four contexts every
   mutation surface that calls into `translateColumnValueAsync` /
   `planChanges` / `planCreate` needs, closing over `ctx.clock` +
-  `ctx.env.MONDAY_TIMEZONE` (date side) and `client` + `ctx.env` +
+  `ctx.env.MONDAY_TIMEZONE` (date side), `client` + `ctx.env` +
   `globalFlags.noCache` (people side via `resolveMeFactory` +
-  `userByEmail`). Lifted from four identical 12-line copies in
-  `set.ts` / `update.ts` (single + bulk) / `create.ts`. Pure function;
-  the natural seam for v0.3's `me`-token caching across translate
-  calls in one command run.
+  `userByEmail` — M19→M20 forwards the full `{id, source,
+  cacheAgeSeconds}` provenance, not just the id), `client` +
+  `env` + `noCache` (tags side via `resolveTags` against the
+  per-account directory), and `client` + `env` + `noCache`
+  (relation side via `validateBoardRelationItems` for both
+  `board_relation` and `dependency` — the per-noun divergence
+  is the `context` discriminant the translator passes through,
+  not a second callback). Lifted from four identical 12-line
+  copies in `set.ts` / `update.ts` (single + bulk) /
+  `create.ts`; widened to four contexts at M19 (Commits 2 / 3 /
+  4). Pure function; the natural seam for `me`-token caching
+  across translate calls in one command run (still candidate
+  work — see v0.3-plan §22).
 
 - `api/item-board-lookup.ts` (M9.5 R23) — shared
   `ITEM_BOARD_LOOKUP_QUERY` + `ITEM_PARENT_LOOKUP_QUERY` GraphQL
