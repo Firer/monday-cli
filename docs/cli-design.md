@@ -2449,7 +2449,7 @@ window. Their `unsupported_column_type` errors carry
 | `text`, `long_text`, `numbers`, `status`, `dropdown`, `date`, `people` | **v0.1** (shipped) | Initial allowlist (M5a). |
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
-| `time_tracking` | v0.3 | Start/stop semantics — verbs, not value writes. |
+| `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
 | `files` | v0.4 | Pinned via `add_file_to_column` (§13 v0.4). |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
@@ -5544,6 +5544,19 @@ scoped idempotent changes, and post comments narrating its work.**
 
 ### v0.3 (Monday Dev + multi-profile)
 
+- `monday item time-track start/stop` (M20, **documentation-only at
+  v0.3**). Verb-shaped column-type extension per §5.2 carve-out 2.
+  Empirical probe (2026-05-10, against API version `2026-01`)
+  confirmed Monday's public API does not currently support writing
+  to `time_tracking` columns: `change_simple_column_value` rejects
+  with `CorrectedValueException`; `change_column_value` rejects
+  with `InvalidColumnTypeException`; the mutation root has zero
+  time-tracking-related mutations. The verbs are registered for
+  forward-compatibility — agent scripts targeting `monday item
+  time-track start/stop` are stable across the eventual swap when
+  Monday ships API support — and reject every invocation today
+  with `usage_error` carrying the empirical-probe context as the
+  hint
 - `dev sprint/epic/release/task` workflow shortcuts
 - `dev discover/configure/doctor`
 - `item search` cross-board (omit `--board`) — "find my open tasks

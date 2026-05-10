@@ -217,6 +217,23 @@ runtime body swap is one-sided in `src/api/time-tracking.ts`.
   `command_count: 70 → 72` + close-docs sweep (cli-design
   §4.3 + §6.4, output-shapes.md, v0.3-plan §3 M20 status
   flip, this CLAUDE.md hunk).
+- **Commit 2 — `<followup>` `docs(m20-followup): drift sweep
+  + M20 post-mortem + 3 new R-watch-items`** (next commit
+  this session). Drift sweep across §9 preconditions tick,
+  §22 R-watch-item time-tracking.ts narrative update,
+  cli-design §13 v0.3 entry adding the M20 verbs, cli-design
+  §5.3 writer-expansion-table line for `time_tracking`
+  noting the documentation-only state. New §12 M20
+  post-mortem (mirrors §11 M19 structure: Codex round
+  summary, contract drift findings, exit ratchets, refactor
+  backlog candidates surfaced, lessons for M21). New §22
+  R-watch-items: (a) `FixtureTransport` order-tolerance
+  for parallel transport calls (logged from the `7dbcf7e`
+  flake fix); (b) empirical-probe step in pre-flight for
+  novel API surfaces (process item, not code refactor —
+  M20's pivot was avoidable with this discipline); (c)
+  `scripts/probe/` reusable probe infrastructure (R-candidate
+  for M21+ probe scenarios).
 
 **Test count + coverage at M20 close:** 2407 (M20 entry,
 post-pre-flight + Node 24 flake fix) → 2422 (M20 close), +15
@@ -224,7 +241,7 @@ net (8 unit time-tracking + 8 integration item-time-track,
 minus 1 column-values assertion that consolidated). Coverage
 99.05 / 95.49 / 99.32 / 99.21 (statements / branches /
 functions / lines), above the 95/95.45/95/95 floor. Floor
-unchanged.
+unchanged. **Full M20 post-mortem at v0.3-plan §12.**
 
 **M11 cross-board flake fix (Node 24 cassette ordering)
 shipped in `7dbcf7e fix(m11): serialise cross-board metadata
