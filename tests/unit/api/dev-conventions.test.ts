@@ -290,6 +290,9 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
 
   it('devDoctorCheckResultSchema rejects a fail WITHOUT details.reason', async () => {
     const mod = await import('../../../src/api/dev-conventions.js');
+    // The discriminated union's fail variant carries
+    // `details: failCheckDetailsSchema` with a required `reason`
+    // enum field — zod rejects with the native enum-mismatch error.
     expect(() =>
       mod.devDoctorCheckResultSchema.parse({
         name: 'tasks_board_exists',
@@ -297,7 +300,7 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
         message: 'something failed',
         details: { slot: 'tasks_board' },
       }),
-    ).toThrow(/details\.reason is required/);
+    ).toThrow();
   });
 
   it('devDoctorCheckResultSchema rejects a fail with null details', async () => {
@@ -309,7 +312,7 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
         message: 'something failed',
         details: null,
       }),
-    ).toThrow(/details\.reason is required/);
+    ).toThrow();
   });
 
   it('devDoctorCheckResultSchema rejects an unknown reason enum value', async () => {
@@ -321,7 +324,7 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
         message: 'something failed',
         details: { reason: 'invented_reason_typo' },
       }),
-    ).toThrow(/details\.reason must be one of/);
+    ).toThrow(/Invalid option/);
   });
 
   it('devDoctorCheckResultSchema accepts ok without reason', async () => {
@@ -358,6 +361,37 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
         details: { board_id: '100', state: 'archived' },
       }),
     ).not.toThrow();
+  });
+
+  it('Codex round-2 P2-2: ok-status accepts any details (no reason-enum coupling)', async () => {
+    // Round-1 superRefine accidentally rejected ok-status with
+    // a non-enum reason; round-2 P2-2 fix: ok-status details is
+    // fully open per the discriminated-union shape.
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'ok',
+        message: 'all good',
+        details: { reason: 'whatever-the-caller-wants', extra: 42 },
+      }),
+    ).not.toThrow();
+  });
+
+  it('Codex round-2 P2-1: JSON Schema export surfaces the reason enum', async () => {
+    // `monday schema` emits `z.toJSONSchema(outputSchema)` which
+    // only sees STRUCTURAL constraints (not superRefine). The
+    // round-2 discriminated-union refactor moved the reason enum
+    // into the structural schema so JSON-Schema agents see it.
+    const { z } = await import('zod');
+    const mod = await import('../../../src/api/dev-conventions.js');
+    const json = z.toJSONSchema(mod.devDoctorOutputSchema);
+    const serialized = JSON.stringify(json);
+    // Every reason value appears at least once in the exported
+    // schema — agents can introspect the closed enum vocabulary.
+    for (const reason of mod.DEV_DOCTOR_REASONS) {
+      expect(serialized).toContain(reason);
+    }
   });
 });
 

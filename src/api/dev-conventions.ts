@@ -41,7 +41,7 @@
  *      `[profiles.<name>.dev]`) + {@link saveDevMapping} (writes
  *      `[profiles.<name>.dev]` via atomic TOML round-trip). The
  *      pre-flight `c8 ignore start/stop` wraps dropped at M26a IMPL
- *      (`<M26A-IMPL-SHA>`) alongside the per-fetcher wire bodies.
+ *      (`19755e3`) alongside the per-fetcher wire bodies.
  *
  * **Empirical-probe findings pinned at M26a IMPL (2026-05-11, against
  * `api.monday.com`, API version `2026-01`) — `scripts/probe/m26-
@@ -76,11 +76,13 @@
  *
  * **What this module does NOT own.**
  *
- *   - Profile-config IO (read / write the TOML file). Lives in
- *     `src/config/profiles.ts` per v0.3-M21. The dev-namespace
- *     verbs call `loadProfilesConfig` + `writeProfileDevBlock`
- *     (the latter lands at M26 IMPL alongside `dev configure`'s
- *     runtime body) — both belong in the config layer.
+ *   - The base profile-config schema + read path. Lives in
+ *     `src/config/profiles.ts` per v0.3-M21 (`loadProfilesConfig`,
+ *     `profilesConfigSchema`, `profileDevBlockSchema`). This module
+ *     re-exports the dev-block schema as `devMappingSchema` for
+ *     namespace clarity + owns the dev-block WRITE-back path
+ *     (`saveDevMapping`); the parent profile shape stays under
+ *     `src/config/profiles.ts`.
  *   - Per-workflow-verb wire calls (sprint/epic/release/task
  *     reads + writes). Those route through existing api/* modules
  *     (`items-page-walker`, `item-mutation-execute`, etc.) — the
@@ -456,50 +458,73 @@ export type DevDoctorReason = (typeof DEV_DOCTOR_REASONS)[number];
 
 export const devDoctorReasonSchema = z.enum(DEV_DOCTOR_REASONS);
 
-export interface DevDoctorCheckResult {
-  readonly name: DevDoctorCheckName;
-  readonly status: 'ok' | 'warn' | 'fail';
-  readonly message: string;
-  readonly details: Readonly<Record<string, unknown>> | null;
-}
+/**
+ * Per-status `details` shape. Codex M26a IMPL round-2 P2-1 + P2-2
+ * fix: the round-1 superRefine ran the `reason`-enum check
+ * runtime-only — `monday schema` (which calls `z.toJSONSchema(outputSchema)`)
+ * couldn't surface the enum vocabulary, and ok-status details were
+ * incidentally blocked when an ok carried any non-enum `reason`.
+ * Refactored into a structural discriminated union on `status`:
+ *
+ *   - `ok`: open `details` object (or null) — no `reason` constraint.
+ *   - `warn`: optional `reason: DEV_DOCTOR_REASONS` enum + open
+ *     extras; supports both unstructured warnings (archived board)
+ *     and structured ones (settings_unparseable).
+ *   - `fail`: REQUIRED `reason: DEV_DOCTOR_REASONS` enum + open
+ *     extras; `details` is non-nullable on fail (every failure
+ *     surfaces a structured reason).
+ *
+ * Open-ended extra keys per-status mirror Monday's per-call payload
+ * variability — every check emits its own context fields
+ * (`board_id`, `column_id`, etc.) under the same status family.
+ */
+export const okCheckDetailsSchema = z
+  .record(z.string(), z.unknown())
+  .nullable();
 
-export const devDoctorCheckResultSchema = z
+export const warnCheckDetailsSchema = z
+  .object({ reason: devDoctorReasonSchema.optional() })
+  .loose()
+  .nullable();
+
+export const failCheckDetailsSchema = z
+  .object({ reason: devDoctorReasonSchema })
+  .loose();
+
+export const devDoctorCheckResultOkSchema = z
   .object({
     name: z.enum(DEV_DOCTOR_CHECK_NAMES),
-    status: z.enum(['ok', 'warn', 'fail']),
+    status: z.literal('ok'),
     message: z.string().min(1),
-    details: z.record(z.string(), z.unknown()).nullable(),
+    details: okCheckDetailsSchema,
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    // Codex M26a IMPL round-1 P2-1: when `details.reason` is set, it
-    // MUST be one of `DEV_DOCTOR_REASONS`. Catches typos in helper
-    // emit paths + gives agents a closed enum to branch on.
-    if (value.details !== null) {
-      const reason = value.details.reason;
-      if (reason !== undefined) {
-        if (typeof reason !== 'string' || !DEV_DOCTOR_REASONS.includes(reason as DevDoctorReason)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['details', 'reason'],
-            message: `details.reason must be one of: ${DEV_DOCTOR_REASONS.join(', ')}`,
-          });
-        }
-      }
-    }
-    // When `status === 'fail'`, `details.reason` is REQUIRED so
-    // agents have a stable branchpoint for every failure mode.
-    if (value.status === 'fail') {
-      const reason = value.details?.reason;
-      if (typeof reason !== 'string') {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['details', 'reason'],
-          message: 'details.reason is required when status is "fail"',
-        });
-      }
-    }
-  });
+  .strict();
+
+export const devDoctorCheckResultWarnSchema = z
+  .object({
+    name: z.enum(DEV_DOCTOR_CHECK_NAMES),
+    status: z.literal('warn'),
+    message: z.string().min(1),
+    details: warnCheckDetailsSchema,
+  })
+  .strict();
+
+export const devDoctorCheckResultFailSchema = z
+  .object({
+    name: z.enum(DEV_DOCTOR_CHECK_NAMES),
+    status: z.literal('fail'),
+    message: z.string().min(1),
+    details: failCheckDetailsSchema,
+  })
+  .strict();
+
+export const devDoctorCheckResultSchema = z.discriminatedUnion('status', [
+  devDoctorCheckResultOkSchema,
+  devDoctorCheckResultWarnSchema,
+  devDoctorCheckResultFailSchema,
+]);
+
+export type DevDoctorCheckResult = z.infer<typeof devDoctorCheckResultSchema>;
 
 /**
  * Output shape for `monday dev doctor` (cli-design §11.3). The
@@ -786,13 +811,20 @@ const okResult = (
 const warnResult = (
   name: DevDoctorCheckName,
   message: string,
-  details: Readonly<Record<string, unknown>> | null = null,
+  details:
+    | Readonly<{ reason?: DevDoctorReason } & Record<string, unknown>>
+    | null = null,
 ): DevDoctorCheckResult => ({ name, status: 'warn', message, details });
 
+// Codex M26a IMPL round-2 P2-1: failResult now REQUIRES a
+// `reason: DevDoctorReason` field so TypeScript enforces the
+// pinned enum at every fail emit site (was previously runtime-only
+// via superRefine). The check's contract is "every failure has a
+// stable, agent-keyable reason".
 const failResult = (
   name: DevDoctorCheckName,
   message: string,
-  details: Readonly<Record<string, unknown>> | null = null,
+  details: Readonly<{ reason: DevDoctorReason } & Record<string, unknown>>,
 ): DevDoctorCheckResult => ({ name, status: 'fail', message, details });
 
 /**
