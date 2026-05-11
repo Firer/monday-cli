@@ -3000,7 +3000,7 @@ Mechanics:
   for and what it found instead. `monday dev doctor` flags this
   proactively.
 
-**v0.3-M26 pre-flight contract diff** lands at `<M26-PREFLIGHT-SHA>`
+**v0.3-M26 pre-flight contract diff** lands at `1620220`
 — the canonical helper module is `src/api/dev-conventions.ts`
 (DevMapping alias over `profiles.ts:profileDevBlockSchema`, the
 pure-helper `matchBoardByConvention` + `groupCandidatesByDevNoun`
@@ -6579,7 +6579,7 @@ scoped idempotent changes, and post comments narrating its work.**
   workflow verb translates to standard board / item CRUD against
   per-profile-configured board IDs in `[profiles.<name>.dev]` —
   no new Monday GraphQL mutations introduced. **M26 pre-flight
-  decisions closed inline (`<M26-PREFLIGHT-SHA>`):** Decision 1
+  decisions closed inline (`1620220`):** Decision 1
   (discover heuristic — name-based match against the stock
   English Monday Dev template board names: `Tasks` / `Sprints` /
   `Epics` / `Releases` / `Bugs`; localised-workspace alias
