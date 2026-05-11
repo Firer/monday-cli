@@ -33,6 +33,7 @@
 import type { z } from 'zod';
 import type { RunContext } from '../cli/run.js';
 import { ApiError } from '../utils/errors.js';
+import { isPlainObject } from '../utils/json.js';
 import { resolveClient } from '../api/resolve-client.js';
 import { emitSuccess } from './emit.js';
 
@@ -74,9 +75,6 @@ export interface RunByIdLookupInputs<O> {
   readonly project?: (raw: unknown) => O;
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
 export const runByIdLookup = async <O>(
   inputs: RunByIdLookupInputs<O>,
 ): Promise<void> => {
@@ -90,7 +88,7 @@ export const runByIdLookup = async <O>(
   // The response shape is `{ <plural>: unknown[] | null }`; we read
   // structurally so the helper can serve every command without a
   // separately-typed RawXxx interface per noun.
-  const collection = isObject(data) ? data[inputs.collectionKey] : null;
+  const collection = isPlainObject(data) ? data[inputs.collectionKey] : null;
   const first: unknown = Array.isArray(collection) ? collection[0] : undefined;
   if (first === undefined || first === null) {
     throw new ApiError(

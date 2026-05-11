@@ -84,6 +84,7 @@ import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError, errorMessage } from '../../utils/errors.js';
+import { isPlainObject } from '../../utils/json.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -305,9 +306,6 @@ const WRITABLE_SETTINGS_EXPECTED_KEYS: Readonly<
   dependency: [],
 };
 
-const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /**
  * Parses `--settings <json>` at argv-parse time. Two-stage:
  *   1. JSON.parse (malformed JSON → usage_error, before any network
@@ -351,7 +349,7 @@ const parseSettingsFlag = (
       },
     );
   }
-  if (!isJsonObject(parsed)) {
+  if (!isPlainObject(parsed)) {
     throw new UsageError(
       `--settings: expected a JSON object, got ${
         Array.isArray(parsed) ? 'array' : parsed === null ? 'null' : typeof parsed

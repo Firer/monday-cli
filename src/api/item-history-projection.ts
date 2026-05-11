@@ -106,6 +106,7 @@
  */
 
 import { z } from 'zod';
+import { isPlainObject } from '../utils/json.js';
 import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { MondayClient } from './client.js';
 import type { Complexity, Warning } from '../utils/output/envelope.js';
@@ -789,16 +790,6 @@ const readNullableIdField = (
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   return null;
 };
-
-/**
- * Returns true when the parsed data is a plain object (not array,
- * not null, not primitive). Used as the structural pre-check before
- * the projector reads typed fields off the payload.
- */
-const isPlainObject = (
-  v: unknown,
-): v is Readonly<Record<string, unknown>> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
  * Projects one wire `ActivityLogType` row into a typed

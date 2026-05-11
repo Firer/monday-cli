@@ -30,6 +30,7 @@ import {
   errorMessage,
   type MondayCliError,
 } from '../utils/errors.js';
+import { isPlainObject } from '../utils/json.js';
 
 /**
  * Subset of Monday's GraphQL error shape that we read. Everything
@@ -318,11 +319,8 @@ const mapHttpStatus = (status: number): MondayCliError['code'] | undefined => {
   return undefined;
 };
 
-const isObject = (v: unknown): v is Readonly<Record<string, unknown>> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
 const asGraphQlBody = (body: unknown): GraphQlResponseBody | undefined => {
-  if (!isObject(body)) {
+  if (!isPlainObject(body)) {
     return undefined;
   }
   // Structural read: the consumer reads `data` / `errors` / `extensions`
@@ -338,9 +336,9 @@ const collectGraphqlErrors = (
   if (!Array.isArray(body.errors)) return [];
   const out: GraphQlError[] = [];
   for (const item of body.errors) {
-    if (!isObject(item)) continue;
+    if (!isPlainObject(item)) continue;
     const message = typeof item.message === 'string' ? item.message : '';
-    const extensions = isObject(item.extensions) ? item.extensions : undefined;
+    const extensions = isPlainObject(item.extensions) ? item.extensions : undefined;
     const path = Array.isArray(item.path)
       ? item.path.filter(
           (p): p is string | number =>

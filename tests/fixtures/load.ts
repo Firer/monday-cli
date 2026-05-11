@@ -49,6 +49,7 @@ import type {
   TransportResponse,
 } from '../../src/api/transport.js';
 import { ApiError } from '../../src/utils/errors.js';
+import { isPlainObject } from '../../src/utils/json.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -114,14 +115,11 @@ export const loadCassette = async (
 };
 
 const normaliseCassette = (input: unknown): Cassette => {
-  if (!isObject(input) || !Array.isArray(input.interactions)) {
+  if (!isPlainObject(input) || !Array.isArray(input.interactions)) {
     throw new Error('cassette: expected `{interactions: [...]}`');
   }
   return { interactions: input.interactions as readonly Interaction[] };
 };
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null;
 
 const queryMatches = (
   haystack: string,

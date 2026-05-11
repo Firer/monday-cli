@@ -18,6 +18,7 @@
  * after JSON-parsing.
  */
 import { createServer, type Server, type ServerResponse } from 'node:http';
+import { isPlainObject } from '../../src/utils/json.js';
 import type {
   Cassette,
   GraphQlErrorShape,
@@ -44,9 +45,6 @@ interface RuntimeInteraction {
   readonly spec: Interaction;
   remaining: number;
 }
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null;
 
 const queryMatches = (
   haystack: string,
@@ -140,10 +138,10 @@ export const startFixtureServer = async (
 
       // Operation name + query + variables come out of a normal
       // GraphQL POST body shape: `{ query, variables, operationName }`.
-      const opName = isObject(parsed) ? typeof parsed.operationName === 'string' ? parsed.operationName : undefined : undefined;
-      const query = isObject(parsed) && typeof parsed.query === 'string' ? parsed.query : '';
+      const opName = isPlainObject(parsed) ? typeof parsed.operationName === 'string' ? parsed.operationName : undefined : undefined;
+      const query = isPlainObject(parsed) && typeof parsed.query === 'string' ? parsed.query : '';
       const variables =
-        isObject(parsed) && isObject(parsed.variables) ? parsed.variables : undefined;
+        isPlainObject(parsed) && isPlainObject(parsed.variables) ? parsed.variables : undefined;
 
       while (queue.length > 0 && (queue[0]?.remaining ?? 0) <= 0) {
         queue.shift();

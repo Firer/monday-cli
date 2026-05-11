@@ -2,9 +2,28 @@
 
 This template captures the 7-section structure that every Codex
 pre-flight review prompt has used across `monday-cli`'s
-v0.3-M21 / v0.3-M22 / v0.3-M23 pre-flight cycles (6+ rounds
-total). The pattern is ratified by `docs/v0.3-plan.md` §22 R-NEW-6
-(**Shipped:** post-M23 pre-flight round 1).
+v0.3-M21 / v0.3-M22 / v0.3-M23 / v0.3-M24 pre-flight cycles
+(8+ rounds total). The pattern is ratified by `docs/v0.3-plan.md`
+§22 R-NEW-6 (**Shipped:** post-M23 pre-flight round 1) and
+extended with R-NEW-25 (findings up front) + R-NEW-17 (redactor-
+pattern audit point) — both folded in at M25 pre-flight kickoff
+after four clean M24 Codex rounds confirmed the patterns.
+
+## Findings-up-front directive (template-stable preamble)
+
+Every rendered prompt opens with this paragraph BEFORE section 1.
+Sets the response-shape expectation early so Codex emits numbered
+findings within the first 25-35 minutes of generation budget
+rather than burning the budget on exploration. Ratified across
+M24's four Codex rounds (pre-flight × 2 + impl × 2; all clean).
+
+> Deliver findings up front, not after exhaustive exploration.
+> Read the diff once, scan the audit points, then emit your
+> numbered findings section. Use file reads to verify specific
+> lines, NOT to survey the whole codebase. Aim to deliver the
+> P1 / P2 / P3 numbered findings section within the first 25-35
+> minutes of generation budget, with the overall verdict at the
+> end.
 
 ## How to use
 
@@ -50,6 +69,21 @@ milestone-specific (re-fill each round / each milestone).
      post-mortem lesson — 5-10 numbered W{N} items specific to
      the milestone. Round 2+: re-numbered as W{N}' to flag
      round-over-round repetition.
+
+     **W1 is template-stable: redactor-pattern check.** Every
+     pre-flight enumerates `W1: redactor-pattern audit — every
+     new detail-key name in this diff checked against
+     src/utils/redact.ts:55's `(token|secret|password|api[-_]?key)(?!s)`
+     regex. The check is asymmetric: any matching key name (e.g.
+     `column_token`, `client_secret`, `api_key_hint`) gets its
+     entire value scrubbed to `[REDACTED]` at emit time, breaking
+     the payload's debug value. Rename ahead of pre-flight close
+     rather than after the integration emit path catches it.`
+     Folded in at M25 pre-flight kickoff post-R-NEW-17 ratification
+     (M23 caught `column_token` at impl gate; M24's four Codex
+     rounds verified the audit-point shape returned "nothing
+     flagged" against every new M24 detail-key surface).
+     Milestone-specific watch-items start at W2.
   6. **Things explicitly OUT of scope for this review** —
      *template-stable*. Standard exclusions:
        - Existing modules NOT touched by this diff.
