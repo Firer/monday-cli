@@ -193,11 +193,11 @@ convention.
   (`crossBoardSearch` walker); LOW priority watch-item, fires
   if M24 `item history` merge projector duplicates the shape;
   **R-NEW-19 migrate manual `safeParse → ApiError` sites to
-  `unwrapOrThrow`** — surfaced at post-M23 audit; 6+ sites
-  across M21+M22+M23 that bypassed the R18 `unwrapOrThrow`
-  helper that already exists in `src/utils/parse-boundary.ts`
-  (same pattern miss as R-NEW-14/15/16); MEDIUM priority
-  mechanical migration; **R-NEW-20 `MondayClient` seam-
+  `unwrapOrThrow`** — **Shipped: `f4e8e1e`** (post-M23 audit);
+  5 sites across M21+M22+M23 (oauth + login + usage + favorites
+  Stage 1 + Stage 2 + cross-board walker) migrated to the R18
+  helper that already existed in `src/utils/parse-boundary.ts`
+  (same pattern miss + mass-migrate cadence as R-NEW-14/15/16); **R-NEW-20 `MondayClient` seam-
   injection stub factory** — 2 consumers at M23 impl
   (board-favorites + cross-board-search unit tests); LOW
   priority watch-item, fires at 3rd consumer at M24.
