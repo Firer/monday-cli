@@ -154,17 +154,22 @@ convention.
   pure helpers split out for independent test coverage.
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
-  `wrapFsError` factory (M22 close did NOT trigger;
-  M23 pre-flight likewise did NOT trigger — the cross-board
-  walker + favorites resolver throw structured `ApiError`s
-  directly via the existing patterns, not via an `wrapFsError`
-  shape. R-NEW-3 stays open as a candidate for the next
-  fs-error-throwing surface); R-NEW-5 `introspectType()`
-  helper in `scripts/probe/_lib.ts` (M23 pre-flight added 5
-  introspecting probe scripts but they each used the
-  inline-`gql` pattern rather than a shared introspect helper;
-  the trigger pattern matches but the lift is held until M27
-  webhooks pre-flight in case the surface grows further).
+  `wrapFsError` factory (M22 + M23 did NOT trigger — neither
+  milestone added a typed-CLI-error fs-wrap site); **R-NEW-5
+  `introspectType()` helper** — **HIGH priority; trigger fired
+  at M23 pre-flight** (5 new introspecting probe scripts:
+  m23-favorites.ts + m23-favorites-deep.ts + m23-hierarchy-item.ts
+  + m23-hierarchy-object.ts + m23-monday-object-enum.ts);
+  combined with M22's 4 sites = 9+ consumers, well above
+  3-consumer threshold. Lift ~30 LOC into `scripts/probe/_lib.ts`
+  at M24 pre-flight kickoff (or sooner in a focused session).
+  R-NEW-8 `missingByDifference` set-delta helper (2 consumers
+  at M23: `buildInaccessibleBoardsWarning` +
+  `buildStaleFavoritesWarning`; fires at 3 — M24/M25
+  candidate); R-NEW-9 2-stage GraphQL filter+hydrate resolver
+  shape (2 confirmed M22 + M23, 1 planned M24 of uncertain
+  shape; MEDIUM priority — re-evaluate at M24 implementation
+  close).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);
@@ -179,19 +184,27 @@ convention.
   always-run-for-novel-API-surface pre-flights; **mockable-
   seam pattern in probes** — ratified at M22 via per-probe
   injection slots, carries to any future probe-style surface
-  (webhooks M27 candidate); **structured `params` through the
-  error envelope** — M23 round-2 P2-3 lifted
-  `parse-argv.ts:summariseIssues` to preserve
-  `ZodIssue.params`; new watch-item — fires for full R-class
-  lift when a second + third `.superRefine` rule wants to
-  surface structured per-issue context (M23 `conflicting_flags`
-  is the first consumer); **command-output union-schema
-  pattern** — M23 round-2 P1-1 introduced
-  `z.union([itemSearchOutputSchema, crossBoardSearchOutputSchema])`
-  as the registry-facing schema for `monday item search`; new
-  watch-item — fires for codification if a second command's
-  cross-cutting v0.3/v0.4 extensions need the same union shape
-  (M27 webhooks + M28 multi-level subitems are candidates).
+  (webhooks M27 candidate); **R-NEW-10 stable warning-builder
+  factory** — 6 sites today (buildCapWarning,
+  buildNoncanonicalWarning, buildInaccessibleBoardsWarning,
+  buildColumnNotFoundOnBoardWarning,
+  buildCrossBoardTruncatedWarning, buildStaleFavoritesWarning);
+  inner-details shapes differ enough that lifting now would
+  be over-engineering — LOW priority watch-item; fires only
+  if 3+ builders converge on identical inner-details shapes;
+  **R-NEW-11 pre-flight stub factory** — 15+ sites across
+  M19-M23 pre-flights but each stub's surface-specific hint
+  is the load-bearing payload; LOW priority watch-item;
+  **R-NEW-12 structured `params` through error envelope** —
+  `parse-argv.ts:summariseIssues` now preserves
+  `ZodIssue.params` (M23 round-2 P2-3); LOW priority
+  watch-item; fires when a 2nd + 3rd `.superRefine` rule
+  wants to surface structured per-issue context; **R-NEW-13
+  command-output union-schema pattern** — M23 round-2 P1-1
+  introduced `z.union([itemSearchOutputSchema,
+  crossBoardSearchOutputSchema])`; LOW priority watch-item;
+  fires when M25/M27/M28 cross-cutting extensions need the
+  same union shape.
 
 ## Pre-flight contract diff discipline
 
