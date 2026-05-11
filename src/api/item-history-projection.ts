@@ -152,12 +152,11 @@ export const HARD_CAP_HISTORY_PAGE_SIZE = 10_000;
  * BEFORE handing rows to {@link projectActivityLogRow}. The
  * projector itself does NOT re-filter — single source of truth at
  * the walker layer per Decision 2 closure. Server-side filtering
- * would require a custom GraphQL middleware Monday doesn't expose,
- * and projector-side filtering would force the projector to know
- * about the entity discriminator (a concern that belongs to the
+ * would require a custom GraphQL middleware Monday doesn't expose;
+ * filtering later than the walker would force row-shaping code to
+ * know about the entity discriminator, which belongs to the
  * walker's "which rows are part of THIS item's history" question,
- * not to the projector's "how do I shape this row's payload"
- * question).
+ * not the projector's "how do I shape this row's payload" question.
  *
  * Monday's `activity_logs(item_ids:, from:, to:, page:, limit:)`
  * signature accepts ISO-8601 timestamps for `from` / `to` per the
@@ -638,7 +637,7 @@ export const buildUnknownEventKindWarning = (
     event,
     entity,
     occurrence_count: occurrenceCount,
-    hint: 'Monday may have extended `activity_logs.event` with a new kind; extend `historyEventSchema` in `src/api/item-history-projection.ts` with a typed variant to surface the before/after payload, or consume the raw `data` slot from the `unknown` variant',
+    hint: 'Monday may have extended `activity_logs.event` with a new kind; extend `historyEventSchema` in `src/api/item-history-projection.ts` with a typed variant to surface the before/after payload, or consume the raw parsed payload from the `unknown` variant\'s `after` slot',
   },
 });
 

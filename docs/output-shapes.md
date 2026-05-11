@@ -1749,7 +1749,7 @@ Sample envelope with a mixed-source merged stream (ordered by
         "event": "future_kind_monday_might_ship",
         "entity": "pulse",
         "occurrence_count": 1,
-        "hint": "Monday may have extended `activity_logs.event` with a new kind; extend `historyEventSchema` in `src/api/item-history-projection.ts` with a typed variant to surface the before/after payload, or consume the raw `data` slot from the `unknown` variant"
+        "hint": "Monday may have extended `activity_logs.event` with a new kind; extend `historyEventSchema` in `src/api/item-history-projection.ts` with a typed variant to surface the before/after payload, or consume the raw parsed payload from the `unknown` variant's `after` slot"
       }
     }
   ]
