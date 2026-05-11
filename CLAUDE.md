@@ -11,21 +11,28 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M23 closed; M24 unblocked.** v0.2.0 published to npm
-2026-05-08. v0.3 is in progress on `main`; M0–M23 closed. M23
-implementation landed at `1f09a25` (cross-board `item search` +
-`board favorites` runtime bodies — `fetchBoardFavorites` 2-stage
-resolver, `crossBoardSearch` per-board fan-out walker, cross-board
-action with column-resolution pre-pass + SourceAggregator merge +
-union-schema emit). M23 pre-flight had two Codex rounds (`9b93f15`
-+ `fa27b60`); impl review run completed exit 0 but truncated
-mid-trace without numbered findings (see v0.3-plan §15 lesson).
-M22 implementation (`3a1b465`) lands the runtime DNS / TCP / TLS /
-auth / cache / redaction / env-var probes for `monday status` +
-the `platform_api.daily_*` projection for `monday usage`, preceded
-by a small refactor (`84c6d2b`) narrowing the redact-layer
-non-string scalar preservation to the boolean/number/null
-allowlist (security-bearing tightening per Codex M22 W8).
+**v0.3-M23 closed; M24 pre-flight ready (Decision 2 closed).**
+v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
+`main`; M0–M23 closed. M23 implementation landed at `1f09a25`
+(cross-board `item search` + `board favorites` runtime bodies —
+`fetchBoardFavorites` 2-stage resolver, `crossBoardSearch`
+per-board fan-out walker, cross-board action with
+column-resolution pre-pass + SourceAggregator merge +
+union-schema emit). M23 pre-flight had two Codex rounds
+(`9b93f15` + `fa27b60`); impl review run completed exit 0 but
+truncated mid-trace without numbered findings (see v0.3-plan
+§15 lesson). M22 implementation (`3a1b465`) lands the runtime
+DNS / TCP / TLS / auth / cache / redaction / env-var probes
+for `monday status` + the `platform_api.daily_*` projection
+for `monday usage`. Decision 2 (item-history `kind` taxonomy)
+closed at the post-M23 M24-prep session via the local
+`scripts/probe/m24-history-kinds.ts` empirical probe
+(2026-05-11; 19 rows captured on a production board); ratified
+zod discriminated union over the observed event taxonomy with
+`unknown` fallback + `unknown_event_kind` warning; entity
+filter (`entity = 'pulse'`) discriminates item-scoped vs
+board-scoped events. Full findings in v0.3-plan §8 Decision 2
+closure.
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
@@ -82,21 +89,32 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M24 pre-flight kickoff** — Close Decision 2 (history kind
-   taxonomy) first, then ship the M24 contract diff per v0.3-plan
-   §3 M24: new `src/api/item-history-projection.ts` + `src/
-   commands/item/history.ts` for `monday item history <iid>` with
-   the activity-log + updates interleave shape. The 2-source
-   merge projection is a fresh contract surface (cli-design §6
-   needs an extension entry — see §8 decision 2). When the
-   M24 pre-flight needs to introspect any new types
-   (`ActivityLogType`, `Update`, etc.), use the shipped
-   `introspectType()` helper from `scripts/probe/_lib.ts`
-   rather than inlining the `__type(name:)` selection;
-   for any "does this field exist?" trial-query probes,
-   use the shipped `trialQuery(label, query, options?)`
-   helper (R-NEW-21) — defaults match the 4 M23 probes'
-   most-common settings.
+1. **M24 pre-flight contract diff (Decision 2 already closed).**
+   Decision 2 (history `kind` taxonomy) closed at the post-M23
+   M24-prep session via the live `scripts/probe/
+   m24-history-kinds.ts` empirical probe (2026-05-11; 19 rows
+   on a production board; full findings in v0.3-plan §8
+   Decision 2 closure). **Ratified shape**: zod discriminated
+   union (`kind` discriminator mapped from wire `event` —
+   schema field name drift) over the observed events
+   (`create_column`, `update_column_value`, `create_group`,
+   `board_workspace_id_changed`, `update_board_name`,
+   `update_board_nickname`) with an `unknown` fallback variant
+   + `unknown_event_kind` warning (§6.1 warnings[]; NOT
+   `error.code`). The walker filters
+   `entity = 'pulse'` to drop board-level noise; `item_ids`
+   alone doesn't exclude board-scoped events. Next session's
+   M24 pre-flight ships: new `src/api/item-history-projection
+   .ts` (stub) + `src/commands/item/history.ts` (stub); cli-
+   design §13 v0.3 entry; output-shapes.md new entry; the 3
+   remaining §3 M24 decisions (pagination shape; merge
+   semantics; streaming reuse of startNdjsonStream). Probe
+   tooling already shipped (`introspectType()` + `trialQuery()`
+   in `scripts/probe/_lib.ts`); no further probing needed
+   ahead of the contract diff. **Caveat to document at
+   contract-diff time**: activity_logs eventual-consistency
+   lag empirically >30s — CLI must NOT promise immediate-
+   history for newly-modified items.
 2. **Branches-margin recovery, deferred residuals.** retry.ts +
    filters.ts saturated in the M24-prep pass (margin 0.30pp →
    0.52pp; target exceeded). Three deferred files carry the
