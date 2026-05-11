@@ -48,10 +48,14 @@
  *     (1×). The `update_column_value` payload carries `column_id`
  *     + `column_type` + `value` + `previous_value` + `textual_value`
  *     + `pulse_id` + `pulse_name`; `previous_value` is sometimes
- *     `{}` for first-set events (decode defensively as
- *     "previously-unset"). Per-`column_type` typed `before` /
- *     `after` projection lands case-by-case at M24 implementation;
- *     pre-flight pins the discriminator + raw-shape fallback.
+ *     `{}` for first-set events (decoded defensively as
+ *     "previously-unset" — preserved as `{}` on the projected
+ *     event so agents distinguish "first set" from "no prior
+ *     value tracked"). The runtime projector applies one level
+ *     of nested-JSON unwrap on `value` / `previous_value` so the
+ *     before/after slots carry structured payloads (e.g.
+ *     `{label, index}` for status, ISO string for date) rather
+ *     than opaque JSON-string scalars.
  *   - **`entity` field discriminates item-scoped from board-scoped
  *     events.** Observed values: `pulse` (4×; item-scoped) and
  *     `board` (15×; board-scoped). The walker filters
@@ -202,9 +206,9 @@ export const ACTIVITY_LOGS_QUERY = `
  * (id / body / text_body / created_at / creator_id / replies +
  * the Reply sub-selection). Other fields (`likes`, `pinned_to_top`,
  * `viewers`, `assets`) are not part of the item-history surface in
- * v0.3; M24 implementation may extend the projection if a v0.4
- * follow-up surfaces them under the `update_posted` event's
- * `after` slot (envelope-additive per §6.1).
+ * v0.3; a v0.4 follow-up may extend the projection under the
+ * `update_posted` event's `after` slot if those fields become
+ * agent-useful (envelope-additive per §6.1).
  *
  * **Update.created_at + Reply.created_at are nullable** per the
  * probe introspection (both fields are `SCALAR/Date`, nullable).
@@ -349,21 +353,28 @@ const baseEventFields = {
  * rows; the only item-scoped kind in the sample). Carries the
  * column-edit before / after payload.
  *
- * The per-`column_type` typed `before` / `after` projection lands
- * case-by-case at M24 implementation. Pre-flight pins:
+ * Schema slots:
  *   - `column_id` + `column_type` from the wire `data` payload
  *     (always present per the probe).
- *   - `before` + `after` as `z.unknown()` slots carrying the raw
- *     parsed `previous_value` / `value` JSON. M24 impl swaps in
- *     per-`column_type` typed unions (status: `{label, index}`;
- *     date: ISO string; etc.).
+ *   - `before` + `after` as `z.unknown()` slots carrying the
+ *     parsed `previous_value` / `value` JSON. The runtime
+ *     projector applies one level of nested-JSON unwrap so
+ *     agents see structured payloads (e.g. `{label, index}` for
+ *     status, ISO string for date) rather than opaque JSON-
+ *     string scalars. `z.unknown()` keeps the schema permissive
+ *     so future Monday column types don't break the parse —
+ *     agents introspect via `column_type` and the runtime
+ *     payload.
  *   - `textual_value` — Monday's human-readable rendering of the
  *     new value (always present per the probe; nullable for
  *     defensive forward-compat with future column types Monday
  *     may not provide a textual rendering for).
  *   - `pulse_id` + `pulse_name` — item identity for cross-board
  *     consumers; nullable for subitem variants where the parent
- *     identification carries the load.
+ *     identification carries the load. `pulse_id` ships as an
+ *     unquoted JSON number on the wire (probe-confirmed); the
+ *     runtime projector stringifies it via
+ *     `readNullableIdField` (Codex impl round-2 P2-1).
  */
 export const updateColumnValueEventSchema = z
   .object({
@@ -383,23 +394,21 @@ export const updateColumnValueEventSchema = z
  * Board-scoped activity-log variants. The walker filters
  * `entity = 'pulse'` BEFORE handing rows to the projector, so these
  * variants are not surfaced on the projected stream in normal
- * operation. Pre-flight retains them as parser-roundtrip targets
- * so a future M24 implementation regression that bypasses the
+ * operation. They stay in the discriminated union as parser-
+ * roundtrip targets so a future regression that bypasses the
  * entity filter falls back to the typed variant rather than to
  * `unknown` (cleaner failure mode; agents see the expected kind
  * literal rather than a fallback shape).
  *
- * Per-kind `before` / `after` typing is M24 impl work — pre-flight
- * pins each variant as `before: z.unknown(), after: z.unknown()`
- * carrying the raw parsed JSON `data` payload. Both slots are
- * `z.unknown()` (not `null` even for creation-shaped events) because
- * the observed taxonomy includes both creation events
- * (`create_column`, `create_group`) where `before` is meaningless
- * AND edit events (`update_board_name`, `update_board_nickname`,
- * `board_workspace_id_changed`) where `before` carries the prior
- * value from the wire `data.previous_value` payload. Uniform
- * `z.unknown()` lets M24 impl type each variant independently
- * without re-pinning the discriminator schema.
+ * Both `before` / `after` carry the raw parsed JSON payload as
+ * `z.unknown()` slots. Uniform shape (not `null` even for
+ * creation-shaped events) because the observed taxonomy includes
+ * both creation events (`create_column`, `create_group`) where
+ * `before` is meaningless AND edit events (`update_board_name`,
+ * `update_board_nickname`, `board_workspace_id_changed`) where
+ * `before` carries the prior value from the wire `data.previous_value`
+ * payload — uniform `z.unknown()` keeps the discriminator schema
+ * stable regardless of which variant a row resolves to.
  */
 const boardScopedEventSchema = <K extends string>(
   kindLiteral: K,
@@ -497,15 +506,15 @@ export const updateRepliedEventSchema = z
  * value the projector doesn't recognise. Carries the raw wire
  * `event` slot (so agents see the unrecognised string) + the raw
  * `entity` slot (so the walker filter discrepancy is visible) +
- * the raw parsed `data` JSON under `after` (so a manual M24 impl
- * extension can reproject without a second wire call). `before` is
+ * the raw parsed `data` JSON under `after` (so a future-extension
+ * consumer can reproject without a second wire call). `before` is
  * `null` for uniform shape with the synthesized comment-event
  * variants (`update_posted` / `update_replied`) which also pin
  * `before: null` for their append-only-events semantics — the
  * `unknown` variant similarly has no meaningful "before" since the
  * projector by definition doesn't know how to extract the prior
- * state from the wire payload (M24 impl's typed variants are the
- * place that knowledge lives). Agents wanting to introspect the raw
+ * state from the wire payload (the typed variants are the place
+ * that knowledge lives). Agents wanting to introspect the raw
  * payload read `after` (the full parsed `data` JSON) alongside
  * `event` + `entity` for routing.
  *
@@ -665,9 +674,10 @@ export const buildUnknownEventKindWarning = (
  *
  * **Streaming semantics.** When `--stream` is on, the merge is
  * NOT incremental — the entire `--since`-bounded slice must be
- * resident to order it. M24 implementation's NDJSON stream emits
- * the merged array per-item after the merge completes; the
- * trailer carries the per-source pagination state for resumption.
+ * resident to order it. The NDJSON stream emits the merged array
+ * per-item via the walker's `onItem` hook AFTER the merge
+ * completes; the trailer carries the per-source pagination state
+ * for resumption.
  */
 export const mergeByCreatedAt = (
   activityEvents: readonly HistoryEvent[],
@@ -1003,8 +1013,7 @@ export interface PerSourcePaginationState {
 }
 
 /**
- * Inputs to {@link fetchItemHistory}. The pre-flight pins the
- * shape; M24 implementation fills in the body.
+ * Inputs to {@link fetchItemHistory}.
  *
  * - `client` — resolved {@link MondayClient} so the fetch inherits
  *   `--retry` + `--verbose`-complexity injection (mirrors M22's
@@ -1013,9 +1022,8 @@ export interface PerSourcePaginationState {
  *   string; parsed at the command argv boundary).
  * - `boardId` — Monday's `activity_logs` resolver lives under
  *   `boards(ids:)`, so the walker needs the item's parent board
- *   ID. M24 implementation's command-action looks this up via
- *   the existing item-board lookup helper before constructing
- *   inputs.
+ *   ID. The command-action looks this up via `lookupItemBoard`
+ *   before constructing inputs.
  * - `since` / `until` — wall-clock filters (ISO-8601). Both
  *   optional; absent → unbounded on that side. Threaded through
  *   to `activity_logs(from:, to:)`; the updates source filters
@@ -1034,9 +1042,8 @@ export interface PerSourcePaginationState {
  *   `kind` is in the set are returned. Applied AFTER projection
  *   (so unknown-event-kind warnings still surface for filtered
  *   events; the filter narrows the returned `data` array, not
- *   the merge denominator). Pre-flight pins as
- *   `readonly HistoryEvent['kind'][]`; M24 impl walks every
- *   page either way and the filter is purely projection-side.
+ *   the merge denominator). The walker drains every page either
+ *   way; the filter is purely projection-side.
  * - `onItem` — streaming hook per the `--stream` path. Called
  *   per merged event per the ordered output (NOT per arrival —
  *   merging requires the full slice resident; see

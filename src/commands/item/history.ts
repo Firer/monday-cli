@@ -100,9 +100,11 @@ const kindsListSchema = z
  * ISO-8601 timestamp validator for `--since` / `--until`. Open-ended
  * (any ISO-8601 surface Date.parse accepts) so agents can pass
  * `2026-05-11`, `2026-05-11T10:00:00Z`, `2026-05-11T10:00:00+01:00`,
- * etc. The wall-clock cap threading lands at M24 implementation
- * (the action passes the raw string through to `fetchItemHistory`
- * which forwards to Monday's `from:` / `to:` ISO8601DateTime args).
+ * etc. The action passes the raw string through to
+ * `fetchItemHistory` which precomputes `Date.parse` epoch bounds
+ * once per fetch + forwards to Monday's `from:` / `to:`
+ * ISO8601DateTime args on Stage 1; Stage 2 (updates) filters
+ * client-side against the same epoch bounds.
  */
 const isoTimestampSchema = z
   .string()
@@ -149,8 +151,10 @@ const inputSchema = z
     kinds: kindsListSchema.optional(),
     /**
      * NDJSON streaming output per cli-design §6.3. When set, emits
-     * one event per stdout line + a final `{"_meta":{...}}` trailer.
-     * Reuses `startNdjsonStream` (R52) at M24 implementation.
+     * one event per stdout line + a final `{"_meta":{...}}` trailer
+     * via `startNdjsonStream` (R52). Overrides global `--json` /
+     * `--table` / `--output` flags — `--stream` always wins (Codex
+     * impl review round-1 P1-1 wiring fix).
      */
     stream: z.boolean().optional(),
   })

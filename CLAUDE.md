@@ -42,10 +42,10 @@ closure.
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
-  §21 M24 post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 +
+  §16 M24 post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 +
   R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 +
-  R-NEW-21 shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open
-  + R-watch-items).
+  R-NEW-21 shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 / R-NEW-27
+  candidates open + R-watch-items including R-NEW-26).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -102,12 +102,18 @@ convention.
    the existing bulk path; per-item-failure envelope shape
    (M15 board-add-users partial-success precedent is the
    inspiration); test matrix +30-50.
-2. **Template fold-ins** — bundle R-NEW-25 (R-NEW-6 template
-   "findings up front" header) + R-NEW-17 (template
-   section-5 W-audit-point for redactor-pattern check) into
-   `.claude/templates/codex-pre-flight-review.md` AT the M25
-   pre-flight kickoff. Both validated at M24 pre-flight + impl
-   review; pattern stable across three rounds now.
+2. **R-class cleanup bundle at M25 pre-flight kickoff** —
+   three lifts that pair naturally in one commit:
+   (a) R-NEW-25 R-NEW-6 template "findings up front" header
+   fold-in; (b) R-NEW-17 template section-5 W-audit-point
+   for redactor-pattern check; (c) R-NEW-27 `isPlainObject`
+   consolidation into `src/utils/json.ts` (or extend an
+   existing util) covering 6 duplicate sites (4 production
+   + 2 test) — see v0.3-plan §22 R-NEW-27 for the migration
+   recipe. All three are mechanical low-risk lifts; bundling
+   keeps the M25 pre-flight commit history clean. Both
+   template fold-ins validated at M24 pre-flight + impl
+   review (4 Codex rounds, all clean numbered findings).
 3. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
@@ -331,7 +337,24 @@ convention.
   analogue (`src/commands/auth/login.ts:fetchAccountId`'s
   guards on the OAuth listener). Document the pattern at
   v0.3-plan §22 R-NEW-26 entry for future-session
-  prophylactic application.
+  prophylactic application;
+  **R-NEW-27 `isPlainObject` consolidation** — surfaced at
+  post-M24 close-docs audit (6 sites: 4 production +
+  2 test; all structurally identical
+  `typeof === 'object' && !== null && !Array.isArray(...)`
+  type-guards). Same pattern miss + mass-migrate cadence as
+  R-NEW-14/15/16; the M24 developer (Claude) added a fresh
+  local `isPlainObject` for the activity-log JSON parsing
+  without searching for the existing 5. **MEDIUM priority.**
+  Lift to `src/utils/json.ts` (new) at M25 pre-flight
+  kickoff — bundle with the R-NEW-25 + R-NEW-17 template
+  fold-ins to keep disruption to a single commit. Migration
+  is mechanical: -24 lines (4-line helper × 6 sites) +
+  ~6 import lines + 1 lift definition. Type predicates
+  unify on `Readonly<Record<string, unknown>>`
+  (type-narrowing, not widening — consumer code keeps
+  compiling). See `docs/v0.3-plan.md` §22 R-NEW-27 entry
+  for the full lift recipe.
 
 ## Pre-flight contract diff discipline
 

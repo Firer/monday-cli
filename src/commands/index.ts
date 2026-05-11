@@ -148,13 +148,12 @@ import { usageCommand } from './usage.js';
 // resolver per cli-design §13 v0.3 entries.
 import { boardFavoritesCommand } from './board/favorites.js';
 // M24 (v0.3) — `monday item history <iid>`. Per-item activity log
-// + comment-thread merged chronologically. Pre-flight stub
-// registers the argv shape (`--since` / `--until` / `--kinds` /
-// `--stream` / per-source page flags); implementation lands the
-// two-source walker (`activity_logs(item_ids:)` filtered to
+// + comment-thread merged chronologically. Two-source walker
+// (`activity_logs(item_ids:)` filtered walker-side to
 // `entity = 'pulse'` per Decision 2 closure `a1f3025` + `updates`
-// + Reply fan-out + merge projector ordered by `created_at`) at
-// the M24 implementation session.
+// + Reply fan-out + merge projector ordered by `created_at`)
+// shipped at `d058172` with Codex impl review fix-ups at
+// `5f10cda` (round 1) + `a024961` (round 2).
 import { itemHistoryCommand } from './item/history.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
