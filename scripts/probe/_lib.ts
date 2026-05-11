@@ -119,6 +119,54 @@ export const expect = <T>(
 };
 
 /**
+ * Structural cast for a GraphQL response whose `data` shape isn't
+ * type-known at the call site. Trial queries (see `trialQuery`)
+ * deliberately send under-specified or wrong-shape GraphQL to probe
+ * field presence/absence; the load-bearing finding is whether
+ * `errors` is populated, not what's inside `data`.
+ */
+export interface ProbeRawErrors {
+  readonly errors?: ReadonlyArray<{ readonly message: string }>;
+  readonly data?: unknown;
+}
+
+/**
+ * Runs a deliberately-imperfect GraphQL query (a "trial query") to
+ * probe whether a field exists on the schema. Unlike `expect()`,
+ * this helper does NOT exit on GraphQL errors — the error path is
+ * the load-bearing finding (it confirms the field doesn't exist).
+ * Prints the outcome and returns; the caller chains trial queries.
+ *
+ * Lift surfaced by v0.3-plan §22 R-NEW-21: 4 M23 probes
+ * (`m23-favorites.ts`, `m23-favorites-deep.ts`,
+ * `m23-hierarchy-item.ts`, `m23-hierarchy-object.ts`) each defined
+ * the same `trialQuery(label, query)` + `RawErrors` interface shape
+ * with minor truncate-length variations (400 / 600 / 800). The
+ * helper carries sensible defaults so the call-site stays terse;
+ * `options.echoQuery` toggles the query echo, `options.truncateBody`
+ * overrides the 600-char default.
+ */
+export const trialQuery = async (
+  label: string,
+  query: string,
+  options?: { readonly echoQuery?: boolean; readonly truncateBody?: number },
+): Promise<void> => {
+  const echoQuery = options?.echoQuery ?? false;
+  const truncateBody = options?.truncateBody ?? 600;
+  console.log(`--- ${label} ---`);
+  if (echoQuery) {
+    console.log(`  query: ${query.replace(/\s+/g, ' ').trim()}`);
+  }
+  const r = (await gql<unknown>(query)) as ProbeRawErrors;
+  if (r.errors !== undefined && r.errors.length > 0) {
+    for (const e of r.errors) console.log(`  [ERROR] ${e.message}`);
+  } else {
+    console.log(`  [OK] ${JSON.stringify(r.data).slice(0, truncateBody)}`);
+  }
+  console.log('');
+};
+
+/**
  * Low-level HTTPS GET that captures status + headers + raw body —
  * suitable for OAuth-endpoint probing where the response may be HTML,
  * a redirect, or a non-standard error JSON shape that we don't want
