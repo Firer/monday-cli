@@ -5,14 +5,11 @@
  * Monday Dev mapping for the active profile (cli-design §4.3 +
  * §5.9 + §11.3 + §13 v0.3 entry; v0.3-plan §3 M26).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: validate the supplied board IDs against current
- * board shape, merge into the active profile's
- * `[profiles.<name>.dev]` block (additive — unset slots stay
- * unset), and write back via `saveDevMapping`. At least one of the
- * five `--<noun>-board` flags MUST be supplied (no-op invocations
- * are usage_error).
+ * **Runtime body landed at M26a IMPL.** Reads the active profile's
+ * existing `[profiles.<name>.dev]` block (or starts empty if absent),
+ * additively merges the supplied `--<noun>-board` flags, writes back
+ * via `saveDevMapping`, and emits the canonical mapping via
+ * `emitMutation`.
  *
  * **Argv → TOML key mapping.** Commander's option-name camelCase
  * → the TOML config's snake_case slots:
@@ -25,14 +22,19 @@
  * Idempotent: yes (writing the same mapping is a no-op).
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
+import { ApiError, type ErrorCode } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitMutation } from '../emit.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import {
   devConfigureOutputSchema,
+  loadDevMapping,
+  saveDevMapping,
   type DevConfigureOutput,
+  type DevMapping,
 } from '../../api/dev-conventions.js';
+import { resolveActiveDevProfile } from './_shared.js';
 
 const inputSchema = z
   .object({
@@ -60,6 +62,8 @@ const inputSchema = z
     }
   });
 
+const DEV_NOT_CONFIGURED: ErrorCode = 'dev_not_configured';
+
 export const devConfigureCommand: CommandModule<
   z.infer<typeof inputSchema>,
   DevConfigureOutput
@@ -75,7 +79,7 @@ export const devConfigureCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: devConfigureOutputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const noun = ensureSubcommand(
       program,
       'dev',
@@ -98,21 +102,75 @@ export const devConfigureCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (opts: unknown) => {
-          parseArgv(devConfigureCommand.inputSchema, opts);
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev configure not yet implemented (v0.3-M26 pre-flight stub)',
-            {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
-            },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+      .action(async (rawOpts: unknown) => {
+        const opts = parseArgv(devConfigureCommand.inputSchema, rawOpts);
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+
+        // Load existing dev block (additive merge — preserves any
+        // slot the user supplied previously that this invocation
+        // doesn't touch). Missing dev block is a normal first-write
+        // case per round-1 P2-4 closure — `dev_not_configured`
+        // surfaces from doctor + workflow verbs, NOT from configure.
+        let existing: DevMapping;
+        try {
+          existing = await loadDevMapping(profile.name, profile.homeOptions);
+        } catch (err) {
+          if (
+            err instanceof ApiError &&
+            err.code === DEV_NOT_CONFIGURED
+          ) {
+            existing = {};
+          } else {
+            // Non-dev_not_configured errors bubble up; in production
+            // `cli/program.ts`'s preAction hook surfaces `config_error`
+            // on malformed TOML FIRST (it calls `loadProfilesConfig`
+            // before the action runs), so this branch is defensive.
+            /* c8 ignore next */
+            throw err;
+          }
+        }
+
+        const next: DevMapping = { ...existing };
+        if (opts.tasksBoard !== undefined) {
+          next.tasks_board = opts.tasksBoard;
+        }
+        if (opts.sprintsBoard !== undefined) {
+          next.sprints_board = opts.sprintsBoard;
+        }
+        if (opts.epicsBoard !== undefined) {
+          next.epics_board = opts.epicsBoard;
+        }
+        if (opts.bugsBoard !== undefined) {
+          next.bugs_board = opts.bugsBoard;
+        }
+        if (opts.releasesBoard !== undefined) {
+          next.releases_board = opts.releasesBoard;
+        }
+
+        await saveDevMapping(profile.name, next, profile.homeOptions);
+
+        // Read back via loadDevMapping so the emitted envelope
+        // reflects what landed on disk (Codex M21 / M25 pattern —
+        // verify the write rather than echoing the input).
+        const stored = await loadDevMapping(
+          profile.name,
+          profile.homeOptions,
+        );
+
+        const output: DevConfigureOutput = {
+          profile: profile.name,
+          mapping: stored,
+        };
+
+        emitMutation({
+          ctx,
+          data: output,
+          schema: devConfigureCommand.outputSchema,
+          programOpts: program.opts(),
+          source: 'none',
+          cacheAgeSeconds: null,
+        });
+      });
   },
 };

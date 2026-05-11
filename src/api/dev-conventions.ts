@@ -34,14 +34,45 @@
  *      though the runtime fetchers don't (M26 IMPL lands the
  *      `boards(workspace_id:)` walker + per-board metadata
  *      hydration).
- *   4. Stub runtime fetchers: {@link discoverDevBoards} (lists
- *      workspace boards + matches via the heuristic) +
- *      {@link runDevDoctor} (validates the active profile's mapping
- *      against current board shape). Both reject with `internal_error`
- *      under `c8 ignore start/stop` block-wraps; M26 IMPL drops the
- *      wraps + lands the wire bodies. Mirrors the M24 history-
- *      projection + M25 partial-success-bulk pre-flight precedent
- *      (`bad98ba` / `d5839a9`).
+ *   4. Runtime fetchers: {@link discoverDevBoards} (walks accessible
+ *      boards + applies the heuristic) + {@link runDevDoctor}
+ *      (validates the active profile's mapping against current board
+ *      shape) + {@link loadDevMapping} (reads
+ *      `[profiles.<name>.dev]`) + {@link saveDevMapping} (writes
+ *      `[profiles.<name>.dev]` via atomic TOML round-trip). The
+ *      pre-flight `c8 ignore start/stop` wraps dropped at M26a IMPL
+ *      (`<M26A-IMPL-SHA>`) alongside the per-fetcher wire bodies.
+ *
+ * **Empirical-probe findings pinned at M26a IMPL (2026-05-11, against
+ * `api.monday.com`, API version `2026-01`) — `scripts/probe/m26-
+ * dev-discover.ts` + `scripts/probe/m26-board-kind.ts` +
+ * `scripts/probe/m26-board-type.ts`:**
+ *
+ *   - **Stock template names unchanged.** Live Monday Dev workspace
+ *     surfaces `Tasks` / `Epics` / `Bugs Queue` matching the pinned
+ *     {@link DEV_NOUN_PATTERNS} (substring tolerance handles the
+ *     `Queue` suffix on bugs). Decision 1 closure stands; no
+ *     `DEV_NOUN_PATTERNS` amendment needed.
+ *   - **`Board.type === 'board'` filter required.** Monday's
+ *     `boards()` walker returns `sub_items_board` virtual entries
+ *     (auto-generated `Subitems of <BoardName>` boards) that pollute
+ *     the substring heuristic — `Subitems of Tasks` matches the
+ *     `tasks` pattern, creating an ambiguous match that prevents
+ *     auto-mapping. The walker filters to `type === 'board'`,
+ *     silently dropping `sub_items_board` / `custom_object` /
+ *     `document` entries. Behavior-equivalent refinement, NOT a
+ *     contract amendment — {@link DiscoverBoardCandidate} schema
+ *     unchanged.
+ *   - **`state: all` walker filter.** Per the M26 IMPL handoff
+ *     guidance (don't filter by board state at the walker), the
+ *     walker passes `state: all` so the heuristic sees archived /
+ *     deleted boards too; the action body surfaces them on
+ *     {@link DevDiscoverOutput.matches} for agent-side review.
+ *   - **`board_kind`-`public`/`private`/`share` only.** Does NOT
+ *     discriminate subitem boards — `Subitems of Tasks` reports
+ *     `board_kind: 'public'`, identical to the parent `Tasks`
+ *     board. Hence the `Board.type` filter rather than a
+ *     `board_kind` filter.
  *
  * **What this module does NOT own.**
  *
@@ -82,9 +113,29 @@
  * widening.
  */
 
-import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
 import {
+  chmod,
+  mkdir,
+  rename,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { stringify as stringifyToml } from 'smol-toml';
+import { z } from 'zod';
+import { ApiError, ConfigError, asError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import type { Complexity } from '../utils/output/envelope.js';
+import {
+  PROFILES_DIR_NAME,
+  loadProfilesConfig,
+  profilesConfigSchema,
+  resolveProfilesConfigPath,
+  type ProfileEntry,
+  type ProfilesConfig,
+  type ProfilesRootOptions,
   profileDevBlockSchema,
   type ProfileDevBlock,
 } from '../config/profiles.js';
@@ -448,38 +499,135 @@ export interface DiscoverDevBoardsInputs {
  * action can emit the {@link DevDiscoverOutput} envelope after
  * deciding whether `--apply` writes the mapping to the active
  * profile.
+ *
+ * `source` / `cacheAgeSeconds` / `complexity` mirror the M23
+ * {@link FetchBoardFavoritesResult} envelope-meta pin — discover
+ * is a pure live read with no per-call cache; `complexity` is the
+ * LAST page's complexity slot (under `--verbose`).
  */
 export interface DiscoverDevBoardsResult {
   readonly candidates: readonly DiscoverBoardCandidate[];
   readonly matches: readonly DevNounMatchResult[];
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
 }
+
+/**
+ * Internal wire-row shape for the boards walker. Carries the
+ * minimum fields the heuristic + the `Board.type === 'board'`
+ * filter need.
+ */
+const rawDiscoverBoardRowSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    workspace_id: z.string().nullable(),
+    type: z.string().nullable(),
+  })
+  .loose();
+
+const rawDiscoverBoardsResponseSchema = z
+  .object({
+    boards: z.array(rawDiscoverBoardRowSchema.nullable()).nullable(),
+  })
+  .loose();
+
+/**
+ * Hard cap on the walker's page count. At 200 boards per page that's
+ * up to 10000 boards before the walker truncates — far above any
+ * realistic dev workspace.
+ */
+const DISCOVER_PAGE_LIMIT = 200;
+const DISCOVER_PAGE_CAP = 50;
 
 /**
  * Walks the user's accessible boards (optionally scoped to
  * `workspaceId`) and groups them by dev-noun via the heuristic.
  *
- * **Pre-flight stub.** Runtime body lands at M26 IMPL — page
- * through `boards(...)` with limit ≤ 500 + the optional
- * `workspace_ids:` filter, narrow to `state: 'active'`, project
- * each row into a {@link DiscoverBoardCandidate}, then call
- * {@link groupCandidatesByDevNoun} on the full candidate list.
+ * **Walker contract.** Pages through `boards(limit:, page:, state:
+ * all[, workspace_ids:])` until a short page indicates the end of
+ * results OR the page cap is reached. Per the M26a IMPL handoff,
+ * `state: all` is passed so archived / deleted boards surface to the
+ * heuristic too — the action body surfaces them on
+ * {@link DevDiscoverOutput.matches} for agent-side review. The
+ * walker silently drops `Board.type !== 'board'` rows
+ * (`sub_items_board` virtual boards, `custom_object` entries,
+ * `document` entries) since those aren't valid dev-noun mapping
+ * targets — see the module docstring for the empirical-probe
+ * rationale.
  */
-export const discoverDevBoards = (
-  /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-  _inputs: DiscoverDevBoardsInputs,
-): Promise<DiscoverDevBoardsResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'monday dev discover not yet implemented (v0.3-M26 pre-flight stub)',
+export const discoverDevBoards = async (
+  inputs: DiscoverDevBoardsInputs,
+): Promise<DiscoverDevBoardsResult> => {
+  const candidates: DiscoverBoardCandidate[] = [];
+  let page = 1;
+  let lastComplexity!: Complexity | null;
+  for (;;) {
+    const query =
+      inputs.workspaceId === undefined
+        ? `query DevDiscoverBoards($limit: Int!, $page: Int!) {
+             boards(limit: $limit, page: $page, state: all) {
+               id name workspace_id type
+             }
+           }`
+        : `query DevDiscoverBoardsScoped($limit: Int!, $page: Int!, $wsids: [ID!]) {
+             boards(limit: $limit, page: $page, state: all, workspace_ids: $wsids) {
+               id name workspace_id type
+             }
+           }`;
+    const variables: Record<string, unknown> =
+      inputs.workspaceId === undefined
+        ? { limit: DISCOVER_PAGE_LIMIT, page }
+        : {
+            limit: DISCOVER_PAGE_LIMIT,
+            page,
+            wsids: [inputs.workspaceId],
+          };
+    const response = await inputs.client.raw<unknown>(query, variables, {
+      operationName:
+        inputs.workspaceId === undefined
+          ? 'DevDiscoverBoards'
+          : 'DevDiscoverBoardsScoped',
+    });
+    lastComplexity = response.complexity;
+    const parsed = unwrapOrThrow(
+      rawDiscoverBoardsResponseSchema.safeParse(response.data),
       {
-        details: {
-          hint: 'M26 implementation lands the discover walker; see docs/v0.3-plan.md §3 M26',
-        },
+        context: 'Monday `boards()` response (dev discover walker)',
+        hint: 'Monday may have amended the `boards()` selection set — re-probe via `scripts/probe/m26-dev-discover.ts` and amend the walker schema if so',
       },
-    ),
-  );
-/* c8 ignore stop */
+    );
+    const rows = (parsed.boards ?? []).filter(
+      (b): b is z.infer<typeof rawDiscoverBoardRowSchema> => b !== null,
+    );
+    for (const row of rows) {
+      // Filter `type !== 'board'`: drops `sub_items_board` virtual
+      // entries (Monday auto-generates `Subitems of <BoardName>` for
+      // any board with subitems enabled), `custom_object` (Monday's
+      // custom-object surface), and `document` (Monday workdocs).
+      // Empirical-probe finding pinned at 2026-05-11; see the
+      // module docstring for the full rationale.
+      if (row.type !== 'board') continue;
+      candidates.push({
+        id: row.id,
+        name: row.name,
+        workspace_id: row.workspace_id,
+      });
+    }
+    if (rows.length < DISCOVER_PAGE_LIMIT) break;
+    page += 1;
+    if (page > DISCOVER_PAGE_CAP) break;
+  }
+  const matches = groupCandidatesByDevNoun(candidates);
+  return {
+    candidates,
+    matches,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: lastComplexity,
+  };
+};
 
 /**
  * Inputs to {@link runDevDoctor}.
@@ -494,90 +642,736 @@ export interface RunDevDoctorInputs {
  * Result of {@link runDevDoctor}. Mirrors the {@link DevDoctorOutput}
  * envelope minus the action-owned `profile` + `mapping` echo (the
  * action body re-echoes these from its own inputs so the doctor
- * resolver stays narrow).
+ * resolver stays narrow). `source` / `cacheAgeSeconds` /
+ * `complexity` mirror the M23 envelope-meta pin.
  */
 export interface RunDevDoctorResult {
   readonly checks: readonly DevDoctorCheckResult[];
   readonly summary: DevDoctorOutput['summary'];
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
 }
+
+/**
+ * Internal wire-row shape for the doctor's per-board hydration call.
+ * Carries the columns + state needed for the 10 pinned checks.
+ */
+const rawDoctorColumnSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    type: z.string(),
+    settings_str: z.string().nullable(),
+  })
+  .loose();
+
+const rawDoctorBoardSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    state: z.string().nullable(),
+    columns: z.array(rawDoctorColumnSchema.nullable()).nullable(),
+  })
+  .loose();
+
+const rawDoctorResponseSchema = z
+  .object({
+    boards: z.array(rawDoctorBoardSchema.nullable()).nullable(),
+  })
+  .loose();
+
+type RawDoctorBoard = z.infer<typeof rawDoctorBoardSchema>;
+type RawDoctorColumn = z.infer<typeof rawDoctorColumnSchema>;
+
+/**
+ * Canonical status-column labels Monday's stock Tasks template
+ * surfaces. Used by the `tasks_status_labels_canonical` check to
+ * warn when the configured tasks board's status column has drifted
+ * from the stock label set. Case-folded match per the heuristic's
+ * NFC convention.
+ */
+const CANONICAL_STATUS_LABELS = ['Done', 'Working on it', 'Stuck'] as const;
+
+/**
+ * Date-column types the `sprints_date_columns_present` check
+ * accepts as a valid sprint date-range column. `timeline` is a
+ * single-column date-range; `date` covers split start/end columns.
+ */
+const SPRINT_DATE_COLUMN_TYPES: ReadonlySet<string> = new Set([
+  'date',
+  'timeline',
+]);
+
+const findBoardById = (
+  boards: readonly RawDoctorBoard[],
+  id: string | undefined,
+): RawDoctorBoard | undefined => {
+  if (id === undefined) return undefined;
+  return boards.find((b) => b.id === id);
+};
+
+const liveColumns = (board: RawDoctorBoard): readonly RawDoctorColumn[] =>
+  (board.columns ?? []).filter((c): c is RawDoctorColumn => c !== null);
+
+const okResult = (
+  name: DevDoctorCheckName,
+  message: string,
+  details: Readonly<Record<string, unknown>> | null = null,
+): DevDoctorCheckResult => ({ name, status: 'ok', message, details });
+
+const warnResult = (
+  name: DevDoctorCheckName,
+  message: string,
+  details: Readonly<Record<string, unknown>> | null = null,
+): DevDoctorCheckResult => ({ name, status: 'warn', message, details });
+
+const failResult = (
+  name: DevDoctorCheckName,
+  message: string,
+  details: Readonly<Record<string, unknown>> | null = null,
+): DevDoctorCheckResult => ({ name, status: 'fail', message, details });
+
+/**
+ * `<noun>_board_exists` family. Verifies a mapping slot is set AND
+ * the configured board ID resolves to an accessible board via the
+ * `boards(ids:)` hydration. `ok` when the board exists and is
+ * active; `warn` when archived (still usable but flagged for
+ * agent review); `fail` when the slot is unset, the board ID
+ * returned null (deleted / inaccessible), or the board state is
+ * `deleted`.
+ */
+const checkBoardExists = (
+  name: DevDoctorCheckName,
+  slotName: keyof DevMapping,
+  mapping: DevMapping,
+  boards: readonly RawDoctorBoard[],
+): DevDoctorCheckResult => {
+  const boardId = mapping[slotName];
+  if (boardId === undefined) {
+    return failResult(
+      name,
+      `${slotName} not configured for this profile`,
+      {
+        slot: slotName,
+        reason: 'not_in_mapping',
+        hint: `set the slot via \`monday dev configure --${slotName.replace('_board', '-board')} <bid>\` or \`monday dev discover --apply\``,
+      },
+    );
+  }
+  const board = findBoardById(boards, boardId);
+  if (board === undefined) {
+    return failResult(
+      name,
+      `${slotName} (${boardId}) is not accessible — board deleted, access revoked, or board never existed`,
+      {
+        slot: slotName,
+        board_id: boardId,
+        reason: 'not_accessible',
+        hint: 're-run `monday dev discover` to pick up the current workspace shape',
+      },
+    );
+  }
+  if (board.state === 'archived') {
+    return warnResult(
+      name,
+      `${slotName} (${boardId}) is archived — dev verbs will still resolve against it`,
+      {
+        slot: slotName,
+        board_id: boardId,
+        board_name: board.name,
+        state: 'archived',
+      },
+    );
+  }
+  if (board.state === 'deleted') {
+    return failResult(
+      name,
+      `${slotName} (${boardId}) is in state 'deleted'`,
+      {
+        slot: slotName,
+        board_id: boardId,
+        board_name: board.name,
+        state: 'deleted',
+        reason: 'board_deleted',
+      },
+    );
+  }
+  return okResult(name, `${slotName} (${boardId}) exists and is accessible`, {
+    slot: slotName,
+    board_id: boardId,
+    board_name: board.name,
+    state: board.state,
+  });
+};
+
+/**
+ * `tasks_status_column_present` — verifies the configured tasks
+ * board has a column of type `status` or `color` (Monday's two
+ * label-shaped column types). `fail` when no tasks board is
+ * configured / accessible OR the board has no status-shaped
+ * column.
+ */
+const checkTasksStatusColumnPresent = (
+  mapping: DevMapping,
+  boards: readonly RawDoctorBoard[],
+): DevDoctorCheckResult => {
+  const name: DevDoctorCheckName = 'tasks_status_column_present';
+  const tasks = findBoardById(boards, mapping.tasks_board);
+  if (tasks === undefined) {
+    return failResult(name, 'tasks board not configured or not accessible', {
+      reason: 'no_tasks_board',
+      hint: 'fix `tasks_board_exists` first (see check above)',
+    });
+  }
+  const statusColumn = liveColumns(tasks).find(
+    (c) => c.type === 'status' || c.type === 'color',
+  );
+  if (statusColumn === undefined) {
+    return failResult(
+      name,
+      `tasks board (${tasks.id}) has no status-shaped column`,
+      {
+        board_id: tasks.id,
+        reason: 'no_status_column',
+        hint: 'add a Status column to the tasks board, or re-run `monday dev discover` if you intended a different board',
+      },
+    );
+  }
+  return okResult(
+    name,
+    `tasks board (${tasks.id}) has status column \`${statusColumn.id}\``,
+    {
+      board_id: tasks.id,
+      column_id: statusColumn.id,
+      column_title: statusColumn.title,
+      column_type: statusColumn.type,
+    },
+  );
+};
+
+const parseStatusLabels = (
+  settingsStr: string | null,
+): readonly string[] | null => {
+  if (settingsStr === null || settingsStr.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(settingsStr);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const labels = (parsed as { labels?: unknown }).labels;
+  if (labels === null || labels === undefined || typeof labels !== 'object') {
+    return null;
+  }
+  return Object.values(labels as Record<string, unknown>)
+    .filter((v): v is string => typeof v === 'string')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+};
+
+/**
+ * `tasks_status_labels_canonical` — verifies the tasks board's
+ * status column carries Monday Dev's stock labels (`Done` / `Working
+ * on it` / `Stuck`). `warn` when one or more canonical labels are
+ * missing; `ok` when all three are present.
+ */
+const checkTasksStatusLabelsCanonical = (
+  mapping: DevMapping,
+  boards: readonly RawDoctorBoard[],
+): DevDoctorCheckResult => {
+  const name: DevDoctorCheckName = 'tasks_status_labels_canonical';
+  const tasks = findBoardById(boards, mapping.tasks_board);
+  if (tasks === undefined) {
+    return failResult(name, 'tasks board not configured or not accessible', {
+      reason: 'no_tasks_board',
+    });
+  }
+  const statusColumn = liveColumns(tasks).find(
+    (c) => c.type === 'status' || c.type === 'color',
+  );
+  if (statusColumn === undefined) {
+    return failResult(
+      name,
+      `tasks board (${tasks.id}) has no status-shaped column`,
+      {
+        board_id: tasks.id,
+        reason: 'no_status_column',
+      },
+    );
+  }
+  const labels = parseStatusLabels(statusColumn.settings_str);
+  if (labels === null) {
+    return warnResult(
+      name,
+      `status column \`${statusColumn.id}\` has unparseable settings_str`,
+      {
+        board_id: tasks.id,
+        column_id: statusColumn.id,
+        reason: 'settings_unparseable',
+      },
+    );
+  }
+  const normalised = new Set(labels.map((l) => l.toLocaleLowerCase('und')));
+  const missing = CANONICAL_STATUS_LABELS.filter(
+    (l) => !normalised.has(l.toLocaleLowerCase('und')),
+  );
+  if (missing.length > 0) {
+    return warnResult(
+      name,
+      `status column \`${statusColumn.id}\` is missing canonical labels: ${missing.join(', ')}`,
+      {
+        board_id: tasks.id,
+        column_id: statusColumn.id,
+        present_labels: labels,
+        missing_labels: missing,
+        hint: 'add the missing labels via the Monday UI, or update your workflow to use the labels this column carries',
+      },
+    );
+  }
+  return okResult(
+    name,
+    `status column \`${statusColumn.id}\` has all canonical labels`,
+    {
+      board_id: tasks.id,
+      column_id: statusColumn.id,
+      labels,
+    },
+  );
+};
+
+/**
+ * `sprints_date_columns_present` — verifies the sprints board has a
+ * date-range column (a `timeline` column or split `date` start/end
+ * columns) so the sprint-state filter on `dev sprint list --state`
+ * can derive active / past / future from the date range.
+ */
+const checkSprintsDateColumnsPresent = (
+  mapping: DevMapping,
+  boards: readonly RawDoctorBoard[],
+): DevDoctorCheckResult => {
+  const name: DevDoctorCheckName = 'sprints_date_columns_present';
+  const sprints = findBoardById(boards, mapping.sprints_board);
+  if (sprints === undefined) {
+    return failResult(name, 'sprints board not configured or not accessible', {
+      reason: 'no_sprints_board',
+    });
+  }
+  const dateColumns = liveColumns(sprints).filter((c) =>
+    SPRINT_DATE_COLUMN_TYPES.has(c.type),
+  );
+  if (dateColumns.length === 0) {
+    return failResult(
+      name,
+      `sprints board (${sprints.id}) has no date-range column (need at least one of: timeline, date)`,
+      {
+        board_id: sprints.id,
+        reason: 'no_date_columns',
+        hint: 'add a Timeline column to the sprints board for date-range-derived sprint state',
+      },
+    );
+  }
+  const timeline = dateColumns.find((c) => c.type === 'timeline');
+  if (timeline !== undefined) {
+    return okResult(
+      name,
+      `sprints board (${sprints.id}) has timeline column \`${timeline.id}\``,
+      {
+        board_id: sprints.id,
+        column_id: timeline.id,
+        column_type: 'timeline',
+      },
+    );
+  }
+  const dateCols = dateColumns.filter((c) => c.type === 'date');
+  if (dateCols.length < 2) {
+    return warnResult(
+      name,
+      `sprints board (${sprints.id}) has only ${String(dateCols.length)} date column(s); need either a timeline column or split start/end date columns`,
+      {
+        board_id: sprints.id,
+        date_column_ids: dateCols.map((c) => c.id),
+        hint: 'add a second date column for the sprint end date, or migrate to a timeline column',
+      },
+    );
+  }
+  return okResult(
+    name,
+    `sprints board (${sprints.id}) has ${String(dateCols.length)} date columns (start/end)`,
+    {
+      board_id: sprints.id,
+      date_column_ids: dateCols.map((c) => c.id),
+    },
+  );
+};
+
+const parseBoardRelationTargets = (
+  settingsStr: string | null,
+): readonly string[] | null => {
+  if (settingsStr === null || settingsStr.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(settingsStr);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const ids = (parsed as { boardIds?: unknown; board_ids?: unknown }).boardIds
+    ?? (parsed as { board_ids?: unknown }).board_ids;
+  if (!Array.isArray(ids)) return null;
+  return ids
+    .map((v): string => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : ''))
+    .filter((s): s is string => s.length > 0);
+};
+
+/**
+ * `tasks_to_<target>_relation` family. Verifies the tasks board has
+ * a `board_relation` column whose `settings_str` references the
+ * target board's ID.
+ */
+const checkBoardRelation = (
+  name: DevDoctorCheckName,
+  targetSlot: keyof DevMapping,
+  mapping: DevMapping,
+  boards: readonly RawDoctorBoard[],
+): DevDoctorCheckResult => {
+  const tasks = findBoardById(boards, mapping.tasks_board);
+  if (tasks === undefined) {
+    return failResult(name, 'tasks board not configured or not accessible', {
+      reason: 'no_tasks_board',
+    });
+  }
+  const targetBoardId = mapping[targetSlot];
+  if (targetBoardId === undefined) {
+    return failResult(
+      name,
+      `${targetSlot} not configured — cannot verify board_relation wiring`,
+      {
+        target_slot: targetSlot,
+        reason: 'no_target_board',
+      },
+    );
+  }
+  const relationColumns = liveColumns(tasks).filter(
+    (c) => c.type === 'board_relation',
+  );
+  if (relationColumns.length === 0) {
+    return failResult(
+      name,
+      `tasks board (${tasks.id}) has no board_relation columns`,
+      {
+        board_id: tasks.id,
+        target_slot: targetSlot,
+        target_board_id: targetBoardId,
+        reason: 'no_relation_column',
+        hint: 'add a Connect Boards column on the tasks board pointing to the target board',
+      },
+    );
+  }
+  for (const col of relationColumns) {
+    const targets = parseBoardRelationTargets(col.settings_str);
+    if (targets?.includes(targetBoardId) === true) {
+      return okResult(
+        name,
+        `tasks board (${tasks.id}) column \`${col.id}\` links to ${targetSlot} (${targetBoardId})`,
+        {
+          board_id: tasks.id,
+          column_id: col.id,
+          target_slot: targetSlot,
+          target_board_id: targetBoardId,
+        },
+      );
+    }
+  }
+  return failResult(
+    name,
+    `no board_relation column on tasks board (${tasks.id}) links to ${targetSlot} (${targetBoardId})`,
+    {
+      board_id: tasks.id,
+      target_slot: targetSlot,
+      target_board_id: targetBoardId,
+      relation_column_ids: relationColumns.map((c) => c.id),
+      reason: 'no_matching_relation',
+      hint: `update one of the relation columns to target board ${targetBoardId}, or run \`monday dev configure --${targetSlot.replace('_board', '-board')} <correct-bid>\``,
+    },
+  );
+};
+
+/**
+ * Hydrates every configured board in `mapping` via a single
+ * `boards(ids:)` call so the doctor checks operate over in-memory
+ * data without extra round-trips. Returns `complexity: null` when
+ * no boards are configured (no wire call made).
+ */
+const hydrateDoctorBoards = async (
+  client: MondayClient,
+  mapping: DevMapping,
+): Promise<{
+  readonly boards: readonly RawDoctorBoard[];
+  readonly complexity: Complexity | null;
+}> => {
+  const configuredIds = Array.from(
+    new Set(
+      Object.values(mapping).filter(
+        (v): v is string => typeof v === 'string' && v.length > 0,
+      ),
+    ),
+  );
+  if (configuredIds.length === 0) {
+    return { boards: [], complexity: null };
+  }
+  const response = await client.raw<unknown>(
+    `query DevDoctorBoards($ids: [ID!]!) {
+       boards(ids: $ids, state: all) {
+         id name state
+         columns { id title type settings_str }
+       }
+     }`,
+    { ids: configuredIds },
+    { operationName: 'DevDoctorBoards' },
+  );
+  const parsed = unwrapOrThrow(
+    rawDoctorResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday `boards(ids:)` response (dev doctor)',
+      hint: 'Monday may have amended the `boards(ids:)` selection set — re-probe and amend the doctor schema if so',
+    },
+  );
+  const boards = (parsed.boards ?? []).filter(
+    (b): b is RawDoctorBoard => b !== null,
+  );
+  return { boards, complexity: response.complexity };
+};
 
 /**
  * Runs every {@link DEV_DOCTOR_CHECK_NAMES} check against the
  * `inputs.mapping`. Returns a per-check result list + a summary
- * count.
+ * count. One `boards(ids:)` call hydrates every configured board's
+ * metadata; the 10 checks operate over the hydrated data.
  *
- * **Pre-flight stub.** Runtime body lands at M26 IMPL — one
- * `boards(ids:)` call to verify each configured board exists +
- * exposes the expected column + the `board_relation` wiring.
+ * The verb's exit code stays 0 regardless of per-check `fail`
+ * counts — `dev doctor`'s success is "diagnostics completed";
+ * agents inspect `data.summary.fail_count` for drift.
+ * `dev_board_misconfigured` is reserved for the case where the
+ * doctor itself can't complete (no boards hydrated at all, etc.) —
+ * not surfaced here at this milestone (no configured boards = empty
+ * mapping = every `<noun>_board_exists` check fails, which is the
+ * correct diagnostic signal).
  */
-export const runDevDoctor = (
-  /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-  _inputs: RunDevDoctorInputs,
-): Promise<RunDevDoctorResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'monday dev doctor not yet implemented (v0.3-M26 pre-flight stub)',
-      {
-        details: {
-          hint: 'M26 implementation lands the doctor walker; see docs/v0.3-plan.md §3 M26',
-        },
-      },
-    ),
+export const runDevDoctor = async (
+  inputs: RunDevDoctorInputs,
+): Promise<RunDevDoctorResult> => {
+  const { boards, complexity } = await hydrateDoctorBoards(
+    inputs.client,
+    inputs.mapping,
   );
-/* c8 ignore stop */
+  const checks: DevDoctorCheckResult[] = [];
+  for (const name of DEV_DOCTOR_CHECK_NAMES) {
+    switch (name) {
+      case 'tasks_board_exists':
+        checks.push(checkBoardExists(name, 'tasks_board', inputs.mapping, boards));
+        break;
+      case 'tasks_status_column_present':
+        checks.push(checkTasksStatusColumnPresent(inputs.mapping, boards));
+        break;
+      case 'tasks_status_labels_canonical':
+        checks.push(checkTasksStatusLabelsCanonical(inputs.mapping, boards));
+        break;
+      case 'sprints_board_exists':
+        checks.push(checkBoardExists(name, 'sprints_board', inputs.mapping, boards));
+        break;
+      case 'sprints_date_columns_present':
+        checks.push(checkSprintsDateColumnsPresent(inputs.mapping, boards));
+        break;
+      case 'epics_board_exists':
+        checks.push(checkBoardExists(name, 'epics_board', inputs.mapping, boards));
+        break;
+      case 'releases_board_exists':
+        checks.push(checkBoardExists(name, 'releases_board', inputs.mapping, boards));
+        break;
+      case 'bugs_board_exists':
+        checks.push(checkBoardExists(name, 'bugs_board', inputs.mapping, boards));
+        break;
+      case 'tasks_to_sprints_relation':
+        checks.push(checkBoardRelation(name, 'sprints_board', inputs.mapping, boards));
+        break;
+      case 'tasks_to_epics_relation':
+        checks.push(checkBoardRelation(name, 'epics_board', inputs.mapping, boards));
+        break;
+    }
+  }
+  const summary = {
+    ok_count: checks.filter((c) => c.status === 'ok').length,
+    warn_count: checks.filter((c) => c.status === 'warn').length,
+    fail_count: checks.filter((c) => c.status === 'fail').length,
+  };
+  return { checks, summary, source: 'live', cacheAgeSeconds: null, complexity };
+};
 
 /**
  * Reads the active profile's `[profiles.<name>.dev]` block. Throws
- * `dev_not_configured` when no `dev` block is present for the
- * active profile (`details.hint` points at `monday dev configure`
- * + `monday dev discover`).
+ * `dev_not_configured` when:
+ *   - no `config.toml` exists at all (`details.reason:
+ *     "no_config_file"`),
+ *   - the named profile is absent from the config
+ *     (`details.reason: "profile_absent"`), OR
+ *   - the named profile exists but has no `dev` sub-block
+ *     (`details.reason: "no_dev_block"`).
  *
- * **Pre-flight stub.** Runtime body lands at M26 IMPL — reads via
- * `loadProfilesConfig` (already shipped at v0.3-M21) + extracts
- * `profiles[profileName].dev` (also already shipped on the
- * profile-entry schema).
+ * Each surface points the agent at `monday dev configure` /
+ * `monday dev discover --apply` via `details.hint`.
  */
-export const loadDevMapping = (
-  /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-  _profile: string,
-): Promise<DevMapping> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'loadDevMapping not yet implemented (v0.3-M26 pre-flight stub)',
+export const loadDevMapping = async (
+  profile: string,
+  options: ProfilesRootOptions = {},
+): Promise<DevMapping> => {
+  const config = await loadProfilesConfig(options);
+  if (config === undefined) {
+    throw new ApiError(
+      'dev_not_configured',
+      `Monday Dev mapping not configured for profile \`${profile}\` — no \`~/.monday-cli/config.toml\``,
       {
         details: {
-          hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
+          profile,
+          reason: 'no_config_file',
+          hint: 'run `monday dev discover --apply` to auto-detect Monday Dev boards, or `monday dev configure --tasks-board <bid> ...` to set them explicitly',
         },
       },
-    ),
-  );
-/* c8 ignore stop */
+    );
+  }
+  const entry = config.profiles[profile];
+  if (entry === undefined) {
+    throw new ApiError(
+      'dev_not_configured',
+      `Monday Dev mapping not configured for profile \`${profile}\` — profile absent from \`config.toml\``,
+      {
+        details: {
+          profile,
+          reason: 'profile_absent',
+          available_profiles: Object.keys(config.profiles),
+          hint: 'create the profile via `monday auth login --profile <name>`, or run `monday dev configure --profile <name> ...`',
+        },
+      },
+    );
+  }
+  if (entry.dev === undefined) {
+    throw new ApiError(
+      'dev_not_configured',
+      `Monday Dev mapping not configured for profile \`${profile}\` — no \`[profiles.${profile}.dev]\` block`,
+      {
+        details: {
+          profile,
+          reason: 'no_dev_block',
+          hint: 'run `monday dev discover --apply` to auto-detect, or `monday dev configure --tasks-board <bid> ...` to set explicit mappings',
+        },
+      },
+    );
+  }
+  return entry.dev;
+};
+
+/** Filesystem mode constant for the config.toml file — mirrors
+ * credentials.ts's discipline (`.claude/rules/security.md`): files
+ * under `~/.monday-cli/` carry user-scoped data even when not
+ * directly token-bearing, so 0600 is the conservative default.
+ */
+const CONFIG_FILE_MODE = 0o600;
 
 /**
- * Writes a {@link DevMapping} into the active profile's
- * `[profiles.<name>.dev]` block. Idempotent — re-writing the same
- * mapping is a no-op (the TOML write preserves surrounding
- * formatting + comments per `smol-toml`'s round-trip).
+ * Atomically writes the supplied `mapping` into
+ * `profiles[profile].dev` in `~/.monday-cli/config.toml`. Creates
+ * the file (and the named profile entry) if absent.
  *
- * **Pre-flight stub.** Runtime body lands at M26 IMPL — read the
- * config, splice in the dev block, write back atomically.
+ * **TOML round-trip behavior.** `smol-toml`'s `stringify` produces
+ * canonical TOML output — comments and bespoke formatting from the
+ * original file are NOT preserved. This is a contract correction
+ * vs the M26 pre-flight docstring claim; documented at v0.3-plan
+ * §17 M26a post-mortem. Mitigation: most config.toml files are CLI-
+ * managed (`monday auth login` populates the credentials side; this
+ * helper populates the dev side), so the comment-preservation
+ * concern is narrow. A future v0.4 string-surgery write path could
+ * preserve comments outside the dev block if user demand surfaces.
+ *
+ * **Disk discipline (mirrors `src/config/credentials.ts`):**
+ *   1. `mkdir({ recursive: true, mode: 0o700 })` + explicit `chmod
+ *      0o700` on the parent dir.
+ *   2. `writeFile(tmpPath, payload, { mode: 0o600 })`.
+ *   3. `chmod(tmpPath, 0o600)` (re-applied since `writeFile`'s
+ *      `mode` is advisory under umask).
+ *   4. `rename(tmpPath, finalPath)` (atomic on the same filesystem).
+ *
+ * **Idempotent:** re-writing the same mapping produces the same
+ * bytes (modulo formatting). When `mapping` carries every existing
+ * slot at the same value, the write is functionally a no-op.
  */
-export const saveDevMapping = (
-  /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-  _profile: string,
-  _mapping: DevMapping,
-): Promise<void> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'saveDevMapping not yet implemented (v0.3-M26 pre-flight stub)',
-      {
-        details: {
-          hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-        },
-      },
-    ),
-  );
-/* c8 ignore stop */
+export const saveDevMapping = async (
+  profile: string,
+  mapping: DevMapping,
+  options: ProfilesRootOptions = {},
+): Promise<void> => {
+  // Load existing config (or start fresh with empty profiles map).
+  const existing = await loadProfilesConfig(options);
+  const baseConfig: ProfilesConfig =
+    existing ?? { profiles: {} };
+
+  // Merge the dev block into the named profile entry. Preserves
+  // every non-dev slot on the profile (api_token_env, api_version,
+  // default_workspace, timezone) and every other profile in the
+  // config file.
+  const existingEntry: ProfileEntry =
+    baseConfig.profiles[profile] ?? {};
+  const nextEntry: ProfileEntry = {
+    ...existingEntry,
+    dev: mapping,
+  };
+  const nextConfig: ProfilesConfig = {
+    ...baseConfig,
+    profiles: {
+      ...baseConfig.profiles,
+      [profile]: nextEntry,
+    },
+  };
+
+  // Re-validate the full config before write so a caller passing a
+  // malformed mapping (bypassing the per-field BoardIdSchema at the
+  // argv layer) can't slip a bad file onto disk.
+  const validated = profilesConfigSchema.parse(nextConfig);
+
+  const fullPath = resolveProfilesConfigPath(options);
+  const dir = join(options.home ?? homedir(), PROFILES_DIR_NAME);
+
+  // Ensure secure directory (mirrors credentials.ts).
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700);
+  } catch (err) {
+    // Disk-full / permissions-denied path; not reproducible from a
+    // unit test against a tmp dir.
+    /* c8 ignore start */
+    throw new ConfigError(`cannot prepare config directory ${dir}`, {
+      cause: asError(err),
+      details: { path: dir },
+    });
+    /* c8 ignore stop */
+  }
+
+  const payload = stringifyToml(validated);
+  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, payload, { mode: CONFIG_FILE_MODE });
+    await chmod(tmpPath, CONFIG_FILE_MODE);
+    await rename(tmpPath, fullPath);
+  } catch (err) {
+    // Disk-full / atomic-rename failure path; not reproducible from
+    // a unit test against a tmp dir.
+    /* c8 ignore start */
+    await unlink(tmpPath).catch(() => undefined);
+    throw new ConfigError(`cannot write config file ${fullPath}`, {
+      cause: asError(err),
+      details: { path: fullPath },
+    });
+    /* c8 ignore stop */
+  }
+};
+

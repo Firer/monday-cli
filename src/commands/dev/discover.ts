@@ -3,42 +3,50 @@
  * mappings + optionally apply them to the active profile
  * (cli-design §4.3 + §11.3 + §13 v0.3 entry; v0.3-plan §3 M26).
  *
- * **Pre-flight stub action.** Argv schema is real; the action body
- * is `c8 ignore start/stop` wrapped — it parses the argv schema +
- * resolves a client, then rejects with `internal_error`. M26
- * implementation lands the runtime body: walk the user's
- * accessible boards (optionally scoped via `--workspace <wid>` if
- * a future contract amendment opts that in), run the heuristic
- * via `groupCandidatesByDevNoun`, surface ambiguous / unmapped
- * nouns on the success envelope's `matches[]` array (zero-match
- * surfaces with `matched: []`; ambiguous surfaces with
- * `matched.length > 1`; no warning code registered at M26 pre-
- * flight — round-1 + round-2 Codex P2 fix), and — when `--apply`
- * is set — write the resulting mapping into the active profile's
- * `[profiles.<name>.dev]` block via `saveDevMapping`.
+ * **Runtime body landed at M26a IMPL.** Walks the user's accessible
+ * boards via `discoverDevBoards`, applies the
+ * `buildDiscoverMappingFromMatches` collapse on the per-noun match
+ * results, and — when `--apply` is set — additively merges the
+ * heuristic findings into the active profile's
+ * `[profiles.<name>.dev]` block via `saveDevMapping`. Mirrors the
+ * M21 oauth-stub / M24 history-stub precedent — argv shape pinned
+ * at pre-flight, runtime body filled at IMPL.
  *
- * Mirrors the M21 oauth-stub / M24 history-stub precedent — argv
- * shape pinned at pre-flight so agent scripts targeting `monday
- * dev discover` are stable across the M26 drop-in.
+ * **Additive-merge semantics on `--apply`.** Heuristic findings are
+ * merged on top of any existing dev block (heuristic wins on slot
+ * conflict; unset slots in the heuristic result preserve existing
+ * values). This preserves user-configured slots the heuristic can't
+ * fill (e.g. a workspace with no `Sprints` board where the user set
+ * `sprints_board` manually).
  *
  * Idempotent: yes when `--apply` is not set (pure read). When
  * `--apply` is set: idempotent on equal mappings (re-discovery
  * against the same workspace shape rewrites the same block).
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
+import { ApiError, type ErrorCode } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import {
+  buildDiscoverMappingFromMatches,
   devDiscoverOutputSchema,
+  discoverDevBoards,
+  loadDevMapping,
+  saveDevMapping,
   type DevDiscoverOutput,
+  type DevMapping,
 } from '../../api/dev-conventions.js';
+import { resolveActiveDevProfile } from './_shared.js';
 
 const inputSchema = z
   .object({
     apply: z.boolean().optional(),
   })
   .strict();
+
+const DEV_NOT_CONFIGURED: ErrorCode = 'dev_not_configured';
 
 export const devDiscoverCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -55,7 +63,7 @@ export const devDiscoverCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: devDiscoverOutputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const noun = ensureSubcommand(
       program,
       'dev',
@@ -77,21 +85,68 @@ export const devDiscoverCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (opts: unknown) => {
-          parseArgv(devDiscoverCommand.inputSchema, opts);
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev discover not yet implemented (v0.3-M26 pre-flight stub)',
-            {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
-            },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+      .action(async (rawOpts: unknown) => {
+        const opts = parseArgv(devDiscoverCommand.inputSchema, rawOpts);
+        const apply = opts.apply ?? false;
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await discoverDevBoards({ client });
+
+        const heuristicMapping = buildDiscoverMappingFromMatches(
+          result.matches,
+        );
+
+        let finalMapping: DevMapping = heuristicMapping;
+        if (apply) {
+          let existing: DevMapping;
+          try {
+            existing = await loadDevMapping(profile.name, profile.homeOptions);
+          } catch (err) {
+            if (
+              err instanceof ApiError &&
+              err.code === DEV_NOT_CONFIGURED
+            ) {
+              // First-write case — no existing dev block. Round-1
+              // P2-4 closure: dev discover doesn't surface
+              // `dev_not_configured` for itself; absence is normal.
+              existing = {};
+            } else {
+              // Non-dev_not_configured errors from `loadDevMapping`
+              // bubble up to the runner's catch-all. In production,
+              // the only realistic source is `config_error` on
+              // malformed TOML, which `cli/program.ts`'s preAction
+              // hook surfaces FIRST (it calls `loadProfilesConfig`
+              // before the action runs); this branch is defensive.
+              /* c8 ignore next */
+              throw err;
+            }
+          }
+          finalMapping = { ...existing, ...heuristicMapping };
+          await saveDevMapping(
+            profile.name,
+            finalMapping,
+            profile.homeOptions,
+          );
+        }
+
+        const output: DevDiscoverOutput = {
+          profile: profile.name,
+          mapping: finalMapping,
+          matches: result.matches,
+          applied: apply,
+        };
+
+        emitSuccess({
+          ctx,
+          data: output,
+          schema: devDiscoverCommand.outputSchema,
+          programOpts: program.opts(),
+          apiVersion,
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+        });
+      });
   },
 };
