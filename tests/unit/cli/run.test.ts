@@ -475,6 +475,19 @@ describe('run — abort handling (SIGINT path)', () => {
           .action(async () => {
             // Action that respects ctx.signal and bails when aborted.
             await new Promise<void>((resolve, reject) => {
+              // Defensive sync check: under load, the test's
+              // `setTimeout(abort, 10)` can fire BEFORE the action's
+              // promise constructor runs. Node's AbortSignal does
+              // NOT replay 'abort' for listeners attached after the
+              // event fired — so without this sync check, the
+              // listener silently waits for an abort that already
+              // happened and the action returns cleanly at the
+              // 5000ms safety timeout. Flake observed in full-
+              // coverage runs at high parallelism.
+              if (ctx.signal.aborted) {
+                reject(new Error('aborted'));
+                return;
+              }
               ctx.signal.addEventListener('abort', () => {
                 reject(new Error('aborted'));
               });
@@ -509,6 +522,15 @@ describe('run — abort handling (SIGINT path)', () => {
           .command('hang')
           .action(async () => {
             await new Promise<void>((_resolve, reject) => {
+              // Same race-window guard as the sigint test above:
+              // if the abort fires before this Promise constructor
+              // runs (load-dependent under full-coverage parallelism),
+              // a listener attached afterward never fires and the
+              // action returns cleanly at the 5000ms safety timeout.
+              if (ctx.signal.aborted) {
+                reject(new Error('client cancelled'));
+                return;
+              }
               ctx.signal.addEventListener('abort', () => {
                 reject(new Error('client cancelled'));
               });
@@ -585,6 +607,16 @@ describe('runWithSignals — SIGINT integration', () => {
           .command('hang')
           .action(async () => {
             await new Promise<void>((resolve, reject) => {
+              // Defensive sync check (same pattern as the in-
+              // process abort tests above): under heavy parallelism
+              // the test's `setTimeout(process.emit SIGINT, 10)` can
+              // fire BEFORE the action's promise constructor runs,
+              // and a listener attached after the abort never
+              // fires.
+              if (ctx.signal.aborted) {
+                reject(new Error('aborted'));
+                return;
+              }
               ctx.signal.addEventListener('abort', () => {
                 reject(new Error('aborted'));
               });
