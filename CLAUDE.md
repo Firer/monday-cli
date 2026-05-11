@@ -143,22 +143,34 @@ convention.
    account with live usage activity. If Monday's runtime `day`
    field turns out to be account-local, amend cli-design §11.5.3
    + flip `formatTodayKey` in `src/commands/usage.ts`.
-4. **Codex impl-review truncation follow-up.** The M23 impl
-   review at `1f09a25` completed (exit 0) but truncated
-   mid-trace after 46 file-reading exec calls without delivering
-   numbered findings (v0.3-plan §15 captures the lesson). Future
-   impl reviews should use a tighter prompt that asks for
-   findings UP FRONT rather than after exploration — preserves
-   Codex's generation budget for the verdict. R-NEW-17's
-   redactor-pattern check at pre-flight would have caught the
-   M23 `column_token → column` rename earlier.
+4. **Codex impl-review truncation follow-up — lesson
+   validated at M24 pre-flight; template fold-in remains.**
+   The M23 impl review at `1f09a25` completed (exit 0) but
+   truncated mid-trace after 46 file-reading exec calls without
+   delivering numbered findings (v0.3-plan §15 captures the
+   lesson). The M24 pre-flight reviews (round 1 at `fbd70de` +
+   round 2 at `f7fac47`) applied a custom "deliver findings UP
+   FRONT, not after exhaustive exploration" instruction in the
+   prompt and BOTH rounds returned numbered findings cleanly
+   without truncation (round 1: 2 P1 + 4 P2 + 1 P3; round 2:
+   1 P1 + 1 P2 + 0 P3). Technique validated — the remaining
+   work is folding the instruction into the R-NEW-6
+   `.claude/templates/codex-pre-flight-review.md` template
+   (R-NEW-25 watch-item) so future pre-flights inherit it
+   automatically. R-NEW-17's redactor-pattern check at
+   pre-flight applied as audit point W1 at the M24 pre-flight
+   review prompt; both rounds returned "W1: nothing flagged"
+   against the new `unknown_event_kind` detail-key surface —
+   pattern validated. R-NEW-17 fold-in to the template's
+   section-5 audit-points list is the remaining lift,
+   bundled with R-NEW-25 at next pre-flight.
 5. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
    OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
    as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M23 implementation)**
+**R-class state (post-M24 pre-flight)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
@@ -213,11 +225,16 @@ convention.
   to targeted seam tests on `cross-board-search.ts`.
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
-  `wrapFsError` factory (M22 + M23 did NOT trigger);
-  R-NEW-8 `missingByDifference` set-delta helper (2
-  consumers; fires at 3); R-NEW-9 2-stage GraphQL
-  filter+hydrate resolver shape (2 confirmed + 1 planned
-  M24; MEDIUM priority).
+  `wrapFsError` factory (M22 + M23 + M24-pre-flight did
+  NOT trigger); R-NEW-8 `missingByDifference` set-delta
+  helper (2 consumers; fires at 3); R-NEW-9 2-stage
+  GraphQL filter+hydrate resolver shape — **STAYS AT 2
+  consumers** (M22 usage + M23 favorites); M24 `item
+  history` shipped as 2-SOURCE MERGE not filter+hydrate
+  (Decision 2 closure ratified the shape; M24-prep
+  empirical-probe ran first), so the M24-planned third
+  consumer never materialised. Watch-item active at M27
+  (webhook source set might be filter+hydrate-shaped).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);
@@ -226,9 +243,10 @@ convention.
   **filesystem-state probes** for non-ENOENT fs-error
   branches (test-pattern; EISDIR-via-dir-at-path probe
   ratified at `7058754`); **empirical-probe-step
-  -in-pre-flight** — fired THREE TIMES (M21 OAuth `5c07840`,
+  -in-pre-flight** — fired FOUR TIMES (M21 OAuth `5c07840`,
   M22 `platform_api.daily_*` reshape `fbab6b0`, M23 cross-board
-  + favorites `3a2f1db`+`1fefdb1`), discipline ratified as
+  + favorites `3a2f1db`+`1fefdb1`, M24-prep history kinds
+  `a1f3025` closing Decision 2), discipline ratified as
   always-run-for-novel-API-surface pre-flights; **mockable-
   seam pattern in probes** — ratified at M22 via per-probe
   injection slots, carries to any future probe-style surface
@@ -254,12 +272,21 @@ convention.
   fires when M25/M27/M28 cross-cutting extensions need the
   same union shape; **R-NEW-17 redactor-pattern check at
   pre-flight** — surfaced at M23 impl (`column_token` rename;
-  v0.3-plan §15 contract drift finding); MEDIUM priority, fold
-  into `.claude/templates/codex-pre-flight-review.md` section-5
-  audit-points at M24 pre-flight kickoff; **R-NEW-18 sequential
+  v0.3-plan §15 contract drift finding); MEDIUM priority.
+  Applied AT M24 pre-flight Codex review prompt as audit
+  point W1 — both rounds returned "W1: nothing flagged"
+  against the new `unknown_event_kind.details.{event, entity,
+  occurrence_count, hint}` detail-key surface. Template lift
+  to `.claude/templates/codex-pre-flight-review.md` section-5
+  audit-points remains the outstanding work — fires at M25/
+  M27 pre-flight kickoff; **R-NEW-18 sequential
   per-board fan-out builder** — surfaced at M23 impl
-  (`crossBoardSearch` walker); LOW priority watch-item, fires
-  if M24 `item history` merge projector duplicates the shape;
+  (`crossBoardSearch` walker); LOW priority watch-item. M24
+  `item history` shipped as CHRONOLOGICAL MERGE
+  (`mergeByCreatedAt` over fully-drained lists), NOT
+  sequential per-board fan-out, so the watch-item stays at
+  1 consumer. Fires at M27 webhook fan-out if it duplicates
+  the M23 shape;
   **R-NEW-19 migrate manual `safeParse → ApiError` sites to
   `unwrapOrThrow`** — **Shipped: `f4e8e1e`** (post-M23 audit);
   5 sites across M21+M22+M23 (oauth + login + usage + favorites
@@ -268,7 +295,11 @@ convention.
   (same pattern miss + mass-migrate cadence as R-NEW-14/15/16); **R-NEW-20 `MondayClient` seam-
   injection stub factory** — 2 consumers at M23 impl
   (board-favorites + cross-board-search unit tests); LOW
-  priority watch-item, fires at 3rd consumer at M24;
+  priority watch-item. M24 pre-flight added no new test
+  consumers (action + walker stubs under `c8 ignore start/
+  stop`); 3rd consumer fires at M24 IMPLEMENTATION when
+  the runtime walker + action body land their unit-test
+  matrix;
   **R-NEW-22 probe-script `main().catch()` runner** —
   surfaced at post-R-NEW-5 audit (`fb77baf`); 14+
   consumers but each instance is 3 trivial defensive lines
@@ -276,7 +307,33 @@ convention.
   boilerplate", not meaningful repetition; LOW priority
   watch-item, fold into R-NEW-21's commit ONLY if that
   commit is already touching every probe script (it's
-  not — R-NEW-21 only touches 4 trial-query probes).
+  not — R-NEW-21 only touches 4 trial-query probes);
+  **R-NEW-23 two-source chronological merge projector**
+  — surfaced at M24 pre-flight (`bad98ba`,
+  `mergeByCreatedAt` in `src/api/item-history-projection.ts`);
+  1 consumer today; LOW priority watch-item, fires at 2nd
+  consumer (likely M27 webhooks if account-scoped +
+  board-scoped surfaces need a merged stream); **R-NEW-24
+  schema field-name drift (wire ↔ CLI) documentation
+  pattern** — 3 sites today: M22 `daily_limit` /
+  `platform_api.daily_limit`, M23 column-tokens /
+  `column_id`, M24 `kind` / `event`. Each is ad-hoc in its
+  module docstring; not a code lift. LOW priority watch-
+  item; if a 4th site appears at M25-M28, consider
+  lifting to a shared `## Field-name mapping conventions`
+  section in `docs/architecture.md` or `docs/cli-design.md`;
+  **R-NEW-25 R-NEW-6 template extension — "findings up
+  front" instruction** — M23 impl-review truncation lesson
+  (v0.3-plan §15) drove a custom "deliver findings up
+  front, not after exhaustive exploration" instruction on
+  M24 pre-flight Codex prompts. Both rounds returned
+  numbered findings cleanly without truncation,
+  validating the technique. The R-NEW-6 template at
+  `.claude/templates/codex-pre-flight-review.md` doesn't
+  currently carry this guidance — fold in at next
+  pre-flight (M25 or M27) so the instruction is template-
+  stable rather than per-prompt re-derived. LOW priority,
+  fires at next pre-flight prompt drafting.
 
 ## Pre-flight contract diff discipline
 
