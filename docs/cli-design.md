@@ -614,11 +614,16 @@ monday board favorites                    # current user's starred boards   v0.3
                                           # favorites { object { id type } }`
                                           # filtered to `type=Board`, then
                                           # (b) `boards(ids:[...])` to hydrate
-                                          # name + workspace_id + state.
+                                          # name + state + workspace_id + url.
                                           # Output sorted by Monday's UI
                                           # position (Float). Read-only —
                                           # writes (favoriting/unfavoriting)
-                                          # are NOT in v0.3 scope.
+                                          # are NOT in v0.3 scope. Surfaces
+                                          # `board_favorites_stale` warning
+                                          # when Stage-1 yielded N boards
+                                          # but Stage-2 hydrated fewer
+                                          # (revoked access, deleted, or
+                                          # archived to private workspace).
 monday board create --name <n> [--workspace <wid>] [--kind public|private|share] [--template <bid>] [--description <d>] [--dry-run]   v0.2
                                           # `create_board(board_name, board_kind,
                                           # workspace_id?, template_id?,
@@ -6340,17 +6345,34 @@ scoped idempotent changes, and post comments narrating its work.**
   `MONDAY_REQUEST_TIMEOUT_MS` default) and N=60+ at the timeout
   ceiling. The 25/100 cap is calibrated for this latency envelope,
   not the complexity budget. Additional load-bearing probe
-  findings pinned for the M23 contract diff:
-  - **Per-board cursor walker.** Each board returns its own
-    `items_page.cursor`; the fan-out walker maintains N
-    per-board cursors (parent stream merges N child walkers).
+  findings pinned for the M23 contract diff (with Codex
+  round-1 P1-2 resolution amending the cursor shape):
+  - **v0.3 cross-board search is single-call-only** (Codex
+    round-1 P1-2 resolution; was originally pinned as a
+    "per-board cursor walker maintains N cursors" shape but
+    cross-board pagination is genuinely thorny: per-board
+    cursors expire at 60min per §5.6, and an aggregate
+    `--limit` mid-walk yields per-board state that doesn't
+    compose into a single resumable token without an opaque-
+    token scheme). The walker fans out across N boards in
+    ONE GraphQL call and returns each board's first page.
+    Boards with more items left OR an aggregate `--limit`
+    short-circuit surface a `cross_board_truncated` warning
+    with per-board `state` breakdown (`exhausted` /
+    `has_more` / `not_started`) — no resumable cross-board
+    cursor at v0.3. v0.4 may add an opaque-token resumable
+    cursor envelope-additively (`meta.next_cursor` per §6.3
+    stays compatible). Agents needing pagination today
+    narrow with `--workspace` / `--favorites` or use the
+    v0.1 `--board <bid>` single-board path (which has its
+    own resumable cursor per §5.6).
   - **Inaccessible board IDs silently omitted.** `boards(ids:
     [<bad-id>])` returns `{"boards":[]}` (empty array, not null,
     not error). The walker MUST detect
-    `response.boards.length < input_ids.length` and surface a
-    warning ("X of N requested boards were inaccessible or do
-    not exist") rather than silently delivering partial
-    results.
+    `response.boards.length < input_ids.length` and surface an
+    `inaccessible_boards` warning ("X of N requested boards
+    were inaccessible or do not exist") rather than silently
+    delivering partial results.
   - **Per-board column resolution required for `--where`.** The
     `items_page(query_params: { rules })` shape uses each
     board's own column IDs; passing a column token (e.g.

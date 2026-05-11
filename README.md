@@ -387,18 +387,21 @@ support time-tracking column writes (`change_simple_column_value`
 time-tracking-related mutations). When Monday ships API support,
 the runtime swap is one-sided in `src/api/time-tracking.ts` —
 agent scripts targeting the verbs are stable across the swap.
-**v0.3-M21 Part 1 shipped** (`5c1f7ac` + `81eec03` + `a4cb5b0`):
+**v0.3-M21 shipped** (Part 1: `5c1f7ac` + `81eec03` +
+`a4cb5b0`; Part 2: `1cd660a` + `3b5cb30` + `e21c166`;
+close-docs `086be70` + coverage push `7058754`):
 `monday auth login --profile <name>` + `monday auth logout
 --profile <name>` runtime bodies, the `~/.monday-cli/credentials`
-mode-`0600` cache, the `~/.monday-cli/config.toml` TOML loader, and
-the `--profile <name>` global flag's resolution wiring through
-`cli/program.ts`'s preAction hook. M21 Part 2 covers the redaction-
-runtime extension + leak-test canary + Codex implementation review
-+ the v0.3-plan §3 M21 close-docs sweep. **Pre-publish blocker (Part
-2 → release):** swap the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`
-placeholders in `src/api/oauth.ts` with the registered Monday OAuth
-app's values (one-time external step at https://developer.monday.com/
-apps with redirect URI exactly `http://127.0.0.1:9876/callback`).
+mode-`0600` cache, the `~/.monday-cli/config.toml` TOML loader, the
+`--profile <name>` global flag's resolution wiring through
+`cli/program.ts`'s preAction hook, and the redaction-runtime
+extension that folds credentials-cache tokens into the secret-bag
+for the §7.4.3 emission-path leak test. **Pre-publish blocker
+(v0.3.0 release prep, after M28):** swap the `OAUTH_CLIENT_ID` /
+`OAUTH_CLIENT_SECRET` placeholders in `src/api/oauth.ts` with the
+registered Monday OAuth app's values (one-time external step at
+https://developer.monday.com/apps with redirect URI exactly
+`http://127.0.0.1:9876/callback`).
 **v0.3-M22 shipped** (`3a1b465`, preceded by `84c6d2b`
 redact narrowing): `monday status` runs the 7-probe
 matrix (DNS / TCP / TLS / auth / cache writability /
