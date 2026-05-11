@@ -11,67 +11,56 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M22 closed; M23 pre-flight shipped; M23 implementation
-unblocked.** v0.2.0 published to npm 2026-05-08. v0.3 is in
-progress on `main`; M0–M22 closed; M23 pre-flight contract diff
-landed at `fa27b60` (Codex round-2 fixes; preceded by `1fefdb1`
-contract-diff commit + `9b93f15` round-1 fixes + `3a2f1db`
-Decision 5 close PR). M23 pre-flight ships two new src/api modules
-(`cross-board-search.ts` fan-out walker, `board-favorites.ts`
-2-stage favorites resolver), one new command (`monday board
-favorites`), and an extension to `monday item search` for the
-cross-board path (`--workspace` / `--favorites` / `--max-boards`
-flags with mutual-exclusion). M22 implementation (`3a1b465`) lands
-the runtime DNS / TCP / TLS / auth / cache / redaction / env-var
-probes for `monday status` + the `platform_api.daily_*` projection
-for `monday usage`, preceded by a small refactor (`84c6d2b`)
-narrowing the redact-layer non-string scalar preservation to the
-boolean/number/null allowlist (security-bearing tightening per
-Codex M22 W8).
+**v0.3-M23 closed; M24 unblocked.** v0.2.0 published to npm
+2026-05-08. v0.3 is in progress on `main`; M0–M23 closed. M23
+implementation landed at `1f09a25` (cross-board `item search` +
+`board favorites` runtime bodies — `fetchBoardFavorites` 2-stage
+resolver, `crossBoardSearch` per-board fan-out walker, cross-board
+action with column-resolution pre-pass + SourceAggregator merge +
+union-schema emit). M23 pre-flight had two Codex rounds (`9b93f15`
++ `fa27b60`); impl review run completed exit 0 but truncated
+mid-trace without numbered findings (see v0.3-plan §15 lesson).
+M22 implementation (`3a1b465`) lands the runtime DNS / TCP / TLS /
+auth / cache / redaction / env-var probes for `monday status` +
+the `platform_api.daily_*` projection for `monday usage`, preceded
+by a small refactor (`84c6d2b`) narrowing the redact-layer
+non-string scalar preservation to the boolean/number/null
+allowlist (security-bearing tightening per Codex M22 W8).
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
-- `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22
-  post-mortems + §3 M23 pre-flight narrative + §22 R-class
-  backlog (R-NEW-1 + R-NEW-4 + R-NEW-6 + R-NEW-7 shipped +
-  R-NEW-2 / R-NEW-3 / R-NEW-5 candidates open + R-watch-items).
+- `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23
+  post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-6
+  + R-NEW-7 + R-NEW-14/15/16 shipped + R-NEW-2 / R-NEW-3 / R-NEW-5
+  / R-NEW-17 candidates open + R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M23 pre-flight + R-NEW-14/15/16 lifts):**
-- Test count: **2844** across 121 files (was 2737 at post-M22
-  close; +107 net across the M23 pre-flight cycle + post-audit
-  refactors: 36 unit tests in
-  `tests/unit/api/cross-board-search.test.ts` (Decision 5
-  constants, schemas, helpers, stub-rejection,
-  `buildCrossBoardTruncatedWarning`), 28 unit tests in
-  `tests/unit/api/board-favorites.test.ts`, 22 integration tests
-  in `tests/integration/commands/m23-cross-board-stubs.test.ts`,
-  +13 unit tests in `tests/unit/utils/errors.test.ts` for the
-  shipped R-NEW-14 `errorMessage` + R-NEW-15 `asError` +
-  R-NEW-16 `errorCode` helpers, +8 across
-  `buildCrossBoardTruncatedWarning` after Codex round-1 P1-2
-  resolution).
-- Coverage: **99.09 / 95.86 / 99.30 / 99.29** (stmts / branches /
+**Live numbers (post-M23 implementation):**
+- Test count: **2864** across 122 files (was 2844 post-M23
+  pre-flight; +20 net across the M23 implementation: +19 unit
+  tests for `fetchBoardFavorites` resolver, +12 unit tests for
+  `crossBoardSearch` walker, +9 integration tests for
+  `monday board favorites`, +18 integration tests for cross-board
+  `monday item search` — -22 pre-flight stub-rejection tests
+  removed in the renamed `m23-cross-board.test.ts`).
+- Coverage: **99.02 / 95.70 / 99.22 / 99.22** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin moved from 0pp (post-M22 close) → 0.04pp (post-M23
-  pre-flight) → 0.41pp (post R-NEW-14/15/16 lift)**, a 10×
-  margin improvement. The R-NEW-14/15/16 consolidation
-  eliminated ~34 inline branches at 17 call sites (each
-  `err instanceof Error ? ... : ...` was 2 branches) and
-  replaced them with 3 shared helpers + 13 branch-thorough unit
-  tests — net positive on both coverage AND code clarity.
-- ERROR_CODES count: **29** (no new code at M23 pre-flight —
-  cross-board cap-exceeded routes through existing
-  `usage_error`; the M23 walker's three load-bearing warnings
+  margin shifted 0.41pp → 0.25pp** at M23 implementation — the
+  cross-board action grew the branch denominator faster than the
+  per-file 100% coverage grew the numerator (M19 lesson again).
+  Above floor; R-NEW-5 `introspectType()` lift at M24 pre-flight
+  is the recovery candidate.
+- ERROR_CODES count: **29** (unchanged — Decision 5's
+  hypothesised `complexity_budget_exhausted` rejected at
+  pre-flight; the M23 walker's three load-bearing warnings
   (`inaccessible_boards`, `column_not_found_on_board`,
   `cross_board_truncated`) and the favorites resolver's
   `board_favorites_stale` warning are §6.1 `warnings[]` codes,
   not `error.code` registry entries).
-  Command count: **77** (`monday board favorites` joined at
-  M23 pre-flight; `monday item search` extension didn't add a
-  new command).
+  Command count: **77** (unchanged — `monday board favorites`
+  joined at M23 pre-flight; runtime body lift didn't add).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -87,47 +76,43 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M23 implementation** — runtime body lift swaps the
-   pre-flight stubs for the runtime `boards(ids:)
-   { items_page(query_params:) }` fan-out walker + per-board
-   column-resolution pre-pass + 2-stage favorites resolver
-   (Stage 1: `Query.favorites` filter to `type === Board`,
-   Stage 2: `boards(ids:)` hydrate). Reuse `startNdjsonStream`
-   (R52) + the existing pagination/streaming helpers per
-   v0.3-plan §3 M23. Codex implementation review (1-2 rounds)
-   before declaring close. Source aggregation across the
-   per-board column-resolution pre-pass + the walker's
-   pure-live fan-out happens in the command-action via the
-   existing `SourceAggregator` (P2-1 round-2 resolution).
-2. **`monday usage` timezone semantics verification** — M22
+1. **R-NEW-5 `introspectType()` lift** — HIGH priority deferred
+   since M23 pre-flight close-docs. ~30 LOC helper to lift into
+   `scripts/probe/_lib.ts` against 9+ consumers (M22's 4 probe
+   scripts + M23 pre-flight's 5). Also branches-margin recovery
+   candidate (from 0.25pp → 0.4pp+) ahead of M24 pre-flight.
+2. **M24 pre-flight kickoff** — Close Decision 2 (history kind
+   taxonomy) first, then ship the M24 contract diff per v0.3-plan
+   §3 M24: new `src/api/item-history-projection.ts` + `src/
+   commands/item/history.ts` for `monday item history <iid>` with
+   the activity-log + updates interleave shape. The 2-source
+   merge projection is a fresh contract surface (cli-design §6
+   needs an extension entry — see §8 decision 2).
+3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
    captured an empty `by_day` list so the timezone pin remains
    inferred from the sibling `last_updated`'s `ISO8601DateTime`
    scalar. Re-probe `scripts/probe/m22-usage-by-day.ts` against an
-   account with live usage activity (or a one-off bootstrap call
-   to populate the series). If Monday's runtime `day` field turns
-   out to be account-local, amend cli-design §11.5.3 + flip
-   `formatTodayKey` in `src/commands/usage.ts`. Pure helpers
-   (`sumUsageForDay`, `projectUsageOutput`) treat `day` as an
-   opaque equality key; the change is local to the command-action
-   `today` derivation.
-3. **Coverage-floor margin recovery (deferred from M22 close)** —
-   M22 close landed at 0pp branches margin; M23 pre-flight
-   recovered to 0.04pp (95.49% vs 95.45% floor) via the new test
-   surface. Margin is still tight; M23 implementation may grow
-   the denominator faster than the per-file 100% coverage grows
-   the numerator (M19 lesson). Continue monitoring; an M24
-   pre-flight audit could re-raise the floor with a
-   confidence-margin lift OR widen the seam-injected matrix to
-   recover branches without real-network reliance.
-4. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
+   account with live usage activity. If Monday's runtime `day`
+   field turns out to be account-local, amend cli-design §11.5.3
+   + flip `formatTodayKey` in `src/commands/usage.ts`.
+4. **Codex impl-review truncation follow-up.** The M23 impl
+   review at `1f09a25` completed (exit 0) but truncated
+   mid-trace after 46 file-reading exec calls without delivering
+   numbered findings (v0.3-plan §15 captures the lesson). Future
+   impl reviews should use a tighter prompt that asks for
+   findings UP FRONT rather than after exploration — preserves
+   Codex's generation budget for the verdict. R-NEW-17's
+   redactor-pattern check at pre-flight would have caught the
+   M23 `column_token → column` rename earlier.
+5. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
    OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
    as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M23 pre-flight + post-audit lifts)**
+**R-class state (post-M23 implementation)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
@@ -198,7 +183,14 @@ convention.
   introduced `z.union([itemSearchOutputSchema,
   crossBoardSearchOutputSchema])`; LOW priority watch-item;
   fires when M25/M27/M28 cross-cutting extensions need the
-  same union shape.
+  same union shape; **R-NEW-17 redactor-pattern check at
+  pre-flight** — surfaced at M23 impl (`column_token` rename;
+  v0.3-plan §15 contract drift finding); MEDIUM priority, fold
+  into `.claude/templates/codex-pre-flight-review.md` section-5
+  audit-points at M24 pre-flight kickoff; **R-NEW-18 sequential
+  per-board fan-out builder** — surfaced at M23 impl
+  (`crossBoardSearch` walker); LOW priority watch-item, fires
+  if M24 `item history` merge projector duplicates the shape.
 
 ## Pre-flight contract diff discipline
 

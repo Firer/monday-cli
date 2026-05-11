@@ -412,10 +412,12 @@ finding pivoted the design at pre-flight — Monday tracks
 operations-per-day under `platform_api.daily_*`, NOT complexity
 points under a non-existent `account.complexity` — additive-only
 envelope per cli-design §11.5.3 Decision 8 closure.
-**v0.3-M23 pre-flight shipped** (`1fefdb1` contract diff +
-`9b93f15` Codex round-1 fixes + `fa27b60` Codex round-2 fixes,
-preceded by Decision 5 close at `3a2f1db`): two new src/api
-modules (`cross-board-search.ts` fan-out walker,
+**v0.3-M23 shipped** (`1f09a25` implementation, preceded by
+`1fefdb1` pre-flight contract diff + `9b93f15` Codex round-1
+fixes + `fa27b60` Codex round-2 fixes + `3a2f1db` Decision 5
+close): cross-board `monday item search` + `monday board
+favorites` runtime bodies live. Two new src/api modules
+(`cross-board-search.ts` per-board fan-out walker,
 `board-favorites.ts` 2-stage favorites resolver), one new
 command (`monday board favorites`), and an extension to
 `monday item search` for the v0.3 cross-board path
@@ -425,16 +427,18 @@ default + hard cap 100, calibrated against wall-clock fan-out
 latency (NOT complexity-budget — empirical probe at 2026-05-11
 measured ~25-30 complexity points per board against a
 ~999_950 per-call budget; latency at ~0.5-1.5s/N is the real
-constraint). The empirical-probe finding also pivoted the
-`board favorites` design — Monday surfaces favorites at
-top-level `Query.favorites: [GraphqlHierarchyObjectItem!]`
-(polymorphic; Board | Folder | Dashboard | Workspace), so the
-verb is a 2-stage filter + hydrate. M23 implementation
-(runtime fan-out walker + 2-stage resolver body lift) lands
-next.
-**Deferred to later v0.3 milestones**: M23 implementation
-(cross-board `item search` + `board favorites` runtime
-bodies), `item history` (M24),
+constraint). `board favorites` is a 2-stage filter + hydrate
+against the polymorphic top-level `Query.favorites:
+[GraphqlHierarchyObjectItem!]` surface (Board | Folder |
+Dashboard | Workspace); the verb filters client-side to
+Board-typed entries + hydrates via `boards(ids:)` for the
+final row shape (`id`, `name`, `state`, `workspace_id`, `url`,
+`position`). Three load-bearing warnings on the cross-board
+path (`inaccessible_boards`, `column_not_found_on_board`,
+`cross_board_truncated` — v0.3 is single-call-only; no
+resumable cross-board cursor) + one on favorites
+(`board_favorites_stale`).
+**Deferred to later v0.3 milestones**: `item history` (M24),
 `item update --continue-on-error` partial-success (M25), `monday
 dev` workflow shortcuts (M26), `notification send` + `webhook list/
 create/delete` (M27), multi-level subitem creation (M28).

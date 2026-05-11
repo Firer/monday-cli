@@ -2790,11 +2790,11 @@ the SemVer-major boundary.
 wire each invocation; the daily-analytics surface is server-
 authoritative).
 
-### `monday board favorites` (v0.3-M23 pre-flight stub)
+### `monday board favorites` (v0.3-M23)
 
-Pre-flight stub at `1fefdb1` — the runtime 2-stage favorites
-resolver body lands at M23 implementation. The shape pinned at
-pre-flight (returned by Stage-1 filter + Stage-2 hydrate):
+Runtime 2-stage favorites resolver landed at `1f09a25`. The
+output shape (Stage-1 filter + Stage-2 hydrate, sorted by
+`position` ascending):
 
 ```json
 {
@@ -2844,7 +2844,7 @@ every kind (Board | Folder | Dashboard | Workspace per the
 the wire). v0.3 scope is READ-ONLY — favorite/unfavorite writes
 are a v0.4+ candidate.
 
-### `monday item search` cross-board (v0.3-M23 pre-flight stub)
+### `monday item search` cross-board (v0.3-M23)
 
 The v0.1 single-board path (`--board <bid>` set) is documented at
 `### \`item search --board <bid> --where ...\`` above and is
@@ -2855,9 +2855,8 @@ Decision 5 closure `3a2f1db`) — at most ONE of `--board` /
 at parse boundary surfaces `usage_error` with structured
 `params.conflicting_flags`).
 
-Cross-board pre-flight stub at `1fefdb1` — the runtime fan-out
-walker body lands at M23 implementation. The shape pinned at
-pre-flight:
+Runtime fan-out walker landed at `1f09a25`. The cross-board
+output shape (each row carries its source board's id + name):
 
 ```json
 {
@@ -2889,7 +2888,12 @@ which board each hit came from without a second round-trip.
   resolve on a specific board; that board was skipped in the
   fan-out (rather than failing the whole call). One warning per
   skipped board. `details` carries
-  `{ board_id, column_token, hint }`.
+  `{ board_id, column, hint }` — the `column` key carries the
+  user's `--where` column token. (The detail-key was renamed
+  from `column_token` → `column` at M23 implementation per the
+  v0.3-plan §15 contract drift finding — the redactor's
+  `(token|secret|password|api[-_]?key)` pattern would scrub
+  the value otherwise.)
 - `cross_board_truncated` — the walker stopped before exhausting
   every board (either `--limit` short-circuit, or any board's
   per-board `items_page.cursor` was non-null at the v0.3

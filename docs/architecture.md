@@ -1393,7 +1393,7 @@ document the verb cluster post-mortems. Briefly:
 
 - **`api/cross-board-search.ts`** (v0.3 M23 — pre-flight at
   `1fefdb1`, Codex round-1 fixes at `9b93f15`, Codex round-2
-  fixes at `fa27b60`; runtime body lands at M23 implementation).
+  fixes at `fa27b60`; runtime body landed at `1f09a25`).
   The cross-board fan-out walker for `monday item search`'s
   v0.3 cross-board path (`--board` omitted; `--workspace` /
   `--favorites` / no-scoping-lever scopes the board set). Per
@@ -1435,7 +1435,7 @@ document the verb cluster post-mortems. Briefly:
 
 - **`api/board-favorites.ts`** (v0.3 M23 — pre-flight at
   `1fefdb1`, Codex round-1 fixes at `9b93f15`, Codex round-2
-  fixes at `fa27b60`; runtime body lands at M23 implementation).
+  fixes at `fa27b60`; runtime body landed at `1f09a25`).
   The 2-stage favorites resolver for `monday board favorites` +
   `monday item search --favorites`. Per the empirical-probe
   findings (2026-05-11, API `2026-01`, `scripts/probe/m23-
@@ -1462,20 +1462,19 @@ document the verb cluster post-mortems. Briefly:
   P1-1 — no per-call cache).
 
 - **`commands/board/favorites.ts`** (v0.3 M23 — pre-flight at
-  `1fefdb1`; runtime body lands at M23 implementation). The
+  `1fefdb1`; runtime body landed at `1f09a25`). The
   `monday board favorites` verb. Argv-empty shape (no command-
   specific flags beyond globals). Action body drives
   `fetchBoardFavorites` (the 2-stage filter+hydrate above) and
   emits the §6.1 collection envelope sorted by Monday-UI
-  `position` (Float). At pre-flight, action stub-rejects with
-  `internal_error` + M23-pending hint; integration tests at
-  `tests/integration/commands/m23-cross-board-stubs.test.ts`
-  drive the stub via commander argv and assert the rejection
-  envelope shape.
+  `position` (Float). Integration tests at
+  `tests/integration/commands/board-favorites.test.ts` cover
+  Stage-1 short-circuit, happy path, stale-favorites warning,
+  parse-failure shape + envelope contract.
 
 - **`commands/item/search.ts`** (v0.3 M23 extension; pre-flight
-  at `1fefdb1`; cross-board runtime body lands at M23
-  implementation). The v0.1 single-board path
+  at `1fefdb1`; cross-board runtime body landed at `1f09a25`).
+  The v0.1 single-board path
   (`items_page_by_column_values`) remains UNCHANGED; the v0.3
   extension adds `--workspace <wid>` / `--favorites` /
   `--max-boards <n>` flags + a `.superRefine` mutual-exclusion
@@ -1492,10 +1491,23 @@ document the verb cluster post-mortems. Briefly:
   `outputSchema` is `z.union([itemSearchOutputSchema,
   crossBoardSearchOutputSchema])` (Codex round-2 P1-1 fix) so
   `monday schema item.search` reflects both branches.
-  Cross-board action body stub-rejects with `internal_error`
-  + `scoping_lever` discriminant (`workspace` / `favorites` /
-  `all-accessible-boards`) + `cap_rationale` referencing
-  Decision 5's wall-clock-latency rationale.
+  Cross-board action body dispatches on the scoping lever:
+  `--favorites` calls `fetchBoardFavorites` for the ID set;
+  `--workspace <wid>` runs `CrossBoardEnumerate` against
+  `boards(workspace_ids:[wid], limit:N, state:active)`; no
+  scoping lever runs the same enum without `workspace_ids`
+  for all-accessible mode. Per-board column-resolution
+  pre-pass calls `loadBoardMetadata` per resolved board; the
+  walker fans out via `crossBoardSearch`. Source aggregation
+  via `SourceAggregator` merges per-board cache state with the
+  walker's `'live'` constant. NDJSON streaming branch wraps the
+  walker's `onItem` hook through `startNdjsonStream`. Cassette
+  tests at `tests/integration/commands/m23-cross-board.test.ts`
+  cover each scoping lever + each warning code (workspace /
+  favorites / all-accessible happy paths, inaccessible_boards,
+  column_not_found_on_board, cross_board_truncated, empty-plans
+  short-circuit, NDJSON streaming, plus parse-boundary mutual
+  exclusion + --max-boards validation).
 
 - **`commands/auth/{login,logout}.ts`** (v0.3 M21 — pre-flight
   at `5c07840`, runtime bodies landed at M21 Part 1 in
