@@ -1,12 +1,28 @@
 /**
- * `monday item search --board <bid> --where ...` — column-value search
- * (`cli-design.md` §5.5, `v0.1-plan.md` §3 M4).
+ * `monday item search [--board <bid> | --workspace <wid> | --favorites]
+ * --where ...` — column-value search across one or many boards
+ * (`cli-design.md` §5.5 / §13 v0.3 entry, `v0.1-plan.md` §3 M4,
+ * `v0.3-plan.md` §3 M23).
  *
- * Backed by Monday's `items_page_by_column_values` endpoint — a
- * narrower surface than `items_page`'s `query_params.rules`:
- * value-equality only, AND across columns, OR within a column's
- * values. Items matching ANY of the listed values for a given
- * column count as a hit.
+ * **v0.1 single-board path (`--board <bid>` set).** Backed by
+ * Monday's `items_page_by_column_values` endpoint — a narrower
+ * surface than `items_page`'s `query_params.rules`: value-equality
+ * only, AND across columns, OR within a column's values. Items
+ * matching ANY of the listed values for a given column count as a
+ * hit.
+ *
+ * **v0.3-M23 cross-board path (`--board` omitted; `--workspace <wid>`,
+ * `--favorites`, or no scoping lever set — all-accessible-boards
+ * mode).** Uses a different shape on the wire: `boards(ids: [...])
+ * { items_page(query_params: { rules }) }` fan-out via
+ * `src/api/cross-board-search.ts`. Per-board cursors, per-board
+ * column resolution, `--max-boards 25` default cap (hard cap 100
+ * per Decision 5 closure `3a2f1db`). At most ONE of `--board` /
+ * `--workspace` / `--favorites` may be supplied — supplying two
+ * raises `usage_error` at the input-schema layer. **Pre-flight stub
+ * (M23): the cross-board paths stub-reject with `internal_error`
+ * + M23-pending hint; the single-board path stays the existing v0.1
+ * runtime body.**
  *
  * Why a separate command from `item list --where`: the endpoints
  * are different. `items_page_by_column_values` is purpose-built for
@@ -16,12 +32,13 @@
  * Monday's full filter DSL (any_of, contains_text, comparators,
  * is_empty) but pays the per-page complexity cost.
  *
- * v0.1 surface: only the `=` operator is supported via this command.
- * Multiple `--where status=A --where status=B` against the same
- * column merge into one entry with `[A, B]` (OR within column).
- * Multiple columns AND across entries. Anything else (`~=`, `<`,
- * `:is_empty`, etc.) raises `usage_error` — agents pick `item
- * list --where` for the richer surface.
+ * v0.1 single-board operator surface: only the `=` operator is
+ * supported via this command. Multiple `--where status=A --where
+ * status=B` against the same column merge into one entry with
+ * `[A, B]` (OR within column). Multiple columns AND across entries.
+ * Anything else (`~=`, `<`, `:is_empty`, etc.) raises `usage_error`
+ * — agents pick `item list --where` for the richer surface. Same
+ * operator surface applies to the cross-board path.
  *
  * Idempotent: yes.
  */
@@ -29,9 +46,13 @@ import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { BoardIdSchema } from '../../types/ids.js';
+import { BoardIdSchema, WorkspaceIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError } from '../../utils/errors.js';
+import { ApiError, UsageError } from '../../utils/errors.js';
+import {
+  DEFAULT_MAX_BOARDS,
+  HARD_CAP_MAX_BOARDS,
+} from '../../api/cross-board-search.js';
 import {
   loadBoardMetadata,
   refreshBoardMetadata,
@@ -108,13 +129,51 @@ export type ItemSearchOutput = readonly ProjectedItem[];
 
 const inputSchema = z
   .object({
-    board: BoardIdSchema,
+    // v0.1 single-board scoping lever. v0.3-M23 makes this optional
+    // — when omitted, one of `workspace` / `favorites` / neither (=
+    // all-accessible-boards mode) picks the cross-board path.
+    board: BoardIdSchema.optional(),
+    // v0.3-M23 cross-board scoping levers (mutually exclusive with
+    // `--board` AND with each other per `.superRefine` below).
+    workspace: WorkspaceIdSchema.optional(),
+    favorites: z.boolean().optional(),
+    // v0.3-M23 cross-board fan-out cap (Decision 5 closure
+    // `3a2f1db`). Default 25, hard cap 100. Only meaningful when
+    // the cross-board path runs; with `--board` the flag is silently
+    // ignored (the single-board path scans one board regardless).
+    maxBoards: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(HARD_CAP_MAX_BOARDS, {
+        message: `--max-boards exceeds the hard cap of ${String(HARD_CAP_MAX_BOARDS)}; narrow the cross-board set with --workspace or --favorites`,
+      })
+      .optional(),
     where: z.array(z.string()).min(1),
     all: z.boolean().optional(),
     limit: z.coerce.number().int().positive().max(10_000).optional(),
     pageSize: z.coerce.number().int().positive().max(500).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    // v0.3-M23 mutual-exclusion rule per cli-design §13 v0.3 entry.
+    // At most ONE of `--board` / `--workspace` / `--favorites` may
+    // be supplied; supplying two surfaces a usage_error at the
+    // parse boundary rather than letting the runtime resolver
+    // surface a confusing error.
+    const scopingLevers = [
+      value.board !== undefined ? 'board' : null,
+      value.workspace !== undefined ? 'workspace' : null,
+      value.favorites === true ? 'favorites' : null,
+    ].filter((s): s is string => s !== null);
+    if (scopingLevers.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `at most one of --board / --workspace / --favorites may be supplied; got: ${scopingLevers.join(', ')}`,
+        path: ['board'],
+      });
+    }
+  });
 
 interface ColumnQuery {
   readonly column_id: string;
@@ -278,7 +337,24 @@ export const itemSearchCommand: CommandModule<
     noun
       .command('search')
       .description(itemSearchCommand.summary)
-      .requiredOption('--board <bid>', 'board ID (required)')
+      // v0.3-M23: `--board` is now optional (v0.1 path still works when
+      // supplied; cross-board path runs when omitted). Mutual-exclusion
+      // with `--workspace` / `--favorites` enforced at the schema layer
+      // (`.superRefine`); missing-all-of-three is treated as
+      // "all-accessible-boards" cross-board mode at M23 implementation.
+      .option('--board <bid>', 'board ID (v0.1 single-board path; omit for v0.3 cross-board)')
+      .option(
+        '--workspace <wid>',
+        'workspace ID (v0.3-M23 cross-board scoping lever; mutually exclusive with --board / --favorites)',
+      )
+      .option(
+        '--favorites',
+        "v0.3-M23 cross-board scoping lever — use the current user's `board favorites` set; mutually exclusive with --board / --workspace",
+      )
+      .option(
+        '--max-boards <n>',
+        `v0.3-M23 cross-board fan-out cap (default ${String(DEFAULT_MAX_BOARDS)}, hard cap ${String(HARD_CAP_MAX_BOARDS)}; ignored on the single-board path)`,
+      )
       .requiredOption(
         '--where <expr>',
         'repeatable: <col>=<val> only (no <, ~=, :is_empty)',
@@ -294,6 +370,50 @@ export const itemSearchCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         const parsed = parseArgv(itemSearchCommand.inputSchema, opts);
+
+        // v0.3-M23 cross-board path. Pre-flight stub — reject every
+        // cross-board invocation with `internal_error` + M23-pending
+        // hint. M23 implementation lands the runtime fan-out walker
+        // via `src/api/cross-board-search.ts` + the per-board column-
+        // resolution pre-pass + the `board favorites` / `boards
+        // (workspace_ids:)` resolver branches.
+        if (parsed.board === undefined) {
+          // The scoping-lever discrimination is for the M23
+          // implementation's hint payload — at pre-flight every
+          // branch rejects identically, but the M23 impl will
+          // dispatch on the lever so the rejection narrative is
+          // plumbed. Command-action stub bodies are NOT c8-wrapped
+          // per testing.md — integration tests drive each branch via
+          // commander argv and assert on the rejection envelope.
+          const lever =
+            parsed.workspace !== undefined
+              ? 'workspace'
+              : parsed.favorites === true
+                ? 'favorites'
+                : 'all-accessible-boards';
+          throw new ApiError(
+            'internal_error',
+            '`monday item search` cross-board path is a v0.3-M23 pre-flight stub — runtime fan-out lands at M23 implementation.',
+            {
+              details: {
+                scoping_lever: lever,
+                max_boards: parsed.maxBoards ?? DEFAULT_MAX_BOARDS,
+                hard_cap: HARD_CAP_MAX_BOARDS,
+                hint: 'M23 implementation kickoff lands the boards(ids:) { items_page(query_params:) } fan-out walker via src/api/cross-board-search.ts; until then, supply --board <bid> to use the v0.1 single-board path.',
+              },
+            },
+          );
+        }
+
+        // v0.3-M23: `parsed.board` is now `BoardId | undefined` at
+        // the schema layer; the cross-board branch above threw so
+        // `board` is `BoardId` here, but the narrowing doesn't carry
+        // through inner closures (the `onColumnNotFound` lambda
+        // captures the original optional type). Bind to a local
+        // before the single-board path so every reference inside
+        // closures sees the narrowed type.
+        const boardId = parsed.board;
+
         const { client, globalFlags, apiVersion, toEmit } = resolveClient(
           ctx,
           program.opts(),
@@ -301,7 +421,7 @@ export const itemSearchCommand: CommandModule<
 
         const meta = await loadBoardMetadata({
           client,
-          boardId: parsed.board,
+          boardId,
           env: ctx.env,
           noCache: globalFlags.noCache,
         });
@@ -312,7 +432,7 @@ export const itemSearchCommand: CommandModule<
             ? async (): Promise<BoardMetadata> => {
                 const refreshed = await refreshBoardMetadata({
                   client,
-                  boardId: parsed.board,
+                  boardId,
                   env: ctx.env,
                 });
                 return refreshed.metadata;
@@ -354,7 +474,7 @@ export const itemSearchCommand: CommandModule<
             project: (raw) => projectFromRaw(raw, titles, { omitColumnTitles: true }),
           });
           const result = await paginate<unknown, InitialResponse | NextResponse>({
-            fetchInitial: initialFetcher(client, parsed.board, columns),
+            fetchInitial: initialFetcher(client, boardId, columns),
             fetchNext: nextFetcher(client),
             now: ctx.clock,
             extractPage: (r): PaginatedPage<unknown> => {

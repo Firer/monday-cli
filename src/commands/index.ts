@@ -140,6 +140,13 @@ import { authLogoutCommand } from './auth/logout.js';
 // projection per cli-design §11.5.
 import { statusCommand } from './status.js';
 import { usageCommand } from './usage.js';
+// M23 (v0.3) — cross-board `monday item search` extension +
+// `monday board favorites`. Pre-flight stub registers the verb
+// shapes (mutual-exclusion at the item-search input schema, the
+// favorites verb's argv-empty shape); implementation lands the
+// runtime cross-board fan-out walker + the 2-stage favorites
+// resolver per cli-design §13 v0.3 entries.
+import { boardFavoritesCommand } from './board/favorites.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -188,6 +195,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardSubscribersCommand,
     boardColumnsCommand,
     boardGroupsCommand,
+    boardFavoritesCommand,
     userListCommand,
     userGetCommand,
     userMeCommand,

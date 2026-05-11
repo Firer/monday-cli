@@ -1,0 +1,424 @@
+/**
+ * Board-favorites resolver for the v0.3-M23 `monday board favorites`
+ * verb + the `monday item search --favorites` cross-board scoping
+ * lever (`cli-design.md` §13 v0.3 entry).
+ *
+ * **Empirical probe findings (2026-05-11, against `api.monday.com`,
+ * API version `2026-01`) — `scripts/probe/m23-favorites*.ts` +
+ * `scripts/probe/m23-hierarchy-*.ts`:**
+ *
+ *   - **Favorites lives at the TOP-LEVEL `Query.favorites:
+ *     [GraphqlHierarchyObjectItem!]`** — NOT `User.favorites` /
+ *     `Board.is_starred` / `me { favorites }`. The original M23
+ *     pre-decision wording ("current user's starred boards") was
+ *     directionally correct but the surface lives on the Query
+ *     root, not the User type.
+ *   - **Polymorphic element shape.** Each `GraphqlHierarchyObjectItem`
+ *     carries `id` (hierarchy-item ID, distinct from the underlying
+ *     object ID), `accountId`, `object: { id: ID, type:
+ *     GraphqlMondayObject }` (enum: `Board` | `Folder` |
+ *     `Dashboard` | `Workspace`), `folderId`, `position` (Float —
+ *     Monday's UI sort order), `createdAt`, `updatedAt`. The
+ *     hierarchy-item ID is distinct from `object.id`; the latter
+ *     is the underlying Board ID when `object.type === Board`.
+ *   - **2-stage GraphQL operation.** Stage 1 fetches `Query.
+ *     favorites { id object { id type } position }` and filters
+ *     client-side to `object.type === Board`. Stage 2 hydrates the
+ *     surviving board IDs via
+ *     `boards(ids: [<board-typed-ids>]) { id name workspace_id
+ *     state url }` for human-readable + agent-useful slots.
+ *   - **Order by `position` (Float).** The probe's `position` field
+ *     is Monday's UI sidebar order (lower = higher in the list).
+ *     `monday board favorites` sorts by `position` ascending for
+ *     parity with what users see in Monday's UI.
+ *   - **No write surface in v0.3.** The probe did NOT enumerate
+ *     mutations under `Mutation` for favorite/unfavorite — the v0.3
+ *     scope is READ-ONLY (`board favorites` lists; the
+ *     `item search --favorites` flag consumes the list as a scoping
+ *     filter). Writes (`board favorite <bid>` / `board unfavorite
+ *     <bid>`) are a v0.4+ candidate.
+ *
+ * **Sharing with `item search --favorites`.** Both verbs share the
+ * favorites-resolver. `monday board favorites` emits the full
+ * 2-stage hydrate output (id + name + workspace_id + state + url);
+ * `monday item search --favorites` consumes only the board IDs
+ * (Stage 1 filter result) since the cross-board fan-out hydrates
+ * board names inline via the same `boards(ids:)` call.
+ *
+ * **What's stub vs runtime at the pre-flight.** `fetchBoardFavorites`
+ * ships as a `Promise.reject(internal_error)` stub under `c8 ignore
+ * start/stop` — M23 implementation lands the runtime 2-stage body.
+ * The schema definitions, type exports, the GraphQL document
+ * constants, the pure-helper `filterFavoritesToBoardIds`, and the
+ * `sortByPosition` projection ship as REAL implementations so the
+ * pre-flight Codex review can verify the projection shape against
+ * the empirical-probe fixtures inline.
+ *
+ * **Mirrors M22 `monday usage` shape.** M22's `fetchUsage` runs a
+ * 2-stage projection (`platform_api.daily_limit` +
+ * `platform_api.daily_analytics`); `fetchBoardFavorites` runs a
+ * 2-stage filter+hydrate. The pre-flight pattern (schema + pure
+ * helper as real impl, async fetcher as stub) is the same.
+ */
+
+import { z } from 'zod';
+import { ApiError } from '../utils/errors.js';
+import type { Transport } from './transport.js';
+
+/**
+ * Monday's `GraphqlMondayObject` enum discriminator on
+ * `HierarchyObjectID.type`. Empirically confirmed via
+ * `scripts/probe/m23-monday-object-enum.ts` at 2026-05-11 against
+ * API `2026-01`. Includes non-Board kinds because Monday's UI
+ * favorites bar includes docs / dashboards / folders / workspaces;
+ * the M23 `board favorites` verb FILTERS to `Board` only.
+ *
+ * Schema kept open-ended (`z.string()` not `z.enum`) to forward-
+ * compatibly absorb future Monday enum additions; the filter step
+ * matches the LITERAL `Board` string so an unrecognised kind is
+ * just "not a board, skip" rather than a parse error.
+ */
+export const HIERARCHY_OBJECT_TYPE_BOARD = 'Board' as const;
+
+/**
+ * Stage-1 GraphQL document — fetches the polymorphic favorites
+ * list. No args (`Query.favorites: [GraphqlHierarchyObjectItem!]`
+ * empirically has zero args per the introspection probe).
+ *
+ * The selection set is the minimum the M23 verbs need:
+ *   - `id` of the hierarchy item (NOT used downstream — Monday's
+ *     surrogate identifier; logged for traceability).
+ *   - `object { id type }` — the discriminator + underlying object
+ *     ID. The `id` here is the Board ID when `type === Board`.
+ *   - `position` — Monday's UI sort key (Float).
+ *
+ * Not selected: `accountId`, `folderId`, `createdAt`, `updatedAt`
+ * — neither verb uses them; selecting widens the response payload
+ * for marginal benefit. Future v0.4 may add `createdAt` /
+ * `updatedAt` if a "favorited since" filter ships.
+ */
+export const FAVORITES_LIST_QUERY = `
+  query BoardFavoritesStage1 {
+    favorites {
+      id
+      object { id type }
+      position
+    }
+  }
+`;
+
+/**
+ * Stage-2 GraphQL document — hydrates the surviving board IDs from
+ * Stage 1. The `boards(ids:)` surface silently omits inaccessible
+ * board IDs (per `scripts/probe/m23-cross-board-search-2.ts` finding
+ * #3); the favorites case is one path where silent-omission is the
+ * EXPECTED behaviour (the user removed access to a board after
+ * favoriting it; we don't want to crash the verb). The hydrator
+ * surfaces this as the count delta on the `board_favorites_stale`
+ * warning per {@link buildStaleFavoritesWarning}.
+ */
+export const BOARDS_HYDRATE_QUERY = `
+  query BoardFavoritesStage2($ids: [ID!]!) {
+    boards(ids: $ids) {
+      id
+      name
+      state
+      workspace_id
+      url
+    }
+    complexity { before after query reset_in_x_seconds }
+  }
+`;
+
+/**
+ * One favorites entry post-Stage-1 parse. The `object.type` field is
+ * the polymorphic-favorites discriminator; `object.id` is the
+ * underlying object's ID (Board ID when `type === Board`).
+ */
+export interface RawFavoriteEntry {
+  readonly id: string;
+  readonly object: { readonly id: string; readonly type: string };
+  readonly position: number;
+}
+
+export const rawFavoriteEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    object: z
+      .object({
+        id: z.string().min(1),
+        // Open-ended `z.string()` so a future Monday enum extension
+        // (e.g., `Form`, `Workdoc`, etc.) doesn't break the parse
+        // — the filter step matches the literal `Board` string
+        // so unrecognised kinds are just "not a board, skip".
+        type: z.string().min(1),
+      })
+      .strict(),
+    position: z.number(),
+  })
+  .strict();
+
+export const favoritesListResponseSchema = z
+  .object({
+    favorites: z.array(rawFavoriteEntrySchema).nullable(),
+  })
+  // `.loose()` so future Monday Query-root extension fields don't
+  // fail this parse. Same forward-compat policy as M22's
+  // `usageQueryResponseSchema`.
+  .loose();
+
+export type FavoritesListResponse = z.infer<typeof favoritesListResponseSchema>;
+
+/**
+ * One hydrated board after Stage 2. Matches Monday's `boards(ids:)`
+ * selection set on the wire.
+ */
+export interface RawHydratedBoard {
+  readonly id: string;
+  readonly name: string;
+  readonly state: string | null;
+  readonly workspace_id: string | null;
+  readonly url: string | null;
+}
+
+export const rawHydratedBoardSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    state: z.string().nullable(),
+    workspace_id: z.string().nullable(),
+    url: z.string().nullable(),
+  })
+  .strict();
+
+export const boardsHydrateResponseSchema = z
+  .object({
+    boards: z.array(rawHydratedBoardSchema.nullable()).nullable(),
+    complexity: z
+      .object({
+        before: z.number().int().nonnegative(),
+        after: z.number().int().nonnegative(),
+        query: z.number().int().nonnegative(),
+        reset_in_x_seconds: z.number().int().nonnegative(),
+      })
+      .nullable()
+      .optional(),
+  })
+  .loose();
+
+export type BoardsHydrateResponse = z.infer<typeof boardsHydrateResponseSchema>;
+
+/**
+ * One row in the `monday board favorites` output. The `position`
+ * slot carries Monday's UI sort key for parity — the output is
+ * sorted by `position` ascending so agents see the same order
+ * users see.
+ */
+export interface BoardFavoriteOutput {
+  readonly id: string;
+  readonly name: string;
+  readonly state: string | null;
+  readonly workspace_id: string | null;
+  readonly url: string | null;
+  readonly position: number;
+}
+
+export const boardFavoriteOutputSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    state: z.string().nullable(),
+    workspace_id: z.string().nullable(),
+    url: z.string().nullable(),
+    position: z.number(),
+  })
+  .strict();
+
+export const boardFavoritesOutputSchema = z.array(boardFavoriteOutputSchema);
+export type BoardFavoritesOutput = z.infer<typeof boardFavoritesOutputSchema>;
+
+/**
+ * Warning the resolver surfaces when Stage 1 returned N favorite
+ * board entries but Stage 2 hydrated fewer (because the user lost
+ * access to a board after favoriting it, or the board was deleted).
+ * Not fatal — the verb still returns the boards Stage 2 hydrated.
+ */
+export interface StaleFavoritesWarning {
+  readonly code: 'board_favorites_stale';
+  readonly message: string;
+  readonly details: {
+    readonly favorited_count: number;
+    readonly hydrated_count: number;
+    readonly missing_board_ids: readonly string[];
+    readonly hint: string;
+  };
+}
+
+export const staleFavoritesWarningSchema = z
+  .object({
+    code: z.literal('board_favorites_stale'),
+    message: z.string().min(1),
+    details: z
+      .object({
+        favorited_count: z.number().int().nonnegative(),
+        hydrated_count: z.number().int().nonnegative(),
+        missing_board_ids: z.array(z.string().min(1)),
+        hint: z.string().min(1),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
+ * Filters {@link FavoritesListResponse} to the surviving Board-typed
+ * entries, sorted by `position` ascending for Monday-UI parity.
+ * Pure helper — **real implementation** at pre-flight (not a stub).
+ */
+export const filterFavoritesToBoards = (
+  response: FavoritesListResponse,
+): readonly RawFavoriteEntry[] => {
+  const entries = response.favorites ?? [];
+  const boards = entries.filter(
+    (e) => e.object.type === HIERARCHY_OBJECT_TYPE_BOARD,
+  );
+  // Sort by position ascending; ties broken by hierarchy-item id
+  // for deterministic output across runs.
+  return [...boards].sort((a, b) => {
+    if (a.position !== b.position) return a.position - b.position;
+    return a.id.localeCompare(b.id);
+  });
+};
+
+/**
+ * Builds a {@link StaleFavoritesWarning} from the Stage-1 / Stage-2
+ * delta. **Real implementation** at pre-flight (pure helper).
+ */
+export const buildStaleFavoritesWarning = (
+  favoritedIds: readonly string[],
+  hydratedIds: readonly string[],
+): StaleFavoritesWarning => {
+  const hydratedSet = new Set(hydratedIds);
+  const missing = favoritedIds.filter((id) => !hydratedSet.has(id));
+  return {
+    code: 'board_favorites_stale',
+    message: `${String(missing.length)} of ${String(favoritedIds.length)} favorited boards were not accessible or no longer exist`,
+    details: {
+      favorited_count: favoritedIds.length,
+      hydrated_count: hydratedIds.length,
+      missing_board_ids: missing,
+      hint: 'a favorited board was deleted, archived to a private workspace, or had access revoked since being favorited',
+    },
+  };
+};
+
+/**
+ * Joins the Stage-1 filtered favorites entries (carrying `position`)
+ * with the Stage-2 hydrated boards (carrying `name` / `state` /
+ * `workspace_id` / `url`) into the final {@link BoardFavoriteOutput}
+ * shape. Pure helper — **real implementation** at pre-flight.
+ *
+ * Result is sorted by `position` ascending (input order from
+ * {@link filterFavoritesToBoards}); rows where Stage 2 didn't
+ * hydrate (silently omitted by `boards(ids:)`) are filtered out and
+ * surfaced via {@link buildStaleFavoritesWarning} at the caller.
+ */
+export const joinFavoritesWithBoards = (
+  filteredFavorites: readonly RawFavoriteEntry[],
+  hydratedBoards: readonly RawHydratedBoard[],
+): readonly BoardFavoriteOutput[] => {
+  const byId = new Map(hydratedBoards.map((b) => [b.id, b]));
+  const out: BoardFavoriteOutput[] = [];
+  for (const fav of filteredFavorites) {
+    const board = byId.get(fav.object.id);
+    if (board === undefined) continue; // stale; warning surfaced at the action
+    out.push({
+      id: board.id,
+      name: board.name,
+      state: board.state,
+      workspace_id: board.workspace_id,
+      url: board.url,
+      position: fav.position,
+    });
+  }
+  return out;
+};
+
+/**
+ * Inputs to {@link fetchBoardFavorites}.
+ *
+ * - `transport` — same Transport the cli-wide resolved client owns.
+ *   The verb-level action threads `ctx.transport` through.
+ * - `signal` — AbortSignal for SIGINT support; threaded to the
+ *   transport's per-call fetch.
+ */
+export interface FetchBoardFavoritesInputs {
+  readonly transport: Transport;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Result of the 2-stage favorites resolver. Carries the hydrated
+ * board rows + the optional warning + the latest Stage-2 complexity
+ * snapshot for `--verbose` callers.
+ */
+export interface FetchBoardFavoritesResult {
+  readonly boards: readonly BoardFavoriteOutput[];
+  readonly warnings: readonly StaleFavoritesWarning[];
+  readonly complexity:
+    | {
+        readonly before: number;
+        readonly after: number;
+        readonly query: number;
+        readonly reset_in_x_seconds: number;
+      }
+    | null;
+}
+
+const stubReject = (): Promise<FetchBoardFavoritesResult> =>
+  Promise.reject(
+    new ApiError(
+      'internal_error',
+      'fetchBoardFavorites is a v0.3-M23 pre-flight stub — runtime 2-stage favorites resolver lands at M23 implementation alongside the `monday board favorites` verb action.',
+      {
+        details: {
+          hint: 'M23 implementation issues Stage 1 (FAVORITES_LIST_QUERY) + Stage 2 (BOARDS_HYDRATE_QUERY) via inputs.transport, filters to Board-typed entries via filterFavoritesToBoards, joins via joinFavoritesWithBoards, and surfaces board_favorites_stale on the Stage-1/Stage-2 count delta.',
+        },
+      },
+    ),
+  );
+
+/**
+ * Issues the 2-stage favorites resolver against `transport`.
+ *
+ * Stage 1: `FAVORITES_LIST_QUERY` → parse via
+ * `favoritesListResponseSchema` → filter via
+ * {@link filterFavoritesToBoards} (kind === Board, sort by
+ * `position` ascending).
+ *
+ * Stage 2: `BOARDS_HYDRATE_QUERY` with the filtered Stage-1 IDs →
+ * parse via `boardsHydrateResponseSchema` → join via
+ * {@link joinFavoritesWithBoards}.
+ *
+ * Stage-1/Stage-2 count delta surfaces a
+ * {@link StaleFavoritesWarning} on `result.warnings`.
+ *
+ * Stub at the M23 pre-flight — the runtime body lands at M23
+ * implementation kickoff. Throws `internal_error` until M23
+ * implementation swaps the body.
+ *
+ * **Edge case: empty favorites.** When Stage 1 returns an empty
+ * array (no favorited resources) the helper short-circuits: no
+ * Stage-2 call, empty `boards` output, no warnings. The verb-level
+ * envelope is success with an empty `data` array — agents detect
+ * via `data.length === 0`.
+ */
+// Stub: M23 implementation issues FAVORITES_LIST_QUERY then
+// BOARDS_HYDRATE_QUERY via inputs.transport, joins via the pure
+// helpers above, and surfaces board_favorites_stale on Stage-1/
+// Stage-2 deltas. The pre-flight diff pins the contract surface;
+// the runtime body lands at M23 implementation.
+/* c8 ignore start */
+export const fetchBoardFavorites = (
+  _inputs: FetchBoardFavoritesInputs,
+): Promise<FetchBoardFavoritesResult> => stubReject();
+/* c8 ignore stop */
