@@ -755,6 +755,32 @@ const readNullableString = (
 };
 
 /**
+ * Reads a Monday ID field that the wire emits as either a string
+ * or an unquoted JSON number. The Decision 2 probe shows
+ * `update_column_value.pulse_id` ships as a `<number>` JSON
+ * literal on the wire; the Update / Reply surfaces ship the same
+ * id-shaped slots as strings. Both need to land on the projected
+ * event as `string | null` (the CLI's branded `ItemId` shape +
+ * agent ergonomics — JSON IDs are stringified throughout the
+ * envelope to avoid floating-point precision issues on large
+ * board / item / pulse identifiers).
+ *
+ * Codex impl review round 2 P2-1: without this helper,
+ * `readNullableString` rejected the numeric wire shape and the
+ * projected event would carry `pulse_id: null` despite the
+ * probe-confirmed wire value.
+ */
+const readNullableIdField = (
+  obj: Readonly<Record<string, unknown>>,
+  key: string,
+): string | null => {
+  const v = obj[key];
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return null;
+};
+
+/**
  * Returns true when the parsed data is a plain object (not array,
  * not null, not primitive). Used as the structural pre-check before
  * the projector reads typed fields off the payload.
@@ -814,7 +840,7 @@ export const projectActivityLogRow = (
           before: unwrapNestedJson(dataObj.previous_value),
           after: unwrapNestedJson(dataObj.value),
           textual_value: readNullableString(dataObj, 'textual_value'),
-          pulse_id: readNullableString(dataObj, 'pulse_id'),
+          pulse_id: readNullableIdField(dataObj, 'pulse_id'),
           pulse_name: readNullableString(dataObj, 'pulse_name'),
         };
       }
@@ -1108,6 +1134,15 @@ const updatesResponseSchema = z
  *
  * `since` / `until` epoch values are precomputed by the caller
  * to avoid the per-row Date.parse cost on large slices.
+ *
+ * **NaN guard.** `Date.parse` returns `NaN` on malformed input.
+ * All `NaN`-vs-number comparisons are `false`, so without a
+ * guard a malformed row timestamp would slip through the filter
+ * (Codex impl review round 2 P3-1). The walker's argv schema
+ * filters user-supplied bounds upstream, but the row epoch is
+ * sourced from Monday's wire and may drift if Monday ships a
+ * malformed `Update.created_at`. Treat unparseable rows as
+ * out-of-range so the merger doesn't surface them.
  */
 const inWallClockRange = (
   timestamp: string,
@@ -1115,6 +1150,7 @@ const inWallClockRange = (
   untilEpoch: number | undefined,
 ): boolean => {
   const epoch = Date.parse(timestamp);
+  if (Number.isNaN(epoch)) return false;
   if (sinceEpoch !== undefined && epoch < sinceEpoch) return false;
   if (untilEpoch !== undefined && epoch > untilEpoch) return false;
   return true;

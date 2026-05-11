@@ -494,6 +494,38 @@ describe('projectActivityLogRow — update_column_value variant', () => {
     }
   });
 
+  it('stringifies numeric pulse_id (Codex round-2 P2-1 — probe-confirmed wire shape)', () => {
+    // The M24 empirical probe (`scripts/probe/m24-history-kinds
+    // .report.txt`) shows `pulse_id` on `update_column_value`
+    // events ships as an unquoted JSON number. Before the
+    // round-2 fix, `readNullableString` rejected the numeric
+    // wire value and the projected event carried `pulse_id: null`
+    // despite the probe-confirmed value. Now `readNullableIdField`
+    // accepts both string + finite number shapes.
+    const result = projectActivityLogRow({
+      row: {
+        id: 'act-1',
+        event: 'update_column_value',
+        entity: 'pulse',
+        user_id: '99',
+        created_at: '2026-05-10T09:00:00Z',
+        data: JSON.stringify({
+          column_id: 'status',
+          column_type: 'status',
+          value: JSON.stringify({ index: 1 }),
+          previous_value: '{}',
+          textual_value: 'Done',
+          pulse_id: 2880477916, // unquoted JSON number per probe
+          pulse_name: 'Refactor login',
+        }),
+      },
+    });
+    expect(result.kind).toBe('update_column_value');
+    if (result.kind === 'update_column_value') {
+      expect(result.pulse_id).toBe('2880477916');
+    }
+  });
+
   it('handles nullable pulse_id / pulse_name / textual_value', () => {
     const result = projectActivityLogRow({
       row: {
@@ -1008,6 +1040,61 @@ describe('fetchItemHistory — happy path', () => {
       since: '2026-05-01T00:00:00Z',
       until: '2026-05-31T23:59:59Z',
     });
+    expect(result.events.map((e) => e.id)).toEqual(['upd-in-range']);
+  });
+
+  it('drops rows with malformed timestamps from the wall-clock filter (Codex round-2 P3-1)', async () => {
+    // `Date.parse('not-a-timestamp')` returns NaN; all
+    // NaN-vs-number comparisons are false, so without an
+    // explicit NaN guard a malformed row would slip past the
+    // filter. Argv schema filters user-supplied bounds upstream
+    // (so this is the wire-side defence-in-depth).
+    const { client } = buildClientStub({
+      ItemHistoryActivityLogs: {
+        data: { boards: [] },
+        complexity: emptyComplexity(),
+        stats: emptyStats,
+      },
+      ItemHistoryUpdates: {
+        data: {
+          items: [
+            {
+              id: '12345',
+              updates: [
+                {
+                  id: 'upd-malformed',
+                  body: 'b',
+                  text_body: null,
+                  created_at: 'not-a-real-timestamp',
+                  edited_at: 'also-bad',
+                  creator_id: null,
+                  replies: null,
+                },
+                {
+                  id: 'upd-in-range',
+                  body: 'b',
+                  text_body: null,
+                  created_at: '2026-05-15T00:00:00Z',
+                  edited_at: '2026-05-15T00:00:00Z',
+                  creator_id: null,
+                  replies: null,
+                },
+              ],
+            },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: emptyStats,
+      },
+    });
+    const result = await fetchItemHistory({
+      client,
+      itemId: iid('12345'),
+      boardId: '67890',
+      since: '2026-05-01T00:00:00Z',
+      until: '2026-05-31T23:59:59Z',
+    });
+    // Malformed row dropped; in-range row preserved.
     expect(result.events.map((e) => e.id)).toEqual(['upd-in-range']);
   });
 
