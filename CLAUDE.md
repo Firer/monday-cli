@@ -30,9 +30,9 @@ allowlist (security-bearing tightening per Codex M22 W8).
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23
-  post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-6
-  + R-NEW-7 + R-NEW-14/15/16 shipped + R-NEW-2 / R-NEW-3 / R-NEW-5
-  / R-NEW-17 candidates open + R-watch-items).
+  post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-5
+  + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 shipped +
+  R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open + R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -46,13 +46,17 @@ in the plan docs — **do not duplicate them here**:
   tests for `monday board favorites`, +18 integration tests for
   cross-board `monday item search` — -22 pre-flight stub-rejection
   tests removed in the renamed `m23-cross-board.test.ts`).
-- Coverage: **99.02 / 95.70 / 99.22 / 99.22** (stmts / branches /
+- Coverage: **99.02 / 95.69 / 99.21 / 99.21** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin shifted 0.41pp → 0.25pp** at M23 implementation — the
+  margin shifted 0.41pp → 0.24pp** at M23 implementation — the
   cross-board action grew the branch denominator faster than the
   per-file 100% coverage grew the numerator (M19 lesson again).
-  Above floor; R-NEW-5 `introspectType()` lift at M24 pre-flight
-  is the recovery candidate.
+  Above floor; the R-NEW-5 `introspectType()` lift (shipped
+  post-M23) was floated as a recovery vehicle but lives in
+  `scripts/probe/_lib.ts`, outside the `src/**/*.ts` coverage
+  scope, so it didn't move the margin. Recovery candidate now:
+  targeted seam-injected tests on cross-board action defensive
+  paths at M24 pre-flight kickoff.
 - ERROR_CODES count: **29** (unchanged — Decision 5's
   hypothesised `complexity_budget_exhausted` rejected at
   pre-flight; the M23 walker's three load-bearing warnings
@@ -77,18 +81,25 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **R-NEW-5 `introspectType()` lift** — HIGH priority deferred
-   since M23 pre-flight close-docs. ~30 LOC helper to lift into
-   `scripts/probe/_lib.ts` against 9+ consumers (M22's 4 probe
-   scripts + M23 pre-flight's 5). Also branches-margin recovery
-   candidate (from 0.25pp → 0.4pp+) ahead of M24 pre-flight.
-2. **M24 pre-flight kickoff** — Close Decision 2 (history kind
+1. **M24 pre-flight kickoff** — Close Decision 2 (history kind
    taxonomy) first, then ship the M24 contract diff per v0.3-plan
    §3 M24: new `src/api/item-history-projection.ts` + `src/
    commands/item/history.ts` for `monday item history <iid>` with
    the activity-log + updates interleave shape. The 2-source
    merge projection is a fresh contract surface (cli-design §6
-   needs an extension entry — see §8 decision 2).
+   needs an extension entry — see §8 decision 2). When the
+   M24 pre-flight needs to introspect any new types
+   (`ActivityLogType`, `Update`, etc.), use the shipped
+   `introspectType()` helper from `scripts/probe/_lib.ts`
+   rather than inlining the `__type(name:)` selection.
+2. **Branches-margin recovery via cross-board seam tests** —
+   margin 0.24pp at M23 close, target ≥0.4pp ahead of M24
+   denominator growth. R-NEW-5's lift didn't move the margin
+   (scripts/ outside coverage scope); the recovery is targeted
+   seam-injected tests on `src/api/cross-board-search.ts`
+   defensive paths (the outer-loop limit-check + the
+   inaccessible-board warning emit + the column-resolution
+   pre-pass column-not-found-on-board warning).
 3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
@@ -138,18 +149,24 @@ convention.
   0.41pp from the consolidation (net positive on coverage +
   clarity). R-NEW-1 `isENOENT` was refactored on top of
   R-NEW-16's `errorCode` (8 lines → 2 lines; identical
-  behaviour).
+  behaviour). **R-NEW-5 `introspectType()` helper** lifted
+  into `scripts/probe/_lib.ts` (post-M23 focused-refactor
+  session) — 9+ consumers across M22's 4 probe scripts +
+  M23 pre-flight's 5; richest-superset selection set so
+  future M24+M25+M26+M27+M28 pre-flights can introspect
+  any type kind (OBJECT/ENUM/UNION/INTERFACE/SCALAR) from
+  one call; no test obligation since `scripts/probe/_lib
+  .ts` is outside the `src/**/*.ts` coverage scope. The
+  originally-floated branches-margin recovery never
+  materialised (scope discovery — record this for future
+  R-class candidates with similar out-of-coverage scope).
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
   `wrapFsError` factory (M22 + M23 did NOT trigger);
-  **R-NEW-5 `introspectType()` helper** — **HIGH priority;
-  trigger fired at M23 pre-flight** (5 new introspecting
-  probe scripts + M22's 4 = 9+ consumers). Lift ~30 LOC into
-  `scripts/probe/_lib.ts` at M24 pre-flight kickoff (or
-  sooner in a focused session); R-NEW-8
-  `missingByDifference` set-delta helper (2 consumers; fires
-  at 3); R-NEW-9 2-stage GraphQL filter+hydrate resolver
-  shape (2 confirmed + 1 planned M24; MEDIUM priority).
+  R-NEW-8 `missingByDifference` set-delta helper (2
+  consumers; fires at 3); R-NEW-9 2-stage GraphQL
+  filter+hydrate resolver shape (2 confirmed + 1 planned
+  M24; MEDIUM priority).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);

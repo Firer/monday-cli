@@ -197,6 +197,141 @@ export const rawPostForm = (
 };
 
 /**
+ * GraphQL type reference, three `ofType` levels deep — covers the
+ * standard `NON_NULL<LIST<NON_NULL<NamedType>>>` chain Monday's schema
+ * uses for collection wrappers. The M23 favorites-deep probe needed
+ * the third level; shallower consumers ignore the inner `ofType`s.
+ */
+export interface IntrospectedTypeRef {
+  readonly name: string | null;
+  readonly kind: string;
+  readonly ofType: {
+    readonly name: string | null;
+    readonly kind: string;
+    readonly ofType: {
+      readonly name: string | null;
+      readonly kind: string;
+      readonly ofType: { readonly name: string | null; readonly kind: string } | null;
+    } | null;
+  } | null;
+}
+
+export interface IntrospectedField {
+  readonly name: string;
+  readonly description: string | null;
+  readonly args: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string | null;
+    readonly type: IntrospectedTypeRef;
+  }>;
+  readonly type: IntrospectedTypeRef;
+}
+
+export interface IntrospectedType {
+  readonly name: string;
+  readonly kind: string;
+  readonly description: string | null;
+  readonly fields: ReadonlyArray<IntrospectedField> | null;
+  readonly enumValues: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string | null;
+  }> | null;
+  readonly possibleTypes: ReadonlyArray<{ readonly name: string }> | null;
+}
+
+/**
+ * Introspects a Monday GraphQL type by name. Returns `null` when the
+ * type doesn't exist on the schema (Monday's `__type` returns null,
+ * not an error — every existing probe-script consumer distinguishes
+ * "type missing" from "GraphQL error" inline, so this preserves that
+ * contract).
+ *
+ * Lift surfaced by v0.3-plan §22 R-NEW-5: the M22 probe matrix had
+ * four consumers (`m22-usage-{extended,daily,platform-api,analytics,
+ * by-day}.ts`) and the M23 pre-flight added five more (`m23-favorites
+ * .ts`, `m23-favorites-deep.ts`, `m23-hierarchy-item.ts`,
+ * `m23-hierarchy-object.ts`, `m23-monday-object-enum.ts`) — 9+ total,
+ * well above the R-class 3-consumer trigger. Each spelled the same
+ * `__type(name:) { name kind description fields { ... } enumValues
+ * { ... } possibleTypes { ... } }` selection in ~30 LOC blocks. The
+ * lift collapses those blocks into a single helper call while
+ * preserving the richest-superset shape so future pre-flights
+ * (M24+M25+M26+M27+M28) can introspect any type kind (OBJECT, ENUM,
+ * UNION, INTERFACE, SCALAR) from one entry point.
+ *
+ * Variables-based rather than string-interpolated — defensive against
+ * future type names containing characters that would break the inline
+ * GraphQL string.
+ */
+export const introspectType = async (
+  typeName: string,
+): Promise<IntrospectedType | null> => {
+  const result = await gql<{ __type: IntrospectedType | null }>(
+    `query Introspect($name: String!) {
+       __type(name: $name) {
+         name kind description
+         fields {
+           name description
+           args { name description type { name kind ofType { name kind ofType { name kind ofType { name kind } } } } }
+           type { name kind ofType { name kind ofType { name kind ofType { name kind } } } }
+         }
+         enumValues(includeDeprecated: true) { name description }
+         possibleTypes { name }
+       }
+     }`,
+    { name: typeName },
+    'Introspect',
+  );
+  return expect(`introspectType("${typeName}")`, result).__type;
+};
+
+/**
+ * Pretty-prints an introspected type. Mirrors the inline `probeType`
+ * / `printFields` shape the M22+M23 probes converged on:
+ * `- fieldName (kind/name[ofType-kind/ofType-name])` per field, plus
+ * per-kind sections for enumValues + possibleTypes. Prints "(missing)"
+ * when the helper returned `null`.
+ */
+export const printIntrospected = (
+  label: string,
+  introspected: IntrospectedType | null,
+): void => {
+  console.log(`\n[INTROSPECT] ${label}`);
+  if (introspected === null) {
+    console.log('  (type not found on schema)');
+    return;
+  }
+  console.log(`  name: ${introspected.name}`);
+  console.log(`  kind: ${introspected.kind}`);
+  if (introspected.description !== null) {
+    console.log(`  description: ${introspected.description}`);
+  }
+  if (introspected.fields !== null) {
+    console.log(`  fields: ${introspected.fields.length.toString()}`);
+    for (const f of introspected.fields) {
+      const oft = f.type.ofType === null
+        ? ''
+        : `[${f.type.ofType.kind}/${f.type.ofType.name ?? '<wrapped>'}]`;
+      console.log(
+        `    - ${f.name} -> ${f.type.kind}/${f.type.name ?? '<wrapped>'}${oft}`,
+      );
+    }
+  }
+  if (introspected.enumValues !== null) {
+    console.log(`  enumValues: ${introspected.enumValues.length.toString()}`);
+    for (const v of introspected.enumValues) {
+      console.log(`    - ${v.name}${v.description === null ? '' : ` — ${v.description}`}`);
+    }
+  }
+  if (introspected.possibleTypes !== null) {
+    console.log(`  possibleTypes: ${introspected.possibleTypes.length.toString()}`);
+    for (const p of introspected.possibleTypes) {
+      console.log(`    - ${p.name}`);
+    }
+  }
+};
+
+/**
  * Pretty-prints a captured raw HTTP response with the body truncated
  * to the first ~600 chars (the probe matrix calls this many times;
  * truncation keeps the terminal output readable).
