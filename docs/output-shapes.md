@@ -2007,7 +2007,7 @@ holds for every M25 success envelope.
 `data.operation: "item_update"` discriminates the partial-success
 envelope from M14's `add_users_to_workspace` / `delete_users_from_workspace`
 variants (same `data.operation` slot, different verbs). Inherits
-`buildPartialSuccessMutation` from `src/api/partial-success-mutation.ts`
+`dispatchSequential` from `src/api/partial-success-mutation.ts`
 via a thin wrapper at `src/api/partial-success-bulk.ts`.
 
 The `--continue-on-error` flag is **orthogonal** to `--yes` — both

@@ -71,19 +71,23 @@ milestone-specific (re-fill each round / each milestone).
      round-over-round repetition.
 
      **W1 is template-stable: redactor-pattern check.** Every
-     pre-flight enumerates `W1: redactor-pattern audit — every
-     new detail-key name in this diff checked against
-     src/utils/redact.ts:55's `(token|secret|password|api[-_]?key)(?!s)`
-     regex. The check is asymmetric: any matching key name (e.g.
-     `column_token`, `client_secret`, `api_key_hint`) gets its
-     entire value scrubbed to `[REDACTED]` at emit time, breaking
-     the payload's debug value. Rename ahead of pre-flight close
-     rather than after the integration emit path catches it.`
-     Folded in at M25 pre-flight kickoff post-R-NEW-17 ratification
-     (M23 caught `column_token` at impl gate; M24's four Codex
-     rounds verified the audit-point shape returned "nothing
-     flagged" against every new M24 detail-key surface).
-     Milestone-specific watch-items start at W2.
+     pre-flight enumerates W1 with this shape:
+
+     > W1: redactor-pattern audit — every new detail-key name
+     > in this diff checked against `src/utils/redact.ts:55`'s
+     > `(token|secret|password|api[-_]?key)(?!s)` regex. The
+     > check is asymmetric: any matching key name (e.g.
+     > `column_token`, `client_secret`, `api_key_hint`) gets
+     > its entire value scrubbed to `[REDACTED]` at emit time,
+     > breaking the payload's debug value. Rename ahead of
+     > pre-flight close rather than after the integration emit
+     > path catches it.
+
+     Folded in at M25 pre-flight kickoff post-R-NEW-17
+     ratification (M23 caught `column_token` at impl gate;
+     M24's four Codex rounds verified the audit-point shape
+     returned "nothing flagged" against every new M24 detail-
+     key surface). Milestone-specific watch-items start at W2.
   6. **Things explicitly OUT of scope for this review** —
      *template-stable*. Standard exclusions:
        - Existing modules NOT touched by this diff.

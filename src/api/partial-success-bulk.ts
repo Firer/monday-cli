@@ -89,6 +89,7 @@ import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
 import { projectedItemSchema, type ProjectedItem } from './item-projection.js';
 import type { PartialSuccessResult } from './partial-success-mutation.js';
+import type { ResolverWarning } from './columns.js';
 import type { SelectedMutation } from './column-values.js';
 import type { MondayClient } from './client.js';
 import type { EnvelopeSource } from './source-aggregator.js';
@@ -166,7 +167,8 @@ export type PartialSuccessBulkUpdateData = z.infer<
  *   calls `client.raw` against. Action layer hands this in
  *   after `resolveClient` has run.
  * - `boardId` — the board the matched items live on. Threaded
- *   through to the per-item `executeMutation` call.
+ *   through to the per-item `executeMutation` call AND to the
+ *   per-item `foldAndRemap` archived-column probe.
  * - `matchedItemIds` — IDs from the items_page walker; non-
  *   empty (action layer's empty-match branch emits a clean
  *   no-op envelope before reaching this helper).
@@ -180,19 +182,49 @@ export type PartialSuccessBulkUpdateData = z.infer<
  *   `change_*_column_value.create_labels_if_missing` flag.
  *   Threaded through to every per-item dispatch.
  *
- * The helper returns `{ results, lastResponse }`. The action
+ * **Codex round-1 P1-1 fix.** Per-item failures must inherit
+ * the SAME error-code remap the v0.1 fail-fast bulk path
+ * applies — a stale-cache `validation_failed` remaps to the
+ * stable `column_archived` code agents key off (cli-design
+ * §6.5). The wrapper's per-item dispatch callback fires
+ * `foldAndRemap` BEFORE throwing into `dispatchSequential` so
+ * the per-record `error.code` in `data.results[]` matches the
+ * shape the fail-fast path would have surfaced as the
+ * top-level `error.code`. That requires the same context the
+ * fail-fast remap needs:
+ *
+ * - `resolverWarnings` — folded into the remapped error's
+ *   `details.resolver_warnings` slot. Same shape the fail-fast
+ *   path carries via `foldResolverWarningsIntoError`.
+ * - `remapColumnIds` — every translated column ID. The remap
+ *   probe scans them in order and remaps to the first
+ *   archived one. Single-column callers pass a one-element
+ *   array; multi-column callers pass every column they tried
+ *   to write (Codex M5b finding #3 precedent).
+ * - `env` — process env for the `refreshBoardMetadata` cache
+ *   call inside the remap probe.
+ * - `noCache` — flag pass-through to the remap probe.
+ * - `resolutionSource` — `'live' | 'cache' | 'mixed'`. The
+ *   remap probe fires ONLY when the original resolution was
+ *   cache-sourced; a `live` resolution already saw the live
+ *   archived flag, so a `validation_failed` after live
+ *   resolution is genuine.
+ *
+ * The helper returns `{ results, dispatchSource }`. The action
  * layer:
  *   1. derives `failed_count` from `results.filter(r => !r.ok)`,
- *   2. folds the per-item dispatch legs into the
- *      `SourceAggregator` (one `'live'` leg per dispatched
- *      item),
+ *   2. folds the dispatch source signal
+ *      (`PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE` — always `'live'`)
+ *      into the `SourceAggregator` via
+ *      `sourceAgg.record(dispatchSource, null)`,
  *   3. assembles the `data.summary` slot with
  *      `matched_count` / `applied_count` / `failed_count` /
  *      `board_id`,
  *   4. emits the partial-success envelope via `emitMutation`,
- *      passing `lastResponse` to `toEmit` for the meta slot
- *      (request_id + api_version come from the last per-item
- *      response — mirrors M14/M15's `lastResponse` capture).
+ *      passing `apiVersion` only (no `lastResponse` capture —
+ *      per-item `request_id`s aren't a useful aggregate
+ *      signal; the partial-success envelope carries per-item
+ *      outcomes inside `data.results[]` instead).
  */
 export interface RunPartialSuccessBulkUpdateInputs {
   readonly client: MondayClient;
@@ -200,6 +232,11 @@ export interface RunPartialSuccessBulkUpdateInputs {
   readonly matchedItemIds: readonly string[];
   readonly mutation: SelectedMutation;
   readonly createLabelsIfMissing: boolean | undefined;
+  readonly resolverWarnings: readonly ResolverWarning[];
+  readonly remapColumnIds: readonly string[];
+  readonly env: NodeJS.ProcessEnv;
+  readonly noCache: boolean;
+  readonly resolutionSource: 'live' | 'cache' | 'mixed';
 }
 
 /**
@@ -214,21 +251,20 @@ export interface RunPartialSuccessBulkUpdateInputs {
  *   (zod's `z.array(...)` infers a mutable array — wrapping
  *   `readonly` would force a spread at the call site).
  *
- * The action layer folds the dispatch source signal
- * (`'live'` — every Monday mutation counts as a `live` leg
- * per `SourceAggregator`'s precedent) into its own aggregator
- * via `sourceAgg.record('live', null)` — same pattern as the
- * v0.1 fail-fast bulk path's terminal source-leg call. The
- * wrapper does NOT return a separate `dispatchSource` slot
- * because the signal is constant (`'live'`) post-dispatch and
- * folding it at the action layer keeps the wrapper's surface
- * minimal.
- *
  * The wrapper does NOT return the last wire response — mirrors
  * the v0.1 fail-fast bulk path's `emitMutation` call which
  * passes only `apiVersion` (the per-item `request_id`s aren't
  * a useful aggregate signal; the partial-success envelope
  * carries per-item outcomes inside `data.results[]` instead).
+ *
+ * The dispatch source signal (always `'live'` post-dispatch
+ * — every Monday mutation counts as a `live` leg per
+ * `SourceAggregator`'s precedent) is folded into the action
+ * layer's `SourceAggregator` via
+ * `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE, null)`
+ * rather than returned from the wrapper. The constant is
+ * exported for the call site to read against a named symbol
+ * rather than a bare string literal.
  */
 export interface RunPartialSuccessBulkUpdateResult {
   readonly results: PartialSuccessBulkUpdateResult[];
@@ -261,18 +297,39 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *   1. Loop `dispatchSequential` over `matchedItemIds` with
  *      id-field `'item_id'`.
  *   2. Per-item dispatch callback fires `executeMutation`
- *      (the existing helper or a lifted shared version).
+ *      (the existing helper or a lifted shared version). On a
+ *      `MondayCliError` catch, run `foldAndRemap` with
+ *      `resolverWarnings` + `remapColumnIds` + `env` +
+ *      `noCache` + `resolutionSource` from the inputs BEFORE
+ *      re-throwing into `dispatchSequential`. This makes the
+ *      per-record `error.code` in `data.results[]` carry the
+ *      SAME stable code (`column_archived` after a
+ *      stale-cache `validation_failed` remap) that the v0.1
+ *      fail-fast path would have surfaced at the top level —
+ *      Codex round-1 P1-1 contract requirement (cli-design
+ *      §6.5 stable-code rule applies uniformly across the
+ *      bulk fail-modes).
  *   3. On success, capture the `ProjectedItem` into a side
  *      map keyed by `item_id`.
  *   4. After the loop, walk the `dispatchSequential` results
  *      and fold the per-item `ProjectedItem` from the side
  *      map into each `results[i].item` slot. Failure records
- *      already carry `error: {code, message}` via
+ *      already carry `error: {code, message}` (with the
+ *      foldAndRemap-applied code) via
  *      `dispatchSequential`'s built-in error decoration.
  *   5. Return `{results}` — the action layer folds the
  *      constant `'live'` dispatch source via
  *      `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE,
  *      null)` and emits the envelope.
+ *
+ * **`internal_error` re-throw escape hatch.** Per M14 round-2
+ * F1 / round-3 F1, `dispatchSequential` re-throws
+ * `internal_error` so schema-drift in the response surfaces
+ * as whole-call (top-level `ok: false`) rather than per-record
+ * — papering over `internal_error` would hide the malformed-
+ * response signal agents need to know about. The M25 wrapper
+ * inherits this behaviour by NOT wrapping the
+ * `dispatchSequential` re-throw.
  */
 /* c8 ignore start */
 export const runPartialSuccessBulkUpdate = (

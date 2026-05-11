@@ -1051,12 +1051,28 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // `data.results[]`.
   /* c8 ignore start */
   if (parsed.continueOnError === true) {
+    // Codex round-1 P1-1 fix: thread the foldAndRemap context
+    // through to the wrapper so per-item failures inherit the
+    // same `validation_failed` → `column_archived` stale-cache
+    // remap the fail-fast path applies. Without this, the
+    // per-record `error.code` in `data.results[]` would carry
+    // `validation_failed` for archived-column failures even
+    // though the v0.1 fail-fast path surfaces the stable
+    // `column_archived` code at the top level for the same
+    // root cause. Same `remapColumnIds` + `resolverWarnings` +
+    // `env` + `noCache` + `resolutionSource` the fail-fast
+    // loop below threads into `foldAndRemap`.
     const partialResult = await runPartialSuccessBulkUpdate({
       client,
       boardId,
       matchedItemIds,
       mutation,
       createLabelsIfMissing: parsed.createLabelsIfMissing,
+      resolverWarnings,
+      remapColumnIds: translated.map((t) => t.columnId),
+      env: ctx.env,
+      noCache: globalFlags.noCache,
+      resolutionSource: remapSource,
     });
     // Per-item dispatch leg is always live — fold into the
     // aggregator. Mirrors the fail-fast path's terminal

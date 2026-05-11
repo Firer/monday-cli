@@ -4921,10 +4921,10 @@ failure becomes the top-level `error`).
 
 `data.operation` is the literal **`"item_update"`** (mirrors
 M14's add-users / remove-users discriminator at
-`data.operation`; M25 inherits the slot from the
-`buildPartialSuccessMutation` envelope-builder per the M15
-family precedent). Agents switch on `data.operation` to confirm
-which verb produced the envelope.
+`data.operation`; M25 inherits the slot from
+`dispatchSequential` per the M15 family precedent). Agents
+switch on `data.operation` to confirm which verb produced the
+envelope.
 
 `resolved_ids` echoes the same token → column-ID mapping the
 v0.1 bulk success envelope carries (one `--set` token resolves
@@ -4944,9 +4944,6 @@ boundary as the M13 / M14 / M15 partial-success envelopes —
 - the column-resolution pre-pass failed (e.g. token resolved
   to no column → the v0.1 fail-fast precedent applies; column
   resolution is whole-call, not per-item).
-- the matched-item set is empty AND `--yes` is missing (the
-  v0.1 `confirmation_required` gate still fires before any
-  per-item dispatch).
 
 Per-item dispatch failures NEVER bubble to top-level under
 `--continue-on-error` — they land per-record. This widens the
@@ -4963,7 +4960,13 @@ attempting N items without `--yes` (and without `--dry-run`)
 returns `confirmation_required` (exit 1). The
 `--continue-on-error` flag is **orthogonal** to the
 confirmation gate; both must be acknowledged for the live
-bulk-partial-success path to fire.
+bulk-partial-success path to fire. The gate fires only when
+`matched_count > 0`; the empty-match path (zero matched items)
+emits a clean success no-op envelope (`applied_count: 0`,
+`failed_count: 0`, `results: []`) without requiring `--yes`,
+mirroring the v0.1 fail-fast bulk path's empty-match shape
+(M5b Codex pass-1 F1 — `--yes` shouldn't be required to
+confirm "no items matched").
 
 **Dry-run shape.** `--continue-on-error --dry-run` emits the
 v0.1 bulk dry-run shape unchanged (N-element
@@ -6739,8 +6742,7 @@ scoped idempotent changes, and post comments narrating its work.**
   every matched item regardless and emits a partial-success
   envelope with per-item `{item_id, ok, error?}` records — a
   §6.4 sub-section ("Bulk per-item partial-success"), not just a
-  flag. Inherits M15's `buildPartialSuccessMutation` envelope-
-  builder + `dispatchSequential` helper from
+  flag. Inherits M15's `dispatchSequential` helper from
   `src/api/partial-success-mutation.ts` via a thin wrapper at
   `src/api/partial-success-bulk.ts` (new at M25), so the
   partial-success contract surface stays single-source-of-truth
