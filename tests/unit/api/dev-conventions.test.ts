@@ -265,6 +265,102 @@ describe('schemas + types', () => {
   });
 });
 
+describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', () => {
+  // Imports happen lazily so the describe block stays close to the
+  // tests covering the new contract surface.
+
+  it('DEV_DOCTOR_REASONS pins the 11 reason values', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(mod.DEV_DOCTOR_REASONS.length).toBe(11);
+    expect(mod.DEV_DOCTOR_REASONS).toContain('not_in_mapping');
+    expect(mod.DEV_DOCTOR_REASONS).toContain('settings_unparseable');
+  });
+
+  it('devDoctorCheckResultSchema accepts a fail with a valid reason', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'fail',
+        message: 'not in mapping',
+        details: { reason: 'not_in_mapping', slot: 'tasks_board' },
+      }),
+    ).not.toThrow();
+  });
+
+  it('devDoctorCheckResultSchema rejects a fail WITHOUT details.reason', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'fail',
+        message: 'something failed',
+        details: { slot: 'tasks_board' },
+      }),
+    ).toThrow(/details\.reason is required/);
+  });
+
+  it('devDoctorCheckResultSchema rejects a fail with null details', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'fail',
+        message: 'something failed',
+        details: null,
+      }),
+    ).toThrow(/details\.reason is required/);
+  });
+
+  it('devDoctorCheckResultSchema rejects an unknown reason enum value', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'fail',
+        message: 'something failed',
+        details: { reason: 'invented_reason_typo' },
+      }),
+    ).toThrow(/details\.reason must be one of/);
+  });
+
+  it('devDoctorCheckResultSchema accepts ok without reason', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'ok',
+        message: 'exists',
+        details: { slot: 'tasks_board', board_id: '100', state: 'active' },
+      }),
+    ).not.toThrow();
+  });
+
+  it('devDoctorCheckResultSchema accepts warn with a structured reason (settings_unparseable)', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_status_labels_canonical',
+        status: 'warn',
+        message: 'settings not parseable',
+        details: { reason: 'settings_unparseable', board_id: '100' },
+      }),
+    ).not.toThrow();
+  });
+
+  it('devDoctorCheckResultSchema accepts warn without reason', async () => {
+    const mod = await import('../../../src/api/dev-conventions.js');
+    expect(() =>
+      mod.devDoctorCheckResultSchema.parse({
+        name: 'tasks_board_exists',
+        status: 'warn',
+        message: 'archived',
+        details: { board_id: '100', state: 'archived' },
+      }),
+    ).not.toThrow();
+  });
+});
+
 /**
  * Builds a seam-injected `MondayClient` stub for the resolver tests.
  * Mock-at-the-network-boundary per testing.md: only `raw` is

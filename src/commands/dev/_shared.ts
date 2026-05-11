@@ -59,16 +59,15 @@ export const resolveActiveDevProfile = async (
     /* c8 ignore next */
     home !== undefined ? { home, env: ctx.env } : { env: ctx.env };
 
-  let flagProfile: string | undefined;
-  try {
-    flagProfile = parseGlobalFlags(programOpts, ctx.env).profile;
-  } catch {
-    // A global-flag parse failure already surfaces as `usage_error`
-    // via the runner's catch-all; this helper just falls back to
-    // env/default below.
-    /* c8 ignore next */
-    flagProfile = undefined;
-  }
+  // `parseGlobalFlags` throws `UsageError` on a bad global flag
+  // (`--retry`, `--timeout`, `--profile`, etc.). Codex M26a IMPL P1-1
+  // fix: surface the UsageError synchronously so the dev verb's
+  // action body never proceeds to the file-write path with invalid
+  // globals. Previously a catch here let `dev configure` reach
+  // `saveDevMapping` before `emitMutation`'s re-parse threw the
+  // usage_error, leaving the active profile's `[profiles.<name>.dev]`
+  // block clobbered despite the rejected invocation.
+  const flagProfile = parseGlobalFlags(programOpts, ctx.env).profile;
 
   const config = await loadProfilesConfig(homeOptions);
   const selection = selectProfile({

@@ -422,6 +422,40 @@ export type DevDoctorCheckName = (typeof DEV_DOCTOR_CHECK_NAMES)[number];
  * typos fail output-schema validation rather than silently
  * passing through.
  */
+/**
+ * Pinned `details.reason` enum vocabulary surfaced by per-check
+ * failure paths. Closes the Decision 2 deferral (per-check
+ * discriminated-union pinning) at M26a IMPL — `details.reason`
+ * is the agent-keyable discriminator on `status: 'fail'` (and on
+ * `status: 'warn'` when a warn carries a structured reason, e.g.
+ * `settings_unparseable`).
+ *
+ * Codex M26a IMPL round-1 P2-1 fix: previously the schema accepted
+ * any `details: Record<string, unknown>` shape, so `monday schema`
+ * couldn't expose the reason vocabulary + tests couldn't catch
+ * typos. Pinning the enum + the "fail requires reason" refinement
+ * gives agents a stable branchpoint.
+ *
+ * Adding a reason is non-breaking; removing or renaming is major.
+ */
+export const DEV_DOCTOR_REASONS = [
+  'not_in_mapping',
+  'not_accessible',
+  'board_deleted',
+  'no_tasks_board',
+  'no_sprints_board',
+  'no_status_column',
+  'no_date_columns',
+  'no_relation_column',
+  'no_matching_relation',
+  'no_target_board',
+  'settings_unparseable',
+] as const;
+
+export type DevDoctorReason = (typeof DEV_DOCTOR_REASONS)[number];
+
+export const devDoctorReasonSchema = z.enum(DEV_DOCTOR_REASONS);
+
 export interface DevDoctorCheckResult {
   readonly name: DevDoctorCheckName;
   readonly status: 'ok' | 'warn' | 'fail';
@@ -436,7 +470,36 @@ export const devDoctorCheckResultSchema = z
     message: z.string().min(1),
     details: z.record(z.string(), z.unknown()).nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    // Codex M26a IMPL round-1 P2-1: when `details.reason` is set, it
+    // MUST be one of `DEV_DOCTOR_REASONS`. Catches typos in helper
+    // emit paths + gives agents a closed enum to branch on.
+    if (value.details !== null) {
+      const reason = value.details.reason;
+      if (reason !== undefined) {
+        if (typeof reason !== 'string' || !DEV_DOCTOR_REASONS.includes(reason as DevDoctorReason)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['details', 'reason'],
+            message: `details.reason must be one of: ${DEV_DOCTOR_REASONS.join(', ')}`,
+          });
+        }
+      }
+    }
+    // When `status === 'fail'`, `details.reason` is REQUIRED so
+    // agents have a stable branchpoint for every failure mode.
+    if (value.status === 'fail') {
+      const reason = value.details?.reason;
+      if (typeof reason !== 'string') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['details', 'reason'],
+          message: 'details.reason is required when status is "fail"',
+        });
+      }
+    }
+  });
 
 /**
  * Output shape for `monday dev doctor` (cli-design §11.3). The
@@ -1286,12 +1349,13 @@ const CONFIG_FILE_MODE = 0o600;
  * **TOML round-trip behavior.** `smol-toml`'s `stringify` produces
  * canonical TOML output — comments and bespoke formatting from the
  * original file are NOT preserved. This is a contract correction
- * vs the M26 pre-flight docstring claim; documented at v0.3-plan
- * §17 M26a post-mortem. Mitigation: most config.toml files are CLI-
- * managed (`monday auth login` populates the credentials side; this
- * helper populates the dev side), so the comment-preservation
- * concern is narrow. A future v0.4 string-surgery write path could
- * preserve comments outside the dev block if user demand surfaces.
+ * vs the M26 pre-flight docstring claim (to be flagged in the
+ * M26a close-docs sweep's post-mortem). Mitigation: most config.toml
+ * files are CLI-managed (`monday auth login` populates the
+ * credentials side; this helper populates the dev side), so the
+ * comment-preservation concern is narrow. A future v0.4 string-
+ * surgery write path could preserve comments outside the dev block
+ * if user demand surfaces.
  *
  * **Disk discipline (mirrors `src/config/credentials.ts`):**
  *   1. `mkdir({ recursive: true, mode: 0o700 })` + explicit `chmod

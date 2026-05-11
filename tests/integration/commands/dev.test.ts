@@ -522,6 +522,37 @@ describe('monday dev configure', () => {
     const envelope = parseEnvelope(captured.stderr());
     expect(envelope.error?.code).toBe('config_error');
   });
+
+  it('Codex round-1 P1-1: invalid global flag leaves config.toml unchanged (no write before usage_error)', async () => {
+    // Seed an existing dev block so we can detect a clobbered write.
+    await seedConfigToml(
+      env.home,
+      '[profiles.work.dev]\ntasks_board = "existing-tasks-id"\n',
+    );
+    const beforeWrite = await readConfigToml(env.home);
+    // Invalid `--retry` value (must be a non-negative integer).
+    const { exitCode, captured } = await driveDev(
+      [
+        '--retry',
+        'not-a-number',
+        'dev',
+        'configure',
+        '--tasks-board',
+        '999',
+        '--json',
+      ],
+      env,
+      undefined,
+    );
+    expect(exitCode).toBe(1);
+    const envelope = parseEnvelope(captured.stderr());
+    expect(envelope.error?.code).toBe('usage_error');
+    // The config.toml MUST be untouched — `_shared.ts:
+    // resolveActiveDevProfile` must surface the usage_error BEFORE
+    // `saveDevMapping` runs.
+    const afterWrite = await readConfigToml(env.home);
+    expect(afterWrite).toBe(beforeWrite);
+  });
 });
 
 // =============================================================
