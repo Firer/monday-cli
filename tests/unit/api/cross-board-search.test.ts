@@ -179,6 +179,20 @@ describe('buildCrossBoardTruncatedWarning (Codex P1-2 single-call surface)', () 
     expect(w.details.hint).toMatch(/v0\.3 cross-board single-call|narrow|--board/);
   });
 
+  it("limit_hit hint renders '?' when called with null limit (defensive fallback)", () => {
+    // The runtime walker only emits `limit_hit` when maxItems is set
+    // (line 859 `hasMore = limitHit || anyNotExhausted`; `limitHit`
+    // can only be true when `maxItems !== undefined` per the inner +
+    // outer guards at lines 726/781). The `limit ?? '?'` fallback on
+    // line 483 is defensive against future direct callers that emit
+    // a `limit_hit` warning without a concrete numeric limit — assert
+    // the fallback renders intelligibly rather than `null`.
+    const w = buildCrossBoardTruncatedWarning('limit_hit', 0, null, {});
+    expect(w.details.limit).toBe(null);
+    expect(w.details.hint).toMatch(/--limit \?/);
+    expect(w.details.hint).not.toMatch(/null/);
+  });
+
   it('parses against the schema', () => {
     const w = buildCrossBoardTruncatedWarning(
       'limit_hit',
@@ -701,6 +715,39 @@ describe('crossBoardSearch — streaming hook', () => {
       },
     });
     expect(seen).toEqual(['a1', 'a2']);
+  });
+});
+
+describe('crossBoardSearch — null boards in wire response', () => {
+  it('treats wire `data.boards = null` as inaccessible (defensive fallback at line 765)', async () => {
+    // The wire schema admits `boards: z.array(...).nullable()` —
+    // Monday's GraphQL contract is `boards(ids:)` non-null array,
+    // but the schema's `.nullable()` is defensive against null-
+    // shaped server-side errors. The walker's `parsedData.boards
+    // ?? []` (cross-board-search.ts:765) folds the null case into
+    // the same inaccessible-board path. Drive that branch by
+    // injecting a `data: { boards: null }` response.
+    const raw = vi.fn(
+      (): Promise<MondayResponse<unknown>> =>
+        Promise.resolve({
+          data: { boards: null },
+          complexity: null,
+          stats: { attempts: 1, sleeps: [] },
+        }),
+    );
+    const client = { raw } as unknown as MondayClient;
+    const result = await crossBoardSearch({
+      client,
+      boardIds: [bid('100')],
+      plans: [{ board_id: bid('100'), rules: [] }],
+    });
+    expect(result.items).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.code).toBe('inaccessible_boards');
+    if (result.warnings[0]?.code === 'inaccessible_boards') {
+      expect(result.warnings[0].details.missing_board_ids).toEqual(['100']);
+      expect(result.warnings[0].details.returned_count).toBe(0);
+    }
   });
 });
 

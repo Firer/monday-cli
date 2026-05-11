@@ -39,25 +39,24 @@ in the plan docs — **do not duplicate them here**:
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
 **Live numbers (post-M23 implementation):**
-- Test count: **2865** across 122 files (was 2844 post-M23
-  pre-flight; +21 net across the M23 implementation: +19 unit
-  tests for `fetchBoardFavorites` resolver, +13 unit tests for
-  `crossBoardSearch` walker (incl. the outer-loop limit-check
-  branch covering cross-board-search.ts:725-728), +9 integration
-  tests for `monday board favorites`, +18 integration tests for
-  cross-board `monday item search` — -22 pre-flight stub-rejection
-  tests removed in the renamed `m23-cross-board.test.ts`).
-- Coverage: **99.02 / 95.69 / 99.21 / 99.21** (stmts / branches /
+- Test count: **2867** across 122 files (+2 post-R-NEW-21 from the
+  cross-board-search.ts defensive-path seam tests covering lines
+  483 + 765; was 2865 post-R-NEW-21).
+- Coverage: **99.02 / 95.75 / 99.21 / 99.21** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin shifted 0.41pp → 0.24pp** at M23 implementation — the
-  cross-board action grew the branch denominator faster than the
-  per-file 100% coverage grew the numerator (M19 lesson again).
-  Above floor; the R-NEW-5 `introspectType()` lift (shipped
-  post-M23) was floated as a recovery vehicle but lives in
-  `scripts/probe/_lib.ts`, outside the `src/**/*.ts` coverage
-  scope, so it didn't move the margin. Recovery candidate now:
-  targeted seam-injected tests on cross-board action defensive
-  paths at M24 pre-flight kickoff.
+  margin shifted 0.24pp → 0.30pp** at the post-R-NEW-21
+  cross-board-search.ts defensive-path saturation pass. The
+  cross-board-search.ts file itself recovered 95.23% → **100%**
+  on branches (both uncovered branches at lines 483 + 765 now
+  covered by direct unit + seam-injected tests); aggregate gain
+  is limited to the +0.06pp the two branches contribute against
+  the 3554-branch denominator. The 0.4pp recovery target named
+  pre-session is partial — cross-board-search.ts is now
+  saturated, so any further branches-margin recovery has to come
+  from re-targeting onto a different file under `src/api/` or
+  `src/commands/` (largest remaining file-level gaps: dry-run.ts
+  96.26%, errors.ts 93.27%, filters.ts 89.36%, retry.ts 86.95%,
+  search.ts 88.23%). Above floor.
 - ERROR_CODES count: **29** (unchanged — Decision 5's
   hypothesised `complexity_budget_exhausted` rejected at
   pre-flight; the M23 walker's three load-bearing warnings
@@ -97,14 +96,20 @@ convention.
    use the shipped `trialQuery(label, query, options?)`
    helper (R-NEW-21) — defaults match the 4 M23 probes'
    most-common settings.
-2. **Branches-margin recovery via cross-board seam tests** —
-   margin 0.24pp at M23 close, target ≥0.4pp ahead of M24
-   denominator growth. R-NEW-5's lift didn't move the margin
-   (scripts/ outside coverage scope); the recovery is targeted
-   seam-injected tests on `src/api/cross-board-search.ts`
-   defensive paths (the outer-loop limit-check + the
-   inaccessible-board warning emit + the column-resolution
-   pre-pass column-not-found-on-board warning).
+2. **Branches-margin recovery, residual gap.**
+   cross-board-search.ts saturated to 100% branches in the
+   post-R-NEW-21 follow-up (lines 483 + 765 covered;
+   aggregate 95.69 → 95.75, margin 0.24pp → 0.30pp). The
+   original 0.4pp target is partial — to close the residual
+   0.10pp before M24 lands its denominator growth, re-target
+   onto the next file-level gaps under `src/api/` and
+   `src/commands/`: `dry-run.ts` 96.26% (lines 289,
+   473-474, 1132); `retry.ts` 86.95% (lines 90-91);
+   `filters.ts` 89.36% (lines 403, 408-413);
+   `item/search.ts` 88.23% (lines 548-549, 569, 575);
+   `errors.ts` 93.27%. Each is a small bounded follow-up;
+   the M24 pre-flight kickoff session can ship 1-2 of
+   these alongside its contract diff.
 3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
