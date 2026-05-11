@@ -32,7 +32,8 @@ in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23
   post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-5
   + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 shipped +
-  R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open + R-watch-items).
+  R-NEW-2 / R-NEW-3 / R-NEW-17 / R-NEW-21 candidates open +
+  R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -166,7 +167,14 @@ convention.
   R-NEW-8 `missingByDifference` set-delta helper (2
   consumers; fires at 3); R-NEW-9 2-stage GraphQL
   filter+hydrate resolver shape (2 confirmed + 1 planned
-  M24; MEDIUM priority).
+  M24; MEDIUM priority); **R-NEW-21 `trialQuery()` +
+  `RawErrors` lift** into `scripts/probe/_lib.ts` —
+  **trigger fired at post-R-NEW-5 audit** (`fb77baf`);
+  4 M23 trial-query probes share verbatim shape with
+  minor truncate-length variations; MEDIUM priority,
+  ship at M24 pre-flight kickoff alongside the
+  `introspectType()` uptake; same out-of-coverage-scope
+  caveat as R-NEW-5 (lift won't move branches margin).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);
@@ -217,7 +225,15 @@ convention.
   (same pattern miss + mass-migrate cadence as R-NEW-14/15/16); **R-NEW-20 `MondayClient` seam-
   injection stub factory** — 2 consumers at M23 impl
   (board-favorites + cross-board-search unit tests); LOW
-  priority watch-item, fires at 3rd consumer at M24.
+  priority watch-item, fires at 3rd consumer at M24;
+  **R-NEW-22 probe-script `main().catch()` runner** —
+  surfaced at post-R-NEW-5 audit (`fb77baf`); 14+
+  consumers but each instance is 3 trivial defensive lines
+  + the duplication reads as "always-defensive
+  boilerplate", not meaningful repetition; LOW priority
+  watch-item, fold into R-NEW-21's commit ONLY if that
+  commit is already touching every probe script (it's
+  not — R-NEW-21 only touches 4 trial-query probes).
 
 ## Pre-flight contract diff discipline
 
