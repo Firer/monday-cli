@@ -3000,6 +3000,16 @@ Mechanics:
   for and what it found instead. `monday dev doctor` flags this
   proactively.
 
+**v0.3-M26 pre-flight contract diff** lands at `<M26-PREFLIGHT-SHA>`
+— the canonical helper module is `src/api/dev-conventions.ts`
+(DevMapping alias over `profiles.ts:profileDevBlockSchema`, the
+pure-helper `matchBoardByConvention` + `groupCandidatesByDevNoun`
++ `buildDiscoverMappingFromMatches` for the discover heuristic,
+and stub runtime fetchers `discoverDevBoards` / `runDevDoctor` /
+`loadDevMapping` / `saveDevMapping` under `c8 ignore start/stop`).
+The 13 verb stubs ship under `src/commands/dev/...`. M26 IMPL
+lands the runtime bodies + tests + drops the `c8 ignore` wraps.
+
 ## 6. Output schema (JSON contract)
 
 The output contract is part of the CLI's public surface. Breaking it
@@ -6557,8 +6567,32 @@ scoped idempotent changes, and post comments narrating its work.**
   Monday ships API support — and reject every invocation today
   with `usage_error` carrying the empirical-probe context as the
   hint
-- `dev sprint/epic/release/task` workflow shortcuts
-- `dev discover/configure/doctor`
+- `dev sprint/epic/release/task` workflow shortcuts + `dev discover/
+  configure/doctor` setup-and-diagnostic verbs (v0.3-M26). The
+  `dev` namespace is the workflow-namespace three-level carve-out
+  (§5.2 carve-out 1; §2.7 Monday Dev as convention, not API; §5.9
+  mechanics). 13 verbs ship at M26: 3 setup verbs at `dev <verb>`
+  shape (`dev discover [--apply]` / `dev configure --tasks-board
+  <bid> [...]` / `dev doctor`) + 10 workflow verbs at three-level
+  depth (`dev sprint current/list/items`, `dev epic list/items`,
+  `dev release list`, `dev task list/start/done/block`). Every
+  workflow verb translates to standard board / item CRUD against
+  per-profile-configured board IDs in `[profiles.<name>.dev]` —
+  no new Monday GraphQL mutations introduced. **M26 pre-flight
+  decisions closed inline (`<M26-PREFLIGHT-SHA>`):** Decision 1
+  (discover heuristic — name-based match against the stock
+  English Monday Dev template board names: `Tasks` / `Sprints` /
+  `Epics` / `Releases` / `Bugs`; localised-workspace alias
+  support deferred to v0.4+); Decision 2 (`dev doctor` check-
+  name vocabulary — 9 stable check names per
+  `src/api/dev-conventions.ts:DEV_DOCTOR_CHECK_NAMES`; per-check
+  `details` shape is per-check additive); Decision 3 (three-
+  level naming reaffirmation against §5.2 carve-out 1 — already
+  in force per Decision 4 closure pre-M20 at `1e81b2f`).
+  ERROR_CODES registry unchanged at 29 — Decision 1 closure
+  routes through existing `dev_not_configured` +
+  `dev_board_misconfigured` codes already pre-registered in
+  `src/utils/errors.ts` per §5.9
 - `item search` cross-board (omit `--board`) — "find my open tasks
   anywhere I have access" without the agent iterating boards.
   Interacts with v0.3 `board favorites` and workspace scoping

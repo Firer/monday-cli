@@ -64,6 +64,7 @@ no `data`); see the **Errors** section at the bottom.
 | [config](#config) | show, path |
 | [schema](#schema) | (no verb) |
 | [diagnostics](#diagnostics) | status, usage |
+| [dev](#dev) | discover (M26 stub), configure (M26 stub), doctor (M26 stub), sprint current/list/items (M26 stub), epic list/items (M26 stub), release list (M26 stub), task list/start/done/block (M26 stub) |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -3194,6 +3195,324 @@ stderr):
   "meta": { ..., "source": "none", "api_version": "2026-01" }
 }
 ```
+
+---
+
+## dev
+
+The `monday dev …` namespace is the **workflow-shortcut carve-out**
+(cli-design §5.2 carve-out 1; §2.7 — Monday Dev is convention, not
+API; §5.9 — board-mapping mechanics). Three setup verbs (`discover` /
+`configure` / `doctor`) + ten workflow verbs (sprint /epic / release
+/ task × their per-noun verbs).
+
+All 13 verbs ship as **v0.3-M26 pre-flight stubs**: argv `inputSchema`
++ output `outputSchema` are real (pinned at pre-flight so `monday
+schema` introspection is stable across the M26 drop-in); the action
+bodies are `c8 ignore start/stop`-wrapped + reject with
+`internal_error.details.hint` pointing at the M26 IMPL session. The
+output shapes below describe what `data` WILL carry once M26 IMPL
+lands the runtime bodies — agents pinning against the pre-flight
+stubs can rely on the documented shape post-drop-in.
+
+### `monday dev discover [--apply]` (v0.3-M26 stub)
+
+Auto-detect Monday Dev board mappings via the heuristic in
+`src/api/dev-conventions.ts:matchBoardByConvention` (case-
+insensitive Unicode-NFC match against the stock English board
+names: `Tasks` / `Sprints` / `Epics` / `Releases` / `Bugs`).
+`--apply` writes the detected mapping to the active profile's
+`[profiles.<name>.dev]` TOML block via `saveDevMapping`. Without
+`--apply` the command is a pure read.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "profile": "work",
+    "mapping": {
+      "tasks_board": "987654",
+      "sprints_board": "987655",
+      "epics_board": "987656",
+      "releases_board": "987657"
+    },
+    "matches": [
+      { "noun": "tasks_board",
+        "matched": [{ "id": "987654", "name": "Tasks",
+                     "workspace_id": "12345" }] },
+      { "noun": "bugs_board", "matched": [] }
+    ],
+    "applied": true
+  },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Failure modes:** `dev_not_configured` (no Monday-Dev-shaped
+boards detected; `details.hint` points at `monday dev configure`
+for manual mapping); `not_found` (workspace scoping returns no
+boards). Per-noun ambiguity (>1 match) surfaces on `matches[]`
+with `matched.length > 1` — the action emits a `dev_discover_ambiguous`
+warning rather than auto-mapping.
+
+### `monday dev configure --tasks-board <bid> [...]` (v0.3-M26 stub)
+
+Explicit per-board override of the Monday Dev mapping on the
+active profile. At least one of `--tasks-board` / `--sprints-board`
+/ `--epics-board` / `--bugs-board` / `--releases-board` must be
+supplied. Idempotent on equal mappings.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "profile": "work",
+    "mapping": {
+      "tasks_board": "987654",
+      "epics_board": "987656"
+    }
+  },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Failure modes:** `usage_error` (no flags supplied — at least one
+`--<noun>-board` is required); `not_found` (a supplied board ID
+doesn't exist / no access); `cache_error` (profile config write
+failed).
+
+### `monday dev doctor` (v0.3-M26 stub)
+
+Validate the active profile's mapping against current board shape.
+Runs every check in `DEV_DOCTOR_CHECK_NAMES` (pinned at M26 pre-
+flight per Decision 2 closure) and emits per-check status. The
+status taxonomy is `ok | warn | fail`; the verb's exit code is
+`0` regardless of per-check status (the verb's success envelope
+is the `data` itself; agents inspect `data.summary.fail_count`
+for hard drift).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "profile": "work",
+    "mapping": { "tasks_board": "987654",
+                 "sprints_board": "987655" },
+    "checks": [
+      { "name": "tasks_board_exists", "status": "ok",
+        "message": "Tasks board 987654 reachable",
+        "details": null },
+      { "name": "tasks_status_column_present", "status": "warn",
+        "message": "Tasks board has no `status` column under the canonical name",
+        "details": { "column_id_found": "status_v2" } }
+    ],
+    "summary": { "ok_count": 1, "warn_count": 1, "fail_count": 0 }
+  },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Failure modes:** `dev_not_configured` (no `[profiles.<name>.dev]`
+block on the active profile); `dev_board_misconfigured` ONLY
+surfaces if the doctor verb itself can't complete (e.g. all
+configured boards inaccessible) — per-check drift is a `data`
+slot, not an error.
+
+### `monday dev sprint current` (v0.3-M26 stub)
+
+The active sprint on the configured `sprints_board`. Date-range
+straddle against `ctx.clock()` resolves "current". Returns a
+single-resource `ProjectedItem` (same shape `monday item get`
+returns).
+
+```json
+{
+  "ok": true,
+  "data": { "id": "12345678", "name": "Sprint 42",
+            "board_id": "987655", "group_id": "active",
+            "parent_item_id": null, "state": "active",
+            "url": "https://...", "created_at": "...",
+            "updated_at": "...", "columns": { /* §6.2 */ } },
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Failure modes:** `not_found` (no active sprint — hint points at
+`dev sprint list --state future`); `dev_not_configured` (no
+`sprints_board` in the active profile's mapping);
+`dev_board_misconfigured` (sprint date columns missing).
+
+### `monday dev sprint list [--state active|past|future]` (v0.3-M26 stub)
+
+List sprints on the configured `sprints_board`, optionally filtered
+by date-range state against `ctx.clock()`. Returns a collection of
+`ProjectedItem`. NaN-guard discipline applies to date parses per
+M24 round-2 P3-1 precedent.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem */ }, { /* ProjectedItem */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Possible warnings:** `sprint_dates_missing` — sprints with no
+resolvable start/end date columns fall through to the `past`
+bucket with this warning attached.
+
+### `monday dev sprint items <sid>` (v0.3-M26 stub)
+
+List task items on the configured `tasks_board` linked to a named
+sprint via the sprint→task `board_relation` column. Positional
+`<sid>` is an item ID on the sprints board (sprints are items,
+not first-class entities). Returns a collection of `ProjectedItem`.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem task row */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Failure modes:** `not_found` (`<sid>` doesn't exist on the
+sprints board); `dev_board_misconfigured` (sprint→task
+`board_relation` column not wired up — diagnose via `dev doctor`
+check `tasks_to_sprints_relation`).
+
+### `monday dev epic list [--state active|done]` (v0.3-M26 stub)
+
+List epics on the configured `epics_board`, optionally filtered by
+the epic's status column (`done` = `Done | Cancelled`; `active` =
+not in that set). Returns a collection of `ProjectedItem`.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem epic row */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+### `monday dev epic items <eid>` (v0.3-M26 stub)
+
+List task items linked to a named epic via the epic→task
+`board_relation` column. Positional `<eid>` is an item ID on the
+epics board. Returns a collection of `ProjectedItem`.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem task row */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+### `monday dev release list` (v0.3-M26 stub)
+
+List releases on the configured `releases_board`. v0.3 ships the
+list verb without a per-release-state filter (the release date-
+column conventions don't stabilise cleanly enough for a `--state`
+flag at v0.3); a v0.3.x / v0.4 follow-up may add
+`--state shipped|upcoming` once the date conventions firm up.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem release row */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+### `monday dev task list [--mine] [--status not_done] [--sprint current]` (v0.3-M26 stub)
+
+List tasks on the configured `tasks_board` filtered by the
+supplied flags. `--mine` resolves through the `me` token resolver
+(M3); `--status` accepts the canonical taxonomy
+(`not_done | done | stuck | working_on_it`); `--sprint` accepts
+either the literal `current` (resolves via `dev sprint current`)
+or a numeric sprint item ID. Returns a collection of
+`ProjectedItem`.
+
+```json
+{
+  "ok": true,
+  "data": [ { /* ProjectedItem task row */ } ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+### `monday dev task start <iid>` (v0.3-M26 stub)
+
+Set a task's status to "Working on it" on the configured
+`tasks_board`. Returns the post-mutation `ProjectedItem` (mutation
+envelope per cli-design §6.4). Idempotent on equal status values.
+
+```json
+{
+  "ok": true,
+  "data": { /* ProjectedItem with columns.status.label = "Working on it" */ },
+  "meta": { /* §6.1 + §6.4 (resolved_ids echo) */ },
+  "warnings": []
+}
+```
+
+### `monday dev task done <iid> [--message <m>]` (v0.3-M26 stub)
+
+Set a task's status to "Done" + optionally post a completion
+comment. Returns the post-mutation `ProjectedItem`. When
+`--message` is supplied, the post-create surfaces on
+`meta.side_effects[]` per cli-design §6.4:
+
+```json
+{
+  "ok": true,
+  "data": { /* ProjectedItem with columns.status.label = "Done" */ },
+  "meta": { /* §6.1 */,
+            "side_effects": [
+              { "kind": "update_created", "update_id": "5678901" }
+            ] },
+  "warnings": []
+}
+```
+
+**Idempotency caveat.** The status flip is idempotent; the
+optional `--message` post is NOT — a re-run with `--message`
+posts a second comment. Help text reproduces this caveat.
+
+### `monday dev task block <iid> --reason <r>` (v0.3-M26 stub)
+
+Set a task's status to "Stuck" + post the blocking reason as a
+comment. `--reason` is REQUIRED (the audit-trail comment is the
+load-bearing value of `task block` over a bare status flip).
+Returns the post-mutation `ProjectedItem` + the post-create on
+`meta.side_effects[]`:
+
+```json
+{
+  "ok": true,
+  "data": { /* ProjectedItem with columns.status.label = "Stuck" */ },
+  "meta": { /* §6.1 */,
+            "side_effects": [
+              { "kind": "update_created", "update_id": "5678902" }
+            ] },
+  "warnings": []
+}
+```
+
+**Idempotency caveat.** As with `task done` — status flip
+idempotent, `update create` is NOT.
 
 ---
 

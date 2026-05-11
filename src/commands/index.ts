@@ -155,6 +155,23 @@ import { boardFavoritesCommand } from './board/favorites.js';
 // shipped at `d058172` with Codex impl review fix-ups at
 // `5f10cda` (round 1) + `a024961` (round 2).
 import { itemHistoryCommand } from './item/history.js';
+// M26 (v0.3) — `dev` namespace workflow shortcuts (cli-design §5.2
+// carve-out 1; convention, not API per §2.7). Three-level depth:
+// `dev sprint current`, `dev task done`, etc. Pre-flight stubs at
+// this commit; runtime bodies + tests land at M26 IMPL.
+import { devDiscoverCommand } from './dev/discover.js';
+import { devConfigureCommand } from './dev/configure.js';
+import { devDoctorCommand } from './dev/doctor.js';
+import { devSprintCurrentCommand } from './dev/sprint/current.js';
+import { devSprintListCommand } from './dev/sprint/list.js';
+import { devSprintItemsCommand } from './dev/sprint/items.js';
+import { devEpicListCommand } from './dev/epic/list.js';
+import { devEpicItemsCommand } from './dev/epic/items.js';
+import { devReleaseListCommand } from './dev/release/list.js';
+import { devTaskListCommand } from './dev/task/list.js';
+import { devTaskStartCommand } from './dev/task/start.js';
+import { devTaskDoneCommand } from './dev/task/done.js';
+import { devTaskBlockCommand } from './dev/task/block.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -239,6 +256,19 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     authLogoutCommand,
     statusCommand,
     usageCommand,
+    devDiscoverCommand,
+    devConfigureCommand,
+    devDoctorCommand,
+    devSprintCurrentCommand,
+    devSprintListCommand,
+    devSprintItemsCommand,
+    devEpicListCommand,
+    devEpicItemsCommand,
+    devReleaseListCommand,
+    devTaskListCommand,
+    devTaskStartCommand,
+    devTaskDoneCommand,
+    devTaskBlockCommand,
     rawCommand,
     boardDoctorCommand,
   ];
