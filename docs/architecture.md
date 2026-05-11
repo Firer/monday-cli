@@ -1203,8 +1203,8 @@ heuristic v0.2-plan §22 documents.
   this module; the test seam is opt-in via `ctx.env.
   __test_oauth_helper`.
 
-- `api/probes.ts` (v0.3 M22 — pre-flight at `fbab6b0`; runtime
-  bodies land at M22 implementation). Per-probe primitives for
+- `api/probes.ts` (v0.3 M22 — pre-flight at `fbab6b0`;
+  implementation at `3a1b465`). Per-probe primitives for
   the `monday status` verb per cli-design §11.5. Type surface
   pins the {@link ProbeName} enum (`dns | tcp | tls | auth |
   cache_writability | redaction_self_test | env_var_pickup`), the
@@ -1217,24 +1217,30 @@ heuristic v0.2-plan §22 documents.
   leak-scan canary). Seven probe runners (`runDnsProbe`,
   `runTcpProbe`, `runTlsProbe`, `runAuthProbe`,
   `runCacheWritabilityProbe`, `runRedactionSelfTest`,
-  `summariseEnvVarPickup`) ship as `Promise.reject(internal_error)`
-  stubs under `c8 ignore start/stop` block-wraps; M22
-  implementation replaces them with `node:dns/promises.lookup` +
-  `node:net.createConnection` + `node:tls.connect` + the
-  `me { id }` GraphQL auth probe + `fs.stat / access(W_OK) /
-  probe-write` cache-writability dance + the canary-fold
+  `summariseEnvVarPickup`) bind to `node:dns/promises.lookup` +
+  `node:net.createConnection` + `node:tls.connect` (production
+  defaults wrapped in `c8 ignore start/stop` block-wraps — unit
+  tests inject `lookupImpl` / `tcpConnectImpl` / `tlsConnectImpl`
+  seams) + the `me { id }` GraphQL auth probe + `fs.stat / access
+  (W_OK) / probe-write` cache-writability dance + the canary-fold
   redaction self-test + the pure env-var-pickup summariser. The
   mockable-seam pattern mirrors the M21 `__test_oauth_helper`
   env-seam: each probe accepts an injectable helper so tests
-  don't bind real sockets / open real fetch handles.
+  don't bind real sockets / open real fetch handles. Per-probe
+  abort context (`createProbeAbortContext`) combines the
+  per-probe `timeoutMs` deadline with the outer abort signal so
+  every probe seam aborts cleanly on Ctrl-C or per-probe timeout.
+  Auth probe scans ALL `errors[]` entries for
+  `NOT_AUTHENTICATED` / `UNAUTHENTICATED` codes (Codex M22 W2
+  ratification — not just `errors[0]`).
   `RedactionSelfTestInputs` takes BOTH `env` and `runtimeSecrets`
   per cli-design §7.4.3 (Codex M21 P1 ratification) — the probe
   exercises the same two-layer redaction the production emission
   paths use via `collectSecrets(env, runtimeSecrets)`. Single
   consumer: `commands/status.ts`.
 
-- `api/usage.ts` (v0.3 M22 — pre-flight at `fbab6b0`; runtime
-  body lands at M22 implementation). Daily-operation budget for
+- `api/usage.ts` (v0.3 M22 — pre-flight at `fbab6b0`;
+  implementation at `3a1b465`). Daily-operation budget for
   the `monday usage` verb per cli-design §11.5.3 / §13 v0.3
   entry. Empirical-probe finding (2026-05-10, API `2026-01`):
   Monday's daily-budget surface lives at `platform_api.daily_limit
@@ -1250,17 +1256,24 @@ heuristic v0.2-plan §22 documents.
   usage_today, usage_remaining_today, last_updated}` (additive-
   only per Decision 8 closure — v0.4 may extend with per-minute
   complexity + concurrency cap WITHOUT breaking), and the
-  `USAGE_QUERY` GraphQL document. Two pure helpers ship as
-  REAL impl + branch-tested: `sumUsageForDay(byDay, today)`
-  (sum-where-day-equals, opaque string equality on the `day`
-  field), `projectUsageOutput(parsed, today)` (clamps
+  `USAGE_QUERY` GraphQL document. `fetchUsage(inputs)` builds a
+  per-call `MondayClient` over the injected `Transport` (retries=0,
+  verbose=false — the usage path doesn't need retry / complexity
+  injection because the verb is reporting on the same budget the
+  retry layer would consume) and projects via
+  `projectUsageOutput`. Parse-failure path surfaces
+  `internal_error` with `details.issues` so a Monday-side
+  amendment to the `platform_api.daily_*` surface fails loudly
+  rather than silently. The `day`-field timezone pin is UTC
+  `YYYY-MM-DD` (`commands/usage.ts formatTodayKey` derives it
+  via `toISOString().slice(0, 10)`); re-probe if a live-activity
+  account reveals account-local semantics. Two pure helpers
+  branch-tested: `sumUsageForDay(byDay, today)` (sum-where-day-
+  equals, opaque string equality on the `day` field),
+  `projectUsageOutput(parsed, today)` (clamps
   `usage_remaining_today` at zero — Monday's reported `usage` is
   best-effort and may briefly exceed `total` on a near-cap
-  account). `fetchUsage(inputs)` ships as a `Promise.reject
-  (internal_error)` stub under `c8 ignore start/stop`; M22
-  implementation issues `USAGE_QUERY` via the transport, parses
-  with `usageQueryResponseSchema`, projects via
-  `projectUsageOutput`. Single consumer: `commands/usage.ts`.
+  account). Single consumer: `commands/usage.ts`.
 
 - `api/time-tracking.ts` (v0.3 M20 — pre-flight at `a702af2`,
   runtime body landed at M20 implementation as **documentation-
@@ -1348,28 +1361,35 @@ document the verb cluster post-mortems. Briefly:
   `with_updates` argument (unlike `duplicate_item` /
   `duplicate_board`).
 - **`commands/{status,usage}.ts`** (v0.3 M22 — pre-flight at
-  `fbab6b0`; runtime bodies land at M22 implementation). The
-  diagnostics-cluster verbs per cli-design §11.5. Both ship
-  as documentation-only stubs (mirrors the M20 time-track + M21
-  pre-flight auth-stub patterns): the argv shape (status takes
-  `--no-probe`; usage takes no flags beyond globals), the
-  `inputSchema.parse(opts)` call, and the
-  `Promise.reject(new ApiError('internal_error', ...))` action
-  body. Command-action stubs are intentionally NOT `c8 ignore`-
-  wrapped — integration tests at
-  `tests/integration/commands/diagnostics.test.ts` drive them
-  via commander's argv parse + assert on the rejection envelope
-  shape (wrapping would suppress real coverage of the
-  input-schema parse leg + the rejection assertion). `status`
-  imports `statusOutputSchema` + `StatusOutput` from
-  `src/api/probes.ts` (single source of truth for the envelope
-  shape); `usage` defines its own `usageOutputSchema` locally
-  (no shared helper — the envelope is verb-specific). M22
-  implementation replaces both action bodies with the real
-  probe matrix / `fetchUsage` + envelope assembly per cli-design
-  §11.5.2 / §11.5.3. `status` is a top-level verb (not a noun-
-  verb shape) — mirrors `schema` / `raw`; the §5.2 two-level
-  rule already permits single-level verbs.
+  `fbab6b0`; implementation at `3a1b465`). The diagnostics-
+  cluster verbs per cli-design §11.5. `status` is a top-level
+  verb (not a noun-verb shape) — mirrors `schema` / `raw`; the
+  §5.2 two-level rule permits single-level verbs. Argv surface:
+  `status` takes `--no-probe`; `usage` takes no flags beyond
+  globals. Both action bodies delegate through dedicated helpers
+  for testability — `commands/status.ts` extracts
+  `orchestrateStatusProbes` (probe-matrix iteration with
+  short-circuit on first network failure: DNS fail → TCP/TLS/auth
+  surface `upstream_failed`; cache_writability + redaction_self_test
+  + env_var_pickup always run) + `deriveOverall` (§11.5.2 rules:
+  `redaction_self_test` failure ALWAYS promotes to `'down'`;
+  network fail → `'down'`; auth-success + soft-local-fail →
+  `'degraded'`) + `resolveStatusTransport` (env → flag → SDK-pin
+  precedence, with `isMissingTokenConfigError` discriminator
+  that downgrades ONLY the token-only `ConfigError` to a
+  `no_token` auth-probe result — Codex M22 F2 ratification; other
+  config-validation failures re-throw verbatim as `config_error`).
+  `commands/usage.ts` exports `formatTodayKey(now)` returning UTC
+  `YYYY-MM-DD` (pinned at M22 close; revise if Monday's runtime
+  `day` field turns out to be account-local). `status`'s
+  `meta.source` is committed BEFORE the orchestrator call (Codex
+  M22 F1 ratification) so error envelopes on `overall='down'`
+  report the accurate `source: 'live'` rather than the runner's
+  `'none'` default. `status` imports `statusOutputSchema` +
+  `StatusOutput` from `src/api/probes.ts` (single source of truth
+  for the envelope shape — R-NEW-4 lift at `0b5af57`); `usage`
+  defines its own `usageOutputSchema` locally (verb-specific
+  envelope, no shared helper).
 
 - **`commands/auth/{login,logout}.ts`** (v0.3 M21 — pre-flight
   at `5c07840`, runtime bodies landed at M21 Part 1 in

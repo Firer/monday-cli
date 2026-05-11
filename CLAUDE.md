@@ -120,14 +120,18 @@ convention.
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
   `probeResultSchema` import-from-api/probes lift (`0b5af57`,
-  post-M22 pre-flight drift sweep). The M22 implementation
-  added orchestration extractions (`orchestrateStatusProbes` +
-  `deriveOverall` + `resolveStatusTransport` exported from
+  post-M22 pre-flight drift sweep); R-NEW-7 `formatMode` lift
+  into `src/utils/fs.ts` (post-M22 close — 3-consumer trigger
+  fired when the M22 cache_writability probe added the third
+  named copy beyond `src/api/cache.ts` + `src/config/credentials.ts`;
+  mirrors R-NEW-1 cadence verbatim). The M22 implementation
+  also added orchestration extractions (`orchestrateStatusProbes`
+  + `deriveOverall` + `resolveStatusTransport` exported from
   `src/commands/status.ts` for direct unit-testing); not an
   R-class lift in the traditional sense but the same shape —
-  pure pure helpers split out of a command action for
-  independent test coverage of the network-probe short-circuit
-  cascade + the §11.5.2 overall-mapping rules.
+  pure helpers split out of a command action for independent
+  test coverage of the network-probe short-circuit cascade +
+  the §11.5.2 overall-mapping rules.
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
   `wrapFsError` factory (M22 close did NOT trigger — the

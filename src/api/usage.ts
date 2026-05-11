@@ -37,14 +37,15 @@
  * fields is non-breaking per cli-design §6.1; removing / renaming
  * is the SemVer-major boundary.
  *
- * **What's stub vs runtime at the pre-flight.** `fetchUsage` ships as
- * a `Promise.reject(internal_error)` stub under `c8 ignore` — M22
- * implementation lands the runtime body alongside the `monday usage`
- * verb's action. The schema definitions, type exports, the
- * `USAGE_QUERY` GraphQL document, and the pure-helper
- * `sumUsageForDay` projection ship as real implementations so the
- * pre-flight Codex review can verify the wire query + projection
- * shape against the empirical probe findings inline.
+ * **M22 implementation surface.** `fetchUsage` builds a per-call
+ * `MondayClient` over the supplied `Transport` (retries=0,
+ * verbose=false — the usage verb is reporting on the same budget the
+ * retry layer would consume, and complexity injection would re-trigger
+ * the surface being reported on), issues the {@link USAGE_QUERY}
+ * GraphQL document, parses through {@link usageQueryResponseSchema},
+ * and projects via {@link projectUsageOutput}. Parse failures surface
+ * `internal_error` with `details.issues` so a Monday-side amendment
+ * to `platform_api.daily_*` fails loudly rather than silently.
  */
 
 import { z } from 'zod';
@@ -65,11 +66,14 @@ export interface RawDailyLimit {
  * The raw `platform_api.daily_analytics.by_day[]` entry — Monday
  * GraphQL types `day` as `String!` and `usage` as `Int!`. The
  * `day`-field timezone semantics (UTC vs account-local) are
- * **deferred to M22 implementation kickoff** — the pre-flight probe
- * captured an empty `by_day` list on the test account, so the
- * runtime timezone confirmation requires either an account with
- * usage activity OR a one-off bootstrap call to populate the
- * series before re-probing. Pure projection logic
+ * **pinned at M22 close as UTC `YYYY-MM-DD`** — `src/commands/usage.ts
+ * formatTodayKey` derives the key via `ctx.clock().toISOString()
+ * .slice(0, 10)`. The pre-flight probe captured an empty `by_day`
+ * list on the test account, so the pin is inferred from the sibling
+ * `last_updated` field's `ISO8601DateTime` scalar (UTC). If a
+ * future re-probe against an account with live activity reveals
+ * Monday emits `day` in account-local time, amend cli-design
+ * §11.5.3 + flip `formatTodayKey`. Pure projection logic
  * ({@link sumUsageForDay}) treats `day` as an opaque equality key;
  * the caller is responsible for supplying the matching "today"
  * string in the same timezone.
@@ -174,9 +178,8 @@ export const sumUsageForDay = (
 /**
  * Projects a parsed {@link UsageQueryResponse} + a caller-supplied
  * `today` string into the v0.3 {@link UsageOutput} envelope shape.
- * Pure helper — used by {@link fetchUsage} at M22 implementation
- * and by tests at pre-flight to verify the projection shape against
- * empirical-probe fixtures.
+ * Pure helper — used by {@link fetchUsage} and by tests to verify
+ * the projection shape against empirical-probe fixtures.
  *
  * `usage_remaining_today` is clamped at zero — Monday's reported
  * `usage` is best-effort and may briefly exceed `daily_limit.total`
@@ -207,10 +210,10 @@ export const projectUsageOutput = (
 };
 
 /**
- * Inputs to {@link fetchUsage}. The pre-flight pins the shape so M22
- * implementation just fills in the body. `today` is supplied by the
- * caller so the helper stays pure — the command action reads the
- * runtime clock once and threads the formatted string through.
+ * Inputs to {@link fetchUsage}. `today` is supplied by the caller so
+ * the helper stays pure — the command action reads the runtime clock
+ * once and threads the formatted string through (UTC `YYYY-MM-DD`
+ * pinned at M22 close via `commands/usage.ts formatTodayKey`).
  */
 export interface FetchUsageInputs {
   readonly transport: Transport;

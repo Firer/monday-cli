@@ -127,17 +127,17 @@ import { boardGroupUpdateCommand } from './board/group-update.js';
 import { boardGroupArchiveCommand } from './board/group-archive.js';
 import { boardGroupDuplicateCommand } from './board/group-duplicate.js';
 import { boardGroupDeleteCommand } from './board/group-delete.js';
-// M21 (v0.3) — `monday auth login` + `auth logout`. Pre-flight stubs:
-// argv shape pinned for forward-compatibility, runtime OAuth + cache
-// bodies land at M21 implementation alongside `src/api/oauth.ts` +
-// `src/config/credentials.ts` real bodies.
+// M21 (v0.3) — `monday auth login` + `auth logout`. Pre-flight at
+// `5c07840`; runtime OAuth + credentials cache + cli-design §7.4.3
+// redaction-runtime extension landed across Part 1 (`a4cb5b0`) +
+// Part 2 (`e21c166`) per cli-design §7.3 / §7.4.
 import { authLoginCommand } from './auth/login.js';
 import { authLogoutCommand } from './auth/logout.js';
 // M22 (v0.3) — `monday status` + `monday usage` diagnostics cluster.
-// Pre-flight stubs: argv shape pinned for forward-compatibility,
-// runtime probe matrix + `platform_api.daily_*` projection land at
-// M22 implementation alongside `src/api/probes.ts` + `src/api/usage.ts`
-// real bodies.
+// Pre-flight at `fbab6b0`; implementation at `3a1b465` lands the
+// runtime probe matrix (DNS / TCP / TLS / auth / cache writability /
+// redaction self-test / env-var pickup) + `platform_api.daily_*`
+// projection per cli-design §11.5.
 import { statusCommand } from './status.js';
 import { usageCommand } from './usage.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
