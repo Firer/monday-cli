@@ -1656,11 +1656,20 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # single-item multi-column atomic update
                                           # at least one of --name / --set / --set-raw required
                                           # --set and --set-raw against the same <col> → usage_error
-monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--yes] [--dry-run]   v0.1 (--set-raw v0.2)
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
-                                          # --continue-on-error (partial-success envelope): v0.3
+                                          # --continue-on-error (v0.3-M25): opt-in to the per-item
+                                          # partial-success envelope per §6.4 "Bulk per-item partial-
+                                          # success". Default (flag absent) keeps the v0.2 fail-fast
+                                          # behaviour — first per-item error aborts the loop with
+                                          # `details.applied_to` decoration per §6.5. With the flag,
+                                          # every matched item is attempted regardless and the success
+                                          # envelope carries `data.results[]` with per-item
+                                          # `{item_id, ok, error?}` records. Always emits `ok: true`
+                                          # at the top level (universal partial-success rule); the
+                                          # agent reads `data.results[]` for per-item outcomes.
 monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
@@ -4838,6 +4847,155 @@ This mirrors upsert's `created` flag — verb-specific business
 signals extend `data`; top-level slots are reserved for cross-verb
 shapes (`resolved_ids`, `side_effects`).
 
+**Bulk per-item partial-success** (v0.3-M25 `item update
+--continue-on-error`). The bulk `item update --where` shape ships
+in v0.1 (M5b) with **fail-fast** semantics: the first per-item
+error aborts the loop, surfaces as a top-level `error` envelope
+with `code` from the per-item failure (`column_archived`,
+`validation_failed`, `complexity_exceeded`, …), and decorates
+`details` with `matched_count` / `applied_count` / `applied_to` /
+`failed_at_item` per §6.5 "Bulk per-item failure". Agents
+implement resume-on-rerun by narrowing the next call's filter
+against `applied_to`.
+
+M25 adds an **opt-in** partial-success bulk shape via
+`--continue-on-error`. With the flag, every matched item is
+attempted regardless of per-item failures; failures land per-
+record inside `data.results[]` rather than aborting the loop.
+The success envelope is **always `ok: true`** when dispatch ran
+— per the §6.1 universal partial-success rule applied uniformly
+across multi-target verbs (v0.2-plan §8 decision 3; M13 / M14 /
+M15 / M25 family). The agent reads `data.results[]` to determine
+per-item outcomes.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "item_update",
+    "summary": {
+      "matched_count": 12,
+      "applied_count": 10,
+      "failed_count": 2,
+      "board_id": "67890"
+    },
+    "results": [
+      { "item_id": "5001", "ok": true,
+        "item": { "id": "5001", "name": "...", "columns": { ... } } },
+      { "item_id": "5002", "ok": false,
+        "error": { "code": "column_archived",
+                   "message": "Column status_4 is archived" } },
+      { "item_id": "5003", "ok": true,
+        "item": { "id": "5003", "name": "...", "columns": { ... } } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+Per-record shape:
+- **Success** — `{ item_id: "<iid>", ok: true, item: <§6.2
+  projection> }`. The `item` slot is the post-mutation
+  projection (same shape as single-item `item update`'s `data`
+  payload — agents reading `data.results[i].item` see the
+  identical `ProjectedItem` shape they'd get from a single-item
+  call).
+- **Failure** — `{ item_id: "<iid>", ok: false, error: { code,
+  message } }`. The `code` is whichever the per-item mutation
+  produced — same codes that would surface as the top-level
+  `error.code` under fail-fast (`column_archived` /
+  `validation_failed` / `complexity_exceeded` / etc.). The
+  `error` slot is non-`undefined` only on failure records; the
+  `item` slot is absent.
+
+`data.summary` extends the v0.1 fail-fast bulk-summary shape
+(§6.4 above) with one new slot: **`failed_count: number`** —
+items whose per-item dispatch failed under the
+`--continue-on-error` path. The invariant
+`matched_count === applied_count + failed_count` holds for every
+M25 success envelope. The slot is absent on the v0.1 fail-fast
+bulk envelope (zero failures by construction — the first
+failure becomes the top-level `error`).
+
+`data.operation` is the literal **`"item_update"`** (mirrors
+M14's add-users / remove-users discriminator at
+`data.operation`; M25 inherits the slot from the
+`buildPartialSuccessMutation` envelope-builder per the M15
+family precedent). Agents switch on `data.operation` to confirm
+which verb produced the envelope.
+
+`resolved_ids` echoes the same token → column-ID mapping the
+v0.1 bulk success envelope carries (one `--set` token resolves
+once, applies to N items). Present on every `--continue-on-
+error` envelope where at least one `--set` token resolved
+through the friendly translator (M5b precedent); the slot is
+identical to the v0.1 bulk success shape — partial-success
+doesn't change what `resolved_ids` echoes.
+
+**Top-level `ok: false` reserved for whole-call failure.** Same
+boundary as the M13 / M14 / M15 partial-success envelopes —
+`ok: false` fires when:
+- the bulk path couldn't reach the API at all (network /
+  config / auth failure);
+- argv validation rejected the call (malformed `--set` /
+  `--set-raw` / `--where` / `--filter-json`);
+- the column-resolution pre-pass failed (e.g. token resolved
+  to no column → the v0.1 fail-fast precedent applies; column
+  resolution is whole-call, not per-item).
+- the matched-item set is empty AND `--yes` is missing (the
+  v0.1 `confirmation_required` gate still fires before any
+  per-item dispatch).
+
+Per-item dispatch failures NEVER bubble to top-level under
+`--continue-on-error` — they land per-record. This widens the
+partial-success contract uniformly: the M13 / M14 / M15 family
+captures resolver-leg + dispatch-leg per-target failures; M25
+captures dispatch-leg per-item failures under an explicitly-
+opted-in flag. The opt-in is critical for the v0.1 fail-fast
+default's preservation — agents who haven't migrated to read
+`data.results[]` continue to receive the v0.1 envelope shape.
+
+**Confirmation gate (`--yes`).** The bulk-update confirmation
+gate per §3.1 #7 still fires for `--continue-on-error` —
+attempting N items without `--yes` (and without `--dry-run`)
+returns `confirmation_required` (exit 1). The
+`--continue-on-error` flag is **orthogonal** to the
+confirmation gate; both must be acknowledged for the live
+bulk-partial-success path to fire.
+
+**Dry-run shape.** `--continue-on-error --dry-run` emits the
+v0.1 bulk dry-run shape unchanged (N-element
+`planned_changes[]`). Dry-run can't preview per-item failures
+because no per-item mutation fires — the partial-success
+envelope only materialises when dispatch actually runs. Agents
+who want to preview the partial-success shape run the dry-run,
+confirm matched count + planned changes, then re-run with
+`--yes --continue-on-error`.
+
+**`meta.source` aggregation.** Same as the v0.1 fail-fast bulk
+path — metadata load leg + items_page walk leg + N per-item
+mutation legs all aggregate through `SourceAggregator`. The
+partial-success envelope carries the same `meta.source` shape
+the fail-fast envelope would have under identical resolution
+inputs. Per-item dispatch failures still count as `'live'` legs
+in the aggregator (the wire call did fire — Monday rejected it
+but the leg was attempted), mirroring M14's per-target failure
+treatment at `src/api/users-fan-out-mutation.ts`.
+
+**Implementation.** The partial-success-bulk path lives in
+`src/api/partial-success-bulk.ts` (new at v0.3-M25; thin wrapper
+around `dispatchSequential` from
+`src/api/partial-success-mutation.ts`). The wrapper accepts the
+pre-resolved `SelectedMutation` + the matched-item-ID list and
+fans out one wire call per item, capturing per-item failures
+into the result records exactly the way M14 / M15 capture
+per-target failures. The fail-fast bulk path
+(`src/commands/item/update.ts:runBulk`) is unchanged; the
+action body branches on `parsed.continueOnError` to choose
+between the two paths after the confirmation gate.
+
 ### 6.5 Error
 
 To stderr (and the *only* thing on stderr at non-debug verbosity):
@@ -6574,16 +6732,37 @@ scoped idempotent changes, and post comments narrating its work.**
   `monday usage` (which combines `platform_api.daily_limit` +
   `platform_api.daily_analytics`); per-call cost is one
   GraphQL request per stage
-- `item update --continue-on-error` — partial-success bulk path.
-  Today's bulk `item update --where` fails fast on the first
-  per-item error (matched items before the failure surface in
-  `details.applied_to` per §6.5). The flag would attempt every
-  matched item regardless and emit a new partial-success envelope
-  with per-item `{ok, error?}` records — that's a §6.4 sub-section,
-  not just a flag. Deferred to v0.3 so the v0.2 bulk-clear (above)
-  fixture-pins the existing failure-decoration shape first; the
-  partial-success envelope design pass benefits from one milestone
-  of operational signal on the fail-fast variant
+- `item update --continue-on-error` — partial-success bulk path
+  (v0.3-M25). Today's bulk `item update --where` fails fast on
+  the first per-item error (matched items before the failure
+  surface in `details.applied_to` per §6.5). The flag attempts
+  every matched item regardless and emits a partial-success
+  envelope with per-item `{item_id, ok, error?}` records — a
+  §6.4 sub-section ("Bulk per-item partial-success"), not just a
+  flag. Inherits M15's `buildPartialSuccessMutation` envelope-
+  builder + `dispatchSequential` helper from
+  `src/api/partial-success-mutation.ts` via a thin wrapper at
+  `src/api/partial-success-bulk.ts` (new at M25), so the
+  partial-success contract surface stays single-source-of-truth
+  across the M13/M14/M15 family + M25's bulk-fail-mode
+  extension. Per cli-design §6.1's universal partial-success
+  rule, the top-level envelope is `ok: true` even when every
+  per-item attempt failed — agents read `data.results[]` for
+  per-item outcomes. `data.summary` extends the v0.1 fail-fast
+  bulk-summary with a new `failed_count` slot
+  (matched_count === applied_count + failed_count invariant).
+  `data.operation` is the literal `"item_update"` (mirrors M14
+  add-users' / remove-users' discriminator). The
+  `--continue-on-error` flag is orthogonal to the `--yes`
+  confirmation gate — both must be acknowledged for the live
+  partial-success path to fire. ERROR_CODES registry unchanged
+  at 29 — per-item failures route through existing codes
+  (column_archived / validation_failed / complexity_exceeded /
+  etc.); no new top-level error code joins the registry. The
+  v0.1 fail-fast bulk path (`details.applied_to` decoration on
+  the top-level error envelope per §6.5) is unchanged; an agent
+  who hasn't migrated to read `data.results[]` continues to
+  receive the v0.1 envelope shape
 - `monday status` — connectivity + auth + local-state probe matrix
   (DNS / TCP / TLS / auth + cache writability + redaction self-test
   + env-var pickup summary) that short-circuits without touching

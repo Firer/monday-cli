@@ -1961,6 +1961,61 @@ column-resolution failures fail-fast before the items_page walk
 fires (no metadata round-trip wasted on a malformed JSON or a
 typo'd column token).
 
+### `item update --where ... --board <bid> --continue-on-error` (bulk, partial-success)
+
+Opt-in partial-success bulk variant (M25). Same matched-item walker
++ confirmation gate as the fail-fast bulk path above; the `--continue-on-
+error` flag swaps the per-item dispatch loop from fail-fast to attempt-
+every-match. Per-item failures land per-record inside `data.results[]`;
+the top-level envelope is **always `ok: true`** when dispatch ran (per
+cli-design §6.1 universal partial-success rule applied uniformly across
+M13/M14/M15/M25 family).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "item_update",
+    "summary": {
+      "matched_count": 12,
+      "applied_count": 10,
+      "failed_count": 2,
+      "board_id": "67890"
+    },
+    "results": [
+      { "item_id": "5001", "ok": true,
+        "item": { "id": "5001", "name": "...", "columns": { ... } } },
+      { "item_id": "5002", "ok": false,
+        "error": { "code": "column_archived",
+                   "message": "Column status_4 is archived" } },
+      { "item_id": "5003", "ok": true,
+        "item": { "id": "5003", "name": "...", "columns": { ... } } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
+}
+```
+
+Per-record shape: `{item_id, ok}` always present; `item: <§6.2
+projection>` on `ok: true`, `error: {code, message}` on `ok: false`.
+`data.summary.failed_count` is the new partial-success-only slot;
+the invariant `matched_count === applied_count + failed_count`
+holds for every M25 success envelope.
+
+`data.operation: "item_update"` discriminates the partial-success
+envelope from M14's `add_users_to_workspace` / `delete_users_from_workspace`
+variants (same `data.operation` slot, different verbs). Inherits
+`buildPartialSuccessMutation` from `src/api/partial-success-mutation.ts`
+via a thin wrapper at `src/api/partial-success-bulk.ts`.
+
+The `--continue-on-error` flag is **orthogonal** to `--yes` — both
+must be acknowledged for the live partial-success path to fire.
+`--continue-on-error --dry-run` emits the same dry-run envelope as
+the fail-fast bulk path (N-element `planned_changes[]`); dry-run
+can't preview per-item failures because no per-item mutation fires.
+
 ### `item create --board <bid> --name <n> [--set ...] [--set-raw ...] [--group ...] [--position ... --relative-to ...]`
 
 Top-level item create (M9). All `--set` / `--set-raw` values bundle

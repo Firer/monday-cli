@@ -99,6 +99,13 @@ import {
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
+import {
+  runPartialSuccessBulkUpdate,
+  buildPartialSuccessBulkSummary,
+  partialSuccessBulkUpdateDataSchema,
+  PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE,
+  type PartialSuccessBulkUpdateData,
+} from '../../api/partial-success-bulk.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 const CHANGE_SIMPLE_COLUMN_VALUE_MUTATION = `
@@ -217,6 +224,21 @@ const inputSchema = z
       )
       .optional(),
     createLabelsIfMissing: z.boolean().optional(),
+    // M25 pre-flight (cli-design §6.4 "Bulk per-item partial-success"
+    // sub-section). Opt-in to the partial-success bulk envelope on
+    // `--where` / `--filter-json` shapes; the v0.1 fail-fast default
+    // is preserved when the flag is absent. Decision 6 closed at the
+    // M25 pre-flight contract diff — positive form (`--continue-on-
+    // error`) keeps the flag self-describing without an agent having
+    // to remember which side of the default the negative-form
+    // (`--no-fail-fast`) flips.
+    //
+    // Argv-parse-time validation: the flag is only meaningful on
+    // bulk shapes (single-item update has no per-item-failure
+    // surface — a single-item failure IS the whole-call failure).
+    // `validateInputShape` rejects `--continue-on-error` on the
+    // single-item path with a `usage_error`.
+    continueOnError: z.boolean().optional(),
   })
   .strict()
   // At least one of --set / --set-raw / --name must be provided. An
@@ -271,6 +293,14 @@ const validateInputShape = (parsed: ParsedInput): DispatchShape => {
     );
   }
   if (hasItemId) {
+    if (parsed.continueOnError === true) {
+      throw new UsageError(
+        '--continue-on-error is only valid on the bulk shape (--where / ' +
+          '--filter-json). Single-item update has no per-item-failure ' +
+          'surface — a single-item failure IS the whole-call failure.',
+        { details: { item_id: parsed.itemId } },
+      );
+    }
     /* c8 ignore next 4 — defensive: hasItemId === true means
        parsed.itemId is non-undefined; the type guard exists for TS. */
     if (parsed.itemId === undefined) {
@@ -335,6 +365,10 @@ export const itemUpdateCommand: CommandModule<
       .option(
         '--create-labels-if-missing',
         'auto-create unknown status / dropdown labels (Monday flag)',
+      )
+      .option(
+        '--continue-on-error',
+        'bulk only: attempt every matched item and emit a partial-success envelope with per-item {item_id, ok, error?} records (v0.3-M25)',
       )
       .addHelpText(
         'after',
@@ -1003,6 +1037,56 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         ];
 
   const mutation: SelectedMutation = selectMutation(allTranslated);
+
+  // M25 pre-flight (cli-design §6.4 "Bulk per-item partial-success").
+  // The `--continue-on-error` flag routes through the partial-success
+  // bulk dispatch helper at `src/api/partial-success-bulk.ts` instead
+  // of the fail-fast loop below. The branch lives under
+  // `c8 ignore start/stop` per the M21/M22/M24 pre-flight cadence;
+  // runtime body lift lands at M25 implementation along with the
+  // stub helper's per-item-dispatch body. The fail-fast bulk path
+  // below stays unchanged — the v0.2 envelope shape (top-level
+  // `error` with `details.applied_to` decoration on per-item failure)
+  // is preserved for agents who haven't migrated to read
+  // `data.results[]`.
+  /* c8 ignore start */
+  if (parsed.continueOnError === true) {
+    const partialResult = await runPartialSuccessBulkUpdate({
+      client,
+      boardId,
+      matchedItemIds,
+      mutation,
+      createLabelsIfMissing: parsed.createLabelsIfMissing,
+    });
+    // Per-item dispatch leg is always live — fold into the
+    // aggregator. Mirrors the fail-fast path's terminal
+    // `sourceAgg.record('live', null)` (cli-design §6.4 +
+    // SourceAggregator precedent).
+    sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE, null);
+    const summary = buildPartialSuccessBulkSummary({
+      matchedCount: matchedItemIds.length,
+      boardId,
+      results: partialResult.results,
+    });
+    const partialData: PartialSuccessBulkUpdateData = {
+      operation: 'item_update',
+      summary,
+      results: partialResult.results,
+    };
+    emitMutation({
+      ctx,
+      data: partialData,
+      schema: partialSuccessBulkUpdateDataSchema,
+      programOpts,
+      warnings: collectedWarnings,
+      ...sourceAgg.result(),
+      apiVersion,
+      resolvedIds,
+    });
+    return;
+  }
+  /* c8 ignore stop */
+
   const appliedItems: ProjectedItem[] = [];
   // Codex pass-1 F3: F4's `validation_failed` → `column_archived`
   // remap must fire on bulk per-item failures too — agents key off
