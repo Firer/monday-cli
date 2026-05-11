@@ -863,18 +863,16 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 
   const mutation: SelectedMutation = selectMutation(allTranslated);
 
-  // M25 pre-flight (cli-design §6.4 "Bulk per-item partial-success").
-  // The `--continue-on-error` flag routes through the partial-success
-  // bulk dispatch helper at `src/api/partial-success-bulk.ts` instead
-  // of the fail-fast loop below. The branch lives under
-  // `c8 ignore start/stop` per the M21/M22/M24 pre-flight cadence;
-  // runtime body lift lands at M25 implementation along with the
-  // stub helper's per-item-dispatch body. The fail-fast bulk path
-  // below stays unchanged — the v0.2 envelope shape (top-level
-  // `error` with `details.applied_to` decoration on per-item failure)
-  // is preserved for agents who haven't migrated to read
-  // `data.results[]`.
-  /* c8 ignore start */
+  // M25 (cli-design §6.4 "Bulk per-item partial-success"). The
+  // `--continue-on-error` flag routes through the partial-success
+  // bulk dispatch helper at `src/api/partial-success-bulk.ts`
+  // instead of the fail-fast loop below. Runtime body landed at
+  // M25 implementation; the c8-ignore-wrapped routing branch from
+  // the pre-flight contract diff (`d5839a9`) has dropped. The
+  // fail-fast bulk path below stays unchanged — the v0.2 envelope
+  // shape (top-level `error` with `details.applied_to` decoration
+  // on per-item failure) is preserved for agents who haven't
+  // migrated to read `data.results[]`.
   if (parsed.continueOnError === true) {
     // Codex round-1 P1-1 fix: thread the foldAndRemap context
     // through to the wrapper so per-item failures inherit the
@@ -926,7 +924,6 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     });
     return;
   }
-  /* c8 ignore stop */
 
   const appliedItems: ProjectedItem[] = [];
   // Codex pass-1 F3: F4's `validation_failed` → `column_archived`

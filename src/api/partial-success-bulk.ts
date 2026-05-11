@@ -86,9 +86,14 @@
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { ApiError, MondayCliError } from '../utils/errors.js';
 import { projectedItemSchema, type ProjectedItem } from './item-projection.js';
-import type { PartialSuccessResult } from './partial-success-mutation.js';
+import {
+  dispatchSequential,
+  type PartialSuccessResult,
+} from './partial-success-mutation.js';
+import { executeItemMutation } from './item-mutation-execute.js';
+import { foldAndRemap } from './resolver-error-fold.js';
 import type { ResolverWarning } from './columns.js';
 import type { SelectedMutation } from './column-values.js';
 import type { MondayClient } from './client.js';
@@ -281,38 +286,31 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
 
 /**
  * Drives the per-item dispatch loop under `--continue-on-error`.
- * Pre-flight stub — runtime body lands at M25 implementation
- * per the M21 oauth-stub / M24 history-stub precedent.
  *
- * **`Promise.reject` shape** so commander's async-rejection
- * routing surfaces the stub through the runner's envelope
- * mapper (sync throws can be swallowed by commander's own
- * error path — the M20 time-track + M21 oauth + M24 history
- * stub pattern). The hint points at the M25 implementation
- * session so the agent reading the rejection knows the verb
- * is staged for the next milestone close.
+ * Implementation (M25 impl `78889df` refactor + this commit):
  *
- * Runtime body (M25 impl):
- *   1. Loop `dispatchSequential` over `matchedItemIds` with
- *      id-field `'item_id'`.
- *   2. Per-item dispatch callback fires `executeMutation`
- *      (the existing helper or a lifted shared version). On a
- *      `MondayCliError` catch, run `foldAndRemap` with
- *      `resolverWarnings` + `remapColumnIds` + `env` +
- *      `noCache` + `resolutionSource` from the inputs BEFORE
- *      re-throwing into `dispatchSequential`. This makes the
- *      per-record `error.code` in `data.results[]` carry the
- *      SAME stable code (`column_archived` after a
- *      stale-cache `validation_failed` remap) that the v0.1
- *      fail-fast path would have surfaced at the top level —
- *      Codex round-1 P1-1 contract requirement (cli-design
- *      §6.5 stable-code rule applies uniformly across the
- *      bulk fail-modes).
+ *   1. Loop {@link dispatchSequential} over `matchedItemIds`
+ *      with id-field `'item_id'`.
+ *   2. Per-item dispatch callback fires
+ *      {@link executeItemMutation} against the resolved
+ *      `SelectedMutation`. On a {@link MondayCliError} catch,
+ *      run {@link foldAndRemap} with `resolverWarnings` +
+ *      `remapColumnIds` + `env` + `noCache` + `resolutionSource`
+ *      from the inputs BEFORE re-throwing into
+ *      `dispatchSequential`. This makes the per-record
+ *      `error.code` in `data.results[]` carry the SAME stable
+ *      code (`column_archived` after a stale-cache
+ *      `validation_failed` remap) that the v0.1 fail-fast
+ *      path would have surfaced at the top level — Codex
+ *      round-1 P1-1 contract requirement (cli-design §6.5
+ *      stable-code rule applies uniformly across the bulk
+ *      fail-modes).
  *   3. On success, capture the `ProjectedItem` into a side
  *      map keyed by `item_id`.
  *   4. After the loop, walk the `dispatchSequential` results
  *      and fold the per-item `ProjectedItem` from the side
- *      map into each `results[i].item` slot. Failure records
+ *      map into each `results[i].item` slot via
+ *      {@link foldPartialSuccessBulkResult}. Failure records
  *      already carry `error: {code, message}` (with the
  *      foldAndRemap-applied code) via
  *      `dispatchSequential`'s built-in error decoration.
@@ -328,25 +326,104 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  * — papering over `internal_error` would hide the malformed-
  * response signal agents need to know about. The M25 wrapper
  * inherits this behaviour by NOT wrapping the
- * `dispatchSequential` re-throw.
+ * `dispatchSequential` re-throw — `foldAndRemap` only ever
+ * runs against {@link MondayCliError} instances, and it
+ * NEVER converts a non-internal_error into internal_error,
+ * so the re-throw path through dispatchSequential remains
+ * the canonical schema-drift surface.
+ *
+ * **Non-`MondayCliError` re-throw.** Programmer-bug exceptions
+ * (TypeError, RangeError, etc.) raised by the executor or by
+ * `foldAndRemap`'s refresh probe propagate through
+ * `dispatchSequential`'s non-CliError re-throw branch unchanged,
+ * surfacing as whole-call `internal_error` via the runner's
+ * catch-all (mirrors M14's pattern at
+ * `users-fan-out-mutation.ts` and the documented behaviour at
+ * `partial-success-mutation.ts:93`).
  */
-/* c8 ignore start */
-export const runPartialSuccessBulkUpdate = (
-  _inputs: RunPartialSuccessBulkUpdateInputs,
-): Promise<RunPartialSuccessBulkUpdateResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      '`runPartialSuccessBulkUpdate` is a v0.3-M25 pre-flight stub — runtime partial-success bulk dispatch lands at M25 implementation.',
-      {
-        details: {
-          hint:
-            'M25 implementation kickoff (next session) lands the runtime per-item dispatch body via `dispatchSequential` per the docstring spec — id-field "item_id", per-item executeMutation + foldAndRemap wiring, ProjectedItem side-map fold, then `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE, null)` at the action layer.',
-        },
-      },
-    ),
+export const runPartialSuccessBulkUpdate = async (
+  inputs: RunPartialSuccessBulkUpdateInputs,
+): Promise<RunPartialSuccessBulkUpdateResult> => {
+  const {
+    client,
+    boardId,
+    matchedItemIds,
+    mutation,
+    createLabelsIfMissing,
+    resolverWarnings,
+    remapColumnIds,
+    env,
+    noCache,
+    resolutionSource,
+  } = inputs;
+
+  const projectedById = new Map<string, ProjectedItem>();
+
+  const dispatchResults = await dispatchSequential(
+    matchedItemIds,
+    'item_id',
+    async ({ targetId }) => {
+      try {
+        const result = await executeItemMutation(client, {
+          mutation,
+          itemId: targetId,
+          boardId,
+          createLabelsIfMissing,
+        });
+        projectedById.set(targetId, result.projected);
+      } catch (err: unknown) {
+        if (err instanceof MondayCliError) {
+          // Codex pre-flight round-1 P1-1: thread the remap
+          // context through so per-item failures inherit the
+          // SAME `validation_failed` → `column_archived`
+          // stale-cache remap the v0.1 fail-fast path applies.
+          // Without this, archived-column failures would
+          // surface as `validation_failed` in `data.results[]`
+          // even though the v0.1 path surfaces `column_archived`
+          // for the same root cause (cli-design §6.5 stable-
+          // code rule). foldAndRemap NEVER converts a non-
+          // internal_error into internal_error, so
+          // dispatchSequential's internal_error re-throw escape
+          // hatch (M14 round-2 F1) stays intact.
+          const remapped = await foldAndRemap({
+            err,
+            warnings: resolverWarnings,
+            client,
+            boardId,
+            columnIds: remapColumnIds,
+            env,
+            noCache,
+            resolutionSource,
+          });
+          throw remapped;
+        }
+        // Non-MondayCliError — programmer bug. Re-throw through
+        // dispatchSequential's non-CliError branch so the runner's
+        // catch-all surfaces it as internal_error (whole-call,
+        // not per-record). Mirrors users-fan-out-mutation.ts
+        // and is the documented dispatchSequential contract.
+        throw err;
+      }
+    },
   );
-/* c8 ignore stop */
+
+  const results: PartialSuccessBulkUpdateResult[] = dispatchResults.map(
+    (row) => {
+      // Side-map lookup requires the item_id string from the row;
+      // foldPartialSuccessBulkResult also enforces the same
+      // invariant + throws internal_error if the id-field is
+      // missing or non-string (dispatchSequential contract).
+      const itemIdSlot = row.item_id;
+      const projected =
+        typeof itemIdSlot === 'string'
+          ? projectedById.get(itemIdSlot)
+          : undefined;
+      return foldPartialSuccessBulkResult(row, projected);
+    },
+  );
+
+  return { results };
+};
 
 /**
  * Pure helper — folds a `dispatchSequential` result row + a

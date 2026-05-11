@@ -1876,3 +1876,729 @@ describe('monday item update bulk — --set-raw (M8)', () => {
     expect(env.error?.details?.read_only).toBe(true);
   });
 });
+
+// ============================================================
+// M25 — `--continue-on-error` partial-success bulk path
+// (cli-design §6.4 "Bulk per-item partial-success" sub-section).
+// ============================================================
+
+describe('monday item update bulk — --continue-on-error (M25 partial-success)', () => {
+  const buildItem = (id: string, name = `Item ${id}`): typeof sampleItem => ({
+    ...sampleItem,
+    id,
+    name,
+  });
+
+  it('rejects --continue-on-error on the single-item shape at argv-parse time (no network call fires)', async () => {
+    // The flag is meaningful only on bulk shapes — a single-item
+    // failure IS the whole-call failure. validateInputShape rejects
+    // before any network call.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--continue-on-error',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/single-item/i);
+  });
+
+  it('without --yes (and without --dry-run) surfaces confirmation_required regardless of --continue-on-error (gate orthogonality)', async () => {
+    // Confirmation gate is orthogonal to --continue-on-error; both
+    // must be acknowledged for the live partial-success path to
+    // fire. cli-design §6.4 confirmation-gate paragraph.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('confirmation_required');
+  });
+
+  it('empty match emits the v0.1 fail-fast empty-match envelope shape (NOT partial-success) — cli-design §6.4 empty-match paragraph', async () => {
+    // Codex round-2 P2-1: the partial-success envelope shape only
+    // materialises when at least one per-item dispatch fires. An
+    // empty match emits the v0.1 envelope (items: [] + no
+    // failed_count / results / operation), regardless of
+    // --continue-on-error.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=NoSuchStatus',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number; board_id: string };
+        items?: readonly unknown[];
+        operation?: unknown;
+        results?: readonly unknown[];
+      };
+    };
+    expect(env.data.summary).toEqual({
+      matched_count: 0,
+      applied_count: 0,
+      board_id: '111',
+    });
+    expect(env.data.items).toEqual([]);
+    // Partial-success-specific fields stay absent on the empty-match shape.
+    expect(env.data.operation).toBeUndefined();
+    expect(env.data.results).toBeUndefined();
+  });
+
+  it('--dry-run + --continue-on-error emits the v0.1 dry-run shape unchanged (N-element planned_changes[], no partial-success envelope) — cli-design §6.4 dry-run paragraph', async () => {
+    // Dry-run can't preview per-item failures because no dispatch
+    // fires — the partial-success envelope only materialises on
+    // live dispatch. cli-design §6.4 dry-run paragraph.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--continue-on-error',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [buildItem('5001')] } },
+          },
+          {
+            operation_name: 'ItemDryRunRead',
+            response: { data: { items: [buildItem('5002')] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: null;
+      planned_changes: readonly { item_id: string }[];
+    };
+    expect(env.data).toBeNull();
+    expect(env.planned_changes.length).toBe(2);
+    expect(env.planned_changes[0]?.item_id).toBe('5001');
+    expect(env.planned_changes[1]?.item_id).toBe('5002');
+  });
+
+  it('all-success: N items succeed → ok: true + summary.failed_count: 0 + per-record item populated', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }, { id: '5003' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5003') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: {
+          matched_count: number;
+          applied_count: number;
+          failed_count: number;
+          board_id: string;
+        };
+        results: readonly {
+          item_id: string;
+          ok: boolean;
+          item?: { id: string };
+          error?: { code: string };
+        }[];
+      };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary).toEqual({
+      matched_count: 3,
+      applied_count: 3,
+      failed_count: 0,
+      board_id: '111',
+    });
+    expect(env.data.results).toHaveLength(3);
+    for (const record of env.data.results) {
+      expect(record.ok).toBe(true);
+      expect(record.item?.id).toBe(record.item_id);
+      expect(record.error).toBeUndefined();
+    }
+    // resolved_ids slot inherited from v0.1 bulk envelope.
+    expect(env.resolved_ids).toEqual({ status: 'status_4' });
+  });
+
+  it('all-failed: N items reject → top-level ok: true (universal partial-success) + summary.applied_count: 0 + per-record error populated', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0); // universal partial-success: still ok: true
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: {
+          matched_count: number;
+          applied_count: number;
+          failed_count: number;
+        };
+        results: readonly {
+          item_id: string;
+          ok: boolean;
+          error?: { code: string };
+        }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary.matched_count).toBe(2);
+    expect(env.data.summary.applied_count).toBe(0);
+    expect(env.data.summary.failed_count).toBe(2);
+    expect(env.data.results).toHaveLength(2);
+    for (const record of env.data.results) {
+      expect(record.ok).toBe(false);
+      expect(record.error?.code).toBe('validation_failed');
+    }
+  });
+
+  it('mixed success/failure: per-record outcomes preserved in input order', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '5001' },
+                        { id: '5002' },
+                        { id: '5003' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5003') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: {
+          matched_count: number;
+          applied_count: number;
+          failed_count: number;
+        };
+        results: readonly {
+          item_id: string;
+          ok: boolean;
+          item?: { id: string };
+          error?: { code: string };
+        }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary).toMatchObject({
+      matched_count: 3,
+      applied_count: 2,
+      failed_count: 1,
+    });
+    expect(env.data.results[0]).toMatchObject({
+      item_id: '5001',
+      ok: true,
+    });
+    expect(env.data.results[0]?.item?.id).toBe('5001');
+    expect(env.data.results[1]).toMatchObject({
+      item_id: '5002',
+      ok: false,
+    });
+    expect(env.data.results[1]?.error?.code).toBe('validation_failed');
+    expect(env.data.results[1]?.item).toBeUndefined();
+    expect(env.data.results[2]).toMatchObject({
+      item_id: '5003',
+      ok: true,
+    });
+  });
+
+  it('stale-cache archived column: per-item validation_failed remaps to column_archived (Codex pre-flight round-1 P1-1)', async () => {
+    // Codex pre-flight round-1 P1-1 contract MUST: per-item
+    // failures inherit the SAME foldAndRemap remap the v0.1 fail-
+    // fast path applies. A cache-sourced validation_failed +
+    // BoardMetadata-refresh-confirms-archived → per-record
+    // error.code is column_archived, not validation_failed
+    // (cli-design §6.5 stable-code rule applies uniformly).
+    const cachedActive = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const refreshedArchived = {
+      ...cachedActive,
+      columns: [{ ...cachedActive.columns[0], archived: true }],
+    };
+    // Seed cache.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: { boards: [{ items_page: { cursor: null, items: [] } }] },
+            },
+          },
+        ],
+      },
+    );
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          // Cache hit on metadata — no BoardMetadata fetch.
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          // First item: validation_failed (will remap per-item).
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          // foldAndRemap probe: refresh confirms archived.
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedArchived] } },
+          },
+          // Second item: also validation_failed → also remaps.
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+          // Second item's foldAndRemap probe.
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedArchived] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: { failed_count: number };
+        results: readonly {
+          item_id: string;
+          ok: boolean;
+          error?: { code: string; message: string };
+        }[];
+      };
+    };
+    expect(env.data.summary.failed_count).toBe(2);
+    for (const record of env.data.results) {
+      expect(record.ok).toBe(false);
+      // The remap is the load-bearing assertion — without P1-1's
+      // foldAndRemap context-threading, per-record codes would
+      // surface as validation_failed for archived-column root
+      // causes, breaking cli-design §6.5's stable-code rule.
+      expect(record.error?.code).toBe('column_archived');
+    }
+  });
+
+  it('internal_error from a per-item wire call re-throws as whole-call (top-level ok: false), preserving M14 round-2 F1 escape hatch', async () => {
+    // M14 round-2 F1 / round-3 F1 precedent — dispatchSequential
+    // re-throws internal_error so schema-drift in the response
+    // surfaces as whole-call rather than per-record. The M25
+    // wrapper inherits this behaviour by NOT wrapping the
+    // dispatchSequential re-throw.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          // First item: malformed response (missing root key) —
+          // assertResponseFieldPresent throws internal_error.
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: {} },
+          },
+        ],
+      },
+    );
+    // Whole-call abort — top-level ok: false (exit 2 — API
+    // error envelope), NOT a partial-success envelope with the
+    // schema-drift hidden inside data.results[].
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('resolver warnings on the bulk envelope are preserved across the partial-success path (collected from filter + resolution legs)', async () => {
+    // Resolver warnings (column_token_collision /
+    // stale_cache_refreshed) collected from the filter +
+    // resolution legs surface on the partial-success envelope's
+    // top-level warnings slot, mirroring the v0.1 fail-fast bulk
+    // success envelope. Setup: collide title-keyed token so
+    // detectCollision emits warnings during resolution.
+    const collidingMeta = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'text_other',
+          title: 'STATUS_4',
+          type: 'text',
+          description: null,
+          archived: null,
+          settings_str: null,
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--filter-json',
+        '{"rules":[]}',
+        '--set',
+        'status_4=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [collidingMeta] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    const collisionWarnings = env.warnings.filter(
+      (w) => w.code === 'column_token_collision',
+    );
+    expect(collisionWarnings.length).toBeGreaterThan(0);
+  });
+});
