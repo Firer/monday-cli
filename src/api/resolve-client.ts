@@ -25,7 +25,7 @@
  * call sees the live config (same as the SDK's per-call client).
  */
 
-import { createFetchTransport } from './transport.js';
+import { createFetchTransport, type Transport } from './transport.js';
 import {
   MondayClient,
   PINNED_API_VERSION,
@@ -69,6 +69,16 @@ export interface ResolvedClient {
    * through `toEmit` below.
    */
   readonly apiVersion: string;
+  /**
+   * The underlying `Transport` (the same instance the client is
+   * built over). Exposed so commands that bypass `MondayClient`'s
+   * typed surface — like `monday usage`'s `fetchUsage`, which calls
+   * the raw transport via its own internal client to keep the probe
+   * vs. command code paths sharing one Transport contract — don't
+   * have to rebuild the transport via duplicating the
+   * env → flag → SDK-pin precedence.
+   */
+  readonly transport: Transport;
   /**
    * Builds the `EmitFromNetworkResult` shape for a given network
    * response — closes over the resolved `apiVersion` so call sites
@@ -130,5 +140,5 @@ export const resolveClient = (
     cacheAgeSeconds: null,
   });
 
-  return { client, globalFlags, apiVersion, toEmit };
+  return { client, globalFlags, apiVersion, transport, toEmit };
 };

@@ -49,6 +49,7 @@
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
+import { MondayClient } from './client.js';
 import type { Transport } from './transport.js';
 
 /**
@@ -222,25 +223,54 @@ export interface FetchUsageInputs {
  * through {@link usageQueryResponseSchema}, and projects via
  * {@link projectUsageOutput}.
  *
- * Stub at the M22 pre-flight — the runtime body lands at M22
- * implementation kickoff alongside the `monday usage` command's
- * action. Throws `internal_error` until M22 implementation swaps
- * the body.
+ * Throws `ApiError('internal_error')` with `details.issues` when the
+ * response doesn't match the empirical-probe-pinned shape — a parse
+ * failure means Monday changed the `platform_api` surface, which is
+ * a v0.3.x amendment (not a routine failure).
+ *
+ * The `today` string is opaque equality-key for `by_day[].day`
+ * matching; the caller picks the format that matches Monday's
+ * runtime `day` field. The pre-flight probe captured an empty
+ * `by_day` list on the test account so the timezone semantics
+ * (UTC vs account-local) are confirmed at impl kickoff against an
+ * account with live activity.
  */
-// Stub: M22 implementation issues USAGE_QUERY via inputs.transport
-// and projects through projectUsageOutput. The pre-flight diff pins
-// the contract surface; the runtime body lands at M22 implementation.
-/* c8 ignore start */
-export const fetchUsage = (_inputs: FetchUsageInputs): Promise<UsageOutput> =>
-  Promise.reject(
-    new ApiError(
+export const fetchUsage = async (
+  inputs: FetchUsageInputs,
+): Promise<UsageOutput> => {
+  // Per-call client construction — `MondayClient` requires a `signal`
+  // for cooperative cancellation; production threads `ctx.signal`
+  // through. retries=0 because the auth probe is idempotent and the
+  // command-level retry policy doesn't apply to a usage read (one
+  // GraphQL call, no side effects). verbose=false because the
+  // `meta.complexity` budget for a `monday usage` call is itself
+  // best-effort meta — surfacing it via --verbose would re-trigger
+  // the GraphQL `complexity` budget the verb is reporting on.
+  const client = new MondayClient({
+    transport: inputs.transport,
+    signal: inputs.signal ?? new AbortController().signal,
+    retries: 0,
+    verbose: false,
+  });
+  const response = await client.raw<unknown>(USAGE_QUERY, undefined, {
+    operationName: 'MondayUsage',
+  });
+  const parsed = usageQueryResponseSchema.safeParse(response.data);
+  if (!parsed.success) {
+    throw new ApiError(
       'internal_error',
-      'fetchUsage is a v0.3-M22 pre-flight stub — runtime body lands at M22 implementation alongside the `monday usage` verb action.',
+      'Monday usage response did not match the expected `platform_api` shape',
       {
+        cause: parsed.error,
         details: {
-          hint: 'M22 implementation issues USAGE_QUERY against the transport, parses with usageQueryResponseSchema, and projects via projectUsageOutput.',
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+          hint: 'Monday may have amended the `platform_api.daily_*` surface — re-probe via `scripts/probe/m22-usage-by-day.ts` and amend cli-design §11.5.3 if so',
         },
       },
-    ),
-  );
-/* c8 ignore stop */
+    );
+  }
+  return projectUsageOutput(parsed.data, inputs.today);
+};

@@ -20,7 +20,7 @@ import {
   type UsageQueryResponse,
 } from '../../../src/api/usage.js';
 import { ApiError } from '../../../src/utils/errors.js';
-import type { Transport } from '../../../src/api/transport.js';
+import { createInlineFixtureTransport } from '../../fixtures/load.js';
 
 describe('USAGE_QUERY', () => {
   it('requests only daily_limit + by_day (no by_app/by_user)', () => {
@@ -187,18 +187,132 @@ describe('schemas', () => {
   });
 });
 
-describe('fetchUsage (pre-flight stub)', () => {
-  it('rejects with ApiError("internal_error") carrying the stub hint', async () => {
-    // Pre-flight stub — every invocation rejects. M22 implementation
-    // replaces this with the real fetch+project body. The reject is
-    // covered indirectly via the integration test for `monday usage`,
-    // but we assert the shape directly here for the surface contract.
-    const fakeTransport = {} as unknown as Transport;
-    await expect(
-      fetchUsage({ transport: fakeTransport, today: '2026-05-10' }),
-    ).rejects.toBeInstanceOf(ApiError);
-    await expect(
-      fetchUsage({ transport: fakeTransport, today: '2026-05-10' }),
-    ).rejects.toMatchObject({ code: 'internal_error' });
+describe('fetchUsage', () => {
+  const today = '2026-05-10';
+
+  it('returns the projected UsageOutput on the empirical-probe shape', async () => {
+    const transport = createInlineFixtureTransport([
+      {
+        operation_name: 'MondayUsage',
+        response: {
+          data: {
+            platform_api: {
+              daily_limit: { base: 200, total: 200 },
+              daily_analytics: {
+                last_updated: '2026-05-10T22:01:26.377Z',
+                by_day: [],
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const result = await fetchUsage({ transport, today });
+    expect(result).toEqual({
+      daily_limit: { base: 200, total: 200 },
+      usage_today: 0,
+      usage_remaining_today: 200,
+      last_updated: '2026-05-10T22:01:26.377Z',
+    });
+  });
+
+  it('sums by_day[].usage for today (active-account case)', async () => {
+    const transport = createInlineFixtureTransport([
+      {
+        operation_name: 'MondayUsage',
+        response: {
+          data: {
+            platform_api: {
+              daily_limit: { base: 200, total: 200 },
+              daily_analytics: {
+                last_updated: '2026-05-10T22:01:26.377Z',
+                by_day: [
+                  { day: '2026-05-09', usage: 5 },
+                  { day: today, usage: 17 },
+                ],
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const result = await fetchUsage({ transport, today });
+    expect(result.usage_today).toBe(17);
+    expect(result.usage_remaining_today).toBe(183);
+  });
+
+  it('throws ApiError("internal_error") with parse issues when shape drifts', async () => {
+    // Defensive: Monday changing `platform_api.daily_*` surface is a
+    // contract bug — surface it as internal_error so the runtime
+    // failure mode points operators at the amend-cli-design hint.
+    const transport = createInlineFixtureTransport([
+      {
+        operation_name: 'MondayUsage',
+        response: {
+          data: {
+            platform_api: {
+              daily_limit: { base: 'wrong-type', total: 200 },
+              daily_analytics: { last_updated: 'x', by_day: [] },
+            },
+          },
+        },
+      },
+    ]);
+    await expect(fetchUsage({ transport, today })).rejects.toBeInstanceOf(ApiError);
+    await expect(fetchUsage({ transport, today })).rejects.toMatchObject({
+      code: 'internal_error',
+    });
+  });
+
+  it('parse-failure details.issues lists the failing zod paths', async () => {
+    const transport = createInlineFixtureTransport([
+      {
+        operation_name: 'MondayUsage',
+        response: {
+          data: {
+            platform_api: {
+              daily_limit: { base: 200, total: 200 },
+              // Missing daily_analytics block — schema rejects.
+            },
+          },
+        },
+        repeat: 2,
+      },
+    ]);
+    let caught: unknown;
+    try {
+      await fetchUsage({ transport, today });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const apiErr = caught as ApiError;
+    const issues = (apiErr.details as { issues: { path: string }[] }).issues;
+    expect(Array.isArray(issues)).toBe(true);
+    expect(issues.length).toBeGreaterThan(0);
+  });
+
+  it('threads the signal through (cancellable via outer abort)', async () => {
+    const ctrl = new AbortController();
+    const transport = createInlineFixtureTransport([
+      {
+        operation_name: 'MondayUsage',
+        response: {
+          data: {
+            platform_api: {
+              daily_limit: { base: 200, total: 200 },
+              daily_analytics: {
+                last_updated: '2026-05-10T22:01:26.377Z',
+                by_day: [],
+              },
+            },
+          },
+        },
+        delay_ms: 100,
+      },
+    ]);
+    const promise = fetchUsage({ transport, today, signal: ctrl.signal });
+    setTimeout(() => { ctrl.abort(new Error('cancelled')); }, 5);
+    await expect(promise).rejects.toBeTruthy();
   });
 });
