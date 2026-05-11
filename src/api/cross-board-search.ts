@@ -28,11 +28,21 @@
  * `2026-01`, `scripts/probe/m23-cross-board.ts` +
  * `scripts/probe/m23-cross-board-search-2.ts`):**
  *
- *   1. **Per-board cursor walker.** Each board returns its own
- *      `items_page.cursor`; the fan-out walker maintains N
- *      per-board cursors (parent stream merges N child walkers).
- *      No parent cursor across boards — the trailer-meta shape is
- *      a per-board cursor map, not a single string.
+ *   1. **Single-call surface; no resumable cross-board cursor at
+ *      v0.3.** Each board returns its own `items_page.cursor`. The
+ *      v0.3 walker fans out across N boards in ONE GraphQL call,
+ *      collects each board's first page, and stops. When any
+ *      board's per-board cursor comes back non-null (board has
+ *      more items) OR the aggregate `--limit` short-circuited
+ *      mid-fan-out, the walker surfaces
+ *      {@link CrossBoardTruncatedWarning} with per-board state
+ *      (`exhausted` / `has_more` / `not_started`) for agent
+ *      introspection — but does NOT expose a resumable
+ *      cross-board cursor (Codex round-1 P1-2 resolution; v0.4
+ *      may add an opaque-token cursor envelope-additively). Agents
+ *      needing pagination today narrow with `--workspace` /
+ *      `--favorites` or use the v0.1 `--board <bid>` single-board
+ *      path (which has its own resumable cursor per §5.6).
  *   2. **Inaccessible board IDs silently omitted.**
  *      `boards(ids: [<bad-id>])` returns `{"boards":[]}` (empty,
  *      not null, not error) even on mixed accessible+inaccessible
@@ -393,7 +403,7 @@ export const validateMaxBoards = (
         details: {
           max_boards: rawValue,
           hard_cap: HARD_CAP_MAX_BOARDS,
-          hint: 'the cap protects against the 30s request timeout (Decision 5 wall-clock-latency rationale, not complexity-budget); narrow the cross-board set with --workspace <wid> or --favorites',
+          hint: 'the cap protects against the 30s request timeout (Decision 5 `3a2f1db` wall-clock-latency rationale, not complexity-budget); narrow the cross-board set with --workspace <wid> or --favorites',
         },
       },
     );
@@ -519,42 +529,24 @@ export const buildCrossBoardTruncatedWarning = (
 export interface CrossBoardSearchResult {
   readonly items: readonly CrossBoardItem[];
   /**
-   * `true` when the walker stopped before draining every board
-   * (`--limit` short-circuit OR any board's per-board cursor still
-   * has data). `false` when every requested board ran to exhaustion.
-   * When `true`, {@link CrossBoardTruncatedWarning} is also
-   * surfaced on `warnings[]` with the per-board state breakdown.
+   * `true` when the walker stopped before exhausting every board
+   * (`--limit` short-circuit OR any board's `items_page.cursor` was
+   * still non-null at the v0.3 single-call surface). `false` when
+   * every requested board's `cursor` came back `null` and the
+   * aggregate `--limit` did not fire. When `true`,
+   * {@link CrossBoardTruncatedWarning} is also surfaced on
+   * `warnings[]` with the per-board state breakdown for agent
+   * introspection.
    */
   readonly hasMore: boolean;
   readonly totalReturned: number;
   /**
-   * `source: 'live'` for the fan-out (cross-board search doesn't
-   * cache items); `source: 'cache'` / `'mixed'` may bubble up via
-   * the per-board column-resolution pass (`boardMetadata` cache hits)
-   * — the walker reports the AGGREGATE source so a single cached
-   * board-metadata resolution surfaces as `'mixed'` at the envelope.
-   * Per the M22 close F1 fix (commit `meta.source` BEFORE the
-   * orchestrator runs), the command-action sets the envelope's
-   * `source` slot from this aggregate.
-   */
-  readonly source: 'live' | 'cache' | 'mixed';
-  /**
-   * `cacheAgeSeconds` from the freshest cache-hit metadata load
-   * across the per-board column-resolution pre-pass. Null when every
-   * board's metadata loaded live (`source: 'live'`). The
-   * R39-mergeCacheAge contract treats the OLDEST cache leg as the
-   * worst-case staleness signal on the envelope; the walker
-   * computes this via the existing `mergeCacheAge` helper in the
-   * cross-board action body at M23 implementation.
-   */
-  readonly cacheAgeSeconds: number | null;
-  /**
-   * `meta.complexity` aggregated across the fan-out call(s). Per
-   * the project complexity-injection contract (`src/api/client.ts`
-   * — only the verbose path injects + parses), this is non-null
-   * only when the global `--verbose` flag is on. The walker reports
-   * the LATEST complexity snapshot across its calls (mirrors the
-   * `pagination.ts:complexity` pick-the-last-response rule).
+   * `meta.complexity` from the cross-board fan-out call. Per the
+   * project complexity-injection contract (`src/api/client.ts` —
+   * only the verbose path injects + parses), this is non-null only
+   * when the global `--verbose` flag is on. Single-call surface →
+   * single `Complexity` snapshot (no need to aggregate across
+   * pages).
    */
   readonly complexity: Complexity | null;
   readonly warnings: readonly (
@@ -562,6 +554,20 @@ export interface CrossBoardSearchResult {
     | ColumnNotFoundOnBoardWarning
     | CrossBoardTruncatedWarning
   )[];
+  /**
+   * **Codex round-2 P2-1 fix.** The walker result is pure-live for
+   * the cross-board fan-out itself — `boards(ids:) { items_page(...) }`
+   * hits Monday directly and never touches the cache. The action-
+   * layer wrapping (`monday item search` cross-board action body
+   * at M23 implementation) aggregates this `'live'` walker source
+   * with the per-board column-resolution pre-pass's cache state
+   * via the existing `SourceAggregator` helper, then emits the
+   * envelope's `meta.source` / `meta.cache_age_seconds` from the
+   * aggregator's resolved state. Keeping the source/cache slots
+   * OUT of the walker result avoids the walker pretending to know
+   * a state it can't compute from `CrossBoardSearchInputs` alone.
+   */
+  readonly source: 'live';
 }
 
 const stubReject = (): Promise<CrossBoardSearchResult> =>

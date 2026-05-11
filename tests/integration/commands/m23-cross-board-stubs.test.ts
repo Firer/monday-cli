@@ -346,6 +346,41 @@ describe('monday item search scoping-lever mutual exclusion', () => {
     expect(conflictIssue).toBeDefined();
     expect(conflictIssue?.path).toBe('');
   });
+
+  it('mutual-exclusion issue carries conflicting_flags in params (Codex round-2 P2-3)', async () => {
+    // The .superRefine guard threads `params.conflicting_flags`
+    // through to the error envelope's
+    // `details.issues[].params.conflicting_flags`, surfacing the
+    // structured list of conflicting scoping levers so agents can
+    // switch on it without parsing the English message.
+    const { stderr } = await driveM23([
+      'item',
+      'search',
+      '--workspace',
+      '999',
+      '--favorites',
+      '--where',
+      'status=Done',
+      '--json',
+    ]);
+    const envelope = parseEnvelope(stderr);
+    if (envelope.ok) throw new Error('expected error envelope');
+    const details = envelope.error.details as {
+      issues: readonly {
+        path: string;
+        message: string;
+        params?: { conflicting_flags?: readonly string[] };
+      }[];
+    };
+    const conflictIssue = details.issues.find((i) =>
+      i.message.includes('at most one of --board'),
+    );
+    expect(conflictIssue).toBeDefined();
+    expect(conflictIssue?.params?.conflicting_flags).toEqual([
+      'workspace',
+      'favorites',
+    ]);
+  });
 });
 
 describe('monday board favorites (M23 pre-flight stub)', () => {

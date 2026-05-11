@@ -52,6 +52,8 @@ import { ApiError, UsageError } from '../../utils/errors.js';
 import {
   DEFAULT_MAX_BOARDS,
   HARD_CAP_MAX_BOARDS,
+  crossBoardSearchOutputSchema,
+  type CrossBoardSearchOutput,
 } from '../../api/cross-board-search.js';
 import {
   loadBoardMetadata,
@@ -126,6 +128,34 @@ interface NextResponse {
 
 export const itemSearchOutputSchema = z.array(projectedItemSchema);
 export type ItemSearchOutput = readonly ProjectedItem[];
+
+/**
+ * The command-registry-facing output schema. Per Codex round-2 P1-1,
+ * `monday item search`'s registry-level `outputSchema` is a union of
+ * the v0.1 single-board projection (`itemSearchOutputSchema` —
+ * `ProjectedItem[]`) AND the v0.3-M23 cross-board projection
+ * (`crossBoardSearchOutputSchema` — `CrossBoardItem[]`, each item
+ * carrying its source board id+name). The action body emits via
+ * the branch-specific schema (single-board uses
+ * `itemSearchOutputSchema` for the existing v0.1 path; cross-board
+ * uses `crossBoardSearchOutputSchema` at M23 implementation). The
+ * UNION here keeps `monday schema item.search` accurate to the
+ * runtime output across both branches.
+ *
+ * **Why a plain union and not a discriminated union.** The two
+ * shapes overlap on `id` / `name` but differ on the `board` slot
+ * (absent in single-board; required object in cross-board). Adding
+ * an explicit `cross_board: true` discriminator to one branch
+ * would carry-cost on every cross-board row for marginal agent
+ * value (the presence of the `board` slot itself discriminates).
+ * Agents that care can check `'board' in item`; agents that just
+ * want `id`/`name` consume both shapes uniformly.
+ */
+export const itemSearchCommandOutputSchema = z.union([
+  itemSearchOutputSchema,
+  crossBoardSearchOutputSchema,
+]);
+export type ItemSearchCommandOutput = ItemSearchOutput | CrossBoardSearchOutput;
 
 const inputSchema = z
   .object({
@@ -339,19 +369,28 @@ const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> =>
 
 export const itemSearchCommand: CommandModule<
   z.infer<typeof inputSchema>,
-  ItemSearchOutput
+  ItemSearchCommandOutput
 > = {
   name: 'item.search',
-  summary: 'Search items by column value (any_of) on one board',
+  summary:
+    'Search items by column value (any_of) on one board (v0.1) or across many boards (v0.3-M23 — --workspace / --favorites / no-scoping-lever)',
   examples: [
     "monday item search --board 12345 --where 'status=Done'",
     "monday item search --board 12345 --where 'status=Done' --where 'status=Backlog'",
     'monday item search --board 12345 --where owner=me --json',
     'monday item search --board 12345 --where status=Done --all --output ndjson',
+    'monday item search --favorites --where status=Done                     # v0.3-M23',
+    'monday item search --workspace 67890 --where status=Done --max-boards 50  # v0.3-M23',
   ],
   idempotent: true,
   inputSchema,
-  outputSchema: itemSearchOutputSchema,
+  // Codex round-2 P1-1: command-registry-facing schema is the union
+  // of single-board + cross-board projections. The action body emits
+  // via the branch-specific schema below (existing v0.1 path uses
+  // `itemSearchOutputSchema` directly; M23 cross-board impl uses
+  // `crossBoardSearchOutputSchema`). The union keeps
+  // `monday schema item.search` accurate across both branches.
+  outputSchema: itemSearchCommandOutputSchema,
   attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun

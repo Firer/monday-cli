@@ -19,13 +19,38 @@
 import type { z } from 'zod';
 import { UsageError } from '../utils/errors.js';
 
+interface SummarisedIssue {
+  readonly path: string;
+  readonly message: string;
+  /**
+   * Optional structured params from `ZodIssue.params` (set via
+   * `ctx.addIssue({ ..., params })` in `.superRefine` /
+   * `.refine`). Preserved so structured per-issue context — e.g.
+   * the M23 `conflicting_flags` slot on the
+   * scoping-lever-mutual-exclusion issue — reaches the agent
+   * through the error envelope's `details.issues[].params`
+   * (Codex M23 pre-flight round-2 P2-3 fix).
+   */
+  readonly params?: Readonly<Record<string, unknown>>;
+}
+
 const summariseIssues = (
   err: z.ZodError,
-): { readonly summary: string; readonly issues: readonly { readonly path: string; readonly message: string }[] } => {
-  const issues = err.issues.map((issue) => ({
-    path: issue.path.map((p) => String(p)).join('.'),
-    message: issue.message,
-  }));
+): { readonly summary: string; readonly issues: readonly SummarisedIssue[] } => {
+  const issues: SummarisedIssue[] = err.issues.map((issue) => {
+    const base: SummarisedIssue = {
+      path: issue.path.map((p) => String(p)).join('.'),
+      message: issue.message,
+    };
+    // `ZodIssue.params` is optional + bare-Record; preserve only
+    // when present so the per-issue shape stays minimal for issues
+    // that don't carry structured context.
+    const maybeParams = (issue as { params?: Record<string, unknown> }).params;
+    if (maybeParams !== undefined) {
+      return { ...base, params: maybeParams };
+    }
+    return base;
+  });
   const summary = issues
     .map((i) => (i.path.length > 0 ? `${i.path}: ${i.message}` : i.message))
     .join('; ');
