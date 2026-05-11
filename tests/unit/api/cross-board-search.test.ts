@@ -15,17 +15,19 @@ import {
   DEFAULT_MAX_BOARDS,
   HARD_CAP_MAX_BOARDS,
   buildColumnNotFoundOnBoardWarning,
+  buildCrossBoardTruncatedWarning,
   buildInaccessibleBoardsWarning,
   columnNotFoundOnBoardWarningSchema,
   crossBoardItemSchema,
   crossBoardSearch,
   crossBoardSearchOutputSchema,
+  crossBoardTruncatedWarningSchema,
   inaccessibleBoardsWarningSchema,
   maxBoardsSchema,
   validateMaxBoards,
 } from '../../../src/api/cross-board-search.js';
 import { ApiError } from '../../../src/utils/errors.js';
-import type { Transport } from '../../../src/api/transport.js';
+import type { MondayClient } from '../../../src/api/client.js';
 import type { BoardId } from '../../../src/types/ids.js';
 
 describe('Decision 5 constants', () => {
@@ -118,6 +120,85 @@ describe('buildInaccessibleBoardsWarning', () => {
   it('hint mentions the silent-omit semantics', () => {
     const w = buildInaccessibleBoardsWarning(['1', '2'], ['1']);
     expect(w.details.hint).toMatch(/silently omitted|boards\(ids/);
+  });
+});
+
+describe('buildCrossBoardTruncatedWarning (Codex P1-2 single-call surface)', () => {
+  it('reports limit_hit when --limit short-circuited the walk', () => {
+    const w = buildCrossBoardTruncatedWarning(
+      'limit_hit',
+      500,
+      500,
+      { '1': 'exhausted', '2': 'has_more', '3': 'not_started' },
+    );
+    expect(w.code).toBe('cross_board_truncated');
+    expect(w.details.reason).toBe('limit_hit');
+    expect(w.details.total_returned).toBe(500);
+    expect(w.details.limit).toBe(500);
+    expect(w.details.per_board_state).toEqual({
+      '1': 'exhausted',
+      '2': 'has_more',
+      '3': 'not_started',
+    });
+  });
+
+  it('reports board_has_more when boards exceed the v0.3 single-call surface', () => {
+    const w = buildCrossBoardTruncatedWarning(
+      'board_has_more',
+      1_200,
+      null,
+      { '1': 'has_more', '2': 'has_more' },
+    );
+    expect(w.details.reason).toBe('board_has_more');
+    expect(w.details.limit).toBe(null);
+  });
+
+  it("limit_hit hint references --limit + narrowing levers + the v0.1 single-board path", () => {
+    const w = buildCrossBoardTruncatedWarning(
+      'limit_hit',
+      25,
+      25,
+      {},
+    );
+    expect(w.details.hint).toMatch(/--limit/);
+    expect(w.details.hint).toMatch(/--workspace|--favorites/);
+    expect(w.details.hint).toMatch(/--board/);
+  });
+
+  it("board_has_more hint points at v0.4-deferred resumable cursor + narrowing", () => {
+    const w = buildCrossBoardTruncatedWarning(
+      'board_has_more',
+      1_000,
+      null,
+      {},
+    );
+    expect(w.details.hint).toMatch(/v0\.3 cross-board single-call|narrow|--board/);
+  });
+
+  it('parses against the schema', () => {
+    const w = buildCrossBoardTruncatedWarning(
+      'limit_hit',
+      10,
+      10,
+      { '1': 'exhausted', '2': 'has_more' },
+    );
+    expect(() => crossBoardTruncatedWarningSchema.parse(w)).not.toThrow();
+  });
+
+  it('schema rejects unknown per-board state values', () => {
+    expect(() =>
+      crossBoardTruncatedWarningSchema.parse({
+        code: 'cross_board_truncated',
+        message: 'x',
+        details: {
+          reason: 'limit_hit',
+          total_returned: 0,
+          limit: 10,
+          per_board_state: { '1': 'unknown' },
+          hint: 'h',
+        },
+      }),
+    ).toThrow();
   });
 });
 
@@ -229,19 +310,19 @@ describe('crossBoardSearch (pre-flight stub)', () => {
   // here confirms the rejection shape so command-level integration
   // tests get a stable failure pattern.
   it('rejects every invocation with internal_error', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     const fakeBoardIds: readonly BoardId[] = [];
     const fakePlans: readonly { board_id: BoardId; rules: readonly never[] }[] = [];
     await expect(
       crossBoardSearch({
-        transport: fakeTransport,
+        client: fakeClient,
         boardIds: fakeBoardIds,
         plans: fakePlans,
       }),
     ).rejects.toBeInstanceOf(ApiError);
     await expect(
       crossBoardSearch({
-        transport: fakeTransport,
+        client: fakeClient,
         boardIds: fakeBoardIds,
         plans: fakePlans,
       }),
@@ -249,10 +330,10 @@ describe('crossBoardSearch (pre-flight stub)', () => {
   });
 
   it('rejection message mentions M23 + the cross-board surface', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     try {
       await crossBoardSearch({
-        transport: fakeTransport,
+        client: fakeClient,
         boardIds: [],
         plans: [],
       });
@@ -266,10 +347,10 @@ describe('crossBoardSearch (pre-flight stub)', () => {
   });
 
   it('rejection details.hint points at the M23 implementation surface', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     try {
       await crossBoardSearch({
-        transport: fakeTransport,
+        client: fakeClient,
         boardIds: [],
         plans: [],
       });

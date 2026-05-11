@@ -72,7 +72,8 @@
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
 import { BoardIdSchema, type BoardId } from '../types/ids.js';
-import type { Transport } from './transport.js';
+import type { MondayClient } from './client.js';
+import type { Complexity } from '../utils/output/envelope.js';
 
 /**
  * Default cross-board fan-out cap per Decision 5 closure (`3a2f1db`).
@@ -106,7 +107,7 @@ export const maxBoardsSchema = z.coerce
   .int()
   .positive()
   .max(HARD_CAP_MAX_BOARDS, {
-    message: `--max-boards exceeds the hard cap of ${String(HARD_CAP_MAX_BOARDS)}; narrow the cross-board set with --workspace or --favorites`,
+    message: `--max-boards exceeds the hard cap of ${String(HARD_CAP_MAX_BOARDS)} (wall-clock fan-out latency cap, not a complexity-budget cap; ~0.5-1.5s per call at small N puts N>=60 at the 30s MONDAY_REQUEST_TIMEOUT_MS ceiling per the Decision 5 \`3a2f1db\` empirical-probe finding); narrow the cross-board set with --workspace or --favorites`,
   });
 
 /**
@@ -139,6 +140,14 @@ export interface PerBoardScanPlan {
  * Inputs to {@link crossBoardSearch}. The pre-flight pins the shape;
  * M23 implementation fills in the body.
  *
+ * - `client` — the resolved {@link MondayClient}. **Codex P1-1
+ *   fix**: pre-flight previously took `Transport` directly, which
+ *   would bypass MondayClient's `--retry` + `--verbose`-complexity
+ *   injection at M23 implementation. Taking the client preserves
+ *   the project's retry contract (cli-design §3.1) and routes
+ *   verbose-complexity through the existing
+ *   `injectComplexity`/`parseComplexity` pair in `src/api/client.ts`
+ *   without re-implementing it per-call.
  * - `boardIds` — the resolved cross-board set (after `--workspace`
  *   / `--favorites` expansion); the walker fans out across these.
  *   At runtime, `boardIds.length` is enforced ≤ {@link HARD_CAP_MAX_BOARDS}
@@ -155,16 +164,15 @@ export interface PerBoardScanPlan {
  *   default 100 per the project pagination default.
  * - `maxItems` — caller-supplied `--limit` cap across the entire
  *   fan-out (not per-board). The walker stops once the aggregate
- *   collected count reaches the cap.
+ *   collected count reaches the cap and surfaces a
+ *   {@link CrossBoardTruncatedWarning}.
  * - `onItem` — streaming hook per the v0.3-plan §3 M23 deliverable
  *   ("Reuse `startNdjsonStream` + `walkPages.onItem`"). Called per
  *   item-arrival across all boards; backpressure through the hook
  *   slows the fan-out walker.
- * - `signal` — AbortSignal threaded through to the transport for
- *   SIGINT support (cli.md "Signal handling").
  */
 export interface CrossBoardSearchInputs {
-  readonly transport: Transport;
+  readonly client: MondayClient;
   readonly boardIds: readonly BoardId[];
   readonly plans: readonly PerBoardScanPlan[];
   readonly pageSize?: number;
@@ -172,7 +180,6 @@ export interface CrossBoardSearchInputs {
   readonly onItem?: (
     item: CrossBoardItem,
   ) => void | Promise<void>;
-  readonly signal?: AbortSignal;
 }
 
 /**
@@ -293,6 +300,67 @@ export const columnNotFoundOnBoardWarningSchema = z
   .strict();
 
 /**
+ * Surfaced when the cross-board walker stopped before draining every
+ * board — either because `--limit` short-circuited the aggregate
+ * walk, or because at least one board still has more data after the
+ * walker's bounded fan-out. Carries the per-board state for agent
+ * introspection.
+ *
+ * **Codex P1-2 resolution.** This warning REPLACES the per-board
+ * cursor map originally pinned on `CrossBoardSearchResult.nextCursors`
+ * — v0.3 cross-board search is single-call-only (no resumable
+ * cross-board cursor); agents needing pagination narrow with
+ * `--workspace` / `--favorites`. v0.4 may add an opaque-token
+ * resumable cursor (envelope-additive per §6.1).
+ *
+ * Per-board state values:
+ *   - `'exhausted'` — the walker drained this board to Monday's
+ *     `cursor: null` terminal state.
+ *   - `'has_more'` — the walker stopped while this board still has
+ *     items (either the aggregate `--limit` fired before this board
+ *     was drained, or per-board page-cap fired).
+ *   - `'not_started'` — the walker hit `--limit` before reaching
+ *     this board in the fan-out order.
+ */
+export type CrossBoardPerBoardWalkState =
+  | 'exhausted'
+  | 'has_more'
+  | 'not_started';
+
+export interface CrossBoardTruncatedWarning {
+  readonly code: 'cross_board_truncated';
+  readonly message: string;
+  readonly details: {
+    readonly reason: 'limit_hit' | 'board_has_more';
+    readonly total_returned: number;
+    readonly limit: number | null;
+    readonly per_board_state: Readonly<
+      Record<string, CrossBoardPerBoardWalkState>
+    >;
+    readonly hint: string;
+  };
+}
+
+export const crossBoardTruncatedWarningSchema = z
+  .object({
+    code: z.literal('cross_board_truncated'),
+    message: z.string().min(1),
+    details: z
+      .object({
+        reason: z.enum(['limit_hit', 'board_has_more']),
+        total_returned: z.number().int().nonnegative(),
+        limit: z.number().int().positive().nullable(),
+        per_board_state: z.record(
+          z.string(),
+          z.enum(['exhausted', 'has_more', 'not_started']),
+        ),
+        hint: z.string().min(1),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
  * Validates `--max-boards <n>` at the parse boundary. Centralised
  * pure helper so the command-action argv parser and the walker's
  * defensive check share one rule. **Real implementation** at
@@ -325,7 +393,7 @@ export const validateMaxBoards = (
         details: {
           max_boards: rawValue,
           hard_cap: HARD_CAP_MAX_BOARDS,
-          hint: 'narrow the cross-board set with --workspace <wid> or --favorites',
+          hint: 'the cap protects against the 30s request timeout (Decision 5 wall-clock-latency rationale, not complexity-budget); narrow the cross-board set with --workspace <wid> or --favorites',
         },
       },
     );
@@ -380,27 +448,82 @@ export const buildColumnNotFoundOnBoardWarning = (
 });
 
 /**
- * Cross-board search-result envelope from the walker. Mirrors the
- * v0.1 single-board search return-shape's spirit (items + meta +
- * warnings) but adds the per-board cursor map for the trailer-meta
- * shape, and the per-walk warnings array for the two warning codes
- * above.
+ * Builds a {@link CrossBoardTruncatedWarning} from the walker's
+ * end-of-walk per-board state. **Real implementation** at pre-flight
+ * (pure helper).
+ *
+ * The `reason` discriminant distinguishes:
+ *   - `'limit_hit'` — the aggregate `--limit` short-circuited the
+ *     walk. The hint points the agent at supplying a larger
+ *     `--limit` or narrowing with `--workspace` / `--favorites`.
+ *   - `'board_has_more'` — every board's per-board page-cap fired
+ *     before the board exhausted. The hint points the agent at
+ *     narrowing the cross-board set or running the v0.1 single-board
+ *     `--board <bid>` path per board.
+ */
+export const buildCrossBoardTruncatedWarning = (
+  reason: 'limit_hit' | 'board_has_more',
+  totalReturned: number,
+  limit: number | null,
+  perBoardState: Readonly<Record<string, CrossBoardPerBoardWalkState>>,
+): CrossBoardTruncatedWarning => {
+  const hint =
+    reason === 'limit_hit'
+      ? `--limit ${String(limit ?? '?')} short-circuited the cross-board fan-out; supply a larger --limit, narrow with --workspace / --favorites, or use --board <bid> for the v0.1 single-board path`
+      : 'one or more boards still have items beyond the v0.3 cross-board single-call surface; narrow with --workspace / --favorites or use --board <bid> per board for the v0.1 resumable-cursor path';
+  return {
+    code: 'cross_board_truncated',
+    message: `cross-board walk truncated after ${String(totalReturned)} items (reason: ${reason})`,
+    details: {
+      reason,
+      total_returned: totalReturned,
+      limit,
+      per_board_state: perBoardState,
+      hint,
+    },
+  };
+};
+
+/**
+ * Cross-board search-result envelope from the walker.
+ *
+ * **Codex P1-2 fix.** Pre-flight previously exposed a per-board
+ * cursor map (`nextCursors: Record<string, string | null>`) intended
+ * to surface as `next_cursor` on the §6.3 trailer; review caught
+ * that the per-board map can't distinguish "not started" from
+ * "exhausted" once an aggregate `--limit` short-circuits the walk,
+ * and JSON-stringifying the map into `next_cursor: string | null`
+ * leaves the wire contract implicit.
+ *
+ * **v0.3 resolution: cross-board search is single-call-only.** The
+ * walker fans out across N boards in ONE GraphQL call (per the
+ * empirical-probe finding #2), drains each board's items via
+ * per-board cursors INTERNALLY (one round-trip per board's
+ * `next_items_page`), and stops on the first of: (a) all boards
+ * exhausted, (b) `--limit` hit. In case (b) or when any board has
+ * more data left after the walker stops, the result surfaces a
+ * {@link CrossBoardTruncatedWarning} carrying the per-board state
+ * for agent introspection but does NOT expose a resumable
+ * cross-board cursor on the envelope.
+ *
+ * **Why no resumable cursor at v0.3.** Cross-board pagination is
+ * genuinely thorny — Monday's per-board cursors expire at 60min per
+ * cli-design §5.6, and an aggregate `--limit` mid-walk yields
+ * per-board state that doesn't compose into a single resumable
+ * token without an opaque-token scheme. v0.3 defers the resumable
+ * cursor to v0.4 (envelope-additive); agents that need pagination
+ * narrow with `--workspace` / `--favorites` until then. This
+ * mirrors the M22 diagnostics-cluster approach of shipping the
+ * minimum-useful surface first.
  */
 export interface CrossBoardSearchResult {
   readonly items: readonly CrossBoardItem[];
   /**
-   * Per-board cursors for the next page on each board, keyed by
-   * board ID. Boards exhausted on the first call surface as
-   * `null`; boards with more items surface a non-null cursor.
-   * `next_cursor` on the §6.3 trailer is this map JSON-stringified.
-   * Renamed from `nextCursor` (singular) — cross-board fan-out has
-   * N cursors, not one.
-   */
-  readonly nextCursors: Readonly<Record<string, string | null>>;
-  /**
-   * `true` when ANY board in the fan-out returned a non-null cursor
-   * OR `--limit` short-circuited mid-walk. `false` when every board
-   * exhausted in one call.
+   * `true` when the walker stopped before draining every board
+   * (`--limit` short-circuit OR any board's per-board cursor still
+   * has data). `false` when every requested board ran to exhaustion.
+   * When `true`, {@link CrossBoardTruncatedWarning} is also
+   * surfaced on `warnings[]` with the per-board state breakdown.
    */
   readonly hasMore: boolean;
   readonly totalReturned: number;
@@ -410,11 +533,34 @@ export interface CrossBoardSearchResult {
    * the per-board column-resolution pass (`boardMetadata` cache hits)
    * — the walker reports the AGGREGATE source so a single cached
    * board-metadata resolution surfaces as `'mixed'` at the envelope.
+   * Per the M22 close F1 fix (commit `meta.source` BEFORE the
+   * orchestrator runs), the command-action sets the envelope's
+   * `source` slot from this aggregate.
    */
   readonly source: 'live' | 'cache' | 'mixed';
+  /**
+   * `cacheAgeSeconds` from the freshest cache-hit metadata load
+   * across the per-board column-resolution pre-pass. Null when every
+   * board's metadata loaded live (`source: 'live'`). The
+   * R39-mergeCacheAge contract treats the OLDEST cache leg as the
+   * worst-case staleness signal on the envelope; the walker
+   * computes this via the existing `mergeCacheAge` helper in the
+   * cross-board action body at M23 implementation.
+   */
+  readonly cacheAgeSeconds: number | null;
+  /**
+   * `meta.complexity` aggregated across the fan-out call(s). Per
+   * the project complexity-injection contract (`src/api/client.ts`
+   * — only the verbose path injects + parses), this is non-null
+   * only when the global `--verbose` flag is on. The walker reports
+   * the LATEST complexity snapshot across its calls (mirrors the
+   * `pagination.ts:complexity` pick-the-last-response rule).
+   */
+  readonly complexity: Complexity | null;
   readonly warnings: readonly (
     | InaccessibleBoardsWarning
     | ColumnNotFoundOnBoardWarning
+    | CrossBoardTruncatedWarning
   )[];
 }
 
@@ -453,20 +599,21 @@ const stubReject = (): Promise<CrossBoardSearchResult> =>
  * concerns for independent testability.
  */
 // Stub: M23 implementation issues the boards(ids:) { items_page
-// (query_params: { rules }) } fan-out via inputs.transport, walks
+// (query_params: { rules }) } fan-out via inputs.client.raw, walks
 // per-board cursors, emits items via onItem, and surfaces the
-// inaccessible_boards + column_not_found_on_board warnings per the
-// empirical probe findings. The pre-flight diff pins the contract
-// surface; the runtime body lands at M23 implementation.
+// inaccessible_boards + column_not_found_on_board +
+// cross_board_truncated warnings per the empirical probe findings.
+// The pre-flight diff pins the contract surface; the runtime body
+// lands at M23 implementation.
 /* c8 ignore start */
 export const crossBoardSearch = (
   _inputs: CrossBoardSearchInputs,
 ): Promise<CrossBoardSearchResult> => stubReject();
 /* c8 ignore stop */
 
-// Pin BoardId import so this module surfaces the type that
-// downstream consumers (commands/item/search.ts at M23 implementation)
-// will use for the `boardIds` slot — keeps imports clean across the
+// Pin BoardId + MondayClient imports so this module surfaces the
+// types that downstream consumers (commands/item/search.ts at M23
+// implementation) will use — keeps imports clean across the
 // pre-flight → impl drop without a separate re-export pass.
-export type { BoardId };
+export type { BoardId, MondayClient };
 export { BoardIdSchema };

@@ -148,10 +148,26 @@ describe('monday item search cross-board (M23 pre-flight stub)', () => {
     const details = envelope.error.details as { hint: string };
     expect(details.hint).toMatch(/M23 implementation|fan-out walker|cross-board-search\.ts/);
   });
+
+  it('rejection details carry cap_rationale referencing wall-clock latency (Codex P3-1)', async () => {
+    const { stderr } = await driveM23([
+      'item',
+      'search',
+      '--favorites',
+      '--where',
+      'status=Done',
+      '--json',
+    ]);
+    const envelope = parseEnvelope(stderr);
+    if (envelope.ok) throw new Error('expected error envelope');
+    const details = envelope.error.details as { cap_rationale: string };
+    expect(details.cap_rationale).toMatch(/wall-clock|latency/);
+    expect(details.cap_rationale).toMatch(/MONDAY_REQUEST_TIMEOUT_MS|30s/);
+  });
 });
 
 describe('monday item search --max-boards validation', () => {
-  it('--max-boards above hard cap surfaces usage_error at the parse boundary', async () => {
+  it('--max-boards above hard cap surfaces usage_error on the cross-board path', async () => {
     const { exitCode, stderr } = await driveM23([
       'item',
       'search',
@@ -166,7 +182,7 @@ describe('monday item search --max-boards validation', () => {
     const envelope = parseEnvelope(stderr);
     if (envelope.ok) throw new Error('expected error envelope');
     expect(envelope.error.code).toBe('usage_error');
-    expect(envelope.error.message).toMatch(/hard cap|--workspace|--favorites/);
+    expect(envelope.error.message).toMatch(/hard cap|wall-clock|--workspace|--favorites/);
   });
 
   it('--max-boards = hard cap accepted (boundary)', async () => {
@@ -200,6 +216,33 @@ describe('monday item search --max-boards validation', () => {
       '--json',
     ]);
     expect(exitCode).toBe(1);
+  });
+
+  it('--max-boards > hard cap accepted on the single-board path (Codex P2-2: flag ignored)', async () => {
+    // The schema-level cap enforcement is CONDITIONAL — only the
+    // cross-board path (--board absent) rejects above-cap values.
+    // On the single-board path, the user-facing contract documents
+    // the flag as ignored; rejecting would punish agents who supply
+    // it harmlessly. The single-board v0.1 path still runs, so the
+    // failure here is whatever the v0.1 search produces (the
+    // fixture-less transport in this test will error at the network
+    // boundary — exitCode != 1 confirms the parse layer accepted
+    // the call).
+    const { exitCode } = await driveM23([
+      'item',
+      'search',
+      '--board',
+      '111',
+      '--max-boards',
+      String(HARD_CAP_MAX_BOARDS + 100),
+      '--where',
+      'status=Done',
+      '--json',
+    ]);
+    // Not usage_error (would be 1) — the schema accepted the
+    // above-cap value on the single-board path. The runtime path
+    // fails at the network boundary (no fixture) → exit 2.
+    expect(exitCode).not.toBe(1);
   });
 });
 
@@ -275,6 +318,33 @@ describe('monday item search scoping-lever mutual exclusion', () => {
     if (envelope.ok) throw new Error('expected error envelope');
     expect(envelope.error.code).toBe('usage_error');
     expect(envelope.error.message).toMatch(/board, workspace, favorites/);
+  });
+
+  it('mutual-exclusion issue path is empty (Codex P2-3: error is about the combination)', async () => {
+    // The .superRefine guard reports `path: []` on the issue so
+    // the error envelope's `details.issues[].path` doesn't point
+    // agents at one specific field — the conflict is about the
+    // combination of scoping levers, not one of them.
+    const { stderr } = await driveM23([
+      'item',
+      'search',
+      '--workspace',
+      '999',
+      '--favorites',
+      '--where',
+      'status=Done',
+      '--json',
+    ]);
+    const envelope = parseEnvelope(stderr);
+    if (envelope.ok) throw new Error('expected error envelope');
+    const details = envelope.error.details as {
+      issues: readonly { path: string; message: string }[];
+    };
+    const conflictIssue = details.issues.find((i) =>
+      i.message.includes('at most one of --board'),
+    );
+    expect(conflictIssue).toBeDefined();
+    expect(conflictIssue?.path).toBe('');
   });
 });
 

@@ -63,7 +63,8 @@
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
-import type { Transport } from './transport.js';
+import type { MondayClient } from './client.js';
+import type { Complexity } from '../utils/output/envelope.js';
 
 /**
  * Monday's `GraphqlMondayObject` enum discriminator on
@@ -116,6 +117,18 @@ export const FAVORITES_LIST_QUERY = `
  * favoriting it; we don't want to crash the verb). The hydrator
  * surfaces this as the count delta on the `board_favorites_stale`
  * warning per {@link buildStaleFavoritesWarning}.
+ *
+ * **Codex P1-1 fix.** The query selects ONLY the leaf board fields
+ * `monday board favorites` projects — `complexity` is NOT selected
+ * here. Per the project's complexity-injection contract
+ * (`src/api/client.ts:257-307` `MondayClient.raw`), the
+ * `complexity { ... }` selection is injected at the operation root
+ * ONLY when `--verbose` is on, and parsed back out via
+ * `parseComplexity`. Hard-coding `complexity` here would (a) leak
+ * the field into non-verbose responses (cli-design §6.1 pins
+ * `meta.complexity: null` outside `--verbose`), and (b) inflate the
+ * per-call cost for every favorites read. The verbose path injects
+ * via MondayClient automatically.
  */
 export const BOARDS_HYDRATE_QUERY = `
   query BoardFavoritesStage2($ids: [ID!]!) {
@@ -126,7 +139,6 @@ export const BOARDS_HYDRATE_QUERY = `
       workspace_id
       url
     }
-    complexity { before after query reset_in_x_seconds }
   }
 `;
 
@@ -194,15 +206,6 @@ export const rawHydratedBoardSchema = z
 export const boardsHydrateResponseSchema = z
   .object({
     boards: z.array(rawHydratedBoardSchema.nullable()).nullable(),
-    complexity: z
-      .object({
-        before: z.number().int().nonnegative(),
-        after: z.number().int().nonnegative(),
-        query: z.number().int().nonnegative(),
-        reset_in_x_seconds: z.number().int().nonnegative(),
-      })
-      .nullable()
-      .optional(),
   })
   .loose();
 
@@ -346,32 +349,35 @@ export const joinFavoritesWithBoards = (
 /**
  * Inputs to {@link fetchBoardFavorites}.
  *
- * - `transport` — same Transport the cli-wide resolved client owns.
- *   The verb-level action threads `ctx.transport` through.
- * - `signal` — AbortSignal for SIGINT support; threaded to the
- *   transport's per-call fetch.
+ * **Codex P1-1 fix.** Takes the {@link MondayClient} (not
+ * `Transport`) so the resolver inherits the project's `--retry` +
+ * `--verbose`-complexity contract automatically. MondayClient owns
+ * the AbortSignal end-to-end; no per-call `signal` slot needed.
  */
 export interface FetchBoardFavoritesInputs {
-  readonly transport: Transport;
-  readonly signal?: AbortSignal;
+  readonly client: MondayClient;
 }
 
 /**
  * Result of the 2-stage favorites resolver. Carries the hydrated
- * board rows + the optional warning + the latest Stage-2 complexity
- * snapshot for `--verbose` callers.
+ * board rows + the optional warning + the per-call envelope-meta
+ * fields the command-action emits.
+ *
+ * **Codex P1-1 fix.** `complexity` is now `Complexity | null` from
+ * `src/utils/output/envelope.ts` (matches the project-wide envelope
+ * shape on `meta.complexity`); the previous bespoke shape was
+ * redundant with the canonical envelope type. `source` /
+ * `cacheAgeSeconds` are added so the command-action emits a fully
+ * correct §6.1 collection envelope. Favorites is a pure read with
+ * no per-call cache; both stages always hit live, so `source` is
+ * fixed at `'live'` and `cacheAgeSeconds` at `null`.
  */
 export interface FetchBoardFavoritesResult {
   readonly boards: readonly BoardFavoriteOutput[];
   readonly warnings: readonly StaleFavoritesWarning[];
-  readonly complexity:
-    | {
-        readonly before: number;
-        readonly after: number;
-        readonly query: number;
-        readonly reset_in_x_seconds: number;
-      }
-    | null;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
 }
 
 const stubReject = (): Promise<FetchBoardFavoritesResult> =>
@@ -381,7 +387,7 @@ const stubReject = (): Promise<FetchBoardFavoritesResult> =>
       'fetchBoardFavorites is a v0.3-M23 pre-flight stub — runtime 2-stage favorites resolver lands at M23 implementation alongside the `monday board favorites` verb action.',
       {
         details: {
-          hint: 'M23 implementation issues Stage 1 (FAVORITES_LIST_QUERY) + Stage 2 (BOARDS_HYDRATE_QUERY) via inputs.transport, filters to Board-typed entries via filterFavoritesToBoards, joins via joinFavoritesWithBoards, and surfaces board_favorites_stale on the Stage-1/Stage-2 count delta.',
+          hint: 'M23 implementation issues Stage 1 (FAVORITES_LIST_QUERY) + Stage 2 (BOARDS_HYDRATE_QUERY) via inputs.client, filters to Board-typed entries via filterFavoritesToBoards, joins via joinFavoritesWithBoards, and surfaces board_favorites_stale on the Stage-1/Stage-2 count delta.',
         },
       },
     ),
@@ -413,7 +419,7 @@ const stubReject = (): Promise<FetchBoardFavoritesResult> =>
  * via `data.length === 0`.
  */
 // Stub: M23 implementation issues FAVORITES_LIST_QUERY then
-// BOARDS_HYDRATE_QUERY via inputs.transport, joins via the pure
+// BOARDS_HYDRATE_QUERY via inputs.client, joins via the pure
 // helpers above, and surfaces board_favorites_stale on Stage-1/
 // Stage-2 deltas. The pre-flight diff pins the contract surface;
 // the runtime body lands at M23 implementation.

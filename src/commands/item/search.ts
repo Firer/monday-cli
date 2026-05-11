@@ -139,16 +139,15 @@ const inputSchema = z
     favorites: z.boolean().optional(),
     // v0.3-M23 cross-board fan-out cap (Decision 5 closure
     // `3a2f1db`). Default 25, hard cap 100. Only meaningful when
-    // the cross-board path runs; with `--board` the flag is silently
-    // ignored (the single-board path scans one board regardless).
-    maxBoards: z.coerce
-      .number()
-      .int()
-      .positive()
-      .max(HARD_CAP_MAX_BOARDS, {
-        message: `--max-boards exceeds the hard cap of ${String(HARD_CAP_MAX_BOARDS)}; narrow the cross-board set with --workspace or --favorites`,
-      })
-      .optional(),
+    // the cross-board path runs; with `--board` the flag is
+    // silently ignored. Codex P2-2 fix: the hard-cap enforcement
+    // is CONDITIONAL — applied only when `board` is absent (the
+    // cross-board path). On the single-board path the v0.1 user-
+    // facing contract is "flag is ignored", so we accept any
+    // positive integer there to honour that wording rather than
+    // rejecting agents that pass the flag harmlessly under
+    // `--board`.
+    maxBoards: z.coerce.number().int().positive().optional(),
     where: z.array(z.string()).min(1),
     all: z.boolean().optional(),
     limit: z.coerce.number().int().positive().max(10_000).optional(),
@@ -161,6 +160,12 @@ const inputSchema = z
     // be supplied; supplying two surfaces a usage_error at the
     // parse boundary rather than letting the runtime resolver
     // surface a confusing error.
+    //
+    // Codex P2-3 fix: the path on the issue is empty (`[]`)
+    // because the conflict is about the COMBINATION of fields,
+    // not one specific field. The message + an explicit
+    // `conflicting_flags` slot in details carries the named
+    // levers for agent introspection.
     const scopingLevers = [
       value.board !== undefined ? 'board' : null,
       value.workspace !== undefined ? 'workspace' : null,
@@ -170,7 +175,22 @@ const inputSchema = z
       ctx.addIssue({
         code: 'custom',
         message: `at most one of --board / --workspace / --favorites may be supplied; got: ${scopingLevers.join(', ')}`,
-        path: ['board'],
+        path: [],
+        params: { conflicting_flags: scopingLevers },
+      });
+    }
+    // Codex P2-2 fix: cap only applies on the cross-board path.
+    // On the single-board path (board set), `--max-boards` is
+    // documented as ignored — accept any positive integer.
+    if (
+      value.board === undefined &&
+      value.maxBoards !== undefined &&
+      value.maxBoards > HARD_CAP_MAX_BOARDS
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `--max-boards exceeds the hard cap of ${String(HARD_CAP_MAX_BOARDS)} (wall-clock fan-out latency cap, not a complexity-budget cap; the cap protects against the 30s request timeout per Decision 5 \`3a2f1db\`); narrow the cross-board set with --workspace or --favorites`,
+        path: ['maxBoards'],
       });
     }
   });
@@ -399,6 +419,8 @@ export const itemSearchCommand: CommandModule<
                 scoping_lever: lever,
                 max_boards: parsed.maxBoards ?? DEFAULT_MAX_BOARDS,
                 hard_cap: HARD_CAP_MAX_BOARDS,
+                cap_rationale:
+                  'wall-clock fan-out latency cap (~0.5-1.5s per call at small N scaling linearly; N=25 lands ~12-18s under the 30s MONDAY_REQUEST_TIMEOUT_MS default per Decision 5 `3a2f1db` empirical-probe finding)',
                 hint: 'M23 implementation kickoff lands the boards(ids:) { items_page(query_params:) } fan-out walker via src/api/cross-board-search.ts; until then, supply --board <bid> to use the v0.1 single-board path.',
               },
             },

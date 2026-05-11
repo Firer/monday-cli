@@ -27,7 +27,7 @@ import {
   staleFavoritesWarningSchema,
 } from '../../../src/api/board-favorites.js';
 import { ApiError } from '../../../src/utils/errors.js';
-import type { Transport } from '../../../src/api/transport.js';
+import type { MondayClient } from '../../../src/api/client.js';
 
 describe('HIERARCHY_OBJECT_TYPE_BOARD', () => {
   it('pins the literal "Board" string per the empirical probe', () => {
@@ -61,8 +61,14 @@ describe('BOARDS_HYDRATE_QUERY', () => {
     expect(BOARDS_HYDRATE_QUERY).toMatch(/\burl\b/);
   });
 
-  it('selects complexity for --verbose support', () => {
-    expect(BOARDS_HYDRATE_QUERY).toMatch(/complexity/);
+  it('does NOT select complexity unconditionally (Codex P1-1)', () => {
+    // MondayClient.raw() injects `complexity { ... }` at the
+    // operation root only when --verbose is on (src/api/client.ts
+    // injectComplexity); hard-coding it in the query would leak
+    // the field outside --verbose, which contradicts cli-design
+    // §6.1's `meta.complexity: null` outside-verbose contract,
+    // and would inflate per-call cost for every favorites read.
+    expect(BOARDS_HYDRATE_QUERY).not.toMatch(/complexity/);
   });
 });
 
@@ -162,12 +168,6 @@ describe('boardsHydrateResponseSchema', () => {
             url: 'https://x.monday.com/boards/100',
           },
         ],
-        complexity: {
-          before: 999_950,
-          after: 999_920,
-          query: 30,
-          reset_in_x_seconds: 60,
-        },
       }),
     ).not.toThrow();
   });
@@ -178,9 +178,27 @@ describe('boardsHydrateResponseSchema', () => {
     ).not.toThrow();
   });
 
-  it('accepts missing complexity (Monday omits complexity sometimes)', () => {
+  it('accepts an empty boards array', () => {
     expect(() =>
       boardsHydrateResponseSchema.parse({ boards: [] }),
+    ).not.toThrow();
+  });
+
+  it('is loose — Monday-side complexity injection passes through (Codex P1-1)', () => {
+    // MondayClient injects `complexity { ... }` at the operation
+    // root under --verbose; the response carries the field
+    // alongside `boards`. Since the schema is `.loose()`, the
+    // extra field passes parse without breaking.
+    expect(() =>
+      boardsHydrateResponseSchema.parse({
+        boards: [],
+        complexity: {
+          before: 999_950,
+          after: 999_920,
+          query: 30,
+          reset_in_x_seconds: 60,
+        },
+      }),
     ).not.toThrow();
   });
 });
@@ -376,19 +394,19 @@ describe('fetchBoardFavorites (pre-flight stub)', () => {
   // here confirms the rejection shape so command-level integration
   // tests get a stable failure pattern.
   it('rejects every invocation with internal_error', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     await expect(
-      fetchBoardFavorites({ transport: fakeTransport }),
+      fetchBoardFavorites({ client: fakeClient }),
     ).rejects.toBeInstanceOf(ApiError);
     await expect(
-      fetchBoardFavorites({ transport: fakeTransport }),
+      fetchBoardFavorites({ client: fakeClient }),
     ).rejects.toMatchObject({ code: 'internal_error' });
   });
 
   it('rejection message mentions M23 + the 2-stage resolver', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     try {
-      await fetchBoardFavorites({ transport: fakeTransport });
+      await fetchBoardFavorites({ client: fakeClient });
       throw new Error('expected reject');
     } catch (err: unknown) {
       const apiErr = err as ApiError;
@@ -398,9 +416,9 @@ describe('fetchBoardFavorites (pre-flight stub)', () => {
   });
 
   it('rejection details.hint references the FAVORITES_LIST_QUERY + BOARDS_HYDRATE_QUERY shape', async () => {
-    const fakeTransport = {} as unknown as Transport;
+    const fakeClient = {} as unknown as MondayClient;
     try {
-      await fetchBoardFavorites({ transport: fakeTransport });
+      await fetchBoardFavorites({ client: fakeClient });
       throw new Error('expected reject');
     } catch (err: unknown) {
       const apiErr = err as ApiError;
