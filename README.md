@@ -399,16 +399,17 @@ runtime extension + leak-test canary + Codex implementation review
 placeholders in `src/api/oauth.ts` with the registered Monday OAuth
 app's values (one-time external step at https://developer.monday.com/
 apps with redirect URI exactly `http://127.0.0.1:9876/callback`).
-**v0.3-M22 pre-flight shipped** (`fbab6b0`): `monday status` +
-`monday usage` argv + envelope surface registered (verbs reject
-with `internal_error` until M22 implementation lands the runtime
-probe matrix + `platform_api.daily_*` projection; the empirical-
-probe finding pivoted the design inline — Monday tracks
+**v0.3-M22 shipped** (`3a1b465`, preceded by `84c6d2b`
+redact narrowing): `monday status` runs the 7-probe
+matrix (DNS / TCP / TLS / auth / cache writability /
+redaction self-test / env-var pickup) per cli-design §11.5;
+`monday usage` reports the daily Monday API operation budget
+remaining from `platform_api.daily_*`. The empirical-probe
+finding pivoted the design at pre-flight — Monday tracks
 operations-per-day under `platform_api.daily_*`, NOT complexity
 points under a non-existent `account.complexity` — additive-only
-envelope per cli-design §11.5.3 Decision 8 closure).
-**Deferred to later v0.3 milestones**: `monday status` /
-`monday usage` runtime body (M22 implementation), cross-board
+envelope per cli-design §11.5.3 Decision 8 closure.
+**Deferred to later v0.3 milestones**: cross-board
 `item search` + `board favorites` (M23), `item history` (M24),
 `item update --continue-on-error` partial-success (M25), `monday
 dev` workflow shortcuts (M26), `notification send` + `webhook list/

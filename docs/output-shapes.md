@@ -63,7 +63,7 @@ no `data`); see the **Errors** section at the bottom.
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
 | [schema](#schema) | (no verb) |
-| [diagnostics](#diagnostics) | status (M22 pre-flight), usage (M22 pre-flight) |
+| [diagnostics](#diagnostics) | status, usage |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -2681,15 +2681,12 @@ no `--help` scraping needed.
 ## diagnostics
 
 The v0.3 diagnostics cluster (cli-design §11.5; pre-flight at
-v0.3-M22 — `fbab6b0`). Two read-shape verbs. Both ship as
-**pre-flight stubs at v0.3-M22**: the argv surface + the output
-envelope are pinned for forward-compatibility, but every invocation
-rejects with `internal_error` carrying the M22-implementation-
-pending hint. The shapes below are what M22 implementation lands
-against; agent scripts targeting `monday status` / `monday usage`
-are stable across the drop-in.
+v0.3-M22 — `fbab6b0`; implementation shipped at `3a1b465`). Two
+read-shape verbs that run live as of M22 close. The argv surface
++ the output envelope are pinned for forward-compatibility per the
+M22 pre-flight contract diff.
 
-### `monday status [--no-probe]` (M22 pre-flight stub)
+### `monday status [--no-probe]`
 
 Connectivity + auth + local-state probe matrix per cli-design
 §11.5.1. Default invocation runs seven probes in
@@ -2746,7 +2743,7 @@ authenticated","extensions":{"code":"NOT_AUTHENTICATED"}}]}`
 same envelope for missing- and bad-`Authorization`. `Bearer
 <token>` prefix also works alongside bare `<token>`.
 
-### `monday usage` (M22 pre-flight stub)
+### `monday usage`
 
 Daily Monday API **operation** budget remaining per cli-design
 §11.5.3 / §13 v0.3 entry. Complements v0.1's per-call
