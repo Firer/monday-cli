@@ -51,12 +51,13 @@ import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
 import type { ResolverWarning } from '../../api/columns.js';
-import type { MondayClient, MondayResponse } from '../../api/client.js';
+import type { MondayClient } from '../../api/client.js';
 import {
   selectMutation,
   type SelectedMutation,
   type TranslatedColumnValue,
 } from '../../api/column-values.js';
+import { executeItemMutation } from '../../api/item-mutation-execute.js';
 import {
   parseSetRawExpression,
   type ParsedSetRawExpression,
@@ -89,12 +90,7 @@ import {
 } from '../../utils/errors.js';
 import type { RunContext } from '../../cli/run.js';
 import type { GlobalFlags } from '../../types/global-flags.js';
-import {
-  ITEM_FIELDS_FRAGMENT,
-  resolveMeFactory,
-} from '../../api/item-helpers.js';
-import { projectMutationItem as projectMutationItemShared } from '../../api/item-mutation-result.js';
-import { assertResponseFieldPresent } from '../../api/response-root.js';
+import { resolveMeFactory } from '../../api/item-helpers.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -107,74 +103,6 @@ import {
   type PartialSuccessBulkUpdateData,
 } from '../../api/partial-success-bulk.js';
 import type { Warning } from '../../utils/output/envelope.js';
-
-const CHANGE_SIMPLE_COLUMN_VALUE_MUTATION = `
-  mutation ItemUpdateSimple(
-    $itemId: ID!
-    $boardId: ID!
-    $columnId: String!
-    $value: String!
-    $createLabelsIfMissing: Boolean
-  ) {
-    change_simple_column_value(
-      item_id: $itemId
-      board_id: $boardId
-      column_id: $columnId
-      value: $value
-      create_labels_if_missing: $createLabelsIfMissing
-    ) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
-const CHANGE_COLUMN_VALUE_MUTATION = `
-  mutation ItemUpdateRich(
-    $itemId: ID!
-    $boardId: ID!
-    $columnId: String!
-    $value: JSON!
-    $createLabelsIfMissing: Boolean
-  ) {
-    change_column_value(
-      item_id: $itemId
-      board_id: $boardId
-      column_id: $columnId
-      value: $value
-      create_labels_if_missing: $createLabelsIfMissing
-    ) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
-const CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION = `
-  mutation ItemUpdateMulti(
-    $itemId: ID!
-    $boardId: ID!
-    $columnValues: JSON!
-    $createLabelsIfMissing: Boolean
-  ) {
-    change_multiple_column_values(
-      item_id: $itemId
-      board_id: $boardId
-      column_values: $columnValues
-      create_labels_if_missing: $createLabelsIfMissing
-    ) {
-      ${ITEM_FIELDS_FRAGMENT}
-    }
-  }
-`;
-
-interface ChangeSimpleResponse {
-  readonly change_simple_column_value: unknown;
-}
-interface ChangeColumnResponse {
-  readonly change_column_value: unknown;
-}
-interface ChangeMultipleResponse {
-  readonly change_multiple_column_values: unknown;
-}
 
 export const itemUpdateOutputSchema = projectedItemSchema;
 export type ItemUpdateOutput = ProjectedItem;
@@ -498,7 +426,7 @@ export const itemUpdateCommand: CommandModule<
         let mutationResult;
         try {
           const mutation: SelectedMutation = selectMutation(allTranslated);
-          mutationResult = await executeMutation(client, {
+          mutationResult = await executeItemMutation(client, {
             mutation,
             itemId: dispatch.itemId,
             boardId,
@@ -553,109 +481,6 @@ export const itemUpdateCommand: CommandModule<
       });
   },
 };
-
-interface MutationExecResult {
-  readonly projected: ProjectedItem;
-  readonly response: MondayResponse<unknown>;
-}
-
-const executeMutation = async (
-  client: MondayClient,
-  inputs: {
-    readonly mutation: SelectedMutation;
-    readonly itemId: string;
-    readonly boardId: string;
-    readonly createLabelsIfMissing: boolean | undefined;
-  },
-): Promise<MutationExecResult> => {
-  const { mutation, itemId, boardId, createLabelsIfMissing } = inputs;
-  const labelsFlag = createLabelsIfMissing ?? false;
-  if (mutation.kind === 'change_simple_column_value') {
-    const response = await client.raw<ChangeSimpleResponse>(
-      CHANGE_SIMPLE_COLUMN_VALUE_MUTATION,
-      {
-        itemId,
-        boardId,
-        columnId: mutation.columnId,
-        value: mutation.value,
-        createLabelsIfMissing: labelsFlag,
-      },
-      { operationName: 'ItemUpdateSimple' },
-    );
-    assertResponseFieldPresent({
-      data: response.data,
-      key: 'change_simple_column_value',
-      operationLabel: 'ItemUpdateSimple',
-      details: { item_id: itemId, board_id: boardId },
-      nullHandling: 'caller_handles',
-    });
-    return {
-      projected: projectMutationItem(response.data.change_simple_column_value, itemId),
-      response,
-    };
-  }
-  if (mutation.kind === 'change_column_value') {
-    const response = await client.raw<ChangeColumnResponse>(
-      CHANGE_COLUMN_VALUE_MUTATION,
-      {
-        itemId,
-        boardId,
-        columnId: mutation.columnId,
-        value: mutation.value,
-        createLabelsIfMissing: labelsFlag,
-      },
-      { operationName: 'ItemUpdateRich' },
-    );
-    assertResponseFieldPresent({
-      data: response.data,
-      key: 'change_column_value',
-      operationLabel: 'ItemUpdateRich',
-      details: { item_id: itemId, board_id: boardId },
-      nullHandling: 'caller_handles',
-    });
-    return {
-      projected: projectMutationItem(response.data.change_column_value, itemId),
-      response,
-    };
-  }
-  // change_multiple_column_values — multi-`--set` or `--set + --name`.
-  const response = await client.raw<ChangeMultipleResponse>(
-    CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION,
-    {
-      itemId,
-      boardId,
-      columnValues: mutation.columnValues,
-      createLabelsIfMissing: labelsFlag,
-    },
-    { operationName: 'ItemUpdateMulti' },
-  );
-  assertResponseFieldPresent({
-    data: response.data,
-    key: 'change_multiple_column_values',
-    operationLabel: 'ItemUpdateMulti',
-    details: { item_id: itemId, board_id: boardId },
-    nullHandling: 'caller_handles',
-  });
-  return {
-    projected: projectMutationItem(response.data.change_multiple_column_values, itemId),
-    response,
-  };
-};
-
-// Thin wrapper around `api/item-mutation-result.ts projectMutationItem`
-// (R28). M5b's `internal_error` + "no item payload" semantics for an
-// empty-payload mutation success are preserved; the wrapper keeps the
-// existing `(raw, itemId)` call signature so the executeMutation arms
-// + the bulk per-item dispatch site stay untouched.
-const projectMutationItem = (raw: unknown, itemId: string): ProjectedItem =>
-  projectMutationItemShared({
-    raw,
-    itemId,
-    errorCode: 'internal_error',
-    errorMessage:
-      `Monday returned no item payload from the mutation for id ${itemId}.`,
-  });
-
 
 /**
  * Bulk dry-run aggregates per-item resolver warnings — the same
@@ -1118,7 +943,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   const remapColumnIds: readonly string[] = translated.map((t) => t.columnId);
   for (const itemId of matchedItemIds) {
     try {
-      const result = await executeMutation(client, {
+      const result = await executeItemMutation(client, {
         mutation,
         itemId,
         boardId,
