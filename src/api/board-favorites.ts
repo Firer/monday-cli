@@ -380,21 +380,8 @@ export interface FetchBoardFavoritesResult {
   readonly complexity: Complexity | null;
 }
 
-const stubReject = (): Promise<FetchBoardFavoritesResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'fetchBoardFavorites is a v0.3-M23 pre-flight stub — runtime 2-stage favorites resolver lands at M23 implementation alongside the `monday board favorites` verb action.',
-      {
-        details: {
-          hint: 'M23 implementation issues Stage 1 (FAVORITES_LIST_QUERY) + Stage 2 (BOARDS_HYDRATE_QUERY) via inputs.client, filters to Board-typed entries via filterFavoritesToBoards, joins via joinFavoritesWithBoards, and surfaces board_favorites_stale on the Stage-1/Stage-2 count delta.',
-        },
-      },
-    ),
-  );
-
 /**
- * Issues the 2-stage favorites resolver against `transport`.
+ * Issues the 2-stage favorites resolver against `inputs.client`.
  *
  * Stage 1: `FAVORITES_LIST_QUERY` → parse via
  * `favoritesListResponseSchema` → filter via
@@ -408,23 +395,117 @@ const stubReject = (): Promise<FetchBoardFavoritesResult> =>
  * Stage-1/Stage-2 count delta surfaces a
  * {@link StaleFavoritesWarning} on `result.warnings`.
  *
- * Stub at the M23 pre-flight — the runtime body lands at M23
- * implementation kickoff. Throws `internal_error` until M23
- * implementation swaps the body.
+ * **Edge case: empty favorites.** When Stage 1 returns no Board-
+ * typed entries (or the favorites list is empty/null) the helper
+ * short-circuits — no Stage-2 call, empty `boards` output, no
+ * warnings. The verb-level envelope is success with an empty
+ * `data` array; agents detect via `data.length === 0`.
  *
- * **Edge case: empty favorites.** When Stage 1 returns an empty
- * array (no favorited resources) the helper short-circuits: no
- * Stage-2 call, empty `boards` output, no warnings. The verb-level
- * envelope is success with an empty `data` array — agents detect
- * via `data.length === 0`.
+ * **Parse-failure handling.** A schema mismatch on either stage
+ * surfaces `internal_error` with `details.issues` carrying the
+ * per-field zod path — a parse failure means Monday amended the
+ * surface (forward-compat additions pass through the `.loose()`
+ * wrappers; this catches the type-mismatch shapes that the v0.3
+ * surface doesn't tolerate).
+ *
+ * **Complexity / source.** The result's `complexity` is the last
+ * stage's value (Stage 2 when it runs, Stage 1 otherwise) — under
+ * `--verbose` MondayClient.raw injects + parses `complexity { ... }`
+ * at the operation root and returns it on the `MondayResponse`.
+ * `source: 'live'` + `cacheAgeSeconds: null` are constants per the
+ * P1-1 contract — favorites is a pure live read.
  */
-// Stub: M23 implementation issues FAVORITES_LIST_QUERY then
-// BOARDS_HYDRATE_QUERY via inputs.client, joins via the pure
-// helpers above, and surfaces board_favorites_stale on Stage-1/
-// Stage-2 deltas. The pre-flight diff pins the contract surface;
-// the runtime body lands at M23 implementation.
-/* c8 ignore start */
-export const fetchBoardFavorites = (
-  _inputs: FetchBoardFavoritesInputs,
-): Promise<FetchBoardFavoritesResult> => stubReject();
-/* c8 ignore stop */
+export const fetchBoardFavorites = async (
+  inputs: FetchBoardFavoritesInputs,
+): Promise<FetchBoardFavoritesResult> => {
+  // Stage 1 — fetch the polymorphic favorites list.
+  const stage1 = await inputs.client.raw<unknown>(
+    FAVORITES_LIST_QUERY,
+    undefined,
+    { operationName: 'BoardFavoritesStage1' },
+  );
+  const stage1Parsed = favoritesListResponseSchema.safeParse(stage1.data);
+  if (!stage1Parsed.success) {
+    throw new ApiError(
+      'internal_error',
+      'Monday `Query.favorites` response did not match the expected shape',
+      {
+        cause: stage1Parsed.error,
+        details: {
+          issues: stage1Parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+          hint: 'Monday may have amended the `Query.favorites` surface — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
+        },
+      },
+    );
+  }
+
+  // Filter to Board-typed entries + sort by `position` ascending
+  // for Monday-UI parity. Drops Folder / Dashboard / Workspace and
+  // any future enum extension (open-ended `z.string()` on
+  // `object.type` is forward-compat).
+  const filtered = filterFavoritesToBoards(stage1Parsed.data);
+
+  // Empty short-circuit — no Stage 2 if there are no Board-typed
+  // favorites. Stage 1's complexity carries forward.
+  if (filtered.length === 0) {
+    return {
+      boards: [],
+      warnings: [],
+      source: 'live',
+      cacheAgeSeconds: null,
+      complexity: stage1.complexity,
+    };
+  }
+
+  // Stage 2 — hydrate the surviving board IDs.
+  const filteredIds = filtered.map((e) => e.object.id);
+  const stage2 = await inputs.client.raw<unknown>(
+    BOARDS_HYDRATE_QUERY,
+    { ids: filteredIds },
+    { operationName: 'BoardFavoritesStage2' },
+  );
+  const stage2Parsed = boardsHydrateResponseSchema.safeParse(stage2.data);
+  if (!stage2Parsed.success) {
+    throw new ApiError(
+      'internal_error',
+      'Monday `boards(ids:)` response did not match the expected shape',
+      {
+        cause: stage2Parsed.error,
+        details: {
+          issues: stage2Parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+          hint: 'Monday may have amended the `boards(ids:)` selection — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
+        },
+      },
+    );
+  }
+
+  // Monday's `boards(ids:)` typically silently omits inaccessible
+  // entries (per the cross-board probe finding); the schema's
+  // `.nullable()` on each entry is defensive for accounts where
+  // Monday returns null placeholders instead of omitting. Drop
+  // nulls — the favorites case treats both shapes as "stale".
+  const hydrated: RawHydratedBoard[] = (stage2Parsed.data.boards ?? []).filter(
+    (b): b is RawHydratedBoard => b !== null,
+  );
+
+  const joined = joinFavoritesWithBoards(filtered, hydrated);
+  const hydratedIds = hydrated.map((b) => b.id);
+  const warnings: StaleFavoritesWarning[] = [];
+  if (hydratedIds.length < filteredIds.length) {
+    warnings.push(buildStaleFavoritesWarning(filteredIds, hydratedIds));
+  }
+
+  return {
+    boards: joined,
+    warnings,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: stage2.complexity,
+  };
+};

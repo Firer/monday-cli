@@ -1,15 +1,16 @@
 /**
  * Surface tests for `src/api/board-favorites.ts` — the v0.3-M23
- * pre-flight contract diff (cli-design §13 v0.3 entry).
+ * runtime body for the 2-stage favorites resolver (cli-design §13
+ * v0.3 entry).
  *
  * Scope: GraphQL document constants + schemas + pure helpers
  * (`filterFavoritesToBoards`, `joinFavoritesWithBoards`,
- * `buildStaleFavoritesWarning`) pinned at pre-flight. The runtime
- * `fetchBoardFavorites` 2-stage resolver body is a stub (rejects
- * with `internal_error`) and is exercised at M23 implementation
- * alongside the real `Query.favorites` + `boards(ids:)` work.
+ * `buildStaleFavoritesWarning`) + the runtime `fetchBoardFavorites`
+ * 2-stage resolver driven via a seam-injected `MondayClient` stub
+ * (mock-at-the-network-boundary per testing.md — the stub replaces
+ * the typed `raw` surface MondayClient exposes downstream).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   BOARDS_HYDRATE_QUERY,
   FAVORITES_LIST_QUERY,
@@ -27,7 +28,11 @@ import {
   staleFavoritesWarningSchema,
 } from '../../../src/api/board-favorites.js';
 import { ApiError } from '../../../src/utils/errors.js';
-import type { MondayClient } from '../../../src/api/client.js';
+import type {
+  MondayClient,
+  MondayResponse,
+} from '../../../src/api/client.js';
+import type { Complexity } from '../../../src/utils/output/envelope.js';
 
 describe('HIERARCHY_OBJECT_TYPE_BOARD', () => {
   it('pins the literal "Board" string per the empirical probe', () => {
@@ -388,42 +393,353 @@ describe('buildStaleFavoritesWarning', () => {
   });
 });
 
-describe('fetchBoardFavorites (pre-flight stub)', () => {
-  // The runtime 2-stage resolver is a Promise.reject(internal_error)
-  // stub at the M23 pre-flight. The stub is c8-ignored; the test
-  // here confirms the rejection shape so command-level integration
-  // tests get a stable failure pattern.
-  it('rejects every invocation with internal_error', async () => {
-    const fakeClient = {} as unknown as MondayClient;
-    await expect(
-      fetchBoardFavorites({ client: fakeClient }),
-    ).rejects.toBeInstanceOf(ApiError);
-    await expect(
-      fetchBoardFavorites({ client: fakeClient }),
-    ).rejects.toMatchObject({ code: 'internal_error' });
+/**
+ * Builds a seam-injected `MondayClient` stub for the resolver tests.
+ * Mock-at-the-network-boundary per testing.md: only `raw` is
+ * stubbed (the typed surface `fetchBoardFavorites` consumes); the
+ * other methods stay unimplemented because the resolver never
+ * touches them.
+ *
+ * Each call routes by `operationName` to the matching response in
+ * `responses`. Throws if no entry matches — surfaces "the resolver
+ * issued a stage we didn't plan for" mismatches loudly.
+ */
+const buildClientStub = (
+  responses: Readonly<Record<string, MondayResponse<unknown>>>,
+): { client: MondayClient; raw: ReturnType<typeof vi.fn> } => {
+  const raw = vi.fn(
+    (
+      _query: string,
+      _variables: Readonly<Record<string, unknown>> | undefined,
+      options: { operationName?: string } = {},
+    ): Promise<MondayResponse<unknown>> => {
+      const opName = options.operationName ?? '<anon>';
+      const response = responses[opName];
+      if (response === undefined) {
+        return Promise.reject(
+          new Error(`buildClientStub: no canned response for ${opName}`),
+        );
+      }
+      return Promise.resolve(response);
+    },
+  );
+  const client = { raw } as unknown as MondayClient;
+  return { client, raw };
+};
+
+const emptyComplexity = (): Complexity | null => null;
+
+describe('fetchBoardFavorites — Stage-1 short-circuit', () => {
+  it('returns empty data + skips Stage 2 when favorites is empty', async () => {
+    const { client, raw } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: { favorites: [] },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.source).toBe('live');
+    expect(result.cacheAgeSeconds).toBe(null);
+    expect(result.complexity).toBe(null);
+    expect(raw).toHaveBeenCalledTimes(1);
+    expect(raw.mock.calls[0]?.[2]).toEqual({
+      operationName: 'BoardFavoritesStage1',
+    });
   });
 
-  it('rejection message mentions M23 + the 2-stage resolver', async () => {
-    const fakeClient = {} as unknown as MondayClient;
+  it('skips Stage 2 when Stage 1 returns null favorites', async () => {
+    const { client, raw } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: { favorites: null },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards).toEqual([]);
+    expect(raw).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips Stage 2 when Stage 1 has only non-Board entries', async () => {
+    const { client, raw } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: '1', object: { id: '100', type: 'Folder' }, position: 1 },
+            { id: '2', object: { id: '200', type: 'Dashboard' }, position: 2 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(raw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fetchBoardFavorites — happy path', () => {
+  it('runs both stages + joins position with hydrated board fields', async () => {
+    const { client, raw } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: 'h1', object: { id: '100', type: 'Board' }, position: 1.5 },
+            { id: 'h2', object: { id: '200', type: 'Folder' }, position: 2 },
+            { id: 'h3', object: { id: '300', type: 'Board' }, position: 3 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: {
+          boards: [
+            {
+              id: '100',
+              name: 'Tasks',
+              state: 'active',
+              workspace_id: '50',
+              url: 'https://x.monday.com/boards/100',
+            },
+            {
+              id: '300',
+              name: 'Archive',
+              state: 'archived',
+              workspace_id: null,
+              url: null,
+            },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards).toEqual([
+      {
+        id: '100',
+        name: 'Tasks',
+        state: 'active',
+        workspace_id: '50',
+        url: 'https://x.monday.com/boards/100',
+        position: 1.5,
+      },
+      {
+        id: '300',
+        name: 'Archive',
+        state: 'archived',
+        workspace_id: null,
+        url: null,
+        position: 3,
+      },
+    ]);
+    expect(result.warnings).toEqual([]);
+    expect(result.source).toBe('live');
+    expect(result.cacheAgeSeconds).toBe(null);
+    expect(raw).toHaveBeenCalledTimes(2);
+    expect(raw.mock.calls[1]?.[1]).toEqual({ ids: ['100', '300'] });
+  });
+
+  it("passes Stage 2's complexity through (verbose-injection contract)", async () => {
+    const stage2Complexity: Complexity = {
+      before: 999_950,
+      after: 999_900,
+      query: 50,
+      reset_in_x_seconds: 60,
+    };
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: '1', object: { id: '100', type: 'Board' }, position: 1 },
+          ],
+        },
+        complexity: {
+          before: 999_950,
+          after: 999_940,
+          query: 10,
+          reset_in_x_seconds: 60,
+        },
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: {
+          boards: [
+            { id: '100', name: 'X', state: 'active', workspace_id: null, url: null },
+          ],
+        },
+        complexity: stage2Complexity,
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.complexity).toEqual(stage2Complexity);
+  });
+
+  it("passes Stage 1's complexity through on the empty short-circuit path", async () => {
+    const stage1Complexity: Complexity = {
+      before: 999_950,
+      after: 999_940,
+      query: 10,
+      reset_in_x_seconds: 60,
+    };
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: { favorites: [] },
+        complexity: stage1Complexity,
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.complexity).toEqual(stage1Complexity);
+  });
+});
+
+describe('fetchBoardFavorites — stale-favorites warning', () => {
+  it('surfaces board_favorites_stale on the Stage-1/Stage-2 count delta', async () => {
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: 'a', object: { id: '100', type: 'Board' }, position: 1 },
+            { id: 'b', object: { id: '200', type: 'Board' }, position: 2 },
+            { id: 'c', object: { id: '300', type: 'Board' }, position: 3 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: {
+          boards: [
+            { id: '100', name: 'A', state: 'active', workspace_id: null, url: null },
+            { id: '300', name: 'C', state: 'active', workspace_id: null, url: null },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards.map((b) => b.id)).toEqual(['100', '300']);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.code).toBe('board_favorites_stale');
+    expect(result.warnings[0]?.details.missing_board_ids).toEqual(['200']);
+  });
+
+  it('drops null entries from Stage 2 boards (defensive nullability)', async () => {
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: 'a', object: { id: '100', type: 'Board' }, position: 1 },
+            { id: 'b', object: { id: '200', type: 'Board' }, position: 2 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: {
+          boards: [
+            { id: '100', name: 'A', state: 'active', workspace_id: null, url: null },
+            null,
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards.map((b) => b.id)).toEqual(['100']);
+    expect(result.warnings[0]?.code).toBe('board_favorites_stale');
+    expect(result.warnings[0]?.details.missing_board_ids).toEqual(['200']);
+  });
+
+  it('handles Stage 2 returning null boards (some accounts return null)', async () => {
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: 'a', object: { id: '100', type: 'Board' }, position: 1 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: { boards: null },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    const result = await fetchBoardFavorites({ client });
+    expect(result.boards).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.details.missing_board_ids).toEqual(['100']);
+  });
+});
+
+describe('fetchBoardFavorites — parse-failure surface', () => {
+  it('surfaces internal_error with details.issues on Stage 1 type mismatch', async () => {
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: { favorites: 'not-an-array' },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
+    await expect(fetchBoardFavorites({ client })).rejects.toBeInstanceOf(
+      ApiError,
+    );
     try {
-      await fetchBoardFavorites({ client: fakeClient });
+      await fetchBoardFavorites({ client });
       throw new Error('expected reject');
     } catch (err: unknown) {
       const apiErr = err as ApiError;
-      expect(apiErr.message).toMatch(/M23 pre-flight stub/);
-      expect(apiErr.message).toMatch(/2-stage|favorites resolver|board favorites/i);
+      expect(apiErr.code).toBe('internal_error');
+      expect(apiErr.message).toMatch(/Query\.favorites/);
+      const details = apiErr.details as {
+        issues: readonly { path: string; message: string }[];
+        hint: string;
+      };
+      expect(details.issues.length).toBeGreaterThan(0);
+      expect(details.hint).toMatch(/Query\.favorites|m23-favorites-deep/);
     }
   });
 
-  it('rejection details.hint references the FAVORITES_LIST_QUERY + BOARDS_HYDRATE_QUERY shape', async () => {
-    const fakeClient = {} as unknown as MondayClient;
+  it('surfaces internal_error with details.issues on Stage 2 type mismatch', async () => {
+    const { client } = buildClientStub({
+      BoardFavoritesStage1: {
+        data: {
+          favorites: [
+            { id: '1', object: { id: '100', type: 'Board' }, position: 1 },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+      BoardFavoritesStage2: {
+        data: { boards: [{ id: '100' }] },
+        complexity: emptyComplexity(),
+        stats: { attempts: 1, sleeps: [] },
+      },
+    });
     try {
-      await fetchBoardFavorites({ client: fakeClient });
+      await fetchBoardFavorites({ client });
       throw new Error('expected reject');
     } catch (err: unknown) {
       const apiErr = err as ApiError;
+      expect(apiErr.code).toBe('internal_error');
+      expect(apiErr.message).toMatch(/boards\(ids:\)/);
       const details = apiErr.details as { hint: string };
-      expect(details.hint).toMatch(/FAVORITES_LIST_QUERY|BOARDS_HYDRATE_QUERY|filterFavoritesToBoards/);
+      expect(details.hint).toMatch(/boards\(ids:\)/);
     }
   });
 });

@@ -2,14 +2,6 @@
  * `monday board favorites` — current user's starred boards
  * (cli-design §13 v0.3 entry; v0.3-plan §3 M23).
  *
- * **v0.3-M23 pre-flight stub.** Registered for forward-compatibility
- * (agent scripts targeting `monday board favorites` are stable across
- * the M23 implementation drop) and rejects every invocation today
- * with `internal_error` carrying the M23-pending hint. The argv shape
- * (no positional, no command-specific flags — uses globals only) is
- * the final shape M23 implementation ships against; only the action
- * body changes.
- *
  * **Empirical-probe finding pinned (2026-05-11, API `2026-01`).**
  * Monday surfaces favorites at `Query.favorites:
  * [GraphqlHierarchyObjectItem!]` (top-level, NOT `User.favorites`).
@@ -22,23 +14,24 @@
  * sidebar parity. See `src/api/board-favorites.ts` for the
  * load-bearing probe-finding docstring.
  *
- * **What lands at M23 implementation:**
- *   - Issue `FAVORITES_LIST_QUERY` (Stage 1) via the resolved
- *     transport; parse via `favoritesListResponseSchema`; filter via
- *     `filterFavoritesToBoards`.
- *   - Issue `BOARDS_HYDRATE_QUERY` (Stage 2) with the filtered IDs;
- *     parse via `boardsHydrateResponseSchema`; join via
- *     `joinFavoritesWithBoards`.
- *   - Surface `board_favorites_stale` warning on the Stage-1/Stage-2
- *     count delta (per `buildStaleFavoritesWarning`).
- *   - Emit success envelope per §6.1 with sorted `BoardFavoriteOutput[]`.
+ * **Stage-1 short-circuit.** When Stage 1 returns no Board-typed
+ * entries the action emits a success envelope with `data: []` and
+ * skips Stage 2 — agents detect via `data.length === 0` (no
+ * special warning shape).
+ *
+ * **Stale-favorites warning.** Stage 2 may hydrate fewer rows than
+ * Stage 1 filtered (board deleted / access revoked since being
+ * favorited). The Stage-1/Stage-2 count delta surfaces a
+ * `board_favorites_stale` warning on `warnings[]` per §6.1.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { ApiError } from '../../utils/errors.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import {
   boardFavoritesOutputSchema,
+  fetchBoardFavorites,
   type BoardFavoritesOutput,
 } from '../../api/board-favorites.js';
 
@@ -49,8 +42,7 @@ export const boardFavoritesCommand: CommandModule<
   BoardFavoritesOutput
 > = {
   name: 'board.favorites',
-  summary:
-    "List the current user's starred boards (v0.3-M23 pre-flight stub — runtime body lands at M23 implementation)",
+  summary: "List the current user's starred boards",
   examples: [
     'monday board favorites',
     'monday board favorites --json',
@@ -58,7 +50,7 @@ export const boardFavoritesCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: boardFavoritesOutputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'board', 'Board commands');
     noun
       .command('favorites')
@@ -70,29 +62,24 @@ export const boardFavoritesCommand: CommandModule<
           'Examples:',
           ...boardFavoritesCommand.examples.map((e) => `  ${e}`),
           '',
-          'NOTE: Pre-flight stub — runtime body lands at v0.3-M23',
-          'implementation. The verb registers the argv shape so agent',
-          'scripts targeting `monday board favorites` are stable across',
-          'the drop-in.',
-          '',
         ].join('\n'),
       )
       .action(async (rawOpts: unknown) => {
         parseArgv(boardFavoritesCommand.inputSchema, rawOpts);
-        // Pre-flight stub — every invocation rejects. M23
-        // implementation replaces this with the real 2-stage
-        // favorites resolver action per cli-design §13 v0.3 entry.
-        await Promise.reject(
-          new ApiError(
-            'internal_error',
-            '`monday board favorites` is a v0.3-M23 pre-flight stub — runtime 2-stage favorites resolver lands at M23 implementation alongside `src/api/board-favorites.ts`.',
-            {
-              details: {
-                hint: 'M23 implementation kickoff lands the Stage-1 favorites query + Stage-2 boards(ids:) hydrate via fetchBoardFavorites; output sorted by Monday-UI position for sidebar parity.',
-              },
-            },
-          ),
-        );
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await fetchBoardFavorites({ client });
+        emitSuccess({
+          ctx,
+          data: result.boards,
+          schema: boardFavoritesCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'collection',
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          warnings: result.warnings,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

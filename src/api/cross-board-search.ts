@@ -279,7 +279,7 @@ export interface ColumnNotFoundOnBoardWarning {
   readonly message: string;
   readonly details: {
     readonly board_id: string;
-    readonly column_token: string;
+    readonly column: string;
     readonly hint: string;
   };
 }
@@ -303,7 +303,7 @@ export const columnNotFoundOnBoardWarningSchema = z
     message: z.string().min(1),
     details: z.object({
       board_id: z.string().min(1),
-      column_token: z.string().min(1),
+      column: z.string().min(1),
       hint: z.string().min(1),
     }).strict(),
   })
@@ -452,7 +452,7 @@ export const buildColumnNotFoundOnBoardWarning = (
   message: `column "${columnToken}" not found on board ${boardId}; board skipped in cross-board fan-out`,
   details: {
     board_id: boardId,
-    column_token: columnToken,
+    column: columnToken,
     hint: 'cross-board search requires the --where column to resolve on every board in the fan-out; boards without the column are skipped',
   },
 });
@@ -570,52 +570,322 @@ export interface CrossBoardSearchResult {
   readonly source: 'live';
 }
 
-const stubReject = (): Promise<CrossBoardSearchResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      'crossBoardSearch is a v0.3-M23 pre-flight stub — runtime fan-out walker lands at M23 implementation alongside the `monday item search` cross-board action.',
-      {
-        details: {
-          hint: 'M23 implementation lands the boards(ids:) { items_page(query_params:) } fan-out walker, per-board cursor tracking, inaccessible-boards detection, and the streaming-onItem composition.',
-        },
-      },
-    ),
-  );
+/**
+ * The GraphQL document the walker issues per board. Per the M23
+ * empirical probe (`scripts/probe/m23-cross-board-search-2.ts` (1)
+ * + (3)), `query_params.rules[].column_id` is `ID!` (not `String!`)
+ * and `compare_value` is `[JSON!]`. The cross-board surface uses
+ * `boards(ids: [...]) { items_page(query_params: {...}) }`; with
+ * per-board column resolution producing distinct rule sets per
+ * board, the walker issues ONE call per plan (the surface can't
+ * fold per-board rules into a single document without aliased
+ * sub-queries — N calls keep the document static and the per-board
+ * latency profile transparent per Decision 5's wall-clock-cap
+ * rationale). The boards(ids: [$boardId]) shape lets the same
+ * document detect inaccessible boards via the empty-array reply
+ * from Monday.
+ */
+const CROSS_BOARD_SEARCH_QUERY = `
+  query CrossBoardSearch($boardId: ID!, $rules: [ItemsQueryRule!]!, $limit: Int!) {
+    boards(ids: [$boardId]) {
+      id
+      name
+      items_page(limit: $limit, query_params: { rules: $rules }) {
+        cursor
+        items {
+          id
+          name
+          state
+          column_values {
+            id
+            text
+          }
+        }
+      }
+    }
+  }
+`;
+
+const wireColumnValueSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string().nullable(),
+  })
+  .loose();
+
+const wireItemSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    state: z.string().nullable(),
+    column_values: z.array(wireColumnValueSchema),
+  })
+  .loose();
+
+const wireItemsPageSchema = z
+  .object({
+    cursor: z.string().nullable(),
+    items: z.array(wireItemSchema),
+  })
+  .loose();
+
+const wireBoardSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    items_page: wireItemsPageSchema,
+  })
+  .loose();
+
+const crossBoardSearchResponseSchema = z
+  .object({
+    boards: z.array(wireBoardSchema.nullable()).nullable(),
+  })
+  .loose();
 
 /**
- * Cross-board fan-out walker entry point. Issues `boards(ids: $ids)
- * { id name items_page(query_params: { rules: ... }) { cursor items
- * { ... } } }` with per-board rule plans, walks per-board cursors to
- * exhaustion (or until `--limit` short-circuits), streams items
- * per-arrival via `onItem`, detects inaccessible boards via the
- * response.boards.length delta, and surfaces the
- * `inaccessible_boards` warning.
+ * Cross-board fan-out walker entry point. Per the M23 empirical-
+ * probe findings, the walker:
  *
- * Stub at the M23 pre-flight — the runtime body lands at M23
- * implementation kickoff alongside the cross-board action's item-
- * search verb extension. Throws `internal_error` until M23
- * implementation swaps the body.
+ *   1. Issues one `boards(ids: [$boardId]) { items_page(query_params:
+ *      { rules }) }` GraphQL call per plan (per-board rule sets
+ *      can't fold into a single document; N calls preserve the
+ *      static document shape + transparent per-board latency
+ *      profile that Decision 5's wall-clock cap is calibrated for).
+ *   2. Walks plans sequentially so the aggregate `--limit` can
+ *      short-circuit further fan-out before issuing calls whose
+ *      results would be discarded.
+ *   3. Streams each item via `onItem` as it arrives (push-then-
+ *      await per `pagination.ts:369`); deterministic per-board-id
+ *      order matches `inputs.plans`.
+ *   4. Detects inaccessibility via Monday's silent-omit shape
+ *      (`boards(ids: [<bad>])` returns `{boards: []}`). Boards
+ *      missing from the response surface in
+ *      `inaccessible_boards.details.missing_board_ids`.
+ *   5. Surfaces `cross_board_truncated` (Codex round-1 P1-2) when
+ *      `--limit` short-circuits OR any board's `items_page.cursor`
+ *      came back non-null at the v0.3 single-call surface.
  *
- * Boards in `boardIds` that don't appear in `plans` are NOT scanned —
- * the column-resolution pre-pass already filtered them (with a
+ * Boards in `boardIds` that don't appear in `plans` are NOT scanned
+ * — the column-resolution pre-pass already filtered them (with a
  * `column_not_found_on_board` warning surfaced by the action, not
  * the walker). The walker's contract is "fan out across `plans` and
  * detect inaccessibility against `boardIds`", separating the two
  * concerns for independent testability.
+ *
+ * **`source` is always `'live'`** per the Codex round-2 P2-1 fix —
+ * the action layer aggregates this with the per-board column-
+ * resolution pre-pass cache state via `SourceAggregator` and
+ * resolves the envelope's `meta.source` / `meta.cache_age_seconds`
+ * from the aggregator's resolved state.
  */
-// Stub: M23 implementation issues the boards(ids:) { items_page
-// (query_params: { rules }) } fan-out via inputs.client.raw, walks
-// per-board cursors, emits items via onItem, and surfaces the
-// inaccessible_boards + column_not_found_on_board +
-// cross_board_truncated warnings per the empirical probe findings.
-// The pre-flight diff pins the contract surface; the runtime body
-// lands at M23 implementation.
-/* c8 ignore start */
-export const crossBoardSearch = (
-  _inputs: CrossBoardSearchInputs,
-): Promise<CrossBoardSearchResult> => stubReject();
-/* c8 ignore stop */
+export const crossBoardSearch = async (
+  inputs: CrossBoardSearchInputs,
+): Promise<CrossBoardSearchResult> => {
+  /* c8 ignore start */
+  // Defensive: the action layer's pre-pass filters out boards
+  // without resolvable columns before constructing
+  // CrossBoardSearchInputs; an empty boardIds array means the
+  // pre-pass found NO viable board, which the action should have
+  // surfaced as a different error (no plans → nothing to walk).
+  // The walker rejects rather than returning `{items: [], hasMore:
+  // false}` so the empty-boardIds case can't silently masquerade
+  // as a "no items matched" success.
+  if (inputs.boardIds.length === 0) {
+    throw new ApiError(
+      'internal_error',
+      'crossBoardSearch: boardIds is empty — the column-resolution pre-pass should ensure at least one board is scanned before calling the walker',
+    );
+  }
+  /* c8 ignore stop */
+
+  const pageSize = inputs.pageSize ?? 100;
+  const maxItems = inputs.maxItems;
+
+  // Per-board walk-state tracking for the cross_board_truncated
+  // warning. The walker writes into `walkedBoardState` only for
+  // boards it actually walked (got a wire response back). The
+  // final `per_board_state` shape is computed at end-of-walk
+  // from this map + the boardIds set (boards never reached →
+  // 'not_started'; boards walked but inaccessible → omitted,
+  // surfaced separately via `inaccessible_boards`).
+  const walkedBoardState = new Map<string, CrossBoardPerBoardWalkState>();
+
+  const items: CrossBoardItem[] = [];
+  // Boards we actually issued a GraphQL call for. Distinct from
+  // `returnedBoardIds` so we can tell "inaccessible (attempted, wire
+  // returned []) " apart from "not_started (--limit short-circuited
+  // before reaching the board)".
+  const attemptedBoardIds = new Set<string>();
+  const returnedBoardIds = new Set<string>();
+  let complexity: Complexity | null = null;
+  let limitHit = false;
+
+  for (const plan of inputs.plans) {
+    if (maxItems !== undefined && items.length >= maxItems) {
+      limitHit = true;
+      break;
+    }
+
+    const boardId = plan.board_id;
+    attemptedBoardIds.add(boardId);
+    const wireRules = plan.rules.map((r) => ({
+      column_id: r.column_id,
+      compare_value: r.compare_values,
+    }));
+    // Cap the per-board page size at the remaining --limit budget
+    // so the walker doesn't fetch more items than it'll keep.
+    // Defensive `Math.max` against zero/negative — the outer
+    // `items.length >= maxItems` guard normally catches the
+    // exhausted case before we reach here.
+    const remaining =
+      maxItems !== undefined ? maxItems - items.length : pageSize;
+    const limit = Math.max(1, Math.min(pageSize, remaining));
+
+    const response = await inputs.client.raw<unknown>(
+      CROSS_BOARD_SEARCH_QUERY,
+      { boardId, rules: wireRules, limit },
+      { operationName: 'CrossBoardSearch' },
+    );
+    complexity = response.complexity;
+
+    const parsed = crossBoardSearchResponseSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new ApiError(
+        'internal_error',
+        'Monday cross-board search response did not match the expected shape',
+        {
+          cause: parsed.error,
+          details: {
+            board_id: boardId,
+            issues: parsed.error.issues.map((i) => ({
+              path: i.path.join('.'),
+              message: i.message,
+            })),
+            hint: 'Monday may have amended the `boards(ids:) { items_page }` surface — re-probe via `scripts/probe/m23-cross-board-search-2.ts` and amend cli-design §13 v0.3 entry if so',
+          },
+        },
+      );
+    }
+
+    const boards = (parsed.data.boards ?? []).filter(
+      (b): b is z.infer<typeof wireBoardSchema> => b !== null,
+    );
+    const board = boards[0];
+    if (board === undefined) {
+      // Inaccessible — Monday returns `boards = []` for IDs the
+      // token can't access. We don't record a walk-state for this
+      // board; the inaccessibility surfaces separately via
+      // `inaccessible_boards` below.
+      continue;
+    }
+    returnedBoardIds.add(board.id);
+
+    const cursor = board.items_page.cursor;
+
+    for (const rawItem of board.items_page.items) {
+      if (maxItems !== undefined && items.length >= maxItems) {
+        limitHit = true;
+        break;
+      }
+      const columnValues: Record<string, string | null> = {};
+      for (const cv of rawItem.column_values) {
+        columnValues[cv.id] = cv.text;
+      }
+      const item: CrossBoardItem = {
+        id: rawItem.id,
+        name: rawItem.name,
+        state: rawItem.state,
+        board: { id: board.id, name: board.name },
+        column_values: columnValues,
+      };
+      items.push(item);
+      if (inputs.onItem !== undefined) {
+        // M18 push-then-await: append to the buffer FIRST so a
+        // listener exception doesn't tear down the in-flight item;
+        // the walker's onItem-hook contract matches paginate's.
+        await inputs.onItem(item);
+      }
+    }
+
+    if (limitHit) {
+      // The board still has more items beyond what we collected
+      // (the aggregate --limit fired mid-page).
+      walkedBoardState.set(boardId, 'has_more');
+      break;
+    }
+    // Drained this board's first page. v0.3 is single-call-only
+    // per board — non-null cursor → board has more items;
+    // surfaced via cross_board_truncated for agent introspection
+    // (no resumable cross-board cursor — narrow with
+    // --workspace / --favorites or use the v0.1 --board path).
+    walkedBoardState.set(boardId, cursor === null ? 'exhausted' : 'has_more');
+  }
+
+  // Materialise the final per_board_state shape. Boards we walked
+  // carry their actual state ('exhausted' | 'has_more'). Boards in
+  // `boardIds` that we never reached (--limit short-circuit) are
+  // 'not_started'. Boards we attempted but Monday omitted are
+  // OMITTED here — surfaced separately via `inaccessible_boards`.
+  const perBoardState: Record<string, CrossBoardPerBoardWalkState> = {};
+  for (const bid of inputs.boardIds) {
+    const walked = walkedBoardState.get(bid);
+    if (walked !== undefined) {
+      perBoardState[bid] = walked;
+    } else if (!attemptedBoardIds.has(bid)) {
+      // Never reached — fan-out stopped before this board.
+      perBoardState[bid] = 'not_started';
+    }
+    // Else: attempted but not walked (inaccessible) → omitted.
+  }
+
+  const warnings: (
+    | InaccessibleBoardsWarning
+    | CrossBoardTruncatedWarning
+  )[] = [];
+
+  // Inaccessibility = boards we attempted but Monday's wire response
+  // omitted. Boards we never attempted (--limit short-circuited
+  // before reaching them) don't count as inaccessible — they're
+  // surfaced via `cross_board_truncated.per_board_state` as
+  // `not_started` for agent introspection.
+  const attemptedArr = Array.from(attemptedBoardIds);
+  if (attemptedArr.length > returnedBoardIds.size) {
+    warnings.push(
+      buildInaccessibleBoardsWarning(
+        attemptedArr,
+        Array.from(returnedBoardIds),
+      ),
+    );
+  }
+
+  const anyNotExhausted = Object.values(perBoardState).some(
+    (s) => s !== 'exhausted',
+  );
+  const hasMore = limitHit || anyNotExhausted;
+  if (hasMore) {
+    const reason: 'limit_hit' | 'board_has_more' = limitHit
+      ? 'limit_hit'
+      : 'board_has_more';
+    warnings.push(
+      buildCrossBoardTruncatedWarning(
+        reason,
+        items.length,
+        maxItems ?? null,
+        perBoardState,
+      ),
+    );
+  }
+
+  return {
+    items,
+    hasMore,
+    totalReturned: items.length,
+    complexity,
+    warnings,
+    source: 'live',
+  };
+};
 
 // Pin BoardId + MondayClient imports so this module surfaces the
 // types that downstream consumers (commands/item/search.ts at M23

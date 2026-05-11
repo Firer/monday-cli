@@ -52,9 +52,18 @@ import { ApiError, UsageError } from '../../utils/errors.js';
 import {
   DEFAULT_MAX_BOARDS,
   HARD_CAP_MAX_BOARDS,
+  buildColumnNotFoundOnBoardWarning,
+  crossBoardSearch,
   crossBoardSearchOutputSchema,
+  type CrossBoardItem,
   type CrossBoardSearchOutput,
+  type PerBoardScanPlan,
 } from '../../api/cross-board-search.js';
+import {
+  fetchBoardFavorites,
+} from '../../api/board-favorites.js';
+import { SourceAggregator } from '../../api/source-aggregator.js';
+import type { BoardId } from '../../types/ids.js';
 import {
   loadBoardMetadata,
   refreshBoardMetadata,
@@ -367,6 +376,208 @@ const extractNext = (r: MondayResponse<NextResponse>): PaginatedPage<unknown> =>
   return { cursor: page?.cursor ?? null, items: page?.items ?? [] };
 };
 
+/**
+ * GraphQL document for cross-board enumeration (workspace + all-
+ * accessible scoping levers). Selects only `id` + `name` — the
+ * fan-out walker hydrates `name` again per-board, but we read it
+ * here too so a future debug path (e.g. printing the resolved set)
+ * has it without an extra round-trip.
+ *
+ * State filter pinned to `active` so archived/deleted boards don't
+ * pollute the cross-board set; agents wanting archived must use the
+ * v0.1 `--board <bid>` single-board path.
+ */
+const CROSS_BOARD_ENUM_QUERY = `
+  query CrossBoardEnumerate($workspaceIds: [ID], $limit: Int) {
+    boards(workspace_ids: $workspaceIds, limit: $limit, state: active) {
+      id
+      name
+    }
+  }
+`;
+
+interface CrossBoardEnumerateResponse {
+  readonly boards: readonly { readonly id: string; readonly name: string }[] | null;
+}
+
+interface ResolveCrossBoardSetInputs {
+  readonly parsed: {
+    readonly workspace?: string | undefined;
+    readonly favorites?: boolean | undefined;
+  };
+  readonly client: MondayClient;
+  readonly maxBoards: number;
+  readonly preWarnings: Warning[];
+  readonly aggregator: SourceAggregator;
+}
+
+/**
+ * Resolves the cross-board ID set per the scoping lever. Three
+ * paths:
+ *
+ *   - `--favorites`: call `fetchBoardFavorites`; project to board
+ *     IDs; truncate to `--max-boards`. Stale-favorites warning (if
+ *     surfaced by the favorites resolver) is folded into
+ *     `preWarnings`.
+ *   - `--workspace <wid>`: `boards(workspace_ids: [<wid>], limit:
+ *     <maxBoards>, state: active)`.
+ *   - neither: `boards(limit: <maxBoards>, state: active)`
+ *     (all-accessible mode).
+ *
+ * All three paths cap at `--max-boards` (parse boundary already
+ * rejected above-hard-cap values; here we honour the agent's
+ * resolved cap). `aggregator` records `'live'` for the enum call
+ * (the lever queries are pure-live; the cache-bearing source is
+ * the per-board metadata pre-pass which records separately).
+ */
+const resolveCrossBoardSet = async (
+  inputs: ResolveCrossBoardSetInputs,
+): Promise<readonly BoardId[]> => {
+  if (inputs.parsed.favorites === true) {
+    const result = await fetchBoardFavorites({ client: inputs.client });
+    inputs.aggregator.record(result.source, result.cacheAgeSeconds);
+    inputs.preWarnings.push(...result.warnings);
+    return result.boards
+      .slice(0, inputs.maxBoards)
+      .map((b) => BoardIdSchema.parse(b.id));
+  }
+  const variables: Record<string, unknown> = { limit: inputs.maxBoards };
+  if (inputs.parsed.workspace !== undefined) {
+    variables.workspaceIds = [inputs.parsed.workspace];
+  }
+  const response = await inputs.client.raw<CrossBoardEnumerateResponse>(
+    CROSS_BOARD_ENUM_QUERY,
+    variables,
+    { operationName: 'CrossBoardEnumerate' },
+  );
+  inputs.aggregator.record('live', null);
+  const boards = response.data.boards ?? [];
+  return boards.map((b) => BoardIdSchema.parse(b.id));
+};
+
+interface BuildPerBoardPlanInputs {
+  readonly boardId: BoardId;
+  readonly clauses: readonly WhereClause[];
+  readonly client: MondayClient;
+  readonly env: NodeJS.ProcessEnv;
+  readonly noCache: boolean;
+  readonly resolveMe: () => Promise<string>;
+  readonly preWarnings: Warning[];
+  readonly aggregator: SourceAggregator;
+}
+
+/**
+ * Builds the `PerBoardScanPlan` for one board, or returns
+ * `undefined` if the board doesn't have all the columns the
+ * `--where` clauses need.
+ *
+ * Per-board steps:
+ *   1. Load metadata (cache-first; `--no-cache` bypasses).
+ *      Record per-leg source via `aggregator`.
+ *   2. Resolve every clause's column token against this board's
+ *      columns. On `column_not_found`, surface a
+ *      `column_not_found_on_board` warning (which board, which
+ *      token) and return `undefined` — the walker skips this
+ *      board.
+ *   3. Project the `--where` clauses into wire rules: resolve
+ *      `me` for people columns, group by resolved column ID, OR
+ *      multiple values within a column.
+ *   4. Validate clauses use only the `=` operator (cross-board
+ *      surface inherits the v0.1 single-board restriction).
+ */
+const buildPerBoardPlan = async (
+  inputs: BuildPerBoardPlanInputs,
+): Promise<PerBoardScanPlan | undefined> => {
+  // Validate operators upfront — same rule the v0.1 single-board
+  // path applies in buildColumnQueries. Cross-board uses the
+  // narrower `=`-only surface; richer filters live on
+  // `item list --where`.
+  for (const clause of inputs.clauses) {
+    if (clause.operator.kind !== 'equals') {
+      throw new UsageError(
+        `item search supports only the = operator (got ${clause.operator.literal} ` +
+          `in ${JSON.stringify(clause.raw)}); use \`item list --where\` for richer filters`,
+        { details: { clause: clause.raw, operator: clause.operator.literal } },
+      );
+    }
+  }
+
+  const meta = await loadBoardMetadata({
+    client: inputs.client,
+    boardId: inputs.boardId,
+    env: inputs.env,
+    noCache: inputs.noCache,
+  });
+  inputs.aggregator.record(meta.source, meta.cacheAgeSeconds);
+
+  // Per-board column resolution. We don't auto-refresh on
+  // column_not_found here — the cross-board path treats per-board
+  // column-not-found as a structured warning (the agent's intent
+  // is fan-out; a board missing a column is not a fatal error).
+  let resolved;
+  try {
+    resolved = await resolveColumnsAcrossClauses({
+      metadata: meta.metadata,
+      tokens: inputs.clauses.map((c) => c.token),
+    });
+  } catch (err: unknown) {
+    if (err instanceof ApiError && err.code === 'column_not_found') {
+      const details = err.details as { token?: string } | undefined;
+      const token = details?.token ?? '<unknown>';
+      inputs.preWarnings.push(
+        buildColumnNotFoundOnBoardWarning(String(inputs.boardId), token),
+      );
+      return undefined;
+    }
+    throw err;
+  }
+
+  // Resolver collision / refresh warnings ResolverWarning widens
+  // cleanly to envelope.Warning per the v0.1 single-board path.
+  inputs.preWarnings.push(...resolved.warnings);
+
+  // Group clauses by resolved column ID, resolving `me` for people
+  // columns lazily.
+  let cachedMe: string | undefined;
+  const me = async (): Promise<string> => {
+    cachedMe ??= await inputs.resolveMe();
+    return cachedMe;
+  };
+  const byColumn = new Map<string, string[]>();
+  for (let i = 0; i < inputs.clauses.length; i++) {
+    const clause = inputs.clauses[i];
+    const match = resolved.matches[i];
+    /* c8 ignore next 4 — defensive: helper contract pins
+       matches.length === clauses.length. */
+    if (clause === undefined || match === undefined) {
+      throw new UsageError(
+        `buildPerBoardPlan: lost clause/match alignment at index ${String(i)}`,
+      );
+    }
+    /* c8 ignore next 3 — defensive: parser guarantees binary ops
+       carry a value. */
+    if (clause.value === undefined) {
+      throw new UsageError(`internal: missing value for ${clause.raw}`);
+    }
+    let value = clause.value;
+    if (match.column.type === 'people' && isMeToken(value)) {
+      value = await me();
+    }
+    const existing = byColumn.get(match.column.id);
+    if (existing === undefined) {
+      byColumn.set(match.column.id, [value]);
+    } else {
+      existing.push(value);
+    }
+  }
+
+  const rules = Array.from(byColumn, ([columnId, values]) => ({
+    column_id: columnId,
+    compare_values: values,
+  }));
+  return { board_id: inputs.boardId, rules };
+};
+
 export const itemSearchCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ItemSearchCommandOutput
@@ -430,40 +641,163 @@ export const itemSearchCommand: CommandModule<
       .action(async (opts: unknown) => {
         const parsed = parseArgv(itemSearchCommand.inputSchema, opts);
 
-        // v0.3-M23 cross-board path. Pre-flight stub — reject every
-        // cross-board invocation with `internal_error` + M23-pending
-        // hint. M23 implementation lands the runtime fan-out walker
-        // via `src/api/cross-board-search.ts` + the per-board column-
-        // resolution pre-pass + the `board favorites` / `boards
-        // (workspace_ids:)` resolver branches.
+        // v0.3-M23 cross-board path. Dispatches on the scoping
+        // lever (`--favorites` / `--workspace <wid>` / neither =
+        // all-accessible-boards). Each branch resolves the board
+        // ID set, runs the per-board column-resolution pre-pass,
+        // and calls the fan-out walker.
         if (parsed.board === undefined) {
-          // The scoping-lever discrimination is for the M23
-          // implementation's hint payload — at pre-flight every
-          // branch rejects identically, but the M23 impl will
-          // dispatch on the lever so the rejection narrative is
-          // plumbed. Command-action stub bodies are NOT c8-wrapped
-          // per testing.md — integration tests drive each branch via
-          // commander argv and assert on the rejection envelope.
-          const lever =
-            parsed.workspace !== undefined
-              ? 'workspace'
-              : parsed.favorites === true
-                ? 'favorites'
-                : 'all-accessible-boards';
-          throw new ApiError(
-            'internal_error',
-            '`monday item search` cross-board path is a v0.3-M23 pre-flight stub — runtime fan-out lands at M23 implementation.',
-            {
-              details: {
-                scoping_lever: lever,
-                max_boards: parsed.maxBoards ?? DEFAULT_MAX_BOARDS,
-                hard_cap: HARD_CAP_MAX_BOARDS,
-                cap_rationale:
-                  'wall-clock fan-out latency cap (~0.5-1.5s per call at small N scaling linearly; N=25 lands ~12-18s under the 30s MONDAY_REQUEST_TIMEOUT_MS default per Decision 5 `3a2f1db` empirical-probe finding)',
-                hint: 'M23 implementation kickoff lands the boards(ids:) { items_page(query_params:) } fan-out walker via src/api/cross-board-search.ts; until then, supply --board <bid> to use the v0.1 single-board path.',
-              },
-            },
-          );
+          const maxBoards = parsed.maxBoards ?? DEFAULT_MAX_BOARDS;
+          const {
+            client,
+            globalFlags,
+            apiVersion,
+          } = resolveClient(ctx, program.opts());
+
+          // Step 1: resolve the cross-board ID set per scoping lever.
+          // SourceAggregator tracks per-leg `meta.source`. The
+          // walker is always `'live'`; the pre-pass legs may be
+          // `'cache'` for cached board-metadata fetches.
+          const aggregator = new SourceAggregator();
+          const preWarnings: Warning[] = [];
+          const boardIds = await resolveCrossBoardSet({
+            parsed,
+            client,
+            maxBoards,
+            preWarnings,
+            aggregator,
+          });
+
+          // Step 2: per-board column-resolution pre-pass. Each
+          // board's metadata is loaded (cache-first), the where
+          // clauses are resolved per-board, and any board where a
+          // clause's column doesn't resolve gets dropped with a
+          // `column_not_found_on_board` warning. The surviving
+          // boards become `PerBoardScanPlan` entries.
+          const clauses = parsed.where.map(parseWhereSyntax);
+          const resolveMe = resolveMeFactory(client);
+          const plans: PerBoardScanPlan[] = [];
+          for (const boardId of boardIds) {
+            const planResult = await buildPerBoardPlan({
+              boardId,
+              clauses,
+              client,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+              resolveMe,
+              preWarnings,
+              aggregator,
+            });
+            if (planResult !== undefined) {
+              plans.push(planResult);
+            }
+          }
+
+          const format = selectOutput({
+            json: globalFlags.json,
+            table: globalFlags.table,
+            ...(globalFlags.output === undefined
+              ? {}
+              : { output: globalFlags.output }),
+            env: ctx.env,
+            isTTY: ctx.isTTY,
+          });
+
+          // Step 3: if no boards have viable plans, short-circuit
+          // with empty data + the per-board warnings. The walker
+          // requires non-empty boardIds (defensive); the empty
+          // case is the action's concern.
+          if (plans.length === 0) {
+            aggregator.record('live', null);
+            const aggregated = aggregator.result('live');
+            emitSuccess({
+              ctx,
+              data: [] as readonly CrossBoardItem[],
+              schema: crossBoardSearchOutputSchema,
+              programOpts: program.opts(),
+              kind: 'collection',
+              source: aggregated.source,
+              cacheAgeSeconds: aggregated.cacheAgeSeconds,
+              warnings: preWarnings,
+              apiVersion,
+              hasMore: false,
+              totalReturned: 0,
+            });
+            return;
+          }
+
+          // Step 4: streaming NDJSON path emits items as they
+          // arrive + writes the §6.3 trailer; bypasses
+          // emitSuccess because the streaming contract requires
+          // bytes hitting stdout before the walk completes.
+          if (format === 'ndjson') {
+            const stream = startNdjsonStream<CrossBoardItem>({
+              stream: ctx.stdout,
+              secrets: collectSecrets(ctx.env, ctx.runtimeSecrets),
+              project: (item) => ({ ...item }),
+            });
+            const walkResult = await crossBoardSearch({
+              client,
+              boardIds: plans.map((p) => p.board_id),
+              plans,
+              pageSize: parsed.pageSize ?? DEFAULT_PAGE_SIZE,
+              ...(parsed.limit === undefined ? {} : { maxItems: parsed.limit }),
+              onItem: stream.onItem,
+            });
+            aggregator.record(walkResult.source, null);
+            const aggregated = aggregator.result('live');
+            stream.writeTrailer(
+              buildStreamingTrailerMeta({
+                ctx: {
+                  cliVersion: ctx.cliVersion,
+                  requestId: ctx.requestId,
+                  clock: ctx.clock,
+                },
+                apiVersion,
+                source: aggregated.source,
+                cacheAgeSeconds: aggregated.cacheAgeSeconds,
+                result: {
+                  hasMore: walkResult.hasMore,
+                  totalReturned: walkResult.totalReturned,
+                  complexity: walkResult.complexity,
+                  nextCursor: null,
+                },
+              }),
+            );
+            return;
+          }
+
+          // Step 5: non-streaming path — full walker run, then
+          // emitSuccess with merged source aggregation + the union
+          // schema's cross-board branch.
+          const walkResult = await crossBoardSearch({
+            client,
+            boardIds: plans.map((p) => p.board_id),
+            plans,
+            pageSize: parsed.pageSize ?? DEFAULT_PAGE_SIZE,
+            ...(parsed.limit === undefined ? {} : { maxItems: parsed.limit }),
+          });
+          aggregator.record(walkResult.source, null);
+          const aggregated = aggregator.result('live');
+          const warnings: Warning[] = [
+            ...preWarnings,
+            ...walkResult.warnings,
+          ];
+          emitSuccess({
+            ctx,
+            data: walkResult.items,
+            schema: crossBoardSearchOutputSchema,
+            programOpts: program.opts(),
+            kind: 'collection',
+            source: aggregated.source,
+            cacheAgeSeconds: aggregated.cacheAgeSeconds,
+            warnings,
+            apiVersion,
+            complexity: walkResult.complexity,
+            hasMore: walkResult.hasMore,
+            totalReturned: walkResult.totalReturned,
+          });
+          return;
         }
 
         // v0.3-M23: `parsed.board` is now `BoardId | undefined` at
