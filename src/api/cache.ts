@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CacheError } from '../utils/errors.js';
-import { isENOENT } from '../utils/fs.js';
+import { formatMode, isENOENT } from '../utils/fs.js';
 
 /**
  * Local cache for board metadata, the user directory, and the
@@ -572,5 +572,3 @@ export const stats = async (
   };
 };
 
-const formatMode = (mode: number): string =>
-  `0${(mode & 0o777).toString(8).padStart(3, '0')}`;

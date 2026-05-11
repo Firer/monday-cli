@@ -74,7 +74,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
-import { isENOENT } from '../utils/fs.js';
+import { formatMode, isENOENT } from '../utils/fs.js';
 import { redact as defaultRedactImpl } from '../utils/redact.js';
 import { collectSecrets } from '../cli/envelope-out.js';
 import type { Transport } from './transport.js';
@@ -357,9 +357,6 @@ const asError = (reason: unknown, fallback: string): Error => {
      `ctrl.abort()` (no-arg) case. */
   return new Error(fallback);
 };
-
-const formatMode = (mode: number): string =>
-  `0${(mode & 0o777).toString(8).padStart(3, '0')}`;
 
 class ProbeTimeoutError extends Error {
   constructor(probe: ProbeName, timeoutMs: number) {

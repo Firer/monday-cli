@@ -28,3 +28,17 @@ export const isENOENT = (err: unknown): boolean => {
   }
   return (err as { code?: unknown }).code === 'ENOENT';
 };
+
+/**
+ * Formats a `stat.mode` numeric field as an octal `'0NNN'` string —
+ * the canonical shape for `chmod`-compatible output in security
+ * diagnostics + cache-permission refusal messages.
+ *
+ * v0.3-M22 close R-NEW-7 lift: the same formatter was duplicated
+ * character-identical across `src/api/cache.ts` + `src/config/
+ * credentials.ts` + `src/api/probes.ts` (M22 cache_writability
+ * probe was the third named consumer). Mirrors the R-NEW-1
+ * `isENOENT` lift cadence — pure fs-helper, no behaviour change.
+ */
+export const formatMode = (mode: number): string =>
+  `0${(mode & 0o777).toString(8).padStart(3, '0')}`;

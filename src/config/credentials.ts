@@ -40,7 +40,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ConfigError } from '../utils/errors.js';
-import { isENOENT } from '../utils/fs.js';
+import { formatMode, isENOENT } from '../utils/fs.js';
 
 /**
  * File-mode constant for the credentials file. Mirrors
@@ -138,9 +138,6 @@ export interface SetProfileCredentialsInputs {
   readonly profileName: string;
   readonly entry: ProfileEntry;
 }
-
-const formatMode = (mode: number): string =>
-  `0${(mode & 0o777).toString(8).padStart(3, '0')}`;
 
 const wrapAsConfigError = (
   err: unknown,
