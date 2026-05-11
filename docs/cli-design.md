@@ -609,7 +609,16 @@ monday board doctor <bid>                 # diagnostics; see §11.2           v0
 monday board subscribers <bid>                                               v0.1
 monday board favorites                    # current user's starred boards   v0.3
                                           # natural scoping lever for v0.3
-                                          # cross-board `item search`
+                                          # cross-board `item search`.
+                                          # 2-stage GraphQL op: (a) `Query.
+                                          # favorites { object { id type } }`
+                                          # filtered to `type=Board`, then
+                                          # (b) `boards(ids:[...])` to hydrate
+                                          # name + workspace_id + state.
+                                          # Output sorted by Monday's UI
+                                          # position (Float). Read-only —
+                                          # writes (favoriting/unfavoriting)
+                                          # are NOT in v0.3 scope.
 monday board create --name <n> [--workspace <wid>] [--kind public|private|share] [--template <bid>] [--description <d>] [--dry-run]   v0.2
                                           # `create_board(board_name, board_kind,
                                           # workspace_id?, template_id?,
@@ -1606,9 +1615,31 @@ monday board group-delete <bid> <gid> --yes [--dry-run]                      v0.
 monday item list --board <bid> [--group <gid>] [--where <expr>]... [--filter-json <json>] [--state active|archived|all] [--all] [--limit <N>]   v0.1
 monday item get <iid>                     # single item with column values   v0.1
 monday item find <name> --board <bid> [--first]                              v0.1
-monday item search --board <bid> --where <col>=<val>...                      v0.1
-                                          # uses items_page_by_column_values
-                                          # cross-board (omit --board): v0.3
+monday item search [--board <bid>] [--workspace <wid>] [--favorites] [--max-boards <n>] --where <col>=<val>...   v0.1 (--board, --where); v0.3 (cross-board)
+                                          # single-board (v0.1, --board <bid>):
+                                          # uses items_page_by_column_values.
+                                          # cross-board (v0.3, omit --board):
+                                          # uses boards(ids:[...]) { items_page
+                                          # (query_params: { rules }) }; fan-out
+                                          # walker maintains per-board cursors.
+                                          # `--workspace <wid>` narrows the
+                                          # board set to one workspace before
+                                          # fan-out; `--favorites` uses the
+                                          # current user's `board favorites`
+                                          # list as the cross-board set.
+                                          # `--max-boards <n>` caps fan-out
+                                          # cardinality (default 25, hard cap
+                                          # 100 — Decision 5; above-cap surfaces
+                                          # `usage_error`). At most ONE of
+                                          # `--board` / `--workspace` /
+                                          # `--favorites` may be supplied.
+                                          # Per-board columns resolve
+                                          # independently — boards lacking the
+                                          # requested column emit a
+                                          # `column_not_found_on_board` warning
+                                          # and are skipped (not fatal).
+                                          # Inaccessible board IDs emit an
+                                          # `inaccessible_boards` warning.
 monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>]   # single column write   v0.1 (--set-raw v0.2)
                                           # positional <col>=<val> uses friendly translator (§5.3)
                                           # --set-raw skips translation; agent supplies wire-shape JSON
@@ -6288,10 +6319,46 @@ scoped idempotent changes, and post comments narrating its work.**
 - `dev sprint/epic/release/task` workflow shortcuts
 - `dev discover/configure/doctor`
 - `item search` cross-board (omit `--board`) — "find my open tasks
-  anywhere I have access" without the agent iterating boards. Needs
-  a per-call complexity-budget design pass (Monday charges
-  complexity per-board scanned); interacts with v0.3 `board
-  favorites` and likely workspace scoping (`--workspace <wid>`)
+  anywhere I have access" without the agent iterating boards.
+  Interacts with v0.3 `board favorites` and workspace scoping
+  (`--workspace <wid>`). **Decision 5 closure (M23 pre-flight):**
+  the per-call cap pinned at `--max-boards 25` default + hard cap
+  100; above-cap surfaces `usage_error` with hint pointing the
+  agent at `--workspace` / `--favorites` to narrow. **Empirical
+  probe (2026-05-11, API `2026-01`, `scripts/probe/m23-cross-board.ts`
+  + `scripts/probe/m23-cross-board-search-2.ts`):** Monday charges
+  ~25–30 complexity points per board against a ~999_950 per-call
+  budget — complexity is NOT the constraint (1M / 30 ≈ 33,000 boards
+  would fit budget-wise). **The real constraint is wall-clock
+  latency** — cross-board `boards(ids: [N]) { items_page(...) }`
+  takes ~0.5–1.5s per call at N=2 against this account; scaling
+  roughly linearly puts N=25 at ~12–18s (comfortable under the 30s
+  `MONDAY_REQUEST_TIMEOUT_MS` default) and N=60+ at the timeout
+  ceiling. The 25/100 cap is calibrated for this latency envelope,
+  not the complexity budget. Additional load-bearing probe
+  findings pinned for the M23 contract diff:
+  - **Per-board cursor walker.** Each board returns its own
+    `items_page.cursor`; the fan-out walker maintains N
+    per-board cursors (parent stream merges N child walkers).
+  - **Inaccessible board IDs silently omitted.** `boards(ids:
+    [<bad-id>])` returns `{"boards":[]}` (empty array, not null,
+    not error). The walker MUST detect
+    `response.boards.length < input_ids.length` and surface a
+    warning ("X of N requested boards were inaccessible or do
+    not exist") rather than silently delivering partial
+    results.
+  - **Per-board column resolution required for `--where`.** The
+    `items_page(query_params: { rules })` shape uses each
+    board's own column IDs; passing a column token (e.g.
+    `status`) that doesn't resolve on ONE board errors the
+    WHOLE cross-board query with `"Column not found"`. The
+    cross-board walker MUST resolve column tokens per-board
+    independently, build per-board `query_params`, and skip
+    boards where the requested column doesn't resolve (with a
+    `column_not_found_on_board` warning), rather than failing
+    the entire fan-out.
+  - **Order preservation.** Monday returns boards in input-ID
+    order; the walker preserves this for stable agent diffs.
 - `item history <iid>` — per-item activity log (status changes,
   column edits, assignments, comments interleaved chronologically).
   Introduces a new §6 envelope shape (event objects with
@@ -6301,7 +6368,24 @@ scoped idempotent changes, and post comments narrating its work.**
 - `board favorites` — current user's starred boards. Pairs with the
   v0.3 cross-board `item search` as a natural scoping lever
   (`item search --favorites`); shipping it in isolation buys little
-  agent value, so the two land together
+  agent value, so the two land together. **M23 pre-flight empirical
+  probe (2026-05-11, API `2026-01`, `scripts/probe/m23-favorites*.ts`
+  + `scripts/probe/m23-hierarchy-*.ts`):** Monday surfaces favorites
+  at the top-level `Query.favorites: [GraphqlHierarchyObjectItem!]`
+  (NOT `User.favorites` or `Board.is_starred`). The element shape
+  is **polymorphic** — each entry carries `id` (hierarchy-item ID),
+  `accountId`, `object: { id: ID, type: GraphqlMondayObject }`
+  (enum: `Board` | `Folder` | `Dashboard` | `Workspace`),
+  `folderId`, `position` (Float — Monday's UI sort order),
+  `createdAt`, `updatedAt`. **Implication: `board favorites` is
+  a 2-stage GraphQL operation** — Stage 1 fetches the favorites
+  list and filters to `object.type === "Board"`; Stage 2 hydrates
+  via `boards(ids: [<board-typed-ids>]) { id name workspace_id
+  state url }`. Output sorted by `position` for parity with
+  Monday's UI sidebar order. The 2-stage shape is similar to M22's
+  `monday usage` (which combines `platform_api.daily_limit` +
+  `platform_api.daily_analytics`); per-call cost is one
+  GraphQL request per stage
 - `item update --continue-on-error` — partial-success bulk path.
   Today's bulk `item update --where` fails fast on the first
   per-item error (matched items before the failure surface in
