@@ -90,7 +90,9 @@ convention.
 **Next session — likely scope:**
 1. **M24 implementation — fill the stubbed `fetchItemHistory`
    walker + `itemHistoryCommand.action` body.** Pre-flight
-   contract diff shipped this session (commit __SHA__): full
+   contract diff shipped this session (commit `bad98ba` +
+   Codex pre-flight round-1 fix-up `fbd70de` + round-2 fix-up
+   `f7fac47`): full
    zod discriminated union historyEventSchema; argv schema
    with `--since` / `--until` / `--activity-logs-page` /
    `--updates-page` / `--limit` / `--kinds` / `--stream`;

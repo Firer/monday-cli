@@ -1661,7 +1661,7 @@ Collection of direct subitems. Sorted by ID asc per page.
 ### `item history <iid>` (v0.3-M24)
 
 Per-item activity log + comment thread merged chronologically.
-Pre-flight stub at `__SHA__` registers the argv shape + the typed
+Pre-flight stub at `bad98ba` registers the argv shape + the typed
 event-object discriminated union; runtime two-source walker
 (`boards.activity_logs(item_ids:, ...)` + `items.updates(...)`)
 lands at M24 implementation per cli-design §13 v0.3 entry.
