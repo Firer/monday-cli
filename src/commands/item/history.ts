@@ -258,15 +258,24 @@ export const itemHistoryCommand: CommandModule<
         const aggregator = new SourceAggregator();
         aggregator.record('live', null);
 
-        const format = selectOutput({
-          json: program.opts<{ json?: boolean }>().json === true,
-          table: program.opts<{ table?: boolean }>().table === true,
-          ...((program.opts<{ output?: string }>().output === undefined)
-            ? {}
-            : { output: program.opts<{ output: string }>().output }),
-          env: ctx.env,
-          isTTY: ctx.isTTY,
-        });
+        // `--stream` forces NDJSON regardless of --json / --table /
+        // --output. Without this override, `monday item history
+        // ... --stream` would silently fall through to the global
+        // output flag's selection (a non-streaming envelope), and
+        // the documented streaming example would not stream — agents
+        // would see the buffered shape instead of the NDJSON stream.
+        const format =
+          parsed.stream === true
+            ? 'ndjson'
+            : selectOutput({
+                json: program.opts<{ json?: boolean }>().json === true,
+                table: program.opts<{ table?: boolean }>().table === true,
+                ...((program.opts<{ output?: string }>().output === undefined)
+                  ? {}
+                  : { output: program.opts<{ output: string }>().output }),
+                env: ctx.env,
+                isTTY: ctx.isTTY,
+              });
 
         // Build the walker inputs once — both the streaming +
         // non-streaming paths consume the same spread shape;

@@ -549,6 +549,60 @@ describe('monday item history — parse-failure surface', () => {
 });
 
 describe('monday item history — streaming (--stream / --output ndjson)', () => {
+  it('--stream alone forces NDJSON without --output (Codex P1-1)', async () => {
+    // The --stream flag must drive NDJSON even when --output isn't
+    // passed. Without the explicit override the action falls
+    // through to the global output flag (defaults to non-streaming),
+    // and the documented `--stream` example silently emits a
+    // buffered envelope.
+    const cassette: Cassette = {
+      interactions: [
+        validItemBoardLookup,
+        {
+          operation_name: 'ItemHistoryActivityLogs',
+          response: {
+            data: {
+              boards: [
+                {
+                  id: '67890',
+                  activity_logs: [
+                    {
+                      id: 'act-1',
+                      event: 'update_column_value',
+                      entity: 'pulse',
+                      user_id: '99',
+                      created_at: '2026-05-10T09:00:00Z',
+                      data: JSON.stringify({
+                        column_id: 'status',
+                        column_type: 'status',
+                        value: '{}',
+                      }),
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        emptyUpdates,
+      ],
+    };
+    const result = await drive(
+      ['item', 'history', '12345', '--stream'],
+      cassette,
+    );
+    expect(result.exitCode).toBe(0);
+    const lines = result.stdout
+      .split('\n')
+      .filter((line) => line.length > 0);
+    // 1 event + 1 trailer = 2 lines. If --stream were ignored the
+    // output would be a single JSON envelope (lines.length === 1
+    // with no trailer sentinel).
+    expect(lines).toHaveLength(2);
+    const trailer = JSON.parse(lines[1]!) as { _meta: { source: string } };
+    expect(trailer._meta.source).toBe('live');
+  });
+
   it('emits NDJSON one event per line + §6.3 trailer', async () => {
     const cassette: Cassette = {
       interactions: [

@@ -898,7 +898,11 @@ export const projectUpdateRow = (
     },
   };
   const repliedEvents = replies.map((reply) =>
-    projectReplyRow({ row: reply, parentUpdateId: row.id }),
+    projectReplyRow({
+      row: reply,
+      parentUpdateId: row.id,
+      parentCreatedAt: createdAt,
+    }),
   );
   return [posted, ...repliedEvents];
 };
@@ -906,11 +910,15 @@ export const projectUpdateRow = (
 /**
  * Inputs to {@link projectReplyRow}. The `parentUpdateId` slot
  * wires the synthesized event's `parent_update_id` so agents
- * reconstruct thread context.
+ * reconstruct thread context; the `parentCreatedAt` slot supplies
+ * the timestamp fallback when both reply timestamps are null
+ * (defensive against Monday's nullable Reply.created_at +
+ * Reply.updated_at combination).
  */
 export interface ProjectReplyRowInputs {
   readonly row: RawReplyRow;
   readonly parentUpdateId: string;
+  readonly parentCreatedAt: string;
 }
 
 /**
@@ -921,19 +929,20 @@ export interface ProjectReplyRowInputs {
  * the Decision 2 closure probe finding).
  *
  * `Reply.created_at` is nullable per the probe introspection;
- * fallback chain: `created_at` → `updated_at`. If both are null
- * the projector substitutes the empty string — Monday's contract
- * pins `Reply.id` + `Reply.body` + `Reply.kind` as NON_NULL
- * (always present); both timestamp slots being null on the same
- * Reply isn't observed in production but is defensively handled
- * (the row still lands on the stream; the merger places it after
- * other zero-timestamp events lexicographically by `id`).
+ * fallback chain: `Reply.created_at` → `Reply.updated_at` →
+ * the parent Update's projected timestamp. The final fallback
+ * is load-bearing: the event schema requires `created_at` to be
+ * non-empty (`min(1)`) and the parent's timestamp is guaranteed
+ * non-empty by `projectUpdateRow`'s `created_at ?? edited_at`
+ * resolution (Codex impl review round 1 P2-2). A Reply with both
+ * timestamps null then merges right next to its parent on the
+ * chronological stream.
  */
 export const projectReplyRow = (
   inputs: ProjectReplyRowInputs,
 ): HistoryEvent => {
-  const { row, parentUpdateId } = inputs;
-  const createdAt = row.created_at ?? row.updated_at ?? '';
+  const { row, parentUpdateId, parentCreatedAt } = inputs;
+  const createdAt = row.created_at ?? row.updated_at ?? parentCreatedAt;
   return {
     id: row.id,
     created_at: createdAt,
@@ -1086,21 +1095,28 @@ const updatesResponseSchema = z
   .loose();
 
 /**
- * Compares two ISO-8601 timestamps lexicographically. ISO-8601 in
- * `YYYY-MM-DD[THH:MM:SS[.fff][Z|±HH:MM]]` form sorts correctly
- * lexicographically WITHIN the same offset (and same precision);
- * Monday's `created_at` values are uniformly UTC `Z`-suffixed per
- * the Decision 2 probe, so lexicographic compare matches
- * wall-clock compare. Used for client-side `--since` / `--until`
- * filtering on the updates source.
+ * Tests whether an ISO-8601 timestamp falls within the
+ * `--since` / `--until` range. Uses `Date.parse` rather than
+ * lexicographic compare because the wire payload may carry
+ * UTC `Z`-suffixed timestamps (Monday's `ISO8601DateTime`
+ * scalar — Decision 2 probe) while the CLI's `--since` /
+ * `--until` accept any ISO-8601 surface, including mixed
+ * offsets (`+01:00`, `-05:00`, etc.). Lex compare gives the
+ * wrong answer when offsets differ — e.g. `09:30:00Z` should
+ * pass `--since 10:00:00+01:00` (= 09:00:00Z) but lex compare
+ * would reject it (Codex impl review round 1 P2-1).
+ *
+ * `since` / `until` epoch values are precomputed by the caller
+ * to avoid the per-row Date.parse cost on large slices.
  */
 const inWallClockRange = (
   timestamp: string,
-  since: string | undefined,
-  until: string | undefined,
+  sinceEpoch: number | undefined,
+  untilEpoch: number | undefined,
 ): boolean => {
-  if (since !== undefined && timestamp < since) return false;
-  if (until !== undefined && timestamp > until) return false;
+  const epoch = Date.parse(timestamp);
+  if (sinceEpoch !== undefined && epoch < sinceEpoch) return false;
+  if (untilEpoch !== undefined && epoch > untilEpoch) return false;
   return true;
 };
 
@@ -1246,12 +1262,17 @@ export const fetchItemHistory = async (
   // Client-side wall-clock filter. Monday's `updates` resolver
   // doesn't expose `from:` / `to:` per Decision 2 probe; filter
   // after projection so the per-row chronological key matches the
-  // merger's sort.
+  // merger's sort. Precompute epoch bounds once so we don't pay
+  // the `Date.parse(bound)` cost per row.
+  const sinceEpoch =
+    inputs.since === undefined ? undefined : Date.parse(inputs.since);
+  const untilEpoch =
+    inputs.until === undefined ? undefined : Date.parse(inputs.until);
   const updateEvents: HistoryEvent[] =
-    inputs.since === undefined && inputs.until === undefined
+    sinceEpoch === undefined && untilEpoch === undefined
       ? allUpdateEvents
       : allUpdateEvents.filter((ev) =>
-          inWallClockRange(ev.created_at, inputs.since, inputs.until),
+          inWallClockRange(ev.created_at, sinceEpoch, untilEpoch),
         );
 
   // Chronological merge of both fully-drained source lists.

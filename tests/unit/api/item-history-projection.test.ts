@@ -713,6 +713,7 @@ describe('projectReplyRow', () => {
         creator_id: '88',
       },
       parentUpdateId: 'upd-1',
+      parentCreatedAt: '2026-05-10T09:00:00Z',
     });
     expect(ev.kind).toBe('update_replied');
     if (ev.kind === 'update_replied') {
@@ -735,14 +736,17 @@ describe('projectReplyRow', () => {
         creator_id: null,
       },
       parentUpdateId: 'upd-1',
+      parentCreatedAt: '2026-05-10T09:00:00Z',
     });
     expect(ev.created_at).toBe('2026-05-10T11:00:00Z');
   });
 
-  it('substitutes empty string when both timestamps are null (defensive)', () => {
-    // Monday's contract pins both Reply.created_at + Reply.updated_at
-    // as nullable; both being null on the same Reply isn't observed
-    // in production but the projector handles it defensively.
+  it('falls back to the parent update timestamp when both Reply timestamps are null', () => {
+    // Codex impl review round 1 P2-2: emitting `created_at: ''`
+    // would trip emitSuccess's `min(1)` schema validation. Reply
+    // with both timestamps null inherits its parent's projected
+    // timestamp so the row still lands on the merged stream
+    // adjacent to the parent.
     const ev = projectReplyRow({
       row: {
         id: 'rep-1',
@@ -754,8 +758,9 @@ describe('projectReplyRow', () => {
         creator_id: null,
       },
       parentUpdateId: 'upd-1',
+      parentCreatedAt: '2026-05-10T09:00:00Z',
     });
-    expect(ev.created_at).toBe('');
+    expect(ev.created_at).toBe('2026-05-10T09:00:00Z');
   });
 });
 
@@ -1004,6 +1009,53 @@ describe('fetchItemHistory — happy path', () => {
       until: '2026-05-31T23:59:59Z',
     });
     expect(result.events.map((e) => e.id)).toEqual(['upd-in-range']);
+  });
+
+  it('compares wall-clock by epoch — mixed offsets resolve correctly (Codex P2-1)', async () => {
+    // Decision 2 probe pinned UTC `Z`-suffixed wire timestamps; the
+    // CLI's --since / --until accept any ISO-8601 surface. Lex
+    // compare would reject `09:30:00Z` against `--since
+    // 10:00:00+01:00` (= 09:00:00Z), but Date.parse compare
+    // resolves both to epoch and accepts.
+    const { client } = buildClientStub({
+      ItemHistoryActivityLogs: {
+        data: { boards: [] },
+        complexity: emptyComplexity(),
+        stats: emptyStats,
+      },
+      ItemHistoryUpdates: {
+        data: {
+          items: [
+            {
+              id: '12345',
+              updates: [
+                {
+                  id: 'upd-zulu',
+                  body: 'b',
+                  text_body: null,
+                  // 09:30:00Z = 09:30 UTC = 10:30 in +01:00
+                  created_at: '2026-05-10T09:30:00Z',
+                  edited_at: '2026-05-10T09:30:00Z',
+                  creator_id: null,
+                  replies: null,
+                },
+              ],
+            },
+          ],
+        },
+        complexity: emptyComplexity(),
+        stats: emptyStats,
+      },
+    });
+    const result = await fetchItemHistory({
+      client,
+      itemId: iid('12345'),
+      boardId: '67890',
+      // 10:00:00+01:00 = 09:00:00Z, so 09:30:00Z is INSIDE.
+      since: '2026-05-10T10:00:00+01:00',
+      until: '2026-05-10T12:00:00+01:00',
+    });
+    expect(result.events.map((e) => e.id)).toEqual(['upd-zulu']);
   });
 });
 
