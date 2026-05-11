@@ -56,7 +56,7 @@ in the plan docs — **do not duplicate them here**:
   R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-17 +
   R-NEW-19 + R-NEW-21 + R-NEW-25 + R-NEW-27 shipped +
   R-NEW-2 / R-NEW-3 candidates open + R-watch-items including
-  R-NEW-26).
+  R-NEW-26 + R-NEW-28).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -377,7 +377,26 @@ convention.
   §22 R-NEW-27 entry). Branches margin recovered 0.55pp →
   0.70pp through this consolidation (5 duplicate branch sites
   removed; lifted helper has no `c8 ignore` wrap and contributes
-  one branch).
+  one branch);
+  **R-NEW-28 pre-flight behavioral-equivalence audit for
+  opt-in flag extensions to existing verbs** — surfaced at
+  M25 pre-flight Codex review rounds 1 (`832a169` fix) + 2
+  (`67df582` fix). Two distinct contract drifts caught because
+  M25 extends an EXISTING fail-fast bulk path with a NEW
+  opt-in partial-success flag. Class of bug: when a pre-flight
+  diff adds a parallel opt-in path to an existing verb, the
+  new path can silently drift from the existing path's
+  contract on shared inputs. Six audit axes (per-target error
+  code semantics; empty-input envelope shape; confirmation
+  gate firing; source aggregation rules; resolver-warning
+  propagation; pre-network argv validation). LOW priority
+  watch-item — process discipline, not code lift. Fires at any
+  future pre-flight diff that extends an existing verb with an
+  opt-in flag adding a parallel path; likely v0.4
+  `--concurrency` flag extending bulk verbs from sequential to
+  parallel dispatch (cli-design §9.3 forward-ref). Full audit
+  axes + Codex-prompt-template W{N}-candidate analysis at
+  v0.3-plan §22 R-NEW-28 entry.
 
 ## Pre-flight contract diff discipline
 
