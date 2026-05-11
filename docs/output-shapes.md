@@ -1675,7 +1675,7 @@ on `kind`. Variants (per Decision 2 closure `a1f3025`):
 | `create_column` / `create_group` / `update_board_name` / `update_board_nickname` / `board_workspace_id_changed` | `activity_logs` (board-scoped — filtered out at walker via `entity = 'pulse'`; kept as defensive parser variants) | `unknown` | `unknown` |
 | `update_posted` | `updates` (synthesized) | `null` | `{body, text_body, reply_count}` |
 | `update_replied` | `updates.replies` (synthesized, one per Reply row) | `null` | `{body, text_body}` |
-| `unknown` | `activity_logs` (fallback for unrecognised wire events) | `null` | raw `data` JSON; raw `event` + `entity` slots on the event for agent introspection |
+| `unknown` | `activity_logs` (fallback for unrecognised wire events) | `null` | raw parsed `data` JSON (the `after` slot IS the payload); raw `event` + `entity` slots additionally land on the event for agent introspection of the unrecognised kind |
 
 Every variant carries `id` + `created_at` + `actor_id` + `kind`.
 `update_column_value` additionally carries `column_id` +
@@ -1728,23 +1728,56 @@ Sample envelope with a mixed-source merged stream (ordered by
         "body": "<p>+1 — need this by Thursday</p>",
         "text_body": "+1 — need this by Thursday"
       }
+    },
+    {
+      "id": "act-1042",
+      "created_at": "2026-05-10T10:00:00Z",
+      "actor_id": "12345",
+      "kind": "unknown",
+      "event": "future_kind_monday_might_ship",
+      "entity": "pulse",
+      "before": null,
+      "after": { "raw_payload_passes_through": true }
     }
   ],
   "meta": { /* §6.1 */ },
-  "warnings": []
+  "warnings": [
+    {
+      "code": "unknown_event_kind",
+      "message": "activity_logs returned 1 row with an unrecognised event kind \"future_kind_monday_might_ship\" (entity: \"pulse\"); surfaced under the `unknown` event variant",
+      "details": {
+        "event": "future_kind_monday_might_ship",
+        "entity": "pulse",
+        "occurrence_count": 1,
+        "hint": "Monday may have extended `activity_logs.event` with a new kind; extend `historyEventSchema` in `src/api/item-history-projection.ts` with a typed variant to surface the before/after payload, or consume the raw `data` slot from the `unknown` variant"
+      }
+    }
+  ]
 }
 ```
+
+Note the dual-field shape on `kind: "unknown"`: the variant
+discriminator `kind: "unknown"` AND the raw wire `event:
+"<unknown-kind>"` BOTH land on the projected event so agents can
+route on the discriminator while ALSO introspecting the
+unrecognised wire kind. `entity` carries the raw wire entity slot
+(usually `pulse` when the row passed the walker's
+`entity = 'pulse'` filter, but the slot is preserved for
+forward-compat with future entity values). The full raw `data`
+JSON payload lands under `after` (no separate `data` slot —
+`after` IS the raw payload for `unknown` variants).
 
 **Possible warnings:**
 - `unknown_event_kind` — Monday's `activity_logs` returned an
   event value not in the typed-variant set. Surfaced as a typed
   fallback on the `data` array (kind: `unknown` carrying raw
-  `event` + `entity` + `data`) AND a `warnings[]` entry with
-  `{event, entity, occurrence_count, hint}`. Aggregation: one
-  warning per unique unrecognised event (NOT per occurrence) so
-  the array stays bounded on degenerate inputs. **NOT an
-  `error.code` registry entry** per Decision 2 closure — the
-  29-stable-error-code registry stays at 29.
+  `event` + `entity` + `before: null` + `after: <raw parsed
+  data>`) AND a `warnings[]` entry with `{event, entity,
+  occurrence_count, hint}`. Aggregation: one warning per unique
+  unrecognised event (NOT per occurrence) so the array stays
+  bounded on degenerate inputs. **NOT an `error.code` registry
+  entry** per Decision 2 closure — the 29-stable-error-code
+  registry stays at 29.
 
 **Eventual-consistency caveat (M24 pre-flight empirical probe
 finding, 2026-05-11).** Monday's `activity_logs` has a

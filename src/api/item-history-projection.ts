@@ -11,11 +11,12 @@
  *   1. `boards(ids:) { activity_logs(item_ids:, from:, to:,
  *      page:, limit:) }` — Monday's per-board activity log,
  *      filtered to the target item via `item_ids` AND additionally
- *      filtered at the projector to `entity = 'pulse'` (the
- *      `item_ids` arg ALONE does NOT exclude board-scoped events;
- *      empirical-probe finding 2026-05-11). Page-numbered
- *      pagination (Monday's native shape; `--page <n>` / `--limit
- *      <n>` flags surface it).
+ *      filtered WALKER-SIDE (post-fetch, before projection) to
+ *      `entity = 'pulse'` (the `item_ids` arg ALONE does NOT
+ *      exclude board-scoped events; empirical-probe finding
+ *      2026-05-11). Page-numbered pagination (Monday's native
+ *      shape; `--activity-logs-page <n>` / `--limit <n>` flags
+ *      surface it).
  *   2. `items(ids:) { updates(limit:, page:) { ... replies { ...
  *      } } }` — Monday's comment thread (top-level updates +
  *      nested replies). Projected into synthesized
@@ -92,9 +93,12 @@
  * **Streaming reuse.** Per the v0.3-plan §3 M24 deliverable, the
  * verb reuses `startNdjsonStream` (R52) when `--stream` is on; the
  * trailer meta carries `{has_more, total_returned, complexity,
- * source}` per cli-design §6.3 + the page-numbered
- * `activity_logs_last_page` + cursor/page-numbered
- * `updates_next_page` slots so agents can resume manually.
+ * source}` per cli-design §6.3 + the symmetric page-numbered
+ * per-source `activity_logs.last_page` + `updates.last_page` slots
+ * (both 1-indexed; `null` when the walker exhausted that source) so
+ * agents resuming a partial walk re-issue with the per-source
+ * `last_page + 1`. No cursor surface at v0.3 — both sources
+ * paginate page-numbered.
  */
 
 import { z } from 'zod';
@@ -142,10 +146,18 @@ export const HARD_CAP_HISTORY_PAGE_SIZE = 10_000;
  *
  * **`item_ids` filter is necessary BUT NOT SUFFICIENT.** Per the
  * probe finding, board-scoped events (entity = 'board') leak
- * through even with `item_ids` set. The projector filters
- * `entity = 'pulse'` post-fetch to discard those rows. Walker-
- * side filtering would require a custom GraphQL middleware Monday
- * doesn't expose; projector-side is the only viable path.
+ * through even with `item_ids` set. The WALKER
+ * ({@link fetchItemHistory}) filters `row.entity ===
+ * ITEM_SCOPED_ENTITY` immediately after the page parses and
+ * BEFORE handing rows to {@link projectActivityLogRow}. The
+ * projector itself does NOT re-filter — single source of truth at
+ * the walker layer per Decision 2 closure. Server-side filtering
+ * would require a custom GraphQL middleware Monday doesn't expose,
+ * and projector-side filtering would force the projector to know
+ * about the entity discriminator (a concern that belongs to the
+ * walker's "which rows are part of THIS item's history" question,
+ * not to the projector's "how do I shape this row's payload"
+ * question).
  *
  * Monday's `activity_logs(item_ids:, from:, to:, page:, limit:)`
  * signature accepts ISO-8601 timestamps for `from` / `to` per the
@@ -198,9 +210,14 @@ export const ACTIVITY_LOGS_QUERY = `
  * **Update.created_at + Reply.created_at are nullable** per the
  * probe introspection (both fields are `SCALAR/Date`, nullable).
  * The projector substitutes `Update.edited_at` (NON_NULL Date) as
- * the chronological key when `created_at` is null, surfacing a
- * `synthesized_created_at` warning so agents can introspect the
- * substitution if needed.
+ * the chronological key when `created_at` is null — silent
+ * projection behaviour (NOT a warning surface; the substitution is
+ * deterministic + agents observing a null-`created_at` Update on
+ * the wire reproduce the same merge order on a re-walk). v0.3's
+ * `warnings[]` shape is `unknown_event_kind` only; adding a
+ * `synthesized_created_at` warning is a v0.4 envelope-additive
+ * extension if the substitution turns out to be agent-visible in
+ * practice.
  *
  * Monday's `updates(limit:, page:)` signature is page-numbered;
  * the projector exposes `--updates-page <n>` so the two sources
@@ -374,10 +391,16 @@ export const updateColumnValueEventSchema = z
  * literal rather than a fallback shape).
  *
  * Per-kind `before` / `after` typing is M24 impl work — pre-flight
- * pins each variant as `before: null, after: z.unknown()` carrying
- * the raw parsed JSON `data` payload. The "before" for a creation
- * event is meaningless (the entity didn't exist); the projector
- * pins `null` for symmetry across the `before` / `after` slot.
+ * pins each variant as `before: z.unknown(), after: z.unknown()`
+ * carrying the raw parsed JSON `data` payload. Both slots are
+ * `z.unknown()` (not `null` even for creation-shaped events) because
+ * the observed taxonomy includes both creation events
+ * (`create_column`, `create_group`) where `before` is meaningless
+ * AND edit events (`update_board_name`, `update_board_nickname`,
+ * `board_workspace_id_changed`) where `before` carries the prior
+ * value from the wire `data.previous_value` payload. Uniform
+ * `z.unknown()` lets M24 impl type each variant independently
+ * without re-pinning the discriminator schema.
  */
 const boardScopedEventSchema = <K extends string>(
   kindLiteral: K,
@@ -475,12 +498,21 @@ export const updateRepliedEventSchema = z
  * value the projector doesn't recognise. Carries the raw wire
  * `event` slot (so agents see the unrecognised string) + the raw
  * `entity` slot (so the walker filter discrepancy is visible) +
- * the parsed `data` payload (so a manual M24 impl extension can
- * reproject without a second wire call).
+ * the raw parsed `data` JSON under `after` (so a manual M24 impl
+ * extension can reproject without a second wire call). `before` is
+ * `null` for uniform shape with the synthesized comment-event
+ * variants (`update_posted` / `update_replied`) which also pin
+ * `before: null` for their append-only-events semantics — the
+ * `unknown` variant similarly has no meaningful "before" since the
+ * projector by definition doesn't know how to extract the prior
+ * state from the wire payload (M24 impl's typed variants are the
+ * place that knowledge lives). Agents wanting to introspect the raw
+ * payload read `after` (the full parsed `data` JSON) alongside
+ * `event` + `entity` for routing.
  *
  * Surfaces alongside a `warnings[]` entry of code
- * `unknown_event_kind` (per `buildUnknownEventKindWarning`) so
- * agents introspect the projector's coverage gap without parsing
+ * `unknown_event_kind` (per {@link buildUnknownEventKindWarning})
+ * so agents introspect the projector's coverage gap without parsing
  * the events list for `kind === 'unknown'` themselves.
  *
  * Per Decision 2 closure: this variant is the registry-stable
@@ -495,7 +527,8 @@ export const unknownEventSchema = z
     kind: z.literal('unknown'),
     event: z.string().min(1),
     entity: z.string().min(1),
-    data: z.unknown(),
+    before: z.null(),
+    after: z.unknown(),
   })
   .strict();
 

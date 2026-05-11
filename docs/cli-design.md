@@ -1816,9 +1816,12 @@ monday item history <iid> [--since <iso>] [--until <iso>] [--activity-logs-page 
                                           # Update + Reply sources), board-scoped
                                           # variants (filtered out at walker, kept
                                           # as defensive parser-roundtrip targets),
-                                          # `unknown` fallback for forward-compat
-                                          # with new wire events. Unknown wire
-                                          # events surface a `unknown_event_kind`
+                                          # `unknown` fallback (before: null +
+                                          # after: <raw parsed data> + raw wire
+                                          # `event` + `entity` slots so agents
+                                          # route on the unrecognised kind).
+                                          # Unknown wire events surface a
+                                          # `unknown_event_kind`
                                           # warning (§6.1 warnings[]; NOT a new
                                           # error.code — registry stays at 29).
                                           # **Eventual-consistency caveat**:
@@ -6465,9 +6468,15 @@ scoped idempotent changes, and post comments narrating its work.**
   - **Unknown-event-kind shape is `warnings[]`, not `error.code`.**
     The 29-stable-error-code registry stays at 29. Unrecognised
     event values surface under the `kind: 'unknown'` fallback
-    variant (carrying the raw wire `event` + `entity` + `data`
-    slots for agent introspection) alongside a
-    `unknown_event_kind` `warnings[]` entry with
+    variant carrying `before: null` + `after: <raw parsed data>`
+    (uniform shape with the synthesized comment-event variants;
+    `after` is the raw payload — no separate `data` slot) +
+    additional raw wire `event` + `entity` slots so agents can
+    route on the unrecognised kind. Dual-field shape on
+    `kind: 'unknown'`: the variant discriminator AND the raw wire
+    `event` BOTH land on the projected event (the projector's
+    routing aid). Alongside the typed `unknown` row, a
+    `unknown_event_kind` `warnings[]` entry surfaces with
     `{event, entity, occurrence_count, hint}` details. One
     warning per unique unrecognised event observed (not per
     occurrence) so the warnings array stays bounded on
