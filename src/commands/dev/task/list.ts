@@ -17,9 +17,14 @@
  *     adds the configured sprint→task `board_relation` filter.
  *     `--sprint <sid>` (numeric) is also accepted.
  *
- * **Mutual exclusion: `--sprint <sid>` and `--sprint current`
- * cannot both be supplied** — argv-parse-time validation rejects
- * the conflict via `usage_error` with structured `details.issues`.
+ * **`--sprint` accepts either the literal `current` token OR a
+ * numeric sprint item ID; the union schema only sees ONE value
+ * per invocation** (round-1 Codex P2-5 clarification — commander
+ * collapses repeated `--sprint` flags to a single value, so no
+ * mutual-exclusion gate is needed at the schema layer; the input
+ * shape is a discriminated union that branches at the action
+ * layer between the `current`-resolution path and the numeric-ID
+ * filter).
  *
  * Idempotent: yes (pure read).
  */

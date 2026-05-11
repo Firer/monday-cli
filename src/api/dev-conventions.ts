@@ -230,8 +230,15 @@ export const groupCandidatesByDevNoun = (
  * Collapses the per-noun match results into a {@link DevMapping}.
  * Nouns with exactly one match populate the mapping slot;
  * zero-match or ambiguous (>1 match) nouns are omitted from the
- * mapping (the caller surfaces these as warnings on the discover
- * output). Pure helper — real implementation at pre-flight.
+ * mapping. The caller — `dev discover` — surfaces both modes
+ * via the same `matches[]` array on the success envelope
+ * (`matched.length === 0` = unmapped; `matched.length > 1` =
+ * ambiguous); no separate warning code is registered at M26
+ * pre-flight (round-1 Codex P2-3 clarification — warning-code
+ * registration is per cli-design §6.1 + the `dev discover`
+ * surface intentionally uses data-shape rather than warnings
+ * for the heuristic's per-noun outcomes). Pure helper — real
+ * implementation at pre-flight.
  */
 export const buildDiscoverMappingFromMatches = (
   matches: readonly DevNounMatchResult[],
@@ -292,6 +299,44 @@ export const devConfigureOutputSchema = z
   .strict();
 
 /**
+ * Pinned check-name vocabulary for `dev doctor` (Decision 2
+ * closure at M26 pre-flight). The runtime body iterates this list
+ * in order and emits one {@link DevDoctorCheckResult} per name.
+ * Names are stable contract surface — agents key off them (an
+ * agent self-correcting after a `dev task` failure can grep the
+ * doctor output for `tasks_status_column_present.status === 'fail'`).
+ *
+ * Adding a check is non-breaking (additive); removing or renaming
+ * is a major bump.
+ *
+ * **Round-1 Codex fix (P1-1).** `sprints_state_column_present`
+ * was the round-0 name but every sprint verb's runtime semantics
+ * are date-range-derived (cli-design §5.9 + the sprint-list verb's
+ * `--state active|past|future` filter), not status-column-derived.
+ * Renamed to `sprints_date_columns_present` to match what the
+ * runtime body will actually inspect — start_date + end_date
+ * columns on the configured sprints board.
+ *
+ * **Round-1 Codex fix (P2-2).** Added `bugs_board_exists` so the
+ * `bugs_board` mapping slot is diagnosed by the doctor like every
+ * other dev-noun slot.
+ */
+export const DEV_DOCTOR_CHECK_NAMES = [
+  'tasks_board_exists',
+  'tasks_status_column_present',
+  'tasks_status_labels_canonical',
+  'sprints_board_exists',
+  'sprints_date_columns_present',
+  'epics_board_exists',
+  'releases_board_exists',
+  'bugs_board_exists',
+  'tasks_to_sprints_relation',
+  'epics_to_releases_relation',
+] as const;
+
+export type DevDoctorCheckName = (typeof DEV_DOCTOR_CHECK_NAMES)[number];
+
+/**
  * One diagnostic check `dev doctor` ran against the active
  * profile's mapping. `status: 'ok'` = passed; `'warn'` = the
  * check raised a non-fatal concern (e.g. status column has
@@ -302,9 +347,15 @@ export const devConfigureOutputSchema = z
  * Open-ended `details` slot so M26 IMPL can add per-check context
  * without contract churn (the check names are pinned; the per-
  * check detail shape is per-check additive).
+ *
+ * **Round-1 Codex fix (P2-1).** `name` is typed as
+ * {@link DevDoctorCheckName} (the enum literal union) so
+ * `monday schema` exposes the stable vocabulary + implementation
+ * typos fail output-schema validation rather than silently
+ * passing through.
  */
 export interface DevDoctorCheckResult {
-  readonly name: string;
+  readonly name: DevDoctorCheckName;
   readonly status: 'ok' | 'warn' | 'fail';
   readonly message: string;
   readonly details: Readonly<Record<string, unknown>> | null;
@@ -312,7 +363,7 @@ export interface DevDoctorCheckResult {
 
 export const devDoctorCheckResultSchema = z
   .object({
-    name: z.string().min(1),
+    name: z.enum(DEV_DOCTOR_CHECK_NAMES),
     status: z.enum(['ok', 'warn', 'fail']),
     message: z.string().min(1),
     details: z.record(z.string(), z.unknown()).nullable(),
@@ -327,16 +378,13 @@ export const devDoctorCheckResultSchema = z
  * envelope).
  *
  * **Decision 2 closure (M26 pre-flight).** The pinned check
- * names: `tasks_board_exists`, `tasks_status_column_present`,
- * `tasks_status_labels_canonical`, `sprints_board_exists`,
- * `sprints_state_column_present`, `epics_board_exists`,
- * `releases_board_exists`, `tasks_to_sprints_relation`,
- * `epics_to_releases_relation`. Mirror cli-design §11.3
- * "runs `board doctor` against each configured dev board plus
- * checks the cross-board `board_relation` wiring". Per-check
- * `details` shape is per-check additive; the discriminated
- * union is left for M26 IMPL to pin (run order locks at this
- * pre-flight).
+ * names: see {@link DEV_DOCTOR_CHECK_NAMES} above (10 entries
+ * post-round-1; round-0 had 9 entries before P1-1 / P2-2
+ * fix-ups). Mirror cli-design §11.3 "runs `board doctor`
+ * against each configured dev board plus checks the cross-board
+ * `board_relation` wiring". Per-check `details` shape is per-
+ * check additive; the discriminated union is left for M26 IMPL
+ * to pin (run order locks at this pre-flight).
  */
 export interface DevDoctorOutput {
   readonly profile: string;
@@ -363,31 +411,6 @@ export const devDoctorOutputSchema = z
       .strict(),
   })
   .strict();
-
-/**
- * Pinned check-name vocabulary for `dev doctor` (Decision 2
- * closure at M26 pre-flight). The runtime body iterates this list
- * in order and emits one {@link DevDoctorCheckResult} per name.
- * Names are stable contract surface — agents key off them (an
- * agent self-correcting after a `dev task` failure can grep the
- * doctor output for `tasks_status_column_present.status === 'fail'`).
- *
- * Adding a check is non-breaking (additive); removing or renaming
- * is a major bump.
- */
-export const DEV_DOCTOR_CHECK_NAMES = [
-  'tasks_board_exists',
-  'tasks_status_column_present',
-  'tasks_status_labels_canonical',
-  'sprints_board_exists',
-  'sprints_state_column_present',
-  'epics_board_exists',
-  'releases_board_exists',
-  'tasks_to_sprints_relation',
-  'epics_to_releases_relation',
-] as const;
-
-export type DevDoctorCheckName = (typeof DEV_DOCTOR_CHECK_NAMES)[number];
 
 /**
  * Inputs to {@link discoverDevBoards}.

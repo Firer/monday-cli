@@ -14,13 +14,15 @@
  * carries roll-up counts.
  *
  * **Decision 2 closure (M26 pre-flight — doctor diagnostics).**
- * The check-name vocabulary (`tasks_board_exists`,
- * `tasks_status_column_present`, `tasks_status_labels_canonical`,
- * `sprints_board_exists`, `sprints_state_column_present`,
- * `epics_board_exists`, `releases_board_exists`,
- * `tasks_to_sprints_relation`, `epics_to_releases_relation`) is
- * pinned at this pre-flight + carries an additive-only contract
- * (adding a check is non-breaking; removing or renaming is major).
+ * The check-name vocabulary (10 entries post-round-1 Codex
+ * fix-ups; see `DEV_DOCTOR_CHECK_NAMES` in
+ * `src/api/dev-conventions.ts` for the canonical list) is pinned
+ * at this pre-flight + carries an additive-only contract (adding
+ * a check is non-breaking; removing or renaming is major).
+ * Round-1 fix-ups: renamed `sprints_state_column_present` →
+ * `sprints_date_columns_present` (P1-1; date-range-derived sprint
+ * state, not status-column-derived); added `bugs_board_exists`
+ * (P2-2; round-0 missed the bugs-board mapping slot).
  *
  * Idempotent: yes (pure read).
  */

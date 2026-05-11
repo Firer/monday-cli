@@ -8,9 +8,13 @@
  * runtime body: load the active profile's `epics_board`, page
  * through items_page, and filter client-side by the epic's
  * status column — `active` = not `Done` / `Cancelled`; `done` =
- * `Done` / `Cancelled`. Epics with no status column fall through
- * to `active` with a `dev_board_misconfigured` warning per
- * cli-design §5.9.
+ * `Done` / `Cancelled`. Epics with no resolvable status column
+ * fall through to `active`; the structural misconfiguration is
+ * diagnosed via `dev doctor`'s `epics_board_exists` check (round-1
+ * Codex P2-3 clarification — `dev_board_misconfigured` is an
+ * ERROR code in the §6.5 registry, not a warning code, so soft
+ * status-column drift on `epic list` surfaces as a normal
+ * pass-through rather than a same-named warning).
  *
  * Idempotent: yes (pure read).
  */

@@ -6584,7 +6584,8 @@ scoped idempotent changes, and post comments narrating its work.**
   English Monday Dev template board names: `Tasks` / `Sprints` /
   `Epics` / `Releases` / `Bugs`; localised-workspace alias
   support deferred to v0.4+); Decision 2 (`dev doctor` check-
-  name vocabulary — 9 stable check names per
+  name vocabulary — 10 stable check names post-round-1 Codex
+  fix-ups (P1-1 + P2-2) per
   `src/api/dev-conventions.ts:DEV_DOCTOR_CHECK_NAMES`; per-check
   `details` shape is per-check additive); Decision 3 (three-
   level naming reaffirmation against §5.2 carve-out 1 — already

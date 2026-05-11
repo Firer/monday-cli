@@ -3249,12 +3249,25 @@ names: `Tasks` / `Sprints` / `Epics` / `Releases` / `Bugs`).
 }
 ```
 
-**Failure modes:** `dev_not_configured` (no Monday-Dev-shaped
-boards detected; `details.hint` points at `monday dev configure`
-for manual mapping); `not_found` (workspace scoping returns no
-boards). Per-noun ambiguity (>1 match) surfaces on `matches[]`
-with `matched.length > 1` — the action emits a `dev_discover_ambiguous`
-warning rather than auto-mapping.
+**No-match + ambiguity semantics (Decision 1 closure;
+round-1 Codex P2-4 clarification).** `dev discover` is the setup
+verb and DOES NOT require existing dev config — zero-match and
+ambiguous-match nouns are SUCCESS shapes, surfaced on the
+output's `matches[]` array (`matched.length === 0` = unmapped;
+`matched.length > 1` = ambiguous; the action emits each in
+`matches[]` with that array length so agents can inspect both
+modes uniformly). The `mapping` slot carries only the single-
+match nouns (zero / ambiguous nouns are absent from the mapping).
+A run against a workspace with NO accessible boards returns
+`{ mapping: {}, matches: [<every noun with matched: []>],
+applied: false }` — still success.
+
+**Failure modes:** `unauthorized` / `network_error` / `timeout`
+on the underlying `boards(...)` walk; `cache_error` (when
+`--apply` set + the profile config write fails). `dev_not_configured`
+does NOT fire from `dev discover` — that code is for verbs that
+REQUIRE an existing mapping (sprint / epic / release / task
+verbs + `dev doctor`).
 
 ### `monday dev configure --tasks-board <bid> [...]` (v0.3-M26 stub)
 
@@ -3362,9 +3375,15 @@ M24 round-2 P3-1 precedent.
 }
 ```
 
-**Possible warnings:** `sprint_dates_missing` — sprints with no
-resolvable start/end date columns fall through to the `past`
-bucket with this warning attached.
+**Bucketing of sprints with no resolvable date columns** falls
+through to the `past` bucket — there is no separate warning code
+introduced at M26 pre-flight (round-1 Codex P2-3 clarification:
+warning-code registration is per cli-design §6.1; the M26 surface
+intentionally does NOT introduce new warning codes since the
+date-missing fallback is documented inline at cli-design §5.9
+and surfaces inline via the verb's existing data shape). `dev
+doctor`'s `sprints_date_columns_present` check is where date-
+column drift is diagnosed as a structured `details` shape.
 
 ### `monday dev sprint items <sid>` (v0.3-M26 stub)
 
@@ -3472,18 +3491,21 @@ envelope per cli-design §6.4). Idempotent on equal status values.
 
 Set a task's status to "Done" + optionally post a completion
 comment. Returns the post-mutation `ProjectedItem`. When
-`--message` is supplied, the post-create surfaces on
-`meta.side_effects[]` per cli-design §6.4:
+`--message` is supplied, the post-create surfaces on the
+top-level `side_effects` slot per cli-design §6.4 (round-1
+Codex P1-2 fix — `side_effects` is a mutation-envelope
+top-level field per `src/utils/output/envelope.ts:99-117`, NOT
+under `meta`):
 
 ```json
 {
   "ok": true,
   "data": { /* ProjectedItem with columns.status.label = "Done" */ },
-  "meta": { /* §6.1 */,
-            "side_effects": [
-              { "kind": "update_created", "update_id": "5678901" }
-            ] },
-  "warnings": []
+  "meta": { /* §6.1 */ },
+  "warnings": [],
+  "side_effects": [
+    { "kind": "update_created", "update_id": "5678901" }
+  ]
 }
 ```
 
@@ -3497,17 +3519,18 @@ Set a task's status to "Stuck" + post the blocking reason as a
 comment. `--reason` is REQUIRED (the audit-trail comment is the
 load-bearing value of `task block` over a bare status flip).
 Returns the post-mutation `ProjectedItem` + the post-create on
-`meta.side_effects[]`:
+the top-level `side_effects` slot per cli-design §6.4 (round-1
+Codex P1-2 fix):
 
 ```json
 {
   "ok": true,
   "data": { /* ProjectedItem with columns.status.label = "Stuck" */ },
-  "meta": { /* §6.1 */,
-            "side_effects": [
-              { "kind": "update_created", "update_id": "5678902" }
-            ] },
-  "warnings": []
+  "meta": { /* §6.1 */ },
+  "warnings": [],
+  "side_effects": [
+    { "kind": "update_created", "update_id": "5678902" }
+  ]
 }
 ```
 
