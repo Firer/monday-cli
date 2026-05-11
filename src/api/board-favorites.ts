@@ -62,7 +62,7 @@
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
@@ -424,29 +424,23 @@ export const fetchBoardFavorites = async (
     undefined,
     { operationName: 'BoardFavoritesStage1' },
   );
-  const stage1Parsed = favoritesListResponseSchema.safeParse(stage1.data);
-  if (!stage1Parsed.success) {
-    throw new ApiError(
-      'internal_error',
-      'Monday `Query.favorites` response did not match the expected shape',
-      {
-        cause: stage1Parsed.error,
-        details: {
-          issues: stage1Parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-          })),
-          hint: 'Monday may have amended the `Query.favorites` surface — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
-        },
-      },
-    );
-  }
+  // R-NEW-19 lift — `unwrapOrThrow` produces the canonical
+  // `internal_error` + `details.issues` shape (path + message +
+  // zod code per failing field); the manual block here was the
+  // same shape minus the `code` slot.
+  const stage1Data = unwrapOrThrow(
+    favoritesListResponseSchema.safeParse(stage1.data),
+    {
+      context: 'Monday `Query.favorites` response',
+      hint: 'Monday may have amended the `Query.favorites` surface — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
+    },
+  );
 
   // Filter to Board-typed entries + sort by `position` ascending
   // for Monday-UI parity. Drops Folder / Dashboard / Workspace and
   // any future enum extension (open-ended `z.string()` on
   // `object.type` is forward-compat).
-  const filtered = filterFavoritesToBoards(stage1Parsed.data);
+  const filtered = filterFavoritesToBoards(stage1Data);
 
   // Empty short-circuit — no Stage 2 if there are no Board-typed
   // favorites. Stage 1's complexity carries forward.
@@ -467,30 +461,20 @@ export const fetchBoardFavorites = async (
     { ids: filteredIds },
     { operationName: 'BoardFavoritesStage2' },
   );
-  const stage2Parsed = boardsHydrateResponseSchema.safeParse(stage2.data);
-  if (!stage2Parsed.success) {
-    throw new ApiError(
-      'internal_error',
-      'Monday `boards(ids:)` response did not match the expected shape',
-      {
-        cause: stage2Parsed.error,
-        details: {
-          issues: stage2Parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-          })),
-          hint: 'Monday may have amended the `boards(ids:)` selection — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
-        },
-      },
-    );
-  }
+  const stage2Data = unwrapOrThrow(
+    boardsHydrateResponseSchema.safeParse(stage2.data),
+    {
+      context: 'Monday `boards(ids:)` response',
+      hint: 'Monday may have amended the `boards(ids:)` selection — re-probe via `scripts/probe/m23-favorites-deep.ts` and amend cli-design §13 v0.3 entry if so',
+    },
+  );
 
   // Monday's `boards(ids:)` typically silently omits inaccessible
   // entries (per the cross-board probe finding); the schema's
   // `.nullable()` on each entry is defensive for accounts where
   // Monday returns null placeholders instead of omitting. Drop
   // nulls — the favorites case treats both shapes as "stale".
-  const hydrated: RawHydratedBoard[] = (stage2Parsed.data.boards ?? []).filter(
+  const hydrated: RawHydratedBoard[] = (stage2Data.boards ?? []).filter(
     (b): b is RawHydratedBoard => b !== null,
   );
 

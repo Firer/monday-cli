@@ -49,7 +49,7 @@
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import { MondayClient } from './client.js';
 import type { Transport } from './transport.js';
 
@@ -258,22 +258,15 @@ export const fetchUsage = async (
   const response = await client.raw<unknown>(USAGE_QUERY, undefined, {
     operationName: 'MondayUsage',
   });
-  const parsed = usageQueryResponseSchema.safeParse(response.data);
-  if (!parsed.success) {
-    throw new ApiError(
-      'internal_error',
-      'Monday usage response did not match the expected `platform_api` shape',
-      {
-        cause: parsed.error,
-        details: {
-          issues: parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-          })),
-          hint: 'Monday may have amended the `platform_api.daily_*` surface — re-probe via `scripts/probe/m22-usage-by-day.ts` and amend cli-design §11.5.3 if so',
-        },
-      },
-    );
-  }
-  return projectUsageOutput(parsed.data, inputs.today);
+  // R-NEW-19 lift — `unwrapOrThrow` produces the canonical
+  // `internal_error` + `details.issues` shape (R18 helper);
+  // the inline block was a manual hand-roll of the same.
+  const parsedData = unwrapOrThrow(
+    usageQueryResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday usage response (`platform_api` shape)',
+      hint: 'Monday may have amended the `platform_api.daily_*` surface — re-probe via `scripts/probe/m22-usage-by-day.ts` and amend cli-design §11.5.3 if so',
+    },
+  );
+  return projectUsageOutput(parsedData, inputs.today);
 };

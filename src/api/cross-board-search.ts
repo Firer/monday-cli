@@ -81,6 +81,7 @@
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import { BoardIdSchema, type BoardId } from '../types/ids.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
@@ -749,26 +750,19 @@ export const crossBoardSearch = async (
     );
     complexity = response.complexity;
 
-    const parsed = crossBoardSearchResponseSchema.safeParse(response.data);
-    if (!parsed.success) {
-      throw new ApiError(
-        'internal_error',
-        'Monday cross-board search response did not match the expected shape',
-        {
-          cause: parsed.error,
-          details: {
-            board_id: boardId,
-            issues: parsed.error.issues.map((i) => ({
-              path: i.path.join('.'),
-              message: i.message,
-            })),
-            hint: 'Monday may have amended the `boards(ids:) { items_page }` surface — re-probe via `scripts/probe/m23-cross-board-search-2.ts` and amend cli-design §13 v0.3 entry if so',
-          },
-        },
-      );
-    }
+    // R-NEW-19 lift — canonical parse-failure envelope via the
+    // existing R18 `unwrapOrThrow` helper; `details.board_id`
+    // threads through as a per-call discriminant.
+    const parsedData = unwrapOrThrow(
+      crossBoardSearchResponseSchema.safeParse(response.data),
+      {
+        context: 'Monday cross-board search response',
+        details: { board_id: boardId },
+        hint: 'Monday may have amended the `boards(ids:) { items_page }` surface — re-probe via `scripts/probe/m23-cross-board-search-2.ts` and amend cli-design §13 v0.3 entry if so',
+      },
+    );
 
-    const boards = (parsed.data.boards ?? []).filter(
+    const boards = (parsedData.boards ?? []).filter(
       (b): b is z.infer<typeof wireBoardSchema> => b !== null,
     );
     const board = boards[0];

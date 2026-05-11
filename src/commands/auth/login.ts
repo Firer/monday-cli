@@ -25,6 +25,7 @@ import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { ApiError, UsageError } from '../../utils/errors.js';
+import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { emitSuccess } from '../emit.js';
 import {
@@ -143,28 +144,20 @@ const fetchAccountId = async (
   const response = await client.raw<unknown>(accountIdQuery, undefined, {
     operationName: 'AuthLoginAccountId',
   });
-  const parsed = accountIdResponseSchema.safeParse(response.data);
-  // Defensive: Monday's GraphQL `account { id }` surface is contract-
-  // stable; a parse failure here would mean Monday changed the response
-  // shape, which is a Part 2 amendment.
+  // R-NEW-19 lift — canonical parse-failure via `unwrapOrThrow`;
+  // Monday's `account { id }` surface is contract-stable so this
+  // path stays defensive (c8-ignore-wrapped — the helper itself is
+  // tested end-to-end, the per-site failure is not reachable from
+  // unit tests).
   /* c8 ignore start */
-  if (!parsed.success) {
-    throw new ApiError(
-      'internal_error',
-      'post-OAuth `account { id }` response did not match the expected shape',
-      {
-        cause: parsed.error,
-        details: {
-          issues: parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-          })),
-        },
-      },
-    );
-  }
+  const parsedData = unwrapOrThrow(
+    accountIdResponseSchema.safeParse(response.data),
+    {
+      context: 'post-OAuth `account { id }` response',
+    },
+  );
+  return parsedData.account.id;
   /* c8 ignore stop */
-  return parsed.data.account.id;
 };
 
 const credentialsHomeOptions = (

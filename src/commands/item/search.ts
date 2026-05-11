@@ -19,10 +19,15 @@
  * column resolution, `--max-boards 25` default cap (hard cap 100
  * per Decision 5 closure `3a2f1db`). At most ONE of `--board` /
  * `--workspace` / `--favorites` may be supplied — supplying two
- * raises `usage_error` at the input-schema layer. **Pre-flight stub
- * (M23): the cross-board paths stub-reject with `internal_error`
- * + M23-pending hint; the single-board path stays the existing v0.1
- * runtime body.**
+ * raises `usage_error` at the input-schema layer. **Runtime body
+ * shipped at `1f09a25`** — `--favorites` calls `fetchBoardFavorites`
+ * for the ID set; `--workspace <wid>` enumerates via
+ * `boards(workspace_ids:[wid])`; no scoping lever enumerates
+ * `boards(limit:N)` for all-accessible mode. Per-board column-
+ * resolution pre-pass surfaces `column_not_found_on_board` warnings
+ * for boards lacking the `--where` columns; the walker fans out
+ * over the surviving plans + surfaces `inaccessible_boards` /
+ * `cross_board_truncated` warnings per the empirical-probe findings.
  *
  * Why a separate command from `item list --where`: the endpoints
  * are different. `items_page_by_column_values` is purpose-built for

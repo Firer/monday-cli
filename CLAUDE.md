@@ -38,13 +38,14 @@ in the plan docs — **do not duplicate them here**:
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
 **Live numbers (post-M23 implementation):**
-- Test count: **2864** across 122 files (was 2844 post-M23
-  pre-flight; +20 net across the M23 implementation: +19 unit
-  tests for `fetchBoardFavorites` resolver, +12 unit tests for
-  `crossBoardSearch` walker, +9 integration tests for
-  `monday board favorites`, +18 integration tests for cross-board
-  `monday item search` — -22 pre-flight stub-rejection tests
-  removed in the renamed `m23-cross-board.test.ts`).
+- Test count: **2865** across 122 files (was 2844 post-M23
+  pre-flight; +21 net across the M23 implementation: +19 unit
+  tests for `fetchBoardFavorites` resolver, +13 unit tests for
+  `crossBoardSearch` walker (incl. the outer-loop limit-check
+  branch covering cross-board-search.ts:725-728), +9 integration
+  tests for `monday board favorites`, +18 integration tests for
+  cross-board `monday item search` — -22 pre-flight stub-rejection
+  tests removed in the renamed `m23-cross-board.test.ts`).
 - Coverage: **99.02 / 95.70 / 99.22 / 99.22** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
   margin shifted 0.41pp → 0.25pp** at M23 implementation — the
@@ -190,7 +191,16 @@ convention.
   audit-points at M24 pre-flight kickoff; **R-NEW-18 sequential
   per-board fan-out builder** — surfaced at M23 impl
   (`crossBoardSearch` walker); LOW priority watch-item, fires
-  if M24 `item history` merge projector duplicates the shape.
+  if M24 `item history` merge projector duplicates the shape;
+  **R-NEW-19 migrate manual `safeParse → ApiError` sites to
+  `unwrapOrThrow`** — surfaced at post-M23 audit; 6+ sites
+  across M21+M22+M23 that bypassed the R18 `unwrapOrThrow`
+  helper that already exists in `src/utils/parse-boundary.ts`
+  (same pattern miss as R-NEW-14/15/16); MEDIUM priority
+  mechanical migration; **R-NEW-20 `MondayClient` seam-
+  injection stub factory** — 2 consumers at M23 impl
+  (board-favorites + cross-board-search unit tests); LOW
+  priority watch-item, fires at 3rd consumer at M24.
 
 ## Pre-flight contract diff discipline
 

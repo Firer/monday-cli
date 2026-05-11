@@ -42,6 +42,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { ApiError, errorMessage } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import { z } from 'zod';
 
 /** Monday Apps OAuth authorize endpoint. */
@@ -531,28 +532,20 @@ export const exchangeCode = async (
         },
       );
     }
-    const result = rawTokenResponseSchema.safeParse(parsedJson);
-    if (!result.success) {
-      throw new ApiError(
-        'internal_error',
-        'OAuth token-exchange success response did not match the expected shape',
-        {
-          cause: result.error,
-          details: {
-            http_status: response.status,
-            issues: result.error.issues.map((i) => ({
-              path: i.path.join('.'),
-              message: i.message,
-            })),
-            hint: 'this likely indicates a Monday-side change in the response shape; inspect the live response and report.',
-          },
-        },
-      );
-    }
+    // R-NEW-19 lift — canonical parse-failure via `unwrapOrThrow`;
+    // `details.http_status` threads through as a per-call discriminant.
+    const tokenResponse = unwrapOrThrow(
+      rawTokenResponseSchema.safeParse(parsedJson),
+      {
+        context: 'OAuth token-exchange success response',
+        details: { http_status: response.status },
+        hint: 'this likely indicates a Monday-side change in the response shape; inspect the live response and report.',
+      },
+    );
     return {
-      accessToken: result.data.access_token,
-      tokenType: result.data.token_type,
-      scope: result.data.scope,
+      accessToken: tokenResponse.access_token,
+      tokenType: tokenResponse.token_type,
+      scope: tokenResponse.scope,
     };
   }
 
