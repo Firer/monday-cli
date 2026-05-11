@@ -11,49 +11,53 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M26 pre-flight closed; M26 implementation unblocked.**
+**v0.3-M26a IMPL closed; M26b unblocked.**
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
-`main`; M0–M25 closed + M26 pre-flight contract diff pinned
-across `1620220` (round-0) + `4433297` (Codex round-1 fix-ups)
-+ `f605260` (Codex round-2 fix-ups). M26 implementation lands
-the runtime bodies + tests + drops the `c8 ignore` wraps;
-M26a (3 setup verbs) + M26b (10 workflow verbs) split decision
-deferred to M26 IMPL kickoff per the natural setup-vs-workflow
-cleavage.
-**M26 pre-flight landed at `1620220`** (new
-`src/api/dev-conventions.ts` module — DevMapping alias over
-`profileDevBlockSchema` + pure helpers `matchBoardByConvention`
-/ `groupCandidatesByDevNoun` / `buildDiscoverMappingFromMatches`
-+ `DEV_DOCTOR_CHECK_NAMES` 10-name vocabulary + stub fetchers
-`discoverDevBoards` / `runDevDoctor` / `loadDevMapping` /
-`saveDevMapping` under `c8 ignore start/stop`; 13 new command
-stubs across `src/commands/dev/{discover,configure,doctor}.ts`
-+ `src/commands/dev/sprint/{current,list,items}.ts` +
-`src/commands/dev/epic/{list,items}.ts` +
-`src/commands/dev/release/list.ts` +
-`src/commands/dev/task/{list,start,done,block}.ts`).
-**Codex pre-flight review ran 2 rounds.** Round 1
-(`4433297`) surfaced 2 P1 + 5 P2 + 1 P3:
-P1-1 = `sprints_state_column_present` → `sprints_date_columns_present`
-rename (sprint state is date-range-derived, not status-column-
-derived); P1-2 = `side_effects` placement (top-level on
-`MutationEnvelope`, NOT under `meta`); P2-1 = `DevDoctorCheckResult.name`
-enum-pin via `z.enum(DEV_DOCTOR_CHECK_NAMES)`; P2-2 = add
-`bugs_board_exists` check; P2-3 = drop unregistered warning code
-+ `dev_board_misconfigured`-as-warning misclassification;
-P2-4 = `dev discover` no-match is success not `dev_not_configured`;
-P2-5 = drop unsupported `--sprint` mutual-exclusion language.
-Round 2 (`f605260`) surfaced 0 P1 + 4 P2 + 1 P3:
-P2-1 + P2-2 = residual warning-language cleanup across in-source
-docstrings (round-1 fixed only the docs/* surface); P2-3 =
-replaced `epics_to_releases_relation` with `tasks_to_epics_relation`
-(no `dev release items` verb to consume the round-1 relation
-check, but `dev epic items` needs the tasks↔epics relation);
-P2-4 = same as P2-1 but for task command docstrings;
-P3-1 = `resolved_ids` documentation in task mutation examples.
-R-NEW-25 "findings up front" directive validated for the 8th +
-9th time; R-NEW-17 W1 redactor-pattern audit returned "nothing
-flagged" across both M26 rounds.
+`main`; M0–M25 closed + M26 pre-flight pinned across `1620220` /
+`4433297` / `f605260` / `d9b2d6d` + **M26a IMPL shipped at
+`19755e3`** (feat) + Codex impl review fix-ups across 3 rounds:
+round 1 `2be9021` (1 P1 + 1 P2 + 1 P3) + round 2 `c70deb3` (0 P1
++ 2 P2 + 1 P3 — discriminated-union refactor on
+`devDoctorCheckResultSchema` for `monday schema` reason-enum
+surfacing) + round 3 `2a3c06c` (0 P1 + 0 P2 + 1 P3 — test
+assertion strengthening). **M26b (10 workflow verbs across
+sprint/epic/release/task)** stays stubbed for the next session
+per the setup-vs-workflow cleavage chosen at M26 IMPL kickoff.
+**M26a IMPL highlights.** Runtime bodies of the four
+`src/api/dev-conventions.ts` stub fetchers (`discoverDevBoards` /
+`runDevDoctor` / `loadDevMapping` / `saveDevMapping`) + the three
+setup-verb action bodies (`dev discover [--apply]` /
+`dev configure` / `dev doctor`) + new
+`src/commands/dev/_shared.ts:resolveActiveDevProfile` (lifted out
+because all 3 setup verbs AND M26b's 10 workflow verbs need the
+same profile-name resolution preamble). Empirical probe at IMPL
+kickoff (`scripts/probe/m26-{dev-discover,board-kind,board-type}.ts`)
+ratified the heuristic (DEV_NOUN_PATTERNS unchanged) + surfaced
+the `Board.type === 'board'` filter requirement to drop
+`sub_items_board` virtual entries from the candidate list
+(behavior-equivalent refinement; not a contract amendment).
+Codex impl review ran 3 rounds: round 1 (1 P1 + 1 P2 + 1 P3) —
+P1-1 = `_shared.ts` `resolveActiveDevProfile` swallowed
+`UsageError` allowing `dev configure` to write to disk before
+emitMutation's re-parse threw; P2-1 = `details.reason` enum-
+enforcement via superRefine; P3-1 = soften premature post-mortem
+reference. Round 2 (0 P1 + 2 P2 + 1 P3) — P2-1 = the round-1
+superRefine was runtime-only and `monday schema`'s
+`z.toJSONSchema(outputSchema)` couldn't surface the reason enum;
+fix refactored `devDoctorCheckResultSchema` into a structural
+`z.discriminatedUnion('status', [ok, warn, fail])` with per-
+status detail shapes + tightened `failResult`'s required-reason
+signature; P2-2 subsumed; P3-1 = module docstring SHA placeholder
++ ownership-text correction. Round 3 (0 P1 + 0 P2 + 1 P3) —
+P3-1 = round-2's discriminated-union refactor incidentally
+weakened existing unit tests from message-specific to generic
+`toThrow()`; fix strengthened to `safeParse(...).success` +
+`issue.path` / `issue.code` asserts. JSON Schema export now
+surfaces the closed `DEV_DOCTOR_REASONS` 11-value enum so agents
+can introspect via `monday schema dev.doctor`.
+R-NEW-25 "findings up front" directive validated for the 10th +
+11th + 12th time (M26a IMPL × 3); R-NEW-17 W1 redactor-pattern
+audit returned "nothing flagged" across all M26a rounds.
 **M25 implementation landed at `fe15181`** (runtime body of
 `runPartialSuccessBulkUpdate` + per-item `dispatchSequential`
 loop with threaded `foldAndRemap` context per pre-flight
@@ -116,44 +120,45 @@ findings in v0.3-plan §8.
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
-  §16 M24, §17 M25 post-mortems + §22 R-class backlog (R-NEW-1 +
-  R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 +
+  §16 M24, §17 M25, §18 M26a post-mortems + §22 R-class backlog
+  (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 +
   R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 + R-NEW-27 +
-  R-NEW-29 shipped + R-NEW-2 / R-NEW-3 candidates open +
-  R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28).
+  R-NEW-29 + R-NEW-30 shipped + R-NEW-2 / R-NEW-3 candidates
+  open + R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28 /
+  R-NEW-31).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M26 pre-flight close):**
-- Test count: **3011** across 125 files (unchanged through M26
-  pre-flight — runtime tests land at M26 IMPL per the
-  M22/M23/M24/M25 precedent; 1 skipped unchanged — auth-probe
-  real-network placeholder).
-- Coverage: **99.09 / 96.03 / 99.24 / 99.28** (stmts / branches
+**Live numbers (post-M26a IMPL close):**
+- Test count: **3109** across 127 files (+98 net at M26a IMPL —
+  76 new unit tests in `tests/unit/api/dev-conventions.test.ts` +
+  22 integration tests in `tests/integration/commands/dev.test.ts`;
+  1 skipped unchanged — auth-probe real-network placeholder).
+- Coverage: **99.10 / 95.96 / 99.24 / 99.29** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin held at 0.58pp** through M26 pre-flight
-  (identical to post-M25 close — the new stubs are entirely
-  under `c8 ignore start/stop` block-wraps + the pure helpers in
-  `dev-conventions.ts` add zero new uncovered branches). Three
-  deferred file-level gaps still: `item/search.ts` 88.23%,
-  `errors.ts` ~95.37%, `dry-run.ts` 96.26% — same set as pre-M24
-  (genuinely defensive or requires new cross-board integration
-  test). **v8 instrumentation glitch on `partial-success-bulk.ts`**
-  carried over from M25 close — investigate at M26 IMPL kickoff
-  if it recurs on the new `dev-conventions.ts` module or any of
-  the 13 new dev stubs.
-- ERROR_CODES count: **29** (unchanged across M26 pre-flight —
-  the two `dev_*` codes (`dev_not_configured` +
-  `dev_board_misconfigured`) were pre-registered in
-  `src/utils/errors.ts:ERROR_CODES` ahead of M5b for forward-
-  compat per cli-design §5.9; M26 IMPL routes
-  `dev`-namespace failures through these existing codes).
-  Command count: **91** (+13 new dev verbs: 3 setup verbs
-  `dev discover` / `dev configure` / `dev doctor` + 10 workflow
-  verbs across sprint × {current, list, items} + epic ×
-  {list, items} + release × {list} + task × {list, start, done,
-  block}).
+  **Branches margin 0.51pp** (was 0.58pp post-M25; small dip from
+  new dev-namespace runtime branches but well above floor). The
+  10 M26b workflow verbs stay stubbed under `c8 ignore start/stop`
+  block-wraps — their bodies will further widen the branches
+  denominator at M26b IMPL. Three deferred file-level gaps still:
+  `item/search.ts` 88.23%, `errors.ts` ~95.37%, `dry-run.ts`
+  96.26% — same set as pre-M24 (genuinely defensive or requires
+  new cross-board integration test). **v8 instrumentation glitch
+  on `partial-success-bulk.ts`** carried over from M25 close;
+  `dev-conventions.ts` v8-instruments correctly so the glitch is
+  module-specific. Investigate at M28 release-prep if it recurs.
+- ERROR_CODES count: **29** (unchanged at M26a IMPL — the two
+  `dev_*` codes (`dev_not_configured` + `dev_board_misconfigured`)
+  pre-registered in `src/utils/errors.ts:ERROR_CODES` ahead of
+  M5b for forward-compat per cli-design §5.9; M26a routes
+  `dev`-namespace failures through these existing codes + the
+  fully-pinned `DEV_DOCTOR_REASONS` 11-value enum in
+  `src/api/dev-conventions.ts` for per-check failure
+  discrimination).
+  Command count: **91** (unchanged at M26a IMPL — IMPL fills 3
+  of the 13 stub bodies pre-flight pinned; commands themselves
+  don't add or remove).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -169,31 +174,38 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M26 implementation — `dev` namespace runtime bodies.**
-   Pre-flight pinned the contract surface across `1620220`
-   (round-0) + `4433297` (Codex round-1 fix-ups) + `f605260`
-   (Codex round-2 fix-ups). IMPL lands the runtime bodies of
-   `discoverDevBoards` + `runDevDoctor` + `loadDevMapping` +
-   `saveDevMapping` in `src/api/dev-conventions.ts` + the
-   13 action bodies in `src/commands/dev/...` + drops the
-   `c8 ignore start/stop` wraps + writes the test suite (per-
-   verb integration tests at minimum; unit tests on the
-   `dev-conventions.ts` pure helpers if not yet covered).
-   **M26a + M26b split decision** — consider landing M26a
-   (3 setup verbs: discover / configure / doctor) first, then
-   M26b (10 workflow verbs) in a separate session per the
-   natural setup-vs-workflow cleavage. Both halves benefit
-   from contract pinning together at pre-flight; impl
-   complexity diverges (setup verbs need profile-config IO
-   + the discovery walker; workflow verbs need wire calls
-   against the configured boards + the relation walkers).
-   **Empirical probe to run at IMPL kickoff:** verify
-   Monday Dev's stock template board names on a real Monday
-   Dev workspace (`Tasks` / `Sprints` / `Epics` / `Releases` /
-   `Bugs`) — round-2 P3 deferred a `scripts/probe/m26-dev-discover.ts`
-   probe to confirm the heuristic. If template names diverge,
-   amend `src/api/dev-conventions.ts:DEV_NOUN_PATTERNS` before
-   the runtime body of `discoverDevBoards` lands.
+1. **M26b implementation — `dev` namespace workflow verbs.**
+   M26a (3 setup verbs) closed across `19755e3` + `2be9021` +
+   `c70deb3` + `2a3c06c`; M26b lands the 10 workflow verbs that
+   READ/WRITE against the M26a-configured `[profiles.<name>.dev]`
+   mapping. Verbs: `dev sprint current/list/items`,
+   `dev epic list/items`, `dev release list`,
+   `dev task list/start/done/block`. Each verb follows the
+   same shape: (a) call `_shared.ts:resolveActiveDevProfile`,
+   (b) call `loadDevMapping` (which fires `dev_not_configured`
+   if no `[profiles.<name>.dev]` block exists — round-1 P2-4
+   closure pins doctor + workflow verbs as the ONLY verbs that
+   surface the code), (c) resolve the noun-specific board ID
+   from the mapping, (d) dispatch the underlying CRUD operation
+   via existing `api/items-page-walker.ts` /
+   `api/item-mutation-execute.ts` (M25's R-NEW-29 lift) /
+   `api/cross-board-search.ts` patterns, (e) emit via
+   `emitSuccess` or `emitMutation`. Drop the M26 pre-flight's
+   `c8 ignore start/stop` wraps on all 10 verbs.
+   **Shared preamble pattern (M26a R-NEW-30):**
+   `_shared.ts:resolveActiveDevProfile` is already 3 consumers
+   at M26a; expected to jump to 13 consumers at M26b (lift
+   already shipped at M26a IMPL).
+   **Expected size:** L (broad surface; 10 verbs). Mirror M13's
+   8-commit cluster shape — feat per noun-verb pair, then
+   Codex impl review fix-ups. Convergence target: 2-3 rounds
+   per M26a's cadence.
+   **No new probe needed** — M26a's empirical-probe findings
+   (Board.type filter, stock template names, board_kind
+   non-discrimination) cover the M26b read paths. M26b
+   workflow verbs hydrate boards by ID (existing
+   `boards(ids:)` patterns), not via the walker; the M26a
+   walker filter is in `dev-conventions.ts` only.
 2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
@@ -228,20 +240,29 @@ convention.
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M26 pre-flight close)** — no new R-class
-candidates surfaced at M26 pre-flight; the 13 stub-command shape
-is too thin to fire a 3-consumer trigger, and the
-`dev-conventions.ts` module's pure helpers (`matchBoardByConvention` /
-`groupCandidatesByDevNoun` / `buildDiscoverMappingFromMatches`)
-are single-consumer at this milestone. M26 IMPL may surface
-candidates as the runtime bodies + per-verb tests land — watch
-for shared scaffolding across the 13 action bodies (e.g. a
-common "load profile mapping → throw `dev_not_configured` if
-absent → resolve `<noun>_board` slot" preamble pattern).
-R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
-2 consumers (M22 usage + M23 favorites); M26 `dev discover` is
-a single-stage walk + projection, NOT 2-stage filter+hydrate
-— the 3rd-consumer trigger doesn't fire.
+**R-class state (post-M26a IMPL close):**
+- **R-NEW-30 — `_shared.ts:resolveActiveDevProfile` lift (3
+  consumers at M26a; pre-shipped at IMPL because the 3-consumer
+  trigger fires inside M26a's own setup verbs).** Shared
+  "load profile mapping → resolve → throw if implicit-v1"
+  preamble used by `dev discover` / `dev configure` /
+  `dev doctor` (3 setup verbs) + all 10 M26b workflow verbs
+  will reuse it (13 total consumers at M26b IMPL). Shipped at
+  `19755e3`. **Status: shipped.**
+- **R-NEW-31 — discriminated-union per-status detail schema
+  pattern (1 consumer at M26a; LOW priority watch-item).** The
+  M26a round-2 P2-1 fix introduced per-status detail schemas
+  (`okCheckDetailsSchema` / `warnCheckDetailsSchema` /
+  `failCheckDetailsSchema`) + `z.discriminatedUnion('status',
+  [...])`. Generalizes to any verb whose output carries a status
+  discriminator with per-status detail variability. Fires at 2nd
+  + 3rd consumer (likely M27 webhook list with per-webhook status
+  OR M28 release-prep readiness checks).
+- R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
+  2 consumers (M22 usage + M23 favorites); M26a `dev discover` is
+  a single-stage walk + projection, M26a `dev doctor` is a
+  single-stage `boards(ids:)` hydrate — neither fires the 3rd-
+  consumer trigger.
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
