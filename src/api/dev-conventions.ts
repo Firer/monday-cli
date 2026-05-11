@@ -30,9 +30,10 @@
  *      {@link buildDiscoverMappingFromMatches} (collapses the
  *      heuristic's per-noun matches into a {@link DevMapping}).
  *      Real implementations — the heuristic is content-addressed
- *      against board names so it ships testable at pre-flight even
- *      though the runtime fetchers don't (M26 IMPL lands the
- *      `boards(workspace_id:)` walker + per-board metadata
+ *      against board names so it shipped testable at pre-flight
+ *      alongside the runtime fetchers (M26a IMPL `19755e3` landed
+ *      the `boards(state: all, workspace_ids:)` walker with the
+ *      `Board.type === 'board'` filter + per-board metadata
  *      hydration).
  *   4. Runtime fetchers: {@link discoverDevBoards} (walks accessible
  *      boards + applies the heuristic) + {@link runDevDoctor}
@@ -414,12 +415,20 @@ export type DevDoctorCheckName = (typeof DEV_DOCTOR_CHECK_NAMES)[number];
  * blocks the corresponding `dev` verb (e.g. tasks board has no
  * status column at all — `dev task start` would fail).
  *
- * Open-ended `details` slot so M26 IMPL can add per-check context
- * without contract churn (the check names are pinned; the per-
- * check detail shape is per-check additive).
+ * Per-status `details` shape is now STRUCTURALLY pinned at M26a
+ * IMPL round-2 P2-1 via the {@link okCheckDetailsSchema} /
+ * {@link warnCheckDetailsSchema} / {@link failCheckDetailsSchema}
+ * discriminated union below — `monday schema dev.doctor` surfaces
+ * the closed {@link DEV_DOCTOR_REASONS} enum via JSON Schema
+ * export, and `failResult` enforces a required `reason` at
+ * compile time. Extra `details` keys beyond `reason` stay open
+ * per-status (open-ended `Record<string, unknown>` extension via
+ * `.loose()`) so each check emits its own context fields
+ * (`board_id`, `column_id`, etc.) without per-check schema
+ * widening.
  *
- * **Round-1 Codex fix (P2-1).** `name` is typed as
- * {@link DevDoctorCheckName} (the enum literal union) so
+ * **M26 pre-flight round-1 Codex fix (P2-1).** `name` is typed
+ * as {@link DevDoctorCheckName} (the enum literal union) so
  * `monday schema` exposes the stable vocabulary + implementation
  * typos fail output-schema validation rather than silently
  * passing through.
@@ -533,14 +542,18 @@ export type DevDoctorCheckResult = z.infer<typeof devDoctorCheckResultSchema>;
  * (so an agent diagnosing a misconfiguration sees both in one
  * envelope).
  *
- * **Decision 2 closure (M26 pre-flight).** The pinned check
- * names: see {@link DEV_DOCTOR_CHECK_NAMES} above (10 entries
- * post-round-1; round-0 had 9 entries before P1-1 / P2-2
- * fix-ups). Mirror cli-design §11.3 "runs `board doctor`
+ * **Decision 2 closure (M26 pre-flight + M26a IMPL).** The
+ * pinned check names: see {@link DEV_DOCTOR_CHECK_NAMES} above
+ * (10 entries post-round-1; round-0 had 9 entries before P1-1
+ * / P2-2 fix-ups). Mirror cli-design §11.3 "runs `board doctor`
  * against each configured dev board plus checks the cross-board
- * `board_relation` wiring". Per-check `details` shape is per-
- * check additive; the discriminated union is left for M26 IMPL
- * to pin (run order locks at this pre-flight).
+ * `board_relation` wiring". Per-check `details` shape was
+ * deferred to IMPL at pre-flight + landed at M26a IMPL round-2
+ * P2-1 as a structural `z.discriminatedUnion('status', [...])`
+ * over {@link okCheckDetailsSchema} / {@link warnCheckDetailsSchema}
+ * / {@link failCheckDetailsSchema} (the `reason` enum from
+ * {@link DEV_DOCTOR_REASONS} is required on fail + optional on
+ * warn; extra keys per check stay open).
  */
 export interface DevDoctorOutput {
   readonly profile: string;
@@ -572,9 +585,12 @@ export const devDoctorOutputSchema = z
  * Inputs to {@link discoverDevBoards}.
  *
  * `workspaceId` is optional — when set, the discovery walker scopes
- * to that workspace; when unset, it walks every board the user has
- * access to (the M26 IMPL body decides the page-size + workspace-
- * scoping cadence per the boards-walker pattern).
+ * to that workspace via Monday's `boards(workspace_ids: [...])`
+ * arg; when unset, it walks every board the user has access to.
+ * M26a IMPL pinned the walker cadence at `DISCOVER_PAGE_LIMIT` 200
+ * entries per page with a hard `DISCOVER_PAGE_CAP` of 50 pages
+ * (10000 boards max — comfortably above any realistic dev
+ * workspace).
  */
 export interface DiscoverDevBoardsInputs {
   readonly client: MondayClient;

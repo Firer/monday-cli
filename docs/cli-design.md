@@ -3005,10 +3005,23 @@ Mechanics:
 (DevMapping alias over `profiles.ts:profileDevBlockSchema`, the
 pure-helper `matchBoardByConvention` + `groupCandidatesByDevNoun`
 + `buildDiscoverMappingFromMatches` for the discover heuristic,
-and stub runtime fetchers `discoverDevBoards` / `runDevDoctor` /
-`loadDevMapping` / `saveDevMapping` under `c8 ignore start/stop`).
-The 13 verb stubs ship under `src/commands/dev/...`. M26 IMPL
-lands the runtime bodies + tests + drops the `c8 ignore` wraps.
+and the 4 runtime fetchers `discoverDevBoards` / `runDevDoctor`
+/ `loadDevMapping` / `saveDevMapping`).
+**M26a IMPL** landed the 4 fetchers' runtime bodies + the 3
+setup verbs (`dev discover` / `dev configure` / `dev doctor`)
+at `19755e3` + Codex impl review fix-ups across 3 rounds
+(`2be9021` / `c70deb3` / `2a3c06c`). The empirical-probe
+finding driving the `Board.type === 'board'` walker filter
+(drops `sub_items_board` virtual entries that pollute the
+substring heuristic) is pinned in the module docstring +
+v0.3-plan §18 M26a post-mortem. The
+{@link DEV_DOCTOR_REASONS} 11-value enum + per-status
+discriminated-union detail schemas surfaced via
+`z.toJSONSchema` so `monday schema dev.doctor` agents can
+introspect the closed reason vocabulary. **M26b** lands the
+10 remaining workflow verbs (`dev sprint/epic/release/task
+<verb>`); those verbs remain stubbed under `c8 ignore
+start/stop` block-wraps until M26b ships.
 
 ## 6. Output schema (JSON contract)
 
