@@ -177,6 +177,30 @@ const redactInternal = (value: unknown, ctx: InternalContext): unknown => {
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
     if (isSensitiveKey(key, ctx.extraKeys, ctx.extraPattern)) {
+      // Default: redact. Only booleans, finite numbers, and `null`
+      // are preserved verbatim — these cannot encode a token byte
+      // sequence in JSON output and are the carrier types for
+      // structural-presence shapes like `set: {MONDAY_API_TOKEN:
+      // true}` (M22 `monday status` env-var-pickup probe per
+      // cli-design §11.5.2). Symbols, functions, bigints, and
+      // `undefined` redact wholesale because:
+      //   - Symbol descriptions can encode secret bytes
+      //     (`Symbol("tok-…")`),
+      //   - function source can encode secret bytes,
+      //   - bigints could theoretically encode a numeric token,
+      //   - `undefined` is omitted by `JSON.stringify` (no visible
+      //     side effect), but consistency: anything that isn't a
+      //     bool/number/null defaults to redact.
+      // Codex M22 W8 ratified the allowlist shape so the
+      // loosening doesn't leak via unusual scalar types.
+      if (
+        typeof child === 'boolean' ||
+        typeof child === 'number' ||
+        child === null
+      ) {
+        result[key] = child;
+        continue;
+      }
       result[key] = ctx.placeholder;
       continue;
     }

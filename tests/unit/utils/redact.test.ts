@@ -57,6 +57,64 @@ describe('redact — defaults', () => {
     });
   });
 
+  it('redacts non-JSON scalars (symbols/functions/bigints) under sensitive keys', () => {
+    // Codex M22 W8: the boolean/number-preservation loosening must NOT
+    // extend to symbol / function / bigint / undefined — those could
+    // encode token bytes (Symbol description, function source, bigint
+    // digits). Allowlist preservation: only `boolean`/`number`/`null`.
+    expect(redact({ apiToken: Symbol('tok-secret') })).toEqual({
+      apiToken: '[REDACTED]',
+    });
+    expect(redact({ apiToken: () => 'tok-secret' })).toEqual({
+      apiToken: '[REDACTED]',
+    });
+    expect(redact({ apiToken: 12345678901234567890n })).toEqual({
+      apiToken: '[REDACTED]',
+    });
+    // `undefined` is consistent with the default-redact rule. The key
+    // is preserved as `'[REDACTED]'` rather than being dropped — the
+    // sensitive-key contract is "value goes through the placeholder",
+    // not "value is silently omitted".
+    expect(redact({ apiToken: undefined })).toEqual({
+      apiToken: '[REDACTED]',
+    });
+  });
+
+  it('preserves non-string scalars under sensitive keys (M22 status env-var-pickup)', () => {
+    // The M22 `monday status` env-var-pickup probe surfaces presence
+    // booleans under sensitive key names — `set: {MONDAY_API_TOKEN: true}`.
+    // The boolean cannot encode a token, so the redactor preserves it
+    // verbatim per cli-design §11.5.2's structural-presence shape.
+    // Strings + objects under sensitive keys still redact wholesale.
+    expect(
+      redact({
+        set: {
+          MONDAY_API_TOKEN: true,
+          apiToken: false,
+          password_set: true,
+          count_of_secrets: 3,
+          nothing: null,
+        },
+      }),
+    ).toEqual({
+      set: {
+        MONDAY_API_TOKEN: true,
+        apiToken: false,
+        password_set: true,
+        count_of_secrets: 3,
+        nothing: null,
+      },
+    });
+    // Sanity: strings under those same keys DO still redact.
+    expect(redact({ MONDAY_API_TOKEN: 'abcdef-tok' })).toEqual({
+      MONDAY_API_TOKEN: '[REDACTED]',
+    });
+    // Nested objects under sensitive keys also still redact wholesale.
+    expect(redact({ Authorization: { Bearer: 'tok' } })).toEqual({
+      Authorization: '[REDACTED]',
+    });
+  });
+
   it('redacts access_token (added at v0.3-M21 pre-flight per cli-design §7.4.3)', () => {
     // The credentials cache (§7.4.1) keys per-profile entries under
     // `access_token`. Adding the key to the static sensitive-keys
