@@ -31,8 +31,8 @@ Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23
   post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-5
-  + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 shipped +
-  R-NEW-2 / R-NEW-3 / R-NEW-17 / R-NEW-21 candidates open +
+  + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 + R-NEW-21
+  shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open +
   R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
@@ -92,7 +92,11 @@ convention.
    M24 pre-flight needs to introspect any new types
    (`ActivityLogType`, `Update`, etc.), use the shipped
    `introspectType()` helper from `scripts/probe/_lib.ts`
-   rather than inlining the `__type(name:)` selection.
+   rather than inlining the `__type(name:)` selection;
+   for any "does this field exist?" trial-query probes,
+   use the shipped `trialQuery(label, query, options?)`
+   helper (R-NEW-21) — defaults match the 4 M23 probes'
+   most-common settings.
 2. **Branches-margin recovery via cross-board seam tests** —
    margin 0.24pp at M23 close, target ≥0.4pp ahead of M24
    denominator growth. R-NEW-5's lift didn't move the margin
@@ -161,20 +165,30 @@ convention.
   originally-floated branches-margin recovery never
   materialised (scope discovery — record this for future
   R-class candidates with similar out-of-coverage scope).
+  **R-NEW-21 `trialQuery()` + `ProbeRawErrors` lift**
+  into `scripts/probe/_lib.ts` (`fa07fb4`, post-R-NEW-5
+  audit session) — 4 M23 trial-query probes
+  (`m23-favorites.ts`, `m23-favorites-deep.ts`,
+  `m23-hierarchy-{item,object}.ts`) converged on the
+  same `trialQuery(label, query)` + local `RawErrors`
+  shape with truncate-length variations (400/600/800).
+  Lift uses `options?: { echoQuery?, truncateBody? }`
+  with defaults matching the two most-common settings;
+  interface renamed `RawErrors` → `ProbeRawErrors` to
+  match the existing `RawHttpResponse` namespace. Two
+  cosmetic deltas in probe output accepted as part of
+  the lift (`[OK] data: <body>` → `[OK] <body>`; echo
+  unified on the `query:` prefix). Same out-of-coverage
+  scope as R-NEW-5 — no branches-margin movement; the
+  M24 pre-flight kickoff's branches recovery still falls
+  to targeted seam tests on `cross-board-search.ts`.
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
   `wrapFsError` factory (M22 + M23 did NOT trigger);
   R-NEW-8 `missingByDifference` set-delta helper (2
   consumers; fires at 3); R-NEW-9 2-stage GraphQL
   filter+hydrate resolver shape (2 confirmed + 1 planned
-  M24; MEDIUM priority); **R-NEW-21 `trialQuery()` +
-  `RawErrors` lift** into `scripts/probe/_lib.ts` —
-  **trigger fired at post-R-NEW-5 audit** (`fb77baf`);
-  4 M23 trial-query probes share verbatim shape with
-  minor truncate-length variations; MEDIUM priority,
-  ship at M24 pre-flight kickoff alongside the
-  `introspectType()` uptake; same out-of-coverage-scope
-  caveat as R-NEW-5 (lift won't move branches margin).
+  M24; MEDIUM priority).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);
