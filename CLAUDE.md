@@ -11,68 +11,82 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M24 closed; M25 unblocked.**
+**v0.3-M25 pre-flight closed; M25 implementation unblocked.**
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
-`main`; M0–M24 closed. **M24 implementation landed at
-`d058172`** (item history runtime walker + per-event projectors
-+ action body); Codex impl review round 1 surfaced 1 P1 + 2 P2
-(all out-of-band / W4); all three fixed at `5f10cda` (--stream
-flag wiring, wall-clock epoch compare for mixed-offset ISO
-inputs, projectReplyRow parent-timestamp fallback). R-NEW-25
-"findings up front" directive validated again — round 1
-returned numbered findings cleanly without truncation. M23
-implementation landed at `1f09a25` (cross-board `item search` +
-`board favorites` runtime bodies — `fetchBoardFavorites`
-2-stage resolver, `crossBoardSearch` per-board fan-out walker,
-cross-board action with column-resolution pre-pass +
-SourceAggregator merge + union-schema emit). M22 implementation
-(`3a1b465`) lands the runtime DNS / TCP / TLS / auth / cache /
-redaction / env-var probes for `monday status` + the
-`platform_api.daily_*` projection for `monday usage`.
-Decision 2 (item-history `kind` taxonomy) closed at the
-post-M23 M24-prep session via the local
-`scripts/probe/m24-history-kinds.ts` empirical probe
-(2026-05-11; 19 rows captured on a production board); ratified
-zod discriminated union over the observed event taxonomy with
-`unknown` fallback + `unknown_event_kind` warning; entity
-filter (`entity = 'pulse'`) discriminates item-scoped vs
-board-scoped events. Full findings in v0.3-plan §8 Decision 2
-closure.
+`main`; M0–M24 closed + M25 pre-flight closed.
+**M25 pre-flight contract diff landed at `d5839a9`**
+(partial-success-bulk module signatures + cli-design §6.4 new
+"Bulk per-item partial-success" sub-section + Decision 6 close
++ `--continue-on-error` argv extension; runtime body under
+`c8 ignore start/stop` stubs awaiting M25 impl). Preceded by
+`85b93e8` (R-class cleanup bundle — R-NEW-25 + R-NEW-17
+template fold-ins + R-NEW-27 `isPlainObject` consolidation; 6
+sites migrated). Codex pre-flight review ran 2 rounds: round 1
+surfaced 1 P1 (foldAndRemap context-thread requirement) + 1 P2
+(empty-match contract drift) + 3 P3 — fixed at `832a169`; round
+2 surfaced 1 P2 (empty-match still drifted) + 3 P3 — fixed at
+`67df582`. R-NEW-25 "findings up front" directive validated for
+the 5th + 6th time (pre-flight × 2 + the 4 M24 rounds);
+R-NEW-17 W1 redactor-pattern audit returned "nothing flagged"
+across both rounds against M25's new detail-key surface.
+**M24 implementation landed at `d058172`** (item history
+runtime walker + per-event projectors + action body); Codex
+impl review round 1 surfaced 1 P1 + 2 P2 (all out-of-band /
+W4); all three fixed at `5f10cda`. M23 implementation landed at
+`1f09a25` (cross-board `item search` + `board favorites`
+runtime bodies — `fetchBoardFavorites` 2-stage resolver,
+`crossBoardSearch` per-board fan-out walker, cross-board action
+with column-resolution pre-pass + SourceAggregator merge +
+union-schema emit). M22 implementation (`3a1b465`) lands the
+runtime DNS / TCP / TLS / auth / cache / redaction / env-var
+probes for `monday status` + the `platform_api.daily_*`
+projection for `monday usage`. Decision 6
+(`--continue-on-error` naming) closed at the M25 pre-flight
+contract diff `d5839a9` — positive form; cli-design §4.3 bulk
+`item update` row + new §6.4 sub-section pin the flag +
+envelope shape. Decision 2 (item-history `kind` taxonomy)
+closed at the post-M23 M24-prep session via the local
+`scripts/probe/m24-history-kinds.ts` empirical probe. Full
+findings in v0.3-plan §8.
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
   §16 M24 post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 +
-  R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 +
-  R-NEW-21 shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 / R-NEW-27
-  candidates open + R-watch-items including R-NEW-26).
+  R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-17 +
+  R-NEW-19 + R-NEW-21 + R-NEW-25 + R-NEW-27 shipped +
+  R-NEW-2 / R-NEW-3 candidates open + R-watch-items including
+  R-NEW-26).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M24 implementation):**
-- Test count: **2967** across 124 files (+97 net from M24 impl;
-  pre-impl 2870 + 95 new item-history tests + 2 round-1 fix-up
-  regression tests). 1 skipped unchanged (auth-probe real-network
-  placeholder). 2 new test files: `tests/unit/api/item-history-
-  projection.test.ts` (78 tests) + `tests/integration/commands/
-  item-history.test.ts` (19 tests).
-- Coverage: **99.08 / 96.00 / 99.24 / 99.27** (stmts / branches /
-  fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin shifted 0.52pp → 0.55pp** through M24 — the runtime body
-  added branches but the action-layer `baseFetchInputs` lift +
-  simplified warnings sort (dropping the dead secondary-by-entity
-  tie-break that the walker's `entity === 'pulse'` filter makes
-  unreachable) actually IMPROVED the margin slightly. Three deferred
-  file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
-  93.27%, `dry-run.ts` 96.26% — same as pre-M24 (genuinely
-  defensive or requires new cross-board integration test).
-- ERROR_CODES count: **29** (unchanged across M24 impl per
-  Decision 2 closure — `unknown_event_kind` is a §6.1 `warnings[]`
-  shape, NOT a registry entry).
-  Command count: **78** (unchanged — `monday item history <iid>`
-  registered at M24 pre-flight `bad98ba`; impl swaps stub bodies
-  without adding new commands).
+**Live numbers (post-M25 pre-flight):**
+- Test count: **2969** across 124 files (unchanged from M24
+  close; pre-flight added no test files — runtime tests land
+  at M25 impl per the M24 `d058172` precedent). 1 skipped
+  unchanged (auth-probe real-network placeholder).
+- Coverage: **99.11 / 96.15 / 99.33 / 99.30** (stmts / branches /
+  fns / lines), at the **95 / 95.45 / 95 / 95** floor.
+  **Branches margin shifted 0.55pp → 0.70pp** through M25
+  pre-flight — R-NEW-27's `isPlainObject` consolidation
+  removed 5 duplicate branch sites (each of the 6 migrated
+  sites had a 3-way condition; consolidating to one lifted
+  helper drops the denominator) while the partial-success-
+  bulk stub adds no branches under `c8 ignore` wraps. Three
+  deferred file-level gaps still: `item/search.ts` 88.23%,
+  `errors.ts` ~95.37%, `dry-run.ts` 96.26% — same set as
+  pre-M24 (genuinely defensive or requires new cross-board
+  integration test); `errors.ts` improved slightly via the
+  R-NEW-27 lift removing one site.
+- ERROR_CODES count: **29** (unchanged across M25 pre-flight
+  per Decision 6 closure — per-item failures under
+  `--continue-on-error` route through existing codes;
+  `cli-design §6.4` "Bulk per-item partial-success" adds no
+  new registry entries).
+  Command count: **78** (unchanged — `--continue-on-error`
+  is a flag on the existing `monday item update --where`
+  verb, not a new command).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -88,45 +102,50 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M25 pre-flight — `--continue-on-error` for bulk
-   `item update`.** Decision 6 (`--continue-on-error` naming)
-   is the remaining design hinge per v0.3-plan §3 M25 + §9
-   preconditions. Bulk `monday item update --where ...` today
-   bails on first per-item failure; M25 adds the opt-in
-   continue-on-error mode that aggregates per-item results +
-   reports partial-success/failure metadata in the envelope.
-   Likely scope (S-M per the §3 sequencing intro): closing
-   Decision 6 in cli-design §X; argv extension on
-   `src/commands/item/update.ts`; thin
-   `src/api/partial-success-bulk.ts` wrapper or fold into
-   the existing bulk path; per-item-failure envelope shape
-   (M15 board-add-users partial-success precedent is the
-   inspiration); test matrix +30-50.
-2. **R-class cleanup bundle at M25 pre-flight kickoff** —
-   three lifts that pair naturally in one commit:
-   (a) R-NEW-25 R-NEW-6 template "findings up front" header
-   fold-in; (b) R-NEW-17 template section-5 W-audit-point
-   for redactor-pattern check; (c) R-NEW-27 `isPlainObject`
-   consolidation into `src/utils/json.ts` (or extend an
-   existing util) covering 6 duplicate sites (4 production
-   + 2 test) — see v0.3-plan §22 R-NEW-27 for the migration
-   recipe. All three are mechanical low-risk lifts; bundling
-   keeps the M25 pre-flight commit history clean. Both
-   template fold-ins validated at M24 pre-flight + impl
-   review (4 Codex rounds, all clean numbered findings).
-3. **Branches-margin deferred residuals.** Three files carry
+1. **M25 implementation — fill the runtime body for
+   `runPartialSuccessBulkUpdate` + wire the per-item dispatch
+   loop.** Pre-flight pinned the contract surface at `d5839a9`
+   (cli-design §6.4 "Bulk per-item partial-success" + new
+   `src/api/partial-success-bulk.ts` module signatures + the
+   `--continue-on-error` argv extension under `c8 ignore`
+   block-wraps). M25 impl swaps the stub `Promise.reject` body
+   in `runPartialSuccessBulkUpdate` for the runtime loop:
+   `dispatchSequential` over `matchedItemIds` with id-field
+   `'item_id'`; per-item dispatch callback fires
+   `executeMutation` + `foldAndRemap` (with the threaded
+   `resolverWarnings` / `remapColumnIds` / `env` / `noCache` /
+   `resolutionSource` context — Codex round-1 P1-1 contract
+   requirement) BEFORE throwing into `dispatchSequential`;
+   ProjectedItem side-map fold on success; the action body's
+   `c8 ignore start/stop` wrap drops at impl (the partial-
+   success branch becomes live). Test matrix +30-50 (mirror
+   M22/M23/M24 impl cadence) — unit tests for
+   `foldPartialSuccessBulkResult` + `buildPartialSuccessBulkSummary`
+   pure helpers (currently exported as REAL implementations
+   awaiting coverage), `partial-success-bulk.ts` integration
+   tests driving the wrapper via mocked `client.raw` with
+   per-item routing predicates (mirror M15's pattern at
+   `tests/unit/api/users-fan-out-mutation.test.ts`),
+   command-level integration tests at
+   `tests/integration/commands/item-update-bulk.test.ts`
+   exercising the empty-match no-op + dispatch-with-mixed-
+   success-and-failure paths. Codex impl review × 1-2
+   rounds. **Decision 6 (`--continue-on-error` naming)
+   already closed at `d5839a9`** — pre-flight pinned the
+   contract; impl doesn't reopen.
+2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
    `--where Owner=me` to cover buildPerBoardPlan's me-
    resolution helper (lines 546-549) + the same-column-twice
-   push branch (line 575); `errors.ts` 93.27% — defensive
-   lines (272 message fallback, 318 status<400, 367
+   push branch (line 575); `errors.ts` 95.37% — defensive
+   lines (272 message fallback, 319 status<400, 365
    path-present) — could be c8-ignored OR covered with
    targeted unit tests; `dry-run.ts` 96.26% — defensive
    `env === undefined ? {}` spreads. Each is a small bounded
    follow-up if a future session needs more margin (margin
-   at 0.55pp post-M24, comfortable).
-4. **`monday usage` timezone semantics verification** — M22
+   at 0.70pp post-M25-pre-flight, comfortable surplus).
+3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
    captured an empty `by_day` list so the timezone pin remains
@@ -135,13 +154,13 @@ convention.
    account with live usage activity. If Monday's runtime `day`
    field turns out to be account-local, amend cli-design §11.5.3
    + flip `formatTodayKey` in `src/commands/usage.ts`.
-5. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
+4. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
    OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
    as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M24 implementation)**
+**R-class state (post-M25 pre-flight)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
@@ -242,17 +261,17 @@ convention.
   crossBoardSearchOutputSchema])`; LOW priority watch-item;
   fires when M25/M27/M28 cross-cutting extensions need the
   same union shape; **R-NEW-17 redactor-pattern check at
-  pre-flight** — surfaced at M23 impl (`column_token` rename;
-  v0.3-plan §15 contract drift finding); MEDIUM priority.
-  Applied AT M24 pre-flight + impl review Codex prompts as
-  audit point W1 — all three rounds (pre-flight × 2 + impl
-  × 1) returned "W1: nothing flagged" against the new
-  `unknown_event_kind.details.{event, entity, occurrence_count,
-  hint}` + `internal_error.details.{item_id, board_id, hint,
-  issues}` detail-key surfaces. Template lift to
-  `.claude/templates/codex-pre-flight-review.md` section-5
-  audit-points remains the outstanding work — fires at M25/
-  M27 pre-flight kickoff; **R-NEW-18 sequential
+  pre-flight** — **Shipped: `85b93e8`** (M25 pre-flight
+  kickoff cleanup bundle). Surfaced at M23 impl
+  (`column_token` rename; v0.3-plan §15 contract drift
+  finding); applied per-prompt AT M24 pre-flight + impl
+  Codex reviews (4 rounds clean), then folded into
+  `.claude/templates/codex-pre-flight-review.md` as the
+  template-stable W1 audit-point at the M25 pre-flight
+  kickoff. M25 pre-flight rounds 1+2 returned "W1: nothing
+  flagged" against the new partial-success-bulk detail-key
+  surfaces, validating the template-stable form;
+  **R-NEW-18 sequential
   per-board fan-out builder** — surfaced at M23 impl
   (`crossBoardSearch` walker); LOW priority watch-item. M24
   `item history` shipped as CHRONOLOGICAL MERGE
@@ -304,18 +323,19 @@ convention.
   lifting to a shared `## Field-name mapping conventions`
   section in `docs/architecture.md` or `docs/cli-design.md`;
   **R-NEW-25 R-NEW-6 template extension — "findings up
-  front" instruction** — M23 impl-review truncation lesson
-  (v0.3-plan §15) drove a custom "deliver findings up
-  front, not after exhaustive exploration" instruction on
-  M24 pre-flight + impl review Codex prompts. All three
-  rounds (pre-flight × 2 + impl × 1) returned numbered
-  findings cleanly without truncation, validating the
-  technique across three independent rounds. The R-NEW-6
-  template at `.claude/templates/codex-pre-flight-review.md`
-  doesn't currently carry this guidance — fold in at next
-  pre-flight (M25 or M27) so the instruction is template-
-  stable rather than per-prompt re-derived. LOW priority,
-  fires at next pre-flight prompt drafting;
+  front" instruction** — **Shipped: `85b93e8`** (M25
+  pre-flight kickoff cleanup bundle). M23 impl-review
+  truncation lesson (v0.3-plan §15) drove a custom "deliver
+  findings up front, not after exhaustive exploration"
+  instruction on M24 pre-flight + impl review Codex prompts;
+  all four M24 rounds (pre-flight × 2 + impl × 2) returned
+  numbered findings cleanly without truncation. Folded into
+  `.claude/templates/codex-pre-flight-review.md` as a
+  top-of-file template-stable preamble at M25 pre-flight
+  kickoff. M25 rounds 1+2 confirmed the directive worked
+  template-side (rounds delivered numbered findings up
+  front despite the substantive diff), bringing the
+  validated-rounds count to 6;
   **R-NEW-26 defensive abort-listener race guard in async
   test promises** — surfaced post-M24 impl (`4c83860`): three
   tests in `tests/unit/cli/run.test.ts` flaked under full
@@ -338,23 +358,26 @@ convention.
   guards on the OAuth listener). Document the pattern at
   v0.3-plan §22 R-NEW-26 entry for future-session
   prophylactic application;
-  **R-NEW-27 `isPlainObject` consolidation** — surfaced at
-  post-M24 close-docs audit (6 sites: 4 production +
-  2 test; all structurally identical
+  **R-NEW-27 `isPlainObject` consolidation** —
+  **Shipped: `85b93e8`** (M25 pre-flight kickoff cleanup
+  bundle). Surfaced at post-M24 close-docs audit (6 sites:
+  4 production + 2 test; all structurally identical
   `typeof === 'object' && !== null && !Array.isArray(...)`
-  type-guards). Same pattern miss + mass-migrate cadence as
-  R-NEW-14/15/16; the M24 developer (Claude) added a fresh
-  local `isPlainObject` for the activity-log JSON parsing
-  without searching for the existing 5. **MEDIUM priority.**
-  Lift to `src/utils/json.ts` (new) at M25 pre-flight
-  kickoff — bundle with the R-NEW-25 + R-NEW-17 template
-  fold-ins to keep disruption to a single commit. Migration
-  is mechanical: -24 lines (4-line helper × 6 sites) +
-  ~6 import lines + 1 lift definition. Type predicates
-  unify on `Readonly<Record<string, unknown>>`
-  (type-narrowing, not widening — consumer code keeps
-  compiling). See `docs/v0.3-plan.md` §22 R-NEW-27 entry
-  for the full lift recipe.
+  type-guards — same pattern miss + mass-migrate cadence as
+  R-NEW-14/15/16). Lifted to `src/utils/json.ts` (new
+  module) exporting one helper narrowing `unknown` to
+  `Readonly<Record<string, unknown>>`. All 6 sites migrated
+  (`src/commands/run-by-id-lookup.ts`,
+  `src/commands/board/column-create.ts`, `src/api/errors.ts`,
+  `src/api/item-history-projection.ts`,
+  `tests/fixtures/load.ts`, `tests/e2e/fixture-server.ts`);
+  the 2 test sites that previously used the shorter form
+  (no `!Array.isArray(v)` clause) widened to the stricter
+  form — behaviour-neutral in practice (analysis at v0.3-plan
+  §22 R-NEW-27 entry). Branches margin recovered 0.55pp →
+  0.70pp through this consolidation (5 duplicate branch sites
+  removed; lifted helper has no `c8 ignore` wrap and contributes
+  one branch).
 
 ## Pre-flight contract diff discipline
 
