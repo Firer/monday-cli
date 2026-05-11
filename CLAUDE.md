@@ -39,35 +39,29 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M23 pre-flight + round-2 fixes):**
-- Test count: **2831** across 121 files (was 2737 at post-M22
-  close; +94 net across the M23 pre-flight cycle: 36 unit tests
-  in `tests/unit/api/cross-board-search.test.ts` (Decision 5
+**Live numbers (post-M23 pre-flight + R-NEW-14/15/16 lifts):**
+- Test count: **2844** across 121 files (was 2737 at post-M22
+  close; +107 net across the M23 pre-flight cycle + post-audit
+  refactors: 36 unit tests in
+  `tests/unit/api/cross-board-search.test.ts` (Decision 5
   constants, schemas, helpers, stub-rejection,
   `buildCrossBoardTruncatedWarning`), 28 unit tests in
-  `tests/unit/api/board-favorites.test.ts` (GraphQL docs,
-  schemas, `filterFavoritesToBoards`,
-  `joinFavoritesWithBoards`, `buildStaleFavoritesWarning`,
-  stub-rejection), 22 integration tests in
-  `tests/integration/commands/m23-cross-board-stubs.test.ts`
-  (mutual-exclusion, scoping-lever discrimination,
-  `--max-boards` validation incl. cap-conditional on
-  single-board path, `cap_rationale` in rejection details,
-  `conflicting_flags` params, `board favorites` stub-rejection),
-  +8 across `buildCrossBoardTruncatedWarning` after Codex
-  round-1 P1-2 resolution).
-- Coverage: **99.09 / 95.49 / 99.30 / 99.29** (stmts / branches /
-  fns / lines), at the **95 / 95.45 / 95 / 95** floor. Branches
+  `tests/unit/api/board-favorites.test.ts`, 22 integration tests
+  in `tests/integration/commands/m23-cross-board-stubs.test.ts`,
+  +13 unit tests in `tests/unit/utils/errors.test.ts` for the
+  shipped R-NEW-14 `errorMessage` + R-NEW-15 `asError` +
+  R-NEW-16 `errorCode` helpers, +8 across
+  `buildCrossBoardTruncatedWarning` after Codex round-1 P1-2
+  resolution).
+- Coverage: **99.09 / 95.86 / 99.30 / 99.29** (stmts / branches /
+  fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
   margin moved from 0pp (post-M22 close) → 0.04pp (post-M23
-  pre-flight round-2 fixes). The recovery came from the new test
-  surface, not floor lowering — every pre-flight stub body lives
-  under `c8 ignore start/stop` block-wraps per the testing.md
-  convention, and pure helpers (`validateMaxBoards`,
-  `buildInaccessibleBoardsWarning`,
-  `buildColumnNotFoundOnBoardWarning`,
-  `buildCrossBoardTruncatedWarning`, `filterFavoritesToBoards`,
-  `joinFavoritesWithBoards`, `buildStaleFavoritesWarning`) ship
-  with branch-thorough coverage.
+  pre-flight) → 0.41pp (post R-NEW-14/15/16 lift)**, a 10×
+  margin improvement. The R-NEW-14/15/16 consolidation
+  eliminated ~34 inline branches at 17 call sites (each
+  `err instanceof Error ? ... : ...` was 2 branches) and
+  replaced them with 3 shared helpers + 13 branch-thorough unit
+  tests — net positive on both coverage AND code clarity.
 - ERROR_CODES count: **29** (no new code at M23 pre-flight —
   cross-board cap-exceeded routes through existing
   `usage_error`; the M23 walker's three load-bearing warnings
@@ -133,7 +127,7 @@ convention.
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M23 pre-flight)**
+**R-class state (post-M23 pre-flight + post-audit lifts)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
@@ -144,32 +138,32 @@ convention.
   post-M23 pre-flight round 1 — 3-consumer trigger fired after
   M21+M22+M23 all used the same 7-section prompt structure);
   R-NEW-7 `formatMode` lift into `src/utils/fs.ts`
-  (post-M22 close — 3-consumer trigger fired when the M22
-  cache_writability probe added the third named copy beyond
-  `src/api/cache.ts` + `src/config/credentials.ts`; mirrors
-  R-NEW-1 cadence verbatim). The M22 implementation also
-  added orchestration extractions (`orchestrateStatusProbes`
-  + `deriveOverall` + `resolveStatusTransport`); not an
-  R-class lift in the traditional sense but the same shape —
-  pure helpers split out for independent test coverage.
+  (post-M22 close); **R-NEW-14 `errorMessage` + R-NEW-15
+  `asError` + R-NEW-16 `errorCode` lifts** into
+  `src/utils/errors.ts` (`5a7c88d`, post-M23 audit) — 17 inline
+  duplicates consolidated across 13 files; trigger fired at M6
+  (R-NEW-14) / M21 close (R-NEW-15) / M22 (R-NEW-16) but went
+  unnoticed for 5-12 days across many milestones; the M22
+  developer wrote LOCAL copies in `src/api/probes.ts` instead
+  of finding the inline sites — the smoking gun that exposed
+  the missed triggers at the user-prompted post-M23 audit
+  ("are there any refactors not done which should have
+  triggered earlier?"). Branches margin recovered 0.04pp →
+  0.41pp from the consolidation (net positive on coverage +
+  clarity). R-NEW-1 `isENOENT` was refactored on top of
+  R-NEW-16's `errorCode` (8 lines → 2 lines; identical
+  behaviour).
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
-  `wrapFsError` factory (M22 + M23 did NOT trigger — neither
-  milestone added a typed-CLI-error fs-wrap site); **R-NEW-5
-  `introspectType()` helper** — **HIGH priority; trigger fired
-  at M23 pre-flight** (5 new introspecting probe scripts:
-  m23-favorites.ts + m23-favorites-deep.ts + m23-hierarchy-item.ts
-  + m23-hierarchy-object.ts + m23-monday-object-enum.ts);
-  combined with M22's 4 sites = 9+ consumers, well above
-  3-consumer threshold. Lift ~30 LOC into `scripts/probe/_lib.ts`
-  at M24 pre-flight kickoff (or sooner in a focused session).
-  R-NEW-8 `missingByDifference` set-delta helper (2 consumers
-  at M23: `buildInaccessibleBoardsWarning` +
-  `buildStaleFavoritesWarning`; fires at 3 — M24/M25
-  candidate); R-NEW-9 2-stage GraphQL filter+hydrate resolver
-  shape (2 confirmed M22 + M23, 1 planned M24 of uncertain
-  shape; MEDIUM priority — re-evaluate at M24 implementation
-  close).
+  `wrapFsError` factory (M22 + M23 did NOT trigger);
+  **R-NEW-5 `introspectType()` helper** — **HIGH priority;
+  trigger fired at M23 pre-flight** (5 new introspecting
+  probe scripts + M22's 4 = 9+ consumers). Lift ~30 LOC into
+  `scripts/probe/_lib.ts` at M24 pre-flight kickoff (or
+  sooner in a focused session); R-NEW-8
+  `missingByDifference` set-delta helper (2 consumers; fires
+  at 3); R-NEW-9 2-stage GraphQL filter+hydrate resolver
+  shape (2 confirmed + 1 planned M24; MEDIUM priority).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
   pattern (still single-consumer in production probe scripts);
   Post-OAuth fresh-transport pattern (single-consumer);
