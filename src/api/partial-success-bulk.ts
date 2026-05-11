@@ -54,7 +54,7 @@
  * path's success branch.
  *
  * **Stub bodies under `c8 ignore start/stop` block-wraps.**
- * M25 pre-flight contract diff (this commit) pins the module
+ * M25 pre-flight contract diff (`d5839a9`) pins the module
  * signatures + per-item result schema; runtime body lift lands
  * at M25 implementation. The stub rejects with
  * `internal_error.details.hint` pointing at the M25 impl
@@ -210,13 +210,12 @@ export type PartialSuccessBulkUpdateData = z.infer<
  *   archived flag, so a `validation_failed` after live
  *   resolution is genuine.
  *
- * The helper returns `{ results, dispatchSource }`. The action
- * layer:
+ * The helper returns `{ results }`. The action layer:
  *   1. derives `failed_count` from `results.filter(r => !r.ok)`,
- *   2. folds the dispatch source signal
- *      (`PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE` — always `'live'`)
- *      into the `SourceAggregator` via
- *      `sourceAgg.record(dispatchSource, null)`,
+ *   2. folds the dispatch source signal (always `'live'`) into
+ *      the `SourceAggregator` via
+ *      `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE,
+ *      null)` — exported constant rather than a bare literal,
  *   3. assembles the `data.summary` slot with
  *      `matched_count` / `applied_count` / `failed_count` /
  *      `board_id`,
@@ -342,7 +341,7 @@ export const runPartialSuccessBulkUpdate = (
       {
         details: {
           hint:
-            'M25 implementation kickoff (next session) lands the runtime per-item dispatch body via `dispatchSequential` per the docstring spec — id-field "item_id", per-item executeMutation wiring, ProjectedItem side-map fold, and dispatchSource live-leg signal.',
+            'M25 implementation kickoff (next session) lands the runtime per-item dispatch body via `dispatchSequential` per the docstring spec — id-field "item_id", per-item executeMutation + foldAndRemap wiring, ProjectedItem side-map fold, then `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE, null)` at the action layer.',
         },
       },
     ),

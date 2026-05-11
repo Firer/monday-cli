@@ -4921,10 +4921,11 @@ failure becomes the top-level `error`).
 
 `data.operation` is the literal **`"item_update"`** (mirrors
 M14's add-users / remove-users discriminator at
-`data.operation`; M25 inherits the slot from
-`dispatchSequential` per the M15 family precedent). Agents
-switch on `data.operation` to confirm which verb produced the
-envelope.
+`data.operation`). M25 follows the M15 partial-success family
+shape; `dispatchSequential` produces the per-item result rows,
+and the action layer assembles `data.operation` +
+`data.summary` alongside them. Agents switch on
+`data.operation` to confirm which verb produced the envelope.
 
 `resolved_ids` echoes the same token → column-ID mapping the
 v0.1 bulk success envelope carries (one `--set` token resolves
@@ -4961,12 +4962,22 @@ returns `confirmation_required` (exit 1). The
 `--continue-on-error` flag is **orthogonal** to the
 confirmation gate; both must be acknowledged for the live
 bulk-partial-success path to fire. The gate fires only when
-`matched_count > 0`; the empty-match path (zero matched items)
-emits a clean success no-op envelope (`applied_count: 0`,
-`failed_count: 0`, `results: []`) without requiring `--yes`,
-mirroring the v0.1 fail-fast bulk path's empty-match shape
+`matched_count > 0`.
+
+**Empty-match shape.** When the matched-item set is empty, the
+bulk path emits the v0.1 fail-fast bulk empty-match envelope
+unchanged — `data: {summary: {matched_count: 0, applied_count:
+0, board_id}, items: []}` — REGARDLESS of `--continue-on-error`
 (M5b Codex pass-1 F1 — `--yes` shouldn't be required to
-confirm "no items matched").
+confirm "no items matched"). The partial-success envelope shape
+(`operation: "item_update"`, `data.summary.failed_count`,
+`data.results[]`) only materialises when at least one per-item
+dispatch fires. Agents reading the bulk envelope check
+`data.summary.matched_count` first; zero matches means the
+empty-match no-op path ran (v0.1 shape with `items: []`); a
+non-zero matched count under `--continue-on-error` means the
+partial-success shape ran (`data.summary.failed_count` +
+`data.results[]` present).
 
 **Dry-run shape.** `--continue-on-error --dry-run` emits the
 v0.1 bulk dry-run shape unchanged (N-element
