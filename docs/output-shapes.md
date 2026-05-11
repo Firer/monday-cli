@@ -2790,6 +2790,121 @@ the SemVer-major boundary.
 wire each invocation; the daily-analytics surface is server-
 authoritative).
 
+### `monday board favorites` (v0.3-M23 pre-flight stub)
+
+Pre-flight stub at `1fefdb1` — the runtime 2-stage favorites
+resolver body lands at M23 implementation. The shape pinned at
+pre-flight (returned by Stage-1 filter + Stage-2 hydrate):
+
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "5095526240",
+      "name": "Tasks",
+      "state": "active",
+      "workspace_id": "12345",
+      "url": "https://example.monday.com/boards/5095526240",
+      "position": 1.5
+    }
+  ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+Field semantics (per `src/api/board-favorites.ts`):
+
+- `id` — the underlying Board ID (NOT the `Query.favorites[].id`
+  hierarchy-item ID; the hierarchy-item ID is discarded after the
+  Stage-1 filter).
+- `name` / `state` / `workspace_id` / `url` — verbatim from
+  Monday's `boards(ids:)` Stage-2 hydrate response.
+- `position` — Monday's UI sort key (Float; lower = higher in the
+  Monday sidebar). Output is sorted by `position` ascending so
+  agents see the same order users see.
+
+**Polymorphic Stage-1 source.** Monday's `Query.favorites:
+[GraphqlHierarchyObjectItem!]` returns favorited resources of
+every kind (Board | Folder | Dashboard | Workspace per the
+`GraphqlMondayObject` enum). The verb filters client-side to
+`object.type === Board`; non-Board entries are silently dropped
+(forward-compat with future Monday enum extensions).
+
+**Possible warnings:**
+- `board_favorites_stale` — Stage-2 hydrate returned fewer boards
+  than Stage-1 yielded (a favorited board was deleted, archived
+  to a private workspace, or had access revoked). Not fatal:
+  `data` still carries the boards Stage 2 hydrated. `details`
+  carries `{ favorited_count, hydrated_count, missing_board_ids,
+  hint }`.
+
+`meta.source: "live"` (no per-call cache; both stages always hit
+the wire). v0.3 scope is READ-ONLY — favorite/unfavorite writes
+are a v0.4+ candidate.
+
+### `monday item search` cross-board (v0.3-M23 pre-flight stub)
+
+The v0.1 single-board path (`--board <bid>` set) is documented at
+`### \`item search --board <bid> --where ...\`` above and is
+UNCHANGED at M23. The cross-board extension adds three new flags
+(`--workspace <wid>`, `--favorites`, `--max-boards <n>` per
+Decision 5 closure `3a2f1db`) — at most ONE of `--board` /
+`--workspace` / `--favorites` may be supplied (mutual-exclusion
+at parse boundary surfaces `usage_error` with structured
+`params.conflicting_flags`).
+
+Cross-board pre-flight stub at `1fefdb1` — the runtime fan-out
+walker body lands at M23 implementation. The shape pinned at
+pre-flight:
+
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "2880477916",
+      "name": "Task 1",
+      "state": "active",
+      "board": { "id": "5095526240", "name": "Tasks" },
+      "column_values": { "status": "Working on it" }
+    }
+  ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+Distinct from the v0.1 single-board row shape — each cross-board
+row carries its source `board: { id, name }` so agents can tell
+which board each hit came from without a second round-trip.
+
+**Possible warnings:**
+- `inaccessible_boards` — Monday's `boards(ids:)` resolver
+  silently omitted N of the requested board IDs (no access,
+  deleted, or never existed). `details` carries
+  `{ requested_count, returned_count, missing_board_ids, hint }`.
+- `column_not_found_on_board` — a `--where` column token didn't
+  resolve on a specific board; that board was skipped in the
+  fan-out (rather than failing the whole call). One warning per
+  skipped board. `details` carries
+  `{ board_id, column_token, hint }`.
+- `cross_board_truncated` — the walker stopped before exhausting
+  every board (either `--limit` short-circuit, or any board's
+  per-board `items_page.cursor` was non-null at the v0.3
+  single-call surface). v0.3 cross-board search is single-call-
+  only; no resumable cross-board cursor (deferred to v0.4 per
+  Decision 5 closure rationale). `details` carries `{ reason:
+  "limit_hit" | "board_has_more", total_returned, limit,
+  per_board_state: Record<board_id, "exhausted" | "has_more" |
+  "not_started">, hint }`.
+
+`meta.source: "live" | "cache" | "mixed"` — aggregated by the
+command-action's `SourceAggregator` across the per-board column-
+resolution pre-pass (cache-hits possible) and the cross-board
+fan-out call itself (always live).
+
 ---
 
 ## Errors

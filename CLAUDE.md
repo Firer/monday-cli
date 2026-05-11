@@ -11,57 +11,73 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M22 closed; M23 unblocked.** v0.2.0 published to
-npm 2026-05-08. v0.3 is in progress on `main`; M0–M22 closed.
-M22 implementation (`3a1b465`) lands the runtime DNS / TCP / TLS /
-auth / cache / redaction / env-var probes for `monday status` +
-the `platform_api.daily_*` projection for `monday usage`, preceded
-by a small refactor (`84c6d2b`) narrowing the redact-layer
-non-string scalar preservation to the boolean/number/null
-allowlist (security-bearing tightening per Codex M22 W8).
+**v0.3-M22 closed; M23 pre-flight shipped; M23 implementation
+unblocked.** v0.2.0 published to npm 2026-05-08. v0.3 is in
+progress on `main`; M0–M22 closed; M23 pre-flight contract diff
+landed at `fa27b60` (Codex round-2 fixes; preceded by `1fefdb1`
+contract-diff commit + `9b93f15` round-1 fixes + `3a2f1db`
+Decision 5 close PR). M23 pre-flight ships two new src/api modules
+(`cross-board-search.ts` fan-out walker, `board-favorites.ts`
+2-stage favorites resolver), one new command (`monday board
+favorites`), and an extension to `monday item search` for the
+cross-board path (`--workspace` / `--favorites` / `--max-boards`
+flags with mutual-exclusion). M22 implementation (`3a1b465`) lands
+the runtime DNS / TCP / TLS / auth / cache / redaction / env-var
+probes for `monday status` + the `platform_api.daily_*` projection
+for `monday usage`, preceded by a small refactor (`84c6d2b`)
+narrowing the redact-layer non-string scalar preservation to the
+boolean/number/null allowlist (security-bearing tightening per
+Codex M22 W8).
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22
-  post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 shipped +
-  R-NEW-2 / R-NEW-3 / R-NEW-5 / R-NEW-6 candidates open +
-  R-watch-items).
+  post-mortems + §3 M23 pre-flight narrative + §22 R-class
+  backlog (R-NEW-1 + R-NEW-4 + R-NEW-6 + R-NEW-7 shipped +
+  R-NEW-2 / R-NEW-3 / R-NEW-5 candidates open + R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M22 close):**
-- Test count: **2737** across 118 files (was 2652 at post-M22
-  pre-flight; +85 net in the M22 implementation diff: ~48
-  `tests/unit/api/probes.test.ts` runtime-body tests across the
-  seven probes (per-failure-mode reason discriminants + timeout
-  + abort cases), 5 `tests/unit/api/usage.test.ts` fetchUsage
-  runtime + parse-drift tests, ~20 new `tests/unit/commands/
-  status.test.ts` orchestration tests (a new file for the
-  extracted `orchestrateStatusProbes` + `deriveOverall` +
-  `resolveStatusTransport` helpers), ~9 `tests/integration/
-  commands/diagnostics.test.ts` success-envelope + error-envelope
-  tests for `monday status` + `monday usage`, plus a redact test
-  for the M22 non-string-scalar preservation rule).
-- Coverage: **99.08 / 95.45 / 99.29 / 99.29** (stmts / branches /
-  fns / lines), at the **95 / 95.45 / 95 / 95** floor. The M22
-  implementation removes the API-layer stub `c8 ignore` wraps
-  (the bodies are now test-reachable via injected seams), adds
-  `c8 ignore start/stop` to the production-only `defaultDnsLookup`
-  / `defaultTcpConnect` / `defaultTlsConnect` real-socket-binding
-  paths (unreachable from unit tests by design), and to a handful
-  of defensive helpers (`isMissingTokenConfigError` Array.isArray
-  guard, `errorCode`/`errorMessage`/`asError` non-Error fallbacks,
-  cache_writability non-ENOENT/permission_denied/write_failed
-  paths). Branches margin is currently **0pp** (right at the
-  floor); post-M22 cleanup may re-raise the floor or recover
-  margin via the seam-injected `Symbol.dispose` ergonomic but
-  that's an M23-pre-flight-time evaluation.
-- ERROR_CODES count: **29** (no new code at M22 implementation —
-  probe failures map to existing codes per cli-design §11.5.1).
-  Command count: **76** (no new commands at M22 implementation;
-  `monday status` + `monday usage` already registered at the M22
-  pre-flight).
+**Live numbers (post-M23 pre-flight + round-2 fixes):**
+- Test count: **2831** across 121 files (was 2737 at post-M22
+  close; +94 net across the M23 pre-flight cycle: 36 unit tests
+  in `tests/unit/api/cross-board-search.test.ts` (Decision 5
+  constants, schemas, helpers, stub-rejection,
+  `buildCrossBoardTruncatedWarning`), 28 unit tests in
+  `tests/unit/api/board-favorites.test.ts` (GraphQL docs,
+  schemas, `filterFavoritesToBoards`,
+  `joinFavoritesWithBoards`, `buildStaleFavoritesWarning`,
+  stub-rejection), 22 integration tests in
+  `tests/integration/commands/m23-cross-board-stubs.test.ts`
+  (mutual-exclusion, scoping-lever discrimination,
+  `--max-boards` validation incl. cap-conditional on
+  single-board path, `cap_rationale` in rejection details,
+  `conflicting_flags` params, `board favorites` stub-rejection),
+  +8 across `buildCrossBoardTruncatedWarning` after Codex
+  round-1 P1-2 resolution).
+- Coverage: **99.09 / 95.49 / 99.30 / 99.29** (stmts / branches /
+  fns / lines), at the **95 / 95.45 / 95 / 95** floor. Branches
+  margin moved from 0pp (post-M22 close) → 0.04pp (post-M23
+  pre-flight round-2 fixes). The recovery came from the new test
+  surface, not floor lowering — every pre-flight stub body lives
+  under `c8 ignore start/stop` block-wraps per the testing.md
+  convention, and pure helpers (`validateMaxBoards`,
+  `buildInaccessibleBoardsWarning`,
+  `buildColumnNotFoundOnBoardWarning`,
+  `buildCrossBoardTruncatedWarning`, `filterFavoritesToBoards`,
+  `joinFavoritesWithBoards`, `buildStaleFavoritesWarning`) ship
+  with branch-thorough coverage.
+- ERROR_CODES count: **29** (no new code at M23 pre-flight —
+  cross-board cap-exceeded routes through existing
+  `usage_error`; the M23 walker's three load-bearing warnings
+  (`inaccessible_boards`, `column_not_found_on_board`,
+  `cross_board_truncated`) and the favorites resolver's
+  `board_favorites_stale` warning are §6.1 `warnings[]` codes,
+  not `error.code` registry entries).
+  Command count: **77** (`monday board favorites` joined at
+  M23 pre-flight; `monday item search` extension didn't add a
+  new command).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -77,15 +93,18 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M23 pre-flight** — cross-board `monday item search` +
-   `monday board favorites`. Mirrors the v0.3 pre-flight discipline
-   (empirical probe of any novel API surface; contract diff
-   commit with module signatures under `c8 ignore`; Codex
-   pre-flight review; implementation; Codex review; close-docs
-   sweep). Per the M22 post-mortem the 7-section pre-flight prompt
-   structure repeats verbatim from M21+M22 — at M23 pre-flight,
-   R-NEW-6 (template at `.claude/templates/codex-pre-flight
-   -review.md`) fires for ratification.
+1. **M23 implementation** — runtime body lift swaps the
+   pre-flight stubs for the runtime `boards(ids:)
+   { items_page(query_params:) }` fan-out walker + per-board
+   column-resolution pre-pass + 2-stage favorites resolver
+   (Stage 1: `Query.favorites` filter to `type === Board`,
+   Stage 2: `boards(ids:)` hydrate). Reuse `startNdjsonStream`
+   (R52) + the existing pagination/streaming helpers per
+   v0.3-plan §3 M23. Codex implementation review (1-2 rounds)
+   before declaring close. Source aggregation across the
+   per-board column-resolution pre-pass + the walker's
+   pure-live fan-out happens in the command-action via the
+   existing `SourceAggregator` (P2-1 round-2 resolution).
 2. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
@@ -99,74 +118,80 @@ convention.
    (`sumUsageForDay`, `projectUsageOutput`) treat `day` as an
    opaque equality key; the change is local to the command-action
    `today` derivation.
-3. **Coverage-floor margin recovery** — M22 close lands at exactly
-   95.45% branches (0pp margin). The remaining uncovered branches
-   are split between defensive guards in helpers
-   (`errorCode`/`errorMessage`/`asError` non-Error fallbacks, the
-   `isMissingTokenConfigError` Array.isArray guard) and
-   production-only OS-call paths (real DNS/TCP/TLS bind). Most
-   are already `c8 ignore`d; an M23-pre-flight-time audit can
-   either re-raise the floor with a confidence-margin lift or
-   widen the seam-injected matrix to recover branches without
-   real-network reliance.
+3. **Coverage-floor margin recovery (deferred from M22 close)** —
+   M22 close landed at 0pp branches margin; M23 pre-flight
+   recovered to 0.04pp (95.49% vs 95.45% floor) via the new test
+   surface. Margin is still tight; M23 implementation may grow
+   the denominator faster than the per-file 100% coverage grows
+   the numerator (M19 lesson). Continue monitoring; an M24
+   pre-flight audit could re-raise the floor with a
+   confidence-margin lift OR widen the seam-injected matrix to
+   recover branches without real-network reliance.
 4. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
    OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
    as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M22 close)**
+**R-class state (post-M23 pre-flight)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
   `probeResultSchema` import-from-api/probes lift (`0b5af57`,
-  post-M22 pre-flight drift sweep); R-NEW-7 `formatMode` lift
-  into `src/utils/fs.ts` (post-M22 close — 3-consumer trigger
-  fired when the M22 cache_writability probe added the third
-  named copy beyond `src/api/cache.ts` + `src/config/credentials.ts`;
-  mirrors R-NEW-1 cadence verbatim). The M22 implementation
-  also added orchestration extractions (`orchestrateStatusProbes`
-  + `deriveOverall` + `resolveStatusTransport` exported from
-  `src/commands/status.ts` for direct unit-testing); not an
+  post-M22 pre-flight drift sweep); R-NEW-6 Codex pre-flight
+  review prompt template lift to
+  `.claude/templates/codex-pre-flight-review.md` (`9b0ee78`,
+  post-M23 pre-flight round 1 — 3-consumer trigger fired after
+  M21+M22+M23 all used the same 7-section prompt structure);
+  R-NEW-7 `formatMode` lift into `src/utils/fs.ts`
+  (post-M22 close — 3-consumer trigger fired when the M22
+  cache_writability probe added the third named copy beyond
+  `src/api/cache.ts` + `src/config/credentials.ts`; mirrors
+  R-NEW-1 cadence verbatim). The M22 implementation also
+  added orchestration extractions (`orchestrateStatusProbes`
+  + `deriveOverall` + `resolveStatusTransport`); not an
   R-class lift in the traditional sense but the same shape —
-  pure helpers split out of a command action for independent
-  test coverage of the network-probe short-circuit cascade +
-  the §11.5.2 overall-mapping rules.
+  pure helpers split out for independent test coverage.
 - **Open candidates:** R-NEW-2 `credentialsHomeOptions`
   (fires at `monday auth status`, v0.3.x); R-NEW-3
-  `wrapFsError` factory (M22 close did NOT trigger — the
-  cache_writability probe converts fs errors into `ProbeFail`
-  shapes inline rather than throwing typed CLI errors; the
-  pattern doesn't match the `wrapAsConfigError` / `wrapFsError`
-  factory cadence in credentials.ts + cache.ts. R-NEW-3 stays
-  open as a candidate for the next fs-error-throwing surface);
-  R-NEW-5 `introspectType()` helper in `scripts/probe/_lib.ts`
-  (fires at M27 webhooks pre-flight if introspecting probe
-  scripts repeat the M22 pattern); R-NEW-6 Codex pre-flight
-  review prompt template at `.claude/templates/codex-pre-flight
-  -review.md` (fires at M23 pre-flight if the 7-section
-  prompt structure repeats verbatim across M21+M22+M23 —
-  template would amortise the per-prompt copy-paste at M23-M28).
+  `wrapFsError` factory (M22 close did NOT trigger;
+  M23 pre-flight likewise did NOT trigger — the cross-board
+  walker + favorites resolver throw structured `ApiError`s
+  directly via the existing patterns, not via an `wrapFsError`
+  shape. R-NEW-3 stays open as a candidate for the next
+  fs-error-throwing surface); R-NEW-5 `introspectType()`
+  helper in `scripts/probe/_lib.ts` (M23 pre-flight added 5
+  introspecting probe scripts but they each used the
+  inline-`gql` pattern rather than a shared introspect helper;
+  the trigger pattern matches but the lift is held until M27
+  webhooks pre-flight in case the surface grows further).
 - **R-watch-items:** `vi.stubGlobal('fetch')` boundary mock
-  pattern (still single-consumer in production probe scripts —
-  M22 status probes use mockable-seam injection in tests
-  rather than vi.stubGlobal); Post-OAuth fresh-transport
-  pattern (still single-consumer; ratified by Codex M21 P1);
-  `c8 ignore` vs v8 branch-coverage friction (tooling — M22
-  close re-fired this watch-item, with branches landing right
-  at the 95.45% floor; coverage-floor margin recovery is in
-  next-session scope); **filesystem-state probes** for
-  non-ENOENT fs-error branches (test-pattern; EISDIR-via-dir-at
-  -path probe ratified at `7058754`); **empirical-probe-step
-  -in-pre-flight** — fired twice (M21 OAuth `5c07840` + M22
-  `platform_api.daily_*` reshape `fbab6b0`), discipline
-  ratified as always-run-for-novel-API-surface pre-flights;
-  **mockable-seam pattern in probes** — new at M22, ratified
-  via the per-probe `lookupImpl` / `tcpConnectImpl` /
-  `tlsConnectImpl` / `redactImpl` injection slots that let
-  unit tests drive every failure-mode discriminant offline.
-  Pattern carries forward to any future probe-style surface
-  (webhooks M27 candidate).
+  pattern (still single-consumer in production probe scripts);
+  Post-OAuth fresh-transport pattern (single-consumer);
+  `c8 ignore` vs v8 branch-coverage friction (tooling — M23
+  pre-flight recovered branches margin to 0.04pp; tight);
+  **filesystem-state probes** for non-ENOENT fs-error
+  branches (test-pattern; EISDIR-via-dir-at-path probe
+  ratified at `7058754`); **empirical-probe-step
+  -in-pre-flight** — fired THREE TIMES (M21 OAuth `5c07840`,
+  M22 `platform_api.daily_*` reshape `fbab6b0`, M23 cross-board
+  + favorites `3a2f1db`+`1fefdb1`), discipline ratified as
+  always-run-for-novel-API-surface pre-flights; **mockable-
+  seam pattern in probes** — ratified at M22 via per-probe
+  injection slots, carries to any future probe-style surface
+  (webhooks M27 candidate); **structured `params` through the
+  error envelope** — M23 round-2 P2-3 lifted
+  `parse-argv.ts:summariseIssues` to preserve
+  `ZodIssue.params`; new watch-item — fires for full R-class
+  lift when a second + third `.superRefine` rule wants to
+  surface structured per-issue context (M23 `conflicting_flags`
+  is the first consumer); **command-output union-schema
+  pattern** — M23 round-2 P1-1 introduced
+  `z.union([itemSearchOutputSchema, crossBoardSearchOutputSchema])`
+  as the registry-facing schema for `monday item search`; new
+  watch-item — fires for codification if a second command's
+  cross-cutting v0.3/v0.4 extensions need the same union shape
+  (M27 webhooks + M28 multi-level subitems are candidates).
 
 ## Pre-flight contract diff discipline
 

@@ -409,8 +409,29 @@ finding pivoted the design at pre-flight — Monday tracks
 operations-per-day under `platform_api.daily_*`, NOT complexity
 points under a non-existent `account.complexity` — additive-only
 envelope per cli-design §11.5.3 Decision 8 closure.
-**Deferred to later v0.3 milestones**: cross-board
-`item search` + `board favorites` (M23), `item history` (M24),
+**v0.3-M23 pre-flight shipped** (`1fefdb1` contract diff +
+`9b93f15` Codex round-1 fixes + `fa27b60` Codex round-2 fixes,
+preceded by Decision 5 close at `3a2f1db`): two new src/api
+modules (`cross-board-search.ts` fan-out walker,
+`board-favorites.ts` 2-stage favorites resolver), one new
+command (`monday board favorites`), and an extension to
+`monday item search` for the v0.3 cross-board path
+(`--workspace <wid>` / `--favorites` / `--max-boards <n>` flags
+with mutual-exclusion). Decision 5 pinned `--max-boards 25`
+default + hard cap 100, calibrated against wall-clock fan-out
+latency (NOT complexity-budget — empirical probe at 2026-05-11
+measured ~25-30 complexity points per board against a
+~999_950 per-call budget; latency at ~0.5-1.5s/N is the real
+constraint). The empirical-probe finding also pivoted the
+`board favorites` design — Monday surfaces favorites at
+top-level `Query.favorites: [GraphqlHierarchyObjectItem!]`
+(polymorphic; Board | Folder | Dashboard | Workspace), so the
+verb is a 2-stage filter + hydrate. M23 implementation
+(runtime fan-out walker + 2-stage resolver body lift) lands
+next.
+**Deferred to later v0.3 milestones**: M23 implementation
+(cross-board `item search` + `board favorites` runtime
+bodies), `item history` (M24),
 `item update --continue-on-error` partial-success (M25), `monday
 dev` workflow shortcuts (M26), `notification send` + `webhook list/
 create/delete` (M27), multi-level subitem creation (M28).

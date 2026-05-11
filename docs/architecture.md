@@ -1391,6 +1391,112 @@ document the verb cluster post-mortems. Briefly:
   defines its own `usageOutputSchema` locally (verb-specific
   envelope, no shared helper).
 
+- **`api/cross-board-search.ts`** (v0.3 M23 — pre-flight at
+  `1fefdb1`, Codex round-1 fixes at `9b93f15`, Codex round-2
+  fixes at `fa27b60`; runtime body lands at M23 implementation).
+  The cross-board fan-out walker for `monday item search`'s
+  v0.3 cross-board path (`--board` omitted; `--workspace` /
+  `--favorites` / no-scoping-lever scopes the board set). Per
+  the empirical-probe findings (2026-05-11, API `2026-01`,
+  `scripts/probe/m23-cross-board.ts` +
+  `scripts/probe/m23-cross-board-search-2.ts`), the walker
+  fans out via `boards(ids: [...]) { items_page(query_params:
+  { rules }) }` — DIFFERENT shape from the v0.1 single-board
+  `items_page_by_column_values` (which takes a singular
+  `board_id: ID!`). Inaccessible board IDs are silently omitted
+  by Monday's `boards(ids:)` resolver; the walker detects the
+  count delta and surfaces an `inaccessible_boards` warning.
+  Per-board column resolution is required because passing a
+  column token (e.g. `status`) that doesn't resolve on ONE
+  board errors the WHOLE cross-board query; the walker resolves
+  tokens per-board independently, skips boards where the column
+  doesn't resolve (with a `column_not_found_on_board` warning).
+  **v0.3 cross-board search is single-call-only** (Codex round-1
+  P1-2 resolution): no resumable cross-board cursor; aggregate
+  `--limit` short-circuit or per-board pagination state surfaces
+  a `cross_board_truncated` warning with per-board `state`
+  breakdown (`exhausted` / `has_more` / `not_started`) for agent
+  introspection. v0.4 may add an opaque-token resumable cursor
+  envelope-additively. Cap pinned at `DEFAULT_MAX_BOARDS=25` /
+  `HARD_CAP_MAX_BOARDS=100` per Decision 5 closure (`3a2f1db`);
+  the cap is wall-clock-latency-based, not complexity-budget-
+  based — empirical probe measured ~25-30 complexity points per
+  board against a ~999_950 per-call budget (complexity supports
+  ~30,000+ boards) but per-call latency scales linearly at
+  ~0.5-1.5s/N, putting N=25 at ~12-18s under the 30s
+  `MONDAY_REQUEST_TIMEOUT_MS` default and N≥60 at the ceiling.
+  Takes `MondayClient` (Codex round-1 P1-1 resolution — not
+  `Transport` directly, so the walker inherits `--retry` +
+  `--verbose`-complexity injection from MondayClient.raw).
+  Walker result is pure-live (`source: 'live'` constant; Codex
+  round-2 P2-1 resolution); the command-action aggregates with
+  the per-board column-resolution pre-pass's cache state via
+  `SourceAggregator`.
+
+- **`api/board-favorites.ts`** (v0.3 M23 — pre-flight at
+  `1fefdb1`, Codex round-1 fixes at `9b93f15`, Codex round-2
+  fixes at `fa27b60`; runtime body lands at M23 implementation).
+  The 2-stage favorites resolver for `monday board favorites` +
+  `monday item search --favorites`. Per the empirical-probe
+  findings (2026-05-11, API `2026-01`, `scripts/probe/m23-
+  favorites*.ts` + `scripts/probe/m23-hierarchy-*.ts`), Monday
+  surfaces favorites at the TOP-LEVEL `Query.favorites:
+  [GraphqlHierarchyObjectItem!]` (NOT `User.favorites` /
+  `Board.is_starred`). The element is POLYMORPHIC — `object: {
+  id, type }` with `type: GraphqlMondayObject` enum (Board |
+  Folder | Dashboard | Workspace). Stage 1 fetches
+  `FAVORITES_LIST_QUERY` and filters via
+  `filterFavoritesToBoards` to `object.type === Board`,
+  sorting by `position` (Float — Monday's UI sidebar order
+  ascending). Stage 2 hydrates surviving board IDs via
+  `BOARDS_HYDRATE_QUERY` (`boards(ids: [...])` for name +
+  workspace_id + state + url; `complexity` NOT selected per
+  Codex round-1 P1-1 — MondayClient.raw injects it under
+  `--verbose` automatically). The 2-stage shape mirrors M22's
+  `monday usage` (`platform_api.daily_limit` +
+  `platform_api.daily_analytics`); one round-trip per stage.
+  Stage-1/Stage-2 count delta surfaces a `board_favorites_stale`
+  warning (a favorited board was deleted or had access
+  revoked). Resolver result is pure-live
+  (`source: 'live', cacheAgeSeconds: null` per Codex round-1
+  P1-1 — no per-call cache).
+
+- **`commands/board/favorites.ts`** (v0.3 M23 — pre-flight at
+  `1fefdb1`; runtime body lands at M23 implementation). The
+  `monday board favorites` verb. Argv-empty shape (no command-
+  specific flags beyond globals). Action body drives
+  `fetchBoardFavorites` (the 2-stage filter+hydrate above) and
+  emits the §6.1 collection envelope sorted by Monday-UI
+  `position` (Float). At pre-flight, action stub-rejects with
+  `internal_error` + M23-pending hint; integration tests at
+  `tests/integration/commands/m23-cross-board-stubs.test.ts`
+  drive the stub via commander argv and assert the rejection
+  envelope shape.
+
+- **`commands/item/search.ts`** (v0.3 M23 extension; pre-flight
+  at `1fefdb1`; cross-board runtime body lands at M23
+  implementation). The v0.1 single-board path
+  (`items_page_by_column_values`) remains UNCHANGED; the v0.3
+  extension adds `--workspace <wid>` / `--favorites` /
+  `--max-boards <n>` flags + a `.superRefine` mutual-exclusion
+  rule (at most one of `--board` / `--workspace` /
+  `--favorites`; supplying two surfaces `usage_error` at the
+  parse boundary with `params.conflicting_flags` carrying the
+  named levers — Codex round-2 P2-3 fix to
+  `parse-argv.ts:summariseIssues` preserves `ZodIssue.params`
+  through to the envelope's `details.issues[].params`).
+  `--max-boards` hard-cap enforcement is CONDITIONAL on the
+  cross-board path (Codex round-1 P2-2 fix); the single-board
+  path accepts any positive integer (the flag is documented as
+  ignored when `--board` is set). Command-registry-facing
+  `outputSchema` is `z.union([itemSearchOutputSchema,
+  crossBoardSearchOutputSchema])` (Codex round-2 P1-1 fix) so
+  `monday schema item.search` reflects both branches.
+  Cross-board action body stub-rejects with `internal_error`
+  + `scoping_lever` discriminant (`workspace` / `favorites` /
+  `all-accessible-boards`) + `cap_rationale` referencing
+  Decision 5's wall-clock-latency rationale.
+
 - **`commands/auth/{login,logout}.ts`** (v0.3 M21 — pre-flight
   at `5c07840`, runtime bodies landed at M21 Part 1 in
   `a4cb5b0`). The OAuth flow + credentials cache verbs per
