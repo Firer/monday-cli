@@ -78,17 +78,17 @@
  * `activity_logs.event` — and the projector surfaces it under the
  * synthesized `update_replied` event's `reply_kind` slot.
  *
- * **What's stub vs runtime at pre-flight.** Schemas + GraphQL
- * document constants + pure helpers (`buildUnknownEventKindWarning`,
- * `mergeByCreatedAt`) ship as REAL implementations so the
- * pre-flight Codex review can verify the projection shape against
- * the empirical-probe fixtures inline. The runtime async functions
- * (`fetchItemHistory` walker, the per-source row projectors
- * `projectActivityLogRow` / `projectUpdateRow` / `projectReplyRow`)
- * ship as `Promise.reject(internal_error)` / `throw` stubs under
- * `c8 ignore start/stop` block-wraps. M24 implementation lands the
- * runtime bodies + the per-`column_type` typed `before` / `after`
- * projection inside `update_column_value` events.
+ * **Runtime composition.** {@link fetchItemHistory} drives the
+ * two-source walker; {@link projectActivityLogRow},
+ * {@link projectUpdateRow}, and {@link projectReplyRow} are the
+ * per-row projectors (the activity-log projector reads the wire
+ * `data` JSON, dispatches on `event`, and applies a one-level
+ * nested-JSON unwrap on `update_column_value`'s `value` /
+ * `previous_value` so agents see the structured payload — e.g.
+ * `{label, index}` for status, ISO string for date — rather than
+ * an opaque JSON-string). The walker filters
+ * `entity === ITEM_SCOPED_ENTITY` walker-side (single source of
+ * truth per Decision 2 closure; projector does NOT re-filter).
  *
  * **Streaming reuse.** Per the v0.3-plan §3 M24 deliverable, the
  * verb reuses `startNdjsonStream` (R52) when `--stream` is on; the
@@ -102,7 +102,7 @@
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { MondayClient } from './client.js';
 import type { Complexity, Warning } from '../utils/output/envelope.js';
 import type { ItemId } from '../types/ids.js';
@@ -683,44 +683,180 @@ export const mergeByCreatedAt = (
 };
 
 /**
- * Inputs to {@link projectActivityLogRow}. Pre-flight stub —
- * runtime body lands at M24 implementation.
+ * Inputs to {@link projectActivityLogRow}.
  */
 export interface ProjectActivityLogRowInputs {
   readonly row: RawActivityLogRow;
 }
 
 /**
- * Projects one wire `ActivityLogType` row into a typed
- * {@link HistoryEvent}. **Stubbed body** at pre-flight (under
- * `c8 ignore start/stop`); M24 implementation parses the wire
- * `data` JSON string, dispatches on `row.event`, and emits the
- * matching typed variant (with per-`column_type` typed `before`
- * / `after` for `update_column_value`).
- *
- * The projector is the SINGLE per-row dispatch point; the walker
- * delegates to it after the `entity = 'pulse'` filter. M24 impl's
- * dispatch table covers the 6 observed events + the unknown
- * fallback.
+ * Parses a wire `data` payload defensively. Monday encodes
+ * `ActivityLogType.data` as a JSON string carrying the per-event
+ * payload (per Decision 2 closure introspection). On parse failure
+ * the projector falls back to the raw string under
+ * `{raw_data: <string>}` so the `unknown` variant's `after` slot
+ * still carries diagnostic content rather than a discarded payload.
  */
-/* c8 ignore start */
-export const projectActivityLogRow = (
-  _inputs: ProjectActivityLogRowInputs,
-): HistoryEvent => {
-  throw new ApiError(
-    'internal_error',
-    '`projectActivityLogRow` is a v0.3-M24 pre-flight stub — runtime per-event projection (incl. per-column_type typed before/after for `update_column_value`) lands at M24 implementation.',
-    {
-      details: {
-        hint: 'M24 implementation kickoff (next session) lands the runtime per-event dispatcher in `src/api/item-history-projection.ts` + the full unit test matrix against the Decision 2 closure empirical-probe fixtures.',
-      },
-    },
-  );
+const parseActivityLogDataJson = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return { raw_data: raw };
+  }
 };
-/* c8 ignore stop */
 
 /**
- * Inputs to {@link projectUpdateRow}. Pre-flight stub.
+ * Extracts `value` / `previous_value` from a Monday `data` payload.
+ * The wire shape carries them as JSON-encoded strings inside the
+ * outer parsed object (Monday's nested-JSON convention); the
+ * projector unwraps one level so agents see the structured payload
+ * (e.g. `{label, index}`, `{date, time}`) rather than an opaque
+ * string. When the slot is already a structured value (Monday's
+ * shape varies per column type and per event), pass it through.
+ *
+ * Per Decision 2 closure: `previous_value` is sometimes `{}` on
+ * first-set events ("previously-unset"). The projector preserves
+ * the empty-object shape rather than collapsing to `null` — agents
+ * keying off the empty-object distinguish "first set" from
+ * "no prior value tracked".
+ */
+const unwrapNestedJson = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+};
+
+/**
+ * Reads `column_id` / `column_type` from a parsed `data` payload.
+ * Both fields are required for the `update_column_value` typed
+ * variant per Decision 2 closure (the wire payload always carries
+ * them for item-scoped column-edit events). Missing / non-string
+ * slots fall back to empty strings — the projector then routes the
+ * row through the `unknown` fallback rather than emitting a typed
+ * variant with an empty discriminator.
+ */
+const readStringField = (
+  obj: Readonly<Record<string, unknown>>,
+  key: string,
+): string => {
+  const v = obj[key];
+  return typeof v === 'string' ? v : '';
+};
+
+const readNullableString = (
+  obj: Readonly<Record<string, unknown>>,
+  key: string,
+): string | null => {
+  const v = obj[key];
+  return typeof v === 'string' ? v : null;
+};
+
+/**
+ * Returns true when the parsed data is a plain object (not array,
+ * not null, not primitive). Used as the structural pre-check before
+ * the projector reads typed fields off the payload.
+ */
+const isPlainObject = (
+  v: unknown,
+): v is Readonly<Record<string, unknown>> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Projects one wire `ActivityLogType` row into a typed
+ * {@link HistoryEvent}. Parses the wire `data` JSON, dispatches
+ * on `row.event`, and emits the matching typed variant. Unknown
+ * event kinds fall back to the `unknown` variant carrying the raw
+ * parsed `data` under `after`.
+ *
+ * The projector is the SINGLE per-row dispatch point; the walker
+ * delegates to it after the `entity === 'pulse'` filter (single
+ * source of truth at the walker layer per Decision 2 closure;
+ * projector does NOT re-filter).
+ *
+ * Per-`column_type` typed before/after for `update_column_value`:
+ * `value` and `previous_value` are passed through with one level
+ * of nested-JSON unwrap (Monday encodes nested values as JSON
+ * strings inside the outer `data` payload); each column type's
+ * concrete payload shape (e.g. status `{label, index}`, date ISO
+ * string, text raw string) flows through unchanged. Per Decision
+ * 2 closure: `previous_value: {}` is preserved as "previously-
+ * unset" rather than collapsed to `null` — agents distinguish
+ * the empty-object shape.
+ */
+export const projectActivityLogRow = (
+  inputs: ProjectActivityLogRowInputs,
+): HistoryEvent => {
+  const { row } = inputs;
+  const parsedData = parseActivityLogDataJson(row.data);
+  const dataObj = isPlainObject(parsedData) ? parsedData : {};
+
+  switch (row.event) {
+    case 'update_column_value': {
+      const columnId = readStringField(dataObj, 'column_id');
+      const columnType = readStringField(dataObj, 'column_type');
+      // Missing / empty discriminator fields → fall through to
+      // `unknown` rather than emit a typed variant with empty
+      // strings. Defensive: the probe pinned both fields always
+      // present on `update_column_value` payloads, but a future
+      // Monday rename or partial-payload bug would otherwise
+      // produce a malformed typed event.
+      if (columnId !== '' && columnType !== '') {
+        return {
+          id: row.id,
+          created_at: row.created_at,
+          actor_id: row.user_id,
+          kind: 'update_column_value',
+          column_id: columnId,
+          column_type: columnType,
+          before: unwrapNestedJson(dataObj.previous_value),
+          after: unwrapNestedJson(dataObj.value),
+          textual_value: readNullableString(dataObj, 'textual_value'),
+          pulse_id: readNullableString(dataObj, 'pulse_id'),
+          pulse_name: readNullableString(dataObj, 'pulse_name'),
+        };
+      }
+      break;
+    }
+    case 'create_column':
+    case 'create_group':
+    case 'update_board_name':
+    case 'update_board_nickname':
+    case 'board_workspace_id_changed': {
+      // Board-scoped variants — the walker's entity filter
+      // normally drops these, but the projector keeps the typed
+      // branch so a future regression that bypasses the filter
+      // fails into the typed variant rather than `unknown`.
+      // Both `before` / `after` carry the raw parsed payload so
+      // agents see Monday's full event payload without re-parsing.
+      return {
+        id: row.id,
+        created_at: row.created_at,
+        actor_id: row.user_id,
+        kind: row.event,
+        before: unwrapNestedJson(dataObj.previous_value),
+        after: parsedData,
+      };
+    }
+    default: // fall through to the unknown variant below.
+  }
+
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    actor_id: row.user_id,
+    kind: 'unknown',
+    event: row.event,
+    entity: row.entity,
+    before: null,
+    after: parsedData,
+  };
+};
+
+/**
+ * Inputs to {@link projectUpdateRow}.
  */
 export interface ProjectUpdateRowInputs {
   readonly row: RawUpdateRow;
@@ -728,38 +864,49 @@ export interface ProjectUpdateRowInputs {
 
 /**
  * Projects one wire `Update` row into a synthesized
- * {@link HistoryEvent} of kind `update_posted`. **Stubbed body**
- * at pre-flight. M24 implementation reads `row.created_at` (or
- * falls back to `row.edited_at` when null) + `row.creator_id` +
- * `row.body` + `row.text_body` + the `row.replies?.length ?? 0`
- * count, emits the `update_posted` variant, AND additionally
- * emits one `update_replied` event per `row.replies` entry via
- * {@link projectReplyRow}.
+ * {@link HistoryEvent} of kind `update_posted` plus one
+ * `update_replied` event per `row.replies` entry (via
+ * {@link projectReplyRow}). Returns a flat array suitable for
+ * the merger.
  *
- * The caller (`fetchItemHistory`) flat-maps the projector's
- * output across the updates source to interleave parent + reply
- * events; the merge projector orders them by `created_at`.
+ * `Update.created_at` is nullable per Decision 2 closure probe
+ * findings; the projector substitutes `Update.edited_at`
+ * (NON_NULL) as the chronological key — silent projection
+ * behaviour, deterministic across re-walks.
+ *
+ * Replies are flat-mapped here (not at the walker) so the
+ * walker stays surface-symmetric with the activity_logs source
+ * (both project per-row → events). The merge projector orders
+ * the combined stream.
  */
-/* c8 ignore start */
 export const projectUpdateRow = (
-  _inputs: ProjectUpdateRowInputs,
+  inputs: ProjectUpdateRowInputs,
 ): readonly HistoryEvent[] => {
-  throw new ApiError(
-    'internal_error',
-    '`projectUpdateRow` is a v0.3-M24 pre-flight stub — runtime Update→event projection lands at M24 implementation.',
-    {
-      details: {
-        hint: 'M24 implementation kickoff (next session) lands the runtime Update→event projector + replies fan-out in `src/api/item-history-projection.ts`.',
-      },
+  const { row } = inputs;
+  const createdAt = row.created_at ?? row.edited_at;
+  const replies = row.replies ?? [];
+  const posted: HistoryEvent = {
+    id: row.id,
+    created_at: createdAt,
+    actor_id: row.creator_id,
+    kind: 'update_posted',
+    before: null,
+    after: {
+      body: row.body,
+      text_body: row.text_body,
+      reply_count: replies.length,
     },
+  };
+  const repliedEvents = replies.map((reply) =>
+    projectReplyRow({ row: reply, parentUpdateId: row.id }),
   );
+  return [posted, ...repliedEvents];
 };
-/* c8 ignore stop */
 
 /**
- * Inputs to {@link projectReplyRow}. Pre-flight stub. The
- * `parentUpdateId` slot wires the synthesized event's
- * `parent_update_id` so agents reconstruct thread context.
+ * Inputs to {@link projectReplyRow}. The `parentUpdateId` slot
+ * wires the synthesized event's `parent_update_id` so agents
+ * reconstruct thread context.
  */
 export interface ProjectReplyRowInputs {
   readonly row: RawReplyRow;
@@ -768,27 +915,39 @@ export interface ProjectReplyRowInputs {
 
 /**
  * Projects one wire `Reply` row into a synthesized
- * {@link HistoryEvent} of kind `update_replied`. **Stubbed body**
- * at pre-flight. M24 implementation reads `row.created_at` (or
- * `row.updated_at` fallback) + `row.creator_id` + `row.body` +
- * `row.text_body` + `row.kind`, emits the `update_replied`
- * variant with the parent reference threaded through.
+ * {@link HistoryEvent} of kind `update_replied`. The parent
+ * `Update.id` lands on `parent_update_id`; `Reply.kind` lands on
+ * `reply_kind` (separate from `activity_logs.event` taxonomy per
+ * the Decision 2 closure probe finding).
+ *
+ * `Reply.created_at` is nullable per the probe introspection;
+ * fallback chain: `created_at` → `updated_at`. If both are null
+ * the projector substitutes the empty string — Monday's contract
+ * pins `Reply.id` + `Reply.body` + `Reply.kind` as NON_NULL
+ * (always present); both timestamp slots being null on the same
+ * Reply isn't observed in production but is defensively handled
+ * (the row still lands on the stream; the merger places it after
+ * other zero-timestamp events lexicographically by `id`).
  */
-/* c8 ignore start */
 export const projectReplyRow = (
-  _inputs: ProjectReplyRowInputs,
+  inputs: ProjectReplyRowInputs,
 ): HistoryEvent => {
-  throw new ApiError(
-    'internal_error',
-    '`projectReplyRow` is a v0.3-M24 pre-flight stub — runtime Reply→event projection lands at M24 implementation.',
-    {
-      details: {
-        hint: 'M24 implementation kickoff (next session) lands the runtime Reply→event projector in `src/api/item-history-projection.ts`.',
-      },
+  const { row, parentUpdateId } = inputs;
+  const createdAt = row.created_at ?? row.updated_at ?? '';
+  return {
+    id: row.id,
+    created_at: createdAt,
+    actor_id: row.creator_id,
+    kind: 'update_replied',
+    parent_update_id: parentUpdateId,
+    reply_kind: row.kind,
+    before: null,
+    after: {
+      body: row.body,
+      text_body: row.text_body,
     },
-  );
+  };
 };
-/* c8 ignore stop */
 
 /**
  * Per-source pagination state surfaced on the
@@ -889,55 +1048,280 @@ export interface FetchItemHistoryResult {
 }
 
 /**
- * Two-source merged-history walker. **Stubbed body** at
- * pre-flight (under `c8 ignore start/stop`).
- *
- * **Runtime body lands at M24 implementation.** The runtime walker:
- *
- *   1. Issues {@link ACTIVITY_LOGS_QUERY} against
- *      `inputs.client` with `bid: [inputs.boardId], iid:
- *      [inputs.itemId], from: inputs.since, to: inputs.until,
- *      page: inputs.activityLogsPage ?? 1, limit: inputs.limit
- *      ?? DEFAULT_HISTORY_PAGE_SIZE`. Parses the response via
- *      {@link rawActivityLogRowSchema}, filters
- *      `entity === ITEM_SCOPED_ENTITY`, projects each surviving
- *      row via {@link projectActivityLogRow}.
- *   2. Issues {@link UPDATES_QUERY} against `inputs.client`
- *      with `iid: [inputs.itemId], page: inputs.updatesPage ?? 1,
- *      limit: inputs.limit ?? DEFAULT_HISTORY_PAGE_SIZE`. Parses
- *      via {@link rawUpdateRowSchema}, projects each row via
- *      {@link projectUpdateRow} (which flat-maps replies via
- *      {@link projectReplyRow}). Applies the client-side wall-
- *      clock filter (`Update.created_at` vs `inputs.since` /
- *      `inputs.until`) since Monday's `updates` resolver doesn't
- *      expose a server-side filter.
- *   3. Merges via {@link mergeByCreatedAt}.
- *   4. Aggregates `unknown_event_kind` warnings (one per unique
- *      unrecognised event observed across the merged stream).
- *   5. Optionally filters `kinds` if `inputs.kinds` is set.
- *   6. Streams via `inputs.onItem` if present.
- *
- * **`Promise.reject` shape** so commander's async-rejection
- * routing surfaces the stub through the runner's envelope mapper
- * (sync throws can be swallowed by commander's own error path —
- * the M20 time-track + M21 oauth stub pattern).
+ * Two-source GraphQL response schemas — parse boundaries for the
+ * walker's per-stage `unwrapOrThrow` calls. `.loose()` lets
+ * additive Monday surface fields pass through without breaking
+ * the parse (same forward-compat policy as M22/M23 wire schemas).
  */
-/* c8 ignore start */
-export const fetchItemHistory = (
-  _inputs: FetchItemHistoryInputs,
-): Promise<FetchItemHistoryResult> =>
-  Promise.reject(
-    new ApiError(
-      'internal_error',
-      '`fetchItemHistory` is a v0.3-M24 pre-flight stub — runtime two-source walker (activity_logs + updates) lands at M24 implementation.',
-      {
-        details: {
-          hint: 'M24 implementation kickoff (next session) lands the runtime walker per the docstring spec — activity_logs page-walk + updates page-walk + merge projector + unknown-event-kind warning aggregation + per-source pagination trailer state.',
-        },
-      },
-    ),
+const activityLogsResponseSchema = z
+  .object({
+    boards: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            activity_logs: z.array(rawActivityLogRowSchema).nullable(),
+          })
+          .loose()
+          .nullable(),
+      )
+      .nullable(),
+  })
+  .loose();
+
+const updatesResponseSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            updates: z.array(rawUpdateRowSchema).nullable(),
+          })
+          .loose()
+          .nullable(),
+      )
+      .nullable(),
+  })
+  .loose();
+
+/**
+ * Compares two ISO-8601 timestamps lexicographically. ISO-8601 in
+ * `YYYY-MM-DD[THH:MM:SS[.fff][Z|±HH:MM]]` form sorts correctly
+ * lexicographically WITHIN the same offset (and same precision);
+ * Monday's `created_at` values are uniformly UTC `Z`-suffixed per
+ * the Decision 2 probe, so lexicographic compare matches
+ * wall-clock compare. Used for client-side `--since` / `--until`
+ * filtering on the updates source.
+ */
+const inWallClockRange = (
+  timestamp: string,
+  since: string | undefined,
+  until: string | undefined,
+): boolean => {
+  if (since !== undefined && timestamp < since) return false;
+  if (until !== undefined && timestamp > until) return false;
+  return true;
+};
+
+/**
+ * Two-source merged-history walker. Issues two independent
+ * GraphQL calls (activity_logs + updates), filters + projects
+ * each per Decision 2 closure ratified shape, merges
+ * chronologically, aggregates `unknown_event_kind` warnings,
+ * applies optional `--kinds` projection filter, and streams via
+ * `inputs.onItem` (per-merged-event AFTER the merge — merging
+ * requires full slice resident per the `mergeByCreatedAt`
+ * docstring).
+ *
+ * **`source: 'live'` constant.** activity_logs + updates are
+ * pure reads with no per-call cache; the action layer aggregates
+ * this with the item-board lookup's `'live'` source via
+ * `SourceAggregator` and resolves the envelope's `meta.source`
+ * from the aggregator's resolved state (mirrors M23
+ * cross-board-search).
+ *
+ * **`complexity`** is the larger of the two stages' per-call
+ * complexity values (under `--verbose` only; null outside). Two
+ * independent calls → take the worst-case stage so agents see
+ * the more conservative budget snapshot rather than averaging.
+ *
+ * **Per-source pagination state.** Each source's `last_page` is
+ * the page number the walker DRAINED if the response returned a
+ * full slice (`response.length === limit` → more pages likely);
+ * `null` when the response returned less than `limit` rows
+ * (source exhausted). Monday's page-numbered surfaces have no
+ * "next" sentinel; the heuristic mirrors the v0.2 page-walker
+ * shape.
+ */
+export const fetchItemHistory = async (
+  inputs: FetchItemHistoryInputs,
+): Promise<FetchItemHistoryResult> => {
+  const limit = inputs.limit ?? DEFAULT_HISTORY_PAGE_SIZE;
+  const activityPage = inputs.activityLogsPage ?? 1;
+  const updatesPage = inputs.updatesPage ?? 1;
+
+  // Stage 1 — activity_logs page-walk.
+  const stage1 = await inputs.client.raw<unknown>(
+    ACTIVITY_LOGS_QUERY,
+    {
+      bid: [inputs.boardId],
+      iid: [inputs.itemId],
+      // Monday's `from` / `to` accept null for unbounded sides; we
+      // omit the key entirely when undefined to keep the wire
+      // payload minimal (the `.loose()` parse on the response is
+      // unaffected by which args we send).
+      ...(inputs.since === undefined ? {} : { from: inputs.since }),
+      ...(inputs.until === undefined ? {} : { to: inputs.until }),
+      page: activityPage,
+      limit,
+    },
+    { operationName: 'ItemHistoryActivityLogs' },
   );
-/* c8 ignore stop */
+  const stage1Data = unwrapOrThrow(
+    activityLogsResponseSchema.safeParse(stage1.data),
+    {
+      context: 'Monday `boards.activity_logs` response',
+      details: { item_id: inputs.itemId, board_id: inputs.boardId },
+      hint: 'Monday may have amended the `boards(ids:) { activity_logs }` surface — re-probe via `scripts/probe/m24-history-kinds.ts` and amend cli-design §13 v0.3 entry if so',
+    },
+  );
+
+  const rawActivityRows: RawActivityLogRow[] = [];
+  const boards = stage1Data.boards ?? [];
+  for (const board of boards) {
+    if (board === null) continue;
+    const rows = board.activity_logs ?? [];
+    rawActivityRows.push(...rows);
+  }
+  // Walker-side entity filter (Decision 2 ratified): drop
+  // board-scoped events that leak through `item_ids` per the
+  // empirical-probe finding. Single source of truth at the walker;
+  // projector does NOT re-filter.
+  const itemScopedRows = rawActivityRows.filter(
+    (r) => r.entity === ITEM_SCOPED_ENTITY,
+  );
+  const activityEvents: HistoryEvent[] = itemScopedRows.map((row) =>
+    projectActivityLogRow({ row }),
+  );
+
+  // Aggregate unknown_event_kind warnings: one warning per unique
+  // (event, entity) tuple observed; `occurrence_count` carries the
+  // multiplicity so the warnings array stays bounded on degenerate
+  // inputs. Keyed by `${event}\x00${entity}` to disambiguate the
+  // same event name surfacing under two entity values.
+  const unknownByKey = new Map<
+    string,
+    { event: string; entity: string; count: number }
+  >();
+  for (const ev of activityEvents) {
+    if (ev.kind === 'unknown') {
+      const key = `${ev.event}\x00${ev.entity}`;
+      const entry = unknownByKey.get(key);
+      if (entry === undefined) {
+        unknownByKey.set(key, {
+          event: ev.event,
+          entity: ev.entity,
+          count: 1,
+        });
+      } else {
+        entry.count++;
+      }
+    }
+  }
+
+  // Stage 2 — updates page-walk (independent denominator).
+  const stage2 = await inputs.client.raw<unknown>(
+    UPDATES_QUERY,
+    {
+      iid: [inputs.itemId],
+      page: updatesPage,
+      limit,
+    },
+    { operationName: 'ItemHistoryUpdates' },
+  );
+  const stage2Data = unwrapOrThrow(
+    updatesResponseSchema.safeParse(stage2.data),
+    {
+      context: 'Monday `items.updates` response',
+      details: { item_id: inputs.itemId },
+      hint: 'Monday may have amended the `items(ids:) { updates }` surface — re-probe via `scripts/probe/m24-history-kinds.ts` and amend cli-design §13 v0.3 entry if so',
+    },
+  );
+
+  const rawUpdateRows: RawUpdateRow[] = [];
+  const items = stage2Data.items ?? [];
+  for (const it of items) {
+    if (it === null) continue;
+    const rows = it.updates ?? [];
+    rawUpdateRows.push(...rows);
+  }
+  // Project each Update + flat-map its replies. The projector
+  // returns a flat array (parent + N replies) per row; flat-map
+  // here so the wall-clock filter and merger see one combined
+  // list per source.
+  const allUpdateEvents: HistoryEvent[] = rawUpdateRows.flatMap((row) =>
+    projectUpdateRow({ row }),
+  );
+  // Client-side wall-clock filter. Monday's `updates` resolver
+  // doesn't expose `from:` / `to:` per Decision 2 probe; filter
+  // after projection so the per-row chronological key matches the
+  // merger's sort.
+  const updateEvents: HistoryEvent[] =
+    inputs.since === undefined && inputs.until === undefined
+      ? allUpdateEvents
+      : allUpdateEvents.filter((ev) =>
+          inWallClockRange(ev.created_at, inputs.since, inputs.until),
+        );
+
+  // Chronological merge of both fully-drained source lists.
+  const merged = mergeByCreatedAt(activityEvents, updateEvents);
+
+  // Optional `--kinds` projection filter — narrows `data` array
+  // but warnings stay (per the docstring contract). Set lookup
+  // keeps the filter O(N).
+  const kindsSet =
+    inputs.kinds === undefined ? undefined : new Set<HistoryEvent['kind']>(inputs.kinds);
+  const filtered =
+    kindsSet === undefined
+      ? merged
+      : merged.filter((ev) => kindsSet.has(ev.kind));
+
+  // Stream hook — per-merged-event AFTER the merge (merging is
+  // not incremental per the helper's docstring). Awaiting each
+  // call preserves backpressure when the hook drives an NDJSON
+  // stream against a slow consumer.
+  if (inputs.onItem !== undefined) {
+    for (const event of filtered) {
+      await inputs.onItem(event);
+    }
+  }
+
+  // Build warnings array — sorted deterministically by event so
+  // re-walks against the same wire produce identical envelopes.
+  // Entity disambiguation lives in the map key (defensive against
+  // a future bypass of the walker's entity filter) but the sort
+  // is primary-on-event only: the walker's `entity === 'pulse'`
+  // filter means every surfaced warning carries entity='pulse'
+  // in production, so a secondary entity sort would be dead code.
+  const warnings: UnknownEventKindWarning[] = Array.from(unknownByKey.values())
+    .sort((a, b) => (a.event < b.event ? -1 : a.event > b.event ? 1 : 0))
+    .map((entry) =>
+      buildUnknownEventKindWarning(entry.event, entry.entity, entry.count),
+    );
+
+  // Per-source pagination state. Heuristic: a response of less
+  // than `limit` rows means "drained" → last_page null; a full
+  // slice means "potentially more" → last_page = current page.
+  const activityLastPage =
+    rawActivityRows.length < limit ? null : activityPage;
+  const updatesLastPage = rawUpdateRows.length < limit ? null : updatesPage;
+
+  // Complexity — worst-case (smaller) of the two stages'
+  // `remaining` budget under `--verbose`; null outside. Two
+  // independent calls → pick the stage that consumed the most
+  // budget so agents see the more conservative remaining
+  // snapshot rather than averaging.
+  const complexity =
+    stage1.complexity === null
+      ? stage2.complexity
+      : stage2.complexity === null
+        ? stage1.complexity
+        : stage1.complexity.remaining <= stage2.complexity.remaining
+          ? stage1.complexity
+          : stage2.complexity;
+
+  return {
+    events: filtered,
+    pagination: {
+      activity_logs: { last_page: activityLastPage },
+      updates: { last_page: updatesLastPage },
+    },
+    warnings,
+    complexity,
+    source: 'live',
+  };
+};
 
 /**
  * Adapter from a {@link FetchItemHistoryResult}'s `warnings`

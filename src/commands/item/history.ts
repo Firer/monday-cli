@@ -19,27 +19,39 @@
  * this caveat so agents polling history after a write know to
  * wait at least 30s before expecting the new event to surface.
  *
- * **Pre-flight stub action.** The action body is a stub under
- * `c8 ignore start/stop` — it parses the argv schema (real;
- * mirrors the M21 oauth precedent that ships argv shape pinned at
- * pre-flight so agent scripts targeting `monday item history` are
- * stable across the M24 implementation drop-in) and rejects with
- * `internal_error`. M24 implementation lands the runtime body:
- * item-board lookup → `fetchItemHistory` → optional
- * `--kinds`-projection-filter → optional `--stream` NDJSON via
+ * **Action shape.** Item-board lookup via `lookupItemBoard` →
+ * `fetchItemHistory` two-source walker → optional `--kinds`-
+ * projection filter (applied inside the walker; warnings still
+ * surface for filtered kinds) → optional `--stream` NDJSON via
  * `startNdjsonStream` → `emitSuccess` per cli-design §6.1.
+ * `SourceAggregator` folds the item-board lookup's `'live'`
+ * source with the walker's `'live'` constant — current envelope
+ * always shows `meta.source: "live"`; the aggregator's seat keeps
+ * the envelope correct when a future cache layer lifts in for
+ * the lookup.
  *
  * Idempotent: yes (pure read).
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
+import { emitSuccess } from '../emit.js';
 import { parseArgv } from '../parse-argv.js';
+import { resolveClient } from '../../api/resolve-client.js';
+import { lookupItemBoard } from '../../api/item-board-lookup.js';
+import { SourceAggregator } from '../../api/source-aggregator.js';
+import { selectOutput } from '../../utils/output/select.js';
+import {
+  buildStreamingTrailerMeta,
+  startNdjsonStream,
+} from '../../utils/output/ndjson.js';
+import { collectSecrets } from '../../cli/envelope-out.js';
 import { ItemIdSchema } from '../../types/ids.js';
 import {
   DEFAULT_HISTORY_PAGE_SIZE,
   HARD_CAP_HISTORY_PAGE_SIZE,
+  fetchItemHistory,
   historyEventOutputSchema,
+  toEnvelopeWarnings,
   type HistoryEvent,
   type HistoryEventOutput,
 } from '../../api/item-history-projection.js';
@@ -173,7 +185,7 @@ export const itemHistoryCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: historyEventOutputSchema,
-  attach: (program, _ctx) => {
+  attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun
       .command('history <iid>')
@@ -219,39 +231,124 @@ export const itemHistoryCommand: CommandModule<
           'write should wait at least 30s before expecting the new event',
           'to surface.',
           '',
-          'NOTE: Pre-flight stub — runtime two-source walker lands at',
-          'v0.3-M24 implementation. The verb registers the argv shape so',
-          'agent scripts targeting `monday item history <iid>` are stable',
-          'across the M24 drop-in.',
-          '',
         ].join('\n'),
       )
       .action(async (iid: string, rawOpts: unknown) => {
         // Parse-validate argv via the schema. `--kinds` splits on `,`
         // + validates each entry against the discriminator literals
         // before reaching the action body; `--since` / `--until`
-        // pass through as raw strings (M24 impl forwards verbatim to
+        // pass through as raw strings (forwarded verbatim to
         // Monday's ISO8601DateTime args).
         const merged = { ...(rawOpts as Record<string, unknown>), iid };
-        parseArgv(itemHistoryCommand.inputSchema, merged);
-        // Pre-flight stub — every invocation rejects. M24
-        // implementation replaces this with item-board lookup +
-        // `fetchItemHistory` + optional `--kinds` filter + optional
-        // `--stream` NDJSON + `emitSuccess`.
-        /* c8 ignore start */
-        await Promise.reject(
-          new ApiError(
-            'internal_error',
-            '`monday item history <iid>` is a v0.3-M24 pre-flight stub — runtime two-source walker (activity_logs + updates) lands at M24 implementation.',
-            {
-              details: {
-                item_id: iid,
-                hint: 'M24 implementation kickoff (next session) lands the runtime body in `src/api/item-history-projection.ts` (per-event projector + walker) and replaces this stub with the real action body.',
+        const parsed = parseArgv(itemHistoryCommand.inputSchema, merged);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+
+        // Step 1 — item-board lookup. Raises `not_found` for both
+        // missing-item and null-board paths per the shared helper.
+        // The lookup hits Monday directly (no per-call cache on
+        // `ItemBoardLookup`); `SourceAggregator` records it as
+        // `'live'` so the envelope's `meta.source` stays correct
+        // when a future cache layer lifts in here.
+        const { boardId } = await lookupItemBoard({
+          client,
+          itemId: parsed.iid,
+        });
+
+        const aggregator = new SourceAggregator();
+        aggregator.record('live', null);
+
+        const format = selectOutput({
+          json: program.opts<{ json?: boolean }>().json === true,
+          table: program.opts<{ table?: boolean }>().table === true,
+          ...((program.opts<{ output?: string }>().output === undefined)
+            ? {}
+            : { output: program.opts<{ output: string }>().output }),
+          env: ctx.env,
+          isTTY: ctx.isTTY,
+        });
+
+        // Build the walker inputs once — both the streaming +
+        // non-streaming paths consume the same spread shape;
+        // duplicating the per-flag ternaries across both paths
+        // would double the branch denominator without adding
+        // observable behaviour.
+        const baseFetchInputs = {
+          client,
+          itemId: parsed.iid,
+          boardId,
+          ...(parsed.since === undefined ? {} : { since: parsed.since }),
+          ...(parsed.until === undefined ? {} : { until: parsed.until }),
+          ...(parsed.activityLogsPage === undefined
+            ? {}
+            : { activityLogsPage: parsed.activityLogsPage }),
+          ...(parsed.updatesPage === undefined
+            ? {}
+            : { updatesPage: parsed.updatesPage }),
+          ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+          ...(parsed.kinds === undefined ? {} : { kinds: parsed.kinds }),
+        };
+
+        // Step 2 — streaming NDJSON path. Emits items per-merged-
+        // event (post-merge — the merge isn't incremental per the
+        // mergeByCreatedAt docstring); writes the §6.3 trailer
+        // with per-source pagination state for resumption.
+        if (format === 'ndjson') {
+          const stream = startNdjsonStream<HistoryEvent>({
+            stream: ctx.stdout,
+            secrets: collectSecrets(ctx.env, ctx.runtimeSecrets),
+            project: (event) => event,
+          });
+          const result = await fetchItemHistory({
+            ...baseFetchInputs,
+            onItem: stream.onItem,
+          });
+          aggregator.record(result.source, null);
+          const aggregated = aggregator.result('live');
+          const hasMore =
+            result.pagination.activity_logs.last_page !== null ||
+            result.pagination.updates.last_page !== null;
+          stream.writeTrailer(
+            buildStreamingTrailerMeta({
+              ctx: {
+                cliVersion: ctx.cliVersion,
+                requestId: ctx.requestId,
+                clock: ctx.clock,
               },
-            },
-          ),
-        );
-        /* c8 ignore stop */
+              apiVersion,
+              source: aggregated.source,
+              cacheAgeSeconds: aggregated.cacheAgeSeconds,
+              result: {
+                hasMore,
+                totalReturned: result.events.length,
+                complexity: result.complexity,
+              },
+            }),
+          );
+          return;
+        }
+
+        // Step 3 — non-streaming path. Run the full walker, then
+        // emit via the §6.1 success envelope.
+        const result = await fetchItemHistory(baseFetchInputs);
+        aggregator.record(result.source, null);
+        const aggregated = aggregator.result('live');
+        const hasMore =
+          result.pagination.activity_logs.last_page !== null ||
+          result.pagination.updates.last_page !== null;
+        emitSuccess({
+          ctx,
+          data: [...result.events] as HistoryEventOutput,
+          schema: itemHistoryCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'collection',
+          source: aggregated.source,
+          cacheAgeSeconds: aggregated.cacheAgeSeconds,
+          warnings: toEnvelopeWarnings(result.warnings),
+          complexity: result.complexity,
+          hasMore,
+          apiVersion,
+        });
       });
   },
 };
