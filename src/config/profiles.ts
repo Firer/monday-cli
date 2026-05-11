@@ -31,7 +31,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
-import { ConfigError } from '../utils/errors.js';
+import { ConfigError, asError } from '../utils/errors.js';
 import { isENOENT } from '../utils/fs.js';
 
 /** Filename under `~/.monday-cli/`. Pinned for HOME-scoping. */
@@ -139,7 +139,7 @@ export const loadProfilesConfig = async (
     throw new ConfigError(
       `cannot read profiles config ${fullPath}`,
       {
-        cause: err instanceof Error ? err : new Error(String(err)),
+        cause: asError(err),
         details: { path: fullPath },
       },
     );
@@ -153,7 +153,7 @@ export const loadProfilesConfig = async (
     throw new ConfigError(
       `malformed TOML in profiles config ${fullPath}`,
       {
-        cause: err instanceof Error ? err : new Error(String(err)),
+        cause: asError(err),
         details: {
           path: fullPath,
           hint: 'check the file for unmatched quotes, missing `=`, or invalid section headers',

@@ -34,7 +34,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { ApiError, ConfigError } from '../utils/errors.js';
+import { ApiError, ConfigError, asError } from '../utils/errors.js';
 import type { OAuthListenerHandle, RedirectPayload } from './oauth.js';
 
 /** Env var name the test seam checks. The leading double-underscore
@@ -75,7 +75,7 @@ export const readTestOAuthFixture = async (
     throw new ConfigError(
       `cannot read __test_oauth_helper fixture at ${fixturePath}`,
       {
-        cause: err instanceof Error ? err : new Error(String(err)),
+        cause: asError(err),
         details: {
           path: fixturePath,
           hint: 'set __test_oauth_helper to the path of a valid fixture file or unset the env var to use the real OAuth listener',
@@ -90,7 +90,7 @@ export const readTestOAuthFixture = async (
     throw new ConfigError(
       `__test_oauth_helper fixture at ${fixturePath} is not valid JSON`,
       {
-        cause: err instanceof Error ? err : new Error(String(err)),
+        cause: asError(err),
         details: { path: fixturePath },
       },
     );

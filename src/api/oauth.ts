@@ -41,7 +41,7 @@
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { ApiError } from '../utils/errors.js';
+import { ApiError, errorMessage } from '../utils/errors.js';
 import { z } from 'zod';
 
 /** Monday Apps OAuth authorize endpoint. */
@@ -501,7 +501,7 @@ export const exchangeCode = async (
   } catch (err) {
     throw new ApiError(
       'network_error',
-      `network failure during OAuth token exchange: ${err instanceof Error ? err.message : String(err)}`,
+      `network failure during OAuth token exchange: ${errorMessage(err)}`,
       {
         cause: err,
         details: {

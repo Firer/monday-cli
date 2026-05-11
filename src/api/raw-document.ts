@@ -35,7 +35,7 @@
  * command in M6 close.
  */
 import { parse, Kind, OperationTypeNode, type DocumentNode, type OperationDefinitionNode } from 'graphql';
-import { UsageError } from '../utils/errors.js';
+import { UsageError, errorMessage } from '../utils/errors.js';
 
 export interface RawDocumentAnalysis {
   /**
@@ -98,9 +98,7 @@ export const analyzeRawDocument = (
     ast = parse(inputs.query);
   } catch (err: unknown) {
     throw new UsageError(
-      `monday raw: GraphQL document failed to parse (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
+      `monday raw: GraphQL document failed to parse (${errorMessage(err)}).`,
       {
         cause: err,
         details: { hint: 'check the document for syntax errors' },

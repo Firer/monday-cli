@@ -39,7 +39,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ConfigError } from '../utils/errors.js';
+import { ConfigError, asError } from '../utils/errors.js';
 import { formatMode, isENOENT } from '../utils/fs.js';
 
 /**
@@ -144,8 +144,7 @@ const wrapAsConfigError = (
   message: string,
   details: Readonly<Record<string, unknown>> = {},
 ): ConfigError => {
-  const cause = err instanceof Error ? err : new Error(String(err));
-  return new ConfigError(message, { cause, details });
+  return new ConfigError(message, { cause: asError(err), details });
 };
 
 /**

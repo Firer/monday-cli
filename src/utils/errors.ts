@@ -337,3 +337,54 @@ export const errorForAbortReason = (reason: AbortReason): MondayCliError => {
       return assertNever(reason, 'errorForAbortReason');
   }
 };
+
+/**
+ * Narrows a caught `unknown` to its message string. The standard
+ * `useUnknownInCatchVariables`-narrowing idiom for project code that
+ * needs the human-readable text without the full Error object.
+ *
+ * **R-NEW-14 lift (post-M23 audit).** Previously inlined 11+ times
+ * across the codebase since M2/M6 — see `docs/v0.3-plan.md` §22
+ * R-NEW-14 entry for the missed-trigger history. M22's
+ * `src/api/probes.ts:errorMessage` is the smoking gun: the developer
+ * needed the helper and wrote a local copy instead of finding the
+ * 9+ inline sites. Lift consolidates those into one canonical
+ * helper.
+ */
+export const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
+/**
+ * Coerces a caught `unknown` to a real `Error` for `cause:`
+ * propagation. The companion to {@link errorMessage} for code paths
+ * that want the full Error object to thread through a `cause:`
+ * chain rather than just the message string.
+ *
+ * **R-NEW-15 lift (post-M23 audit).** Previously inlined 6+ times
+ * across M1 + M21 modules (`src/api/cache.ts`,
+ * `src/config/credentials.ts`, `src/config/profiles.ts`,
+ * `src/api/oauth-test-helper.ts`). M22's `src/api/probes.ts:asError`
+ * is the smoking gun (local copy with an `AbortSignal.reason`
+ * fallback parameter — superseded here by the shared helper).
+ * See `docs/v0.3-plan.md` §22 R-NEW-15 for the missed-trigger
+ * history.
+ */
+export const asError = (err: unknown): Error =>
+  err instanceof Error ? err : new Error(String(err));
+
+/**
+ * Extracts the Node `err.code` property in a type-safe way, returning
+ * the string when present and `undefined` otherwise.
+ *
+ * **R-NEW-16 lift (post-M23 audit).** Generalises the
+ * `(err as { code?: unknown }).code` pattern that R-NEW-1's
+ * `isENOENT` open-coded. Three named consumers as of M22 (probes.ts
+ * + transport.ts + utils/fs.ts's `isENOENT`). `isENOENT` is now a
+ * one-liner on top of this. See `docs/v0.3-plan.md` §22 R-NEW-16
+ * for the trigger history.
+ */
+export const errorCode = (err: unknown): string | undefined => {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+};

@@ -83,7 +83,7 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError } from '../../utils/errors.js';
+import { UsageError, errorMessage } from '../../utils/errors.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -334,8 +334,7 @@ const parseSettingsFlag = (
     // throws a non-Error here. Leaving the narrowing in for safety
     // (useUnknownInCatchVariables) but ignoring the unreachable
     // branch for coverage purposes.
-    /* c8 ignore next */
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     throw new UsageError(
       `--settings: malformed JSON (${message})`,
       {

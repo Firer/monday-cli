@@ -87,7 +87,7 @@ import type { CommandModule } from '../types.js';
 import { emitSuccess, emitDryRun } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError } from '../../utils/errors.js';
+import { UsageError, errorMessage } from '../../utils/errors.js';
 import { analyzeRawDocument } from '../../api/raw-document.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { PINNED_API_VERSION } from '../../api/client.js';
@@ -210,9 +210,7 @@ const readQuery = async (
     raw = await readFile(path, 'utf8');
   } catch (err: unknown) {
     throw new UsageError(
-      `--query-file: failed to read ${JSON.stringify(path)} (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
+      `--query-file: failed to read ${JSON.stringify(path)} (${errorMessage(err)}).`,
       {
         cause: err,
         details: { query_file: path },
@@ -297,9 +295,7 @@ const readVars = async (
       fileRaw = await readFile(path, 'utf8');
     } catch (err: unknown) {
       throw new UsageError(
-        `--vars-file: failed to read ${JSON.stringify(path)} (${
-          err instanceof Error ? err.message : String(err)
-        }).`,
+        `--vars-file: failed to read ${JSON.stringify(path)} (${errorMessage(err)}).`,
         {
           cause: err,
           details: { vars_file: path },
@@ -320,9 +316,7 @@ const readVars = async (
     parsed = JSON.parse(raw);
   } catch (err: unknown) {
     throw new UsageError(
-      `monday raw: GraphQL variables are not valid JSON (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
+      `monday raw: GraphQL variables are not valid JSON (${errorMessage(err)}).`,
       {
         cause: err,
         details: {

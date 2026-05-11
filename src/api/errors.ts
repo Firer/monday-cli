@@ -25,7 +25,11 @@
  * `retry_in_seconds` / `Retry-After` headers) and ignore the prose.
  */
 
-import { ApiError, type MondayCliError } from '../utils/errors.js';
+import {
+  ApiError,
+  errorMessage,
+  type MondayCliError,
+} from '../utils/errors.js';
 
 /**
  * Subset of Monday's GraphQL error shape that we read. Everything
@@ -534,7 +538,10 @@ export const wrapTransportError = (err: unknown): ApiError => {
   if (err instanceof ApiError) {
     return err;
   }
-  const message = err instanceof Error ? err.message : String(err);
   const opts: { cause: unknown } = { cause: err };
-  return new ApiError('internal_error', `unexpected transport error: ${message}`, opts);
+  return new ApiError(
+    'internal_error',
+    `unexpected transport error: ${errorMessage(err)}`,
+    opts,
+  );
 };

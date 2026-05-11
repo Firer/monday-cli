@@ -43,7 +43,7 @@
  */
 
 import { z } from 'zod';
-import { UsageError } from '../utils/errors.js';
+import { UsageError, errorMessage } from '../utils/errors.js';
 
 /**
  * The validated mapping shape. Keys are source column IDs (slugs),
@@ -101,7 +101,7 @@ export const parseColumnMappingJson = (raw: unknown): ColumnMapping => {
     parsed = JSON.parse(raw);
   } catch (err) {
     throw new UsageError(
-      `--columns-mapping value isn't valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      `--columns-mapping value isn't valid JSON: ${errorMessage(err)}`,
       {
         cause: err,
         details: {

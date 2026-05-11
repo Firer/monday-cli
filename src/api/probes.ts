@@ -73,7 +73,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { ApiError, errorCode, errorMessage } from '../utils/errors.js';
 import { formatMode, isENOENT } from '../utils/fs.js';
 import { redact as defaultRedactImpl } from '../utils/redact.js';
 import { collectSecrets } from '../cli/envelope-out.js';
@@ -322,30 +322,18 @@ export interface EnvVarPickupProbeInputs {
   readonly env: NodeJS.ProcessEnv;
 }
 
-const errorCode = (err: unknown): string | undefined => {
-  /* c8 ignore next 3 — non-object errors don't reach this guard via
-     fs/promises/dns rejections (every rejection wraps a real Error). */
-  if (typeof err !== 'object' || err === null) {
-    return undefined;
-  }
-  const code = (err as { code?: unknown }).code;
-  return typeof code === 'string' ? code : undefined;
-};
-
-const errorMessage = (err: unknown): string => {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  /* c8 ignore next — non-Error throws don't reach probe error paths in
-     practice; defensive fallback for the unknown-thrown case. */
-  return String(err);
-};
-
 /**
  * Coerces `AbortSignal.reason` (typed `any`) into an `Error` for the
  * Promise-reject path. Standardises the abort-bubbling shape so
  * every probe seam rejects with an `Error` per the lint rule
  * `@typescript-eslint/prefer-promise-reject-errors`.
+ *
+ * Distinct from the shared {@link asError} in `utils/errors.ts`: the
+ * shared helper has no fallback parameter and uses `String(err)` as
+ * the no-Error fallback, which would render `"undefined"` for the
+ * `ctrl.abort()` (no-arg) case. This local variant takes a named
+ * fallback string that describes the abort source, useful when
+ * `AbortSignal.reason` is undefined.
  */
 const asError = (reason: unknown, fallback: string): Error => {
   if (reason instanceof Error) {

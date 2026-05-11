@@ -8,7 +8,10 @@ import {
   InternalError,
   MondayCliError,
   UsageError,
+  asError,
+  errorCode,
   errorForAbortReason,
+  errorMessage,
   exitCodeForError,
   type AbortReason,
   type ErrorCode,
@@ -196,5 +199,80 @@ describe('errorForAbortReason', () => {
   it('falls back to a default message when cancel reason is omitted', () => {
     const err = errorForAbortReason({ kind: 'cancel' });
     expect(err.message).toBe('cancelled');
+  });
+});
+
+describe('errorMessage (R-NEW-14)', () => {
+  it('extracts message from an Error instance', () => {
+    expect(errorMessage(new Error('boom'))).toBe('boom');
+  });
+
+  it('coerces a non-Error to String(err)', () => {
+    expect(errorMessage('a string error')).toBe('a string error');
+    expect(errorMessage(42)).toBe('42');
+    expect(errorMessage(undefined)).toBe('undefined');
+    expect(errorMessage(null)).toBe('null');
+  });
+
+  it('preserves subclass instances (TypeError etc.)', () => {
+    expect(errorMessage(new TypeError('bad type'))).toBe('bad type');
+  });
+});
+
+describe('asError (R-NEW-15)', () => {
+  it('returns the same Error instance when input is an Error', () => {
+    const original = new Error('original');
+    expect(asError(original)).toBe(original);
+  });
+
+  it('wraps a non-Error value in a new Error with String(err) as message', () => {
+    const wrapped = asError('not an error');
+    expect(wrapped).toBeInstanceOf(Error);
+    expect(wrapped.message).toBe('not an error');
+  });
+
+  it('wraps undefined as Error("undefined")', () => {
+    const wrapped = asError(undefined);
+    expect(wrapped).toBeInstanceOf(Error);
+    expect(wrapped.message).toBe('undefined');
+  });
+
+  it('preserves subclass instances (TypeError etc.)', () => {
+    const t = new TypeError('subclass');
+    expect(asError(t)).toBe(t);
+  });
+});
+
+describe('errorCode (R-NEW-16)', () => {
+  it('returns the string code from a Node fs-style error', () => {
+    const err: NodeJS.ErrnoException = new Error('boom');
+    err.code = 'ENOENT';
+    expect(errorCode(err)).toBe('ENOENT');
+  });
+
+  it('returns undefined for non-object errors', () => {
+    expect(errorCode('a string')).toBeUndefined();
+    expect(errorCode(42)).toBeUndefined();
+    expect(errorCode(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for null', () => {
+    expect(errorCode(null)).toBeUndefined();
+  });
+
+  it('returns undefined when the object lacks a code field', () => {
+    expect(errorCode(new Error('plain'))).toBeUndefined();
+    expect(errorCode({ message: 'no code here' })).toBeUndefined();
+  });
+
+  it('returns undefined when code is non-string (numeric or boolean)', () => {
+    expect(errorCode({ code: 42 })).toBeUndefined();
+    expect(errorCode({ code: true })).toBeUndefined();
+    expect(errorCode({ code: null })).toBeUndefined();
+  });
+
+  it('returns the code from any object with a string code property', () => {
+    expect(errorCode({ code: 'EACCES' })).toBe('EACCES');
+    expect(errorCode({ code: 'CUSTOM_CODE' })).toBe('CUSTOM_CODE');
   });
 });

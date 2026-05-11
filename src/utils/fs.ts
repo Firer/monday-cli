@@ -12,22 +12,18 @@
  * own consumer-count thresholds fire.
  */
 
+import { errorCode } from './errors.js';
+
 /**
  * Returns `true` when `err` is a Node fs error with `code === 'ENOENT'`.
  *
- * The non-object guard is `c8 ignore`d because in practice every
- * `fs/promises` rejection wraps a real `Error` — but the guard exists
- * to keep the function strict-typed (`err: unknown`) for callers that
- * pass `catch (err)` directly.
+ * v0.3 post-M23 audit (R-NEW-16): refactored from the open-coded
+ * type-guard pattern to call the shared {@link errorCode} helper.
+ * Behaviour preserved (returns `false` for non-object errors,
+ * non-string codes, and missing-code errors); the lift is mechanical.
  */
-export const isENOENT = (err: unknown): boolean => {
-  /* c8 ignore next 3 — non-object errors don't reach this guard via
-     fs/promises (every promise rejection wraps a real Error). */
-  if (typeof err !== 'object' || err === null) {
-    return false;
-  }
-  return (err as { code?: unknown }).code === 'ENOENT';
-};
+export const isENOENT = (err: unknown): boolean =>
+  errorCode(err) === 'ENOENT';
 
 /**
  * Formats a `stat.mode` numeric field as an octal `'0NNN'` string —

@@ -57,7 +57,7 @@
  * check rather than introducing a separate pre-flight check here.
  */
 
-import { ApiError, UsageError } from '../utils/errors.js';
+import { ApiError, UsageError, errorMessage } from '../utils/errors.js';
 import {
   isFilesShapedType,
   isReadOnlyForeverType,
@@ -120,9 +120,10 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
   try {
     parsed = JSON.parse(rawJson);
   } catch (err) {
+    const msg = errorMessage(err);
     throw new UsageError(
       `--set-raw: JSON parse failed for column "${token}". ` +
-        `${err instanceof Error ? err.message : String(err)}. ` +
+        `${msg}. ` +
         `Pass a well-formed JSON object literal (e.g. --set-raw ` +
         `status='{"label":"Done"}'). Use single-quote-around-double-` +
         `quote shell quoting on POSIX shells.`,
@@ -131,7 +132,7 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
         details: {
           token,
           raw_json: rawJson,
-          parse_error: err instanceof Error ? err.message : String(err),
+          parse_error: msg,
           hint:
             'JSON property names + string values use double quotes; ' +
             'wrap the whole literal in single quotes in the shell.',

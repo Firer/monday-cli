@@ -1,4 +1,4 @@
-import { ApiError } from '../utils/errors.js';
+import { ApiError, errorCode } from '../utils/errors.js';
 
 /**
  * Transport interface (`v0.1-plan.md` §2 pre-flight, §5.2).
@@ -195,8 +195,8 @@ const isAbortError = (err: unknown): boolean => {
  */
 const describeFetchError = (err: unknown): string => {
   if (err instanceof Error) {
-    const code = (err as { code?: unknown }).code;
-    if (typeof code === 'string') {
+    const code = errorCode(err);
+    if (code !== undefined) {
       if (code.startsWith('ENOTFOUND') || code.startsWith('EAI_')) {
         return 'fetch failed: dns lookup failed';
       }

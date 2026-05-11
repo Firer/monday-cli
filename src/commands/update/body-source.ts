@@ -22,7 +22,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { UsageError } from '../../utils/errors.js';
+import { UsageError, errorMessage } from '../../utils/errors.js';
 
 export interface ReadBodyInputs {
   /** `--body <md>` value (per-command flag). */
@@ -98,9 +98,7 @@ export const readUpdateBody = async (
   // posted comment.
   const raw = await readFile(bodyFile, 'utf8').catch((err: unknown) => {
     throw new UsageError(
-      `--body-file: failed to read ${JSON.stringify(bodyFile)} (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
+      `--body-file: failed to read ${JSON.stringify(bodyFile)} (${errorMessage(err)}).`,
       {
         cause: err,
         details: { body_file: bodyFile },
