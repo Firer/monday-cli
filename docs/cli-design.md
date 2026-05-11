@@ -6536,6 +6536,23 @@ scoped idempotent changes, and post comments narrating its work.**
   `updates.last_page`) + complexity + source. Agents
   resuming a partial walk re-issue with the trailer's
   `last_page` values bumped by 1 per source.
+  **Implementation shipped at `d058172`** (+ Codex impl
+  review fixes at `5f10cda` round 1 + `a024961` round 2):
+  per-event projector with one-level nested-JSON unwrap on
+  `update_column_value.value` / `previous_value` so agents
+  see structured payloads (e.g. `{label, index}` for status,
+  ISO string for date) rather than opaque JSON-string
+  scalars; numeric `pulse_id` stringified via the
+  `readNullableIdField` helper per the probe-confirmed
+  unquoted-JSON-number wire shape; updates source filter
+  uses `Date.parse` epoch comparison with explicit NaN
+  guard (defence-in-depth against malformed wire timestamps
+  + mixed-offset CLI inputs); `projectReplyRow` fallback
+  chain `Reply.created_at → Reply.updated_at → parent
+  Update's projected timestamp` ensures the event schema's
+  `created_at.min(1)` invariant holds; `--stream` flag
+  forces NDJSON regardless of `--json` / `--table` /
+  `--output` flags.
 - `board favorites` — current user's starred boards. Pairs with the
   v0.3 cross-board `item search` as a natural scoping lever
   (`item search --favorites`); shipping it in isolation buys little

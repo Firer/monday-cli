@@ -1661,10 +1661,14 @@ Collection of direct subitems. Sorted by ID asc per page.
 ### `item history <iid>` (v0.3-M24)
 
 Per-item activity log + comment thread merged chronologically.
-Pre-flight stub at `bad98ba` registers the argv shape + the typed
-event-object discriminated union; runtime two-source walker
-(`boards.activity_logs(item_ids:, ...)` + `items.updates(...)`)
-lands at M24 implementation per cli-design §13 v0.3 entry.
+Pre-flight contract diff at `bad98ba` registered the argv shape
++ the typed event-object discriminated union; **runtime
+two-source walker landed at `d058172`** (+ Codex impl review
+round-1 fixes `5f10cda` + round-2 fixes `a024961`) —
+`boards.activity_logs(item_ids:, ...)` + `items.updates(...)`
+fan-out, walker-side `entity = 'pulse'` filter, chronological
+merge via `mergeByCreatedAt`, unknown-event-kind aggregation
+per cli-design §13 v0.3 entry.
 
 The output is a flat array of typed event-objects discriminated
 on `kind`. Variants (per Decision 2 closure `a1f3025`):

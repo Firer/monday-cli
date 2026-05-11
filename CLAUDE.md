@@ -11,22 +11,26 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M23 closed; M24 pre-flight closed; M24 implementation
-unblocked.**
+**v0.3-M24 closed; M25 unblocked.**
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
-`main`; M0–M23 closed. M23 implementation landed at `1f09a25`
-(cross-board `item search` + `board favorites` runtime bodies —
-`fetchBoardFavorites` 2-stage resolver, `crossBoardSearch`
-per-board fan-out walker, cross-board action with
-column-resolution pre-pass + SourceAggregator merge +
-union-schema emit). M23 pre-flight had two Codex rounds
-(`9b93f15` + `fa27b60`); impl review run completed exit 0 but
-truncated mid-trace without numbered findings (see v0.3-plan
-§15 lesson). M22 implementation (`3a1b465`) lands the runtime
-DNS / TCP / TLS / auth / cache / redaction / env-var probes
-for `monday status` + the `platform_api.daily_*` projection
-for `monday usage`. Decision 2 (item-history `kind` taxonomy)
-closed at the post-M23 M24-prep session via the local
+`main`; M0–M24 closed. **M24 implementation landed at
+`d058172`** (item history runtime walker + per-event projectors
++ action body); Codex impl review round 1 surfaced 1 P1 + 2 P2
+(all out-of-band / W4); all three fixed at `5f10cda` (--stream
+flag wiring, wall-clock epoch compare for mixed-offset ISO
+inputs, projectReplyRow parent-timestamp fallback). R-NEW-25
+"findings up front" directive validated again — round 1
+returned numbered findings cleanly without truncation. M23
+implementation landed at `1f09a25` (cross-board `item search` +
+`board favorites` runtime bodies — `fetchBoardFavorites`
+2-stage resolver, `crossBoardSearch` per-board fan-out walker,
+cross-board action with column-resolution pre-pass +
+SourceAggregator merge + union-schema emit). M22 implementation
+(`3a1b465`) lands the runtime DNS / TCP / TLS / auth / cache /
+redaction / env-var probes for `monday status` + the
+`platform_api.daily_*` projection for `monday usage`.
+Decision 2 (item-history `kind` taxonomy) closed at the
+post-M23 M24-prep session via the local
 `scripts/probe/m24-history-kinds.ts` empirical probe
 (2026-05-11; 19 rows captured on a production board); ratified
 zod discriminated union over the observed event taxonomy with
@@ -37,42 +41,38 @@ closure.
 
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
-- `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23
-  post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 + R-NEW-5
-  + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 + R-NEW-21
-  shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open +
-  R-watch-items).
+- `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
+  §21 M24 post-mortems + §22 R-class backlog (R-NEW-1 + R-NEW-4 +
+  R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 + R-NEW-19 +
+  R-NEW-21 shipped + R-NEW-2 / R-NEW-3 / R-NEW-17 candidates open
+  + R-watch-items).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M24 pre-flight):**
-- Test count: **2870** across 122 files (+3 post-cross-board-search
-  saturation from the M24-prep branches-margin recovery pass:
-  3 new tests in retry.test.ts targeting defensive paths +
-  1 extended existing filters.test.ts case covering all 4 numeric
-  comparison operators).
-- Coverage: **99.05 / 95.97 / 99.21 / 99.25** (stmts / branches /
+**Live numbers (post-M24 implementation):**
+- Test count: **2967** across 124 files (+97 net from M24 impl;
+  pre-impl 2870 + 95 new item-history tests + 2 round-1 fix-up
+  regression tests). 1 skipped unchanged (auth-probe real-network
+  placeholder). 2 new test files: `tests/unit/api/item-history-
+  projection.test.ts` (78 tests) + `tests/integration/commands/
+  item-history.test.ts` (19 tests).
+- Coverage: **99.08 / 96.00 / 99.24 / 99.27** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin shifted 0.30pp → 0.52pp** at the M24-prep recovery pass —
-  exceeds the 0.4pp pre-session target by 0.12pp ahead of M24
-  denominator growth. retry.ts recovered 86.95% → 97.82% (lines
-  89-91 defaultSleep pre-aborted check + line 111 signalAbortError
-  fallback + line 223 requestId-present decoration); filters.ts
-  recovered 89.36% → 95.74% (lines 409-412 case statements for
-  `lower_than` / `lower_than_or_equals` / `greater_than` now
-  covered alongside the pre-existing `greater_than_or_equals`).
-  Remaining file-level gaps (item/search.ts 88.23%, errors.ts
-  93.27%, dry-run.ts 96.26%) are deferred — search.ts needs a
-  cross-board `--where Owner=me` integration test; errors.ts +
-  dry-run.ts uncovered branches are genuinely defensive.
-- ERROR_CODES count: **29** (unchanged — Decision 2's
-  `unknown_event_kind` is a §6.1 `warnings[]` shape per the
-  M24-prep empirical probe ratification; the registry stays at
-  29 across M24 pre-flight too).
-  Command count: **77 → 78** — `monday item history <iid>`
-  joined at M24 pre-flight; M24 implementation will swap the
-  stub bodies for runtime walker without adding new commands.
+  margin shifted 0.52pp → 0.55pp** through M24 — the runtime body
+  added branches but the action-layer `baseFetchInputs` lift +
+  simplified warnings sort (dropping the dead secondary-by-entity
+  tie-break that the walker's `entity === 'pulse'` filter makes
+  unreachable) actually IMPROVED the margin slightly. Three deferred
+  file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
+  93.27%, `dry-run.ts` 96.26% — same as pre-M24 (genuinely
+  defensive or requires new cross-board integration test).
+- ERROR_CODES count: **29** (unchanged across M24 impl per
+  Decision 2 closure — `unknown_event_kind` is a §6.1 `warnings[]`
+  shape, NOT a registry entry).
+  Command count: **78** (unchanged — `monday item history <iid>`
+  registered at M24 pre-flight `bad98ba`; impl swaps stub bodies
+  without adding new commands).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -88,53 +88,39 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M24 implementation — fill the stubbed `fetchItemHistory`
-   walker + `itemHistoryCommand.action` body.** Pre-flight
-   contract diff shipped this session (commit `bad98ba` +
-   Codex pre-flight round-1 fix-up `fbd70de` + round-2 fix-up
-   `f7fac47`): full
-   zod discriminated union historyEventSchema; argv schema
-   with `--since` / `--until` / `--activity-logs-page` /
-   `--updates-page` / `--limit` / `--kinds` / `--stream`;
-   cli-design §13 v0.3 entry; output-shapes.md new top-level
-   entry. M24 implementation drops in: (a) runtime
-   `fetchItemHistory` walker — issues `boards.activity_logs
-   (item_ids:, from:, to:, page:, limit:)` Stage 1, filters
-   `entity === 'pulse'`, projects each row via
-   `projectActivityLogRow`; issues `items(ids:).updates(...)
-   { replies { ... } }` Stage 2, projects via
-   `projectUpdateRow` + `projectReplyRow`, applies client-
-   side wall-clock filter on `Update.created_at`; merges
-   chronologically via `mergeByCreatedAt`; aggregates
-   `unknown_event_kind` warnings; (b) per-`column_type`
-   typed `before` / `after` projection inside
-   `projectActivityLogRow` for `update_column_value` events
-   (case-by-case: status → `{label, index}`, date → ISO,
-   etc.); (c) `monday item history <iid>` action body —
-   item-board lookup (existing `ItemBoardLookup`), call
-   `fetchItemHistory` with parsed argv, optional
-   `--kinds`-projection filter, optional `--stream` NDJSON
-   via `startNdjsonStream`, `emitSuccess` with
-   `SourceAggregator` merge of cache-state + live-fetch
-   source. Full unit + integration test matrix mirroring
-   M22/M23 cassette pattern (`MondayClient` seam-injection
-   stub factory — watch R-NEW-20 third-consumer trigger);
-   target +60–90 tests, branches margin 0.52pp → ≥0.4pp
-   post-impl. Eventual-consistency lag >30s caveat already
-   pinned in cli-design §13 v0.3 entry + verb help text.
-2. **Branches-margin recovery, deferred residuals.** retry.ts +
-   filters.ts saturated in the M24-prep pass (margin 0.30pp →
-   0.52pp; target exceeded). Three deferred files carry the
-   remaining residual: `item/search.ts` 88.23% — needs a new
-   cross-board integration test driving `--where Owner=me` to
-   cover buildPerBoardPlan's me-resolution helper (lines
-   546-549) + the same-column-twice push branch (line 575);
-   `errors.ts` 93.27% — defensive lines (272 message fallback,
-   318 status<400, 367 path-present) — could be c8-ignored OR
-   covered with targeted unit tests; `dry-run.ts` 96.26% —
-   defensive `env === undefined ? {}` spreads. Each is a small
-   bounded follow-up if a future session needs more margin.
-3. **`monday usage` timezone semantics verification** — M22
+1. **M25 pre-flight — `--continue-on-error` for bulk
+   `item update`.** Decision 6 (`--continue-on-error` naming)
+   is the remaining design hinge per v0.3-plan §3 M25 + §9
+   preconditions. Bulk `monday item update --where ...` today
+   bails on first per-item failure; M25 adds the opt-in
+   continue-on-error mode that aggregates per-item results +
+   reports partial-success/failure metadata in the envelope.
+   Likely scope (S-M per the §3 sequencing intro): closing
+   Decision 6 in cli-design §X; argv extension on
+   `src/commands/item/update.ts`; thin
+   `src/api/partial-success-bulk.ts` wrapper or fold into
+   the existing bulk path; per-item-failure envelope shape
+   (M15 board-add-users partial-success precedent is the
+   inspiration); test matrix +30-50.
+2. **Template fold-ins** — bundle R-NEW-25 (R-NEW-6 template
+   "findings up front" header) + R-NEW-17 (template
+   section-5 W-audit-point for redactor-pattern check) into
+   `.claude/templates/codex-pre-flight-review.md` AT the M25
+   pre-flight kickoff. Both validated at M24 pre-flight + impl
+   review; pattern stable across three rounds now.
+3. **Branches-margin deferred residuals.** Three files carry
+   the remaining out-of-coverage residual: `item/search.ts`
+   88.23% — needs a new cross-board integration test driving
+   `--where Owner=me` to cover buildPerBoardPlan's me-
+   resolution helper (lines 546-549) + the same-column-twice
+   push branch (line 575); `errors.ts` 93.27% — defensive
+   lines (272 message fallback, 318 status<400, 367
+   path-present) — could be c8-ignored OR covered with
+   targeted unit tests; `dry-run.ts` 96.26% — defensive
+   `env === undefined ? {}` spreads. Each is a small bounded
+   follow-up if a future session needs more margin (margin
+   at 0.55pp post-M24, comfortable).
+4. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
    captured an empty `by_day` list so the timezone pin remains
@@ -143,34 +129,13 @@ convention.
    account with live usage activity. If Monday's runtime `day`
    field turns out to be account-local, amend cli-design §11.5.3
    + flip `formatTodayKey` in `src/commands/usage.ts`.
-4. **Codex impl-review truncation follow-up — lesson
-   validated at M24 pre-flight; template fold-in remains.**
-   The M23 impl review at `1f09a25` completed (exit 0) but
-   truncated mid-trace after 46 file-reading exec calls without
-   delivering numbered findings (v0.3-plan §15 captures the
-   lesson). The M24 pre-flight reviews (round 1 at `fbd70de` +
-   round 2 at `f7fac47`) applied a custom "deliver findings UP
-   FRONT, not after exhaustive exploration" instruction in the
-   prompt and BOTH rounds returned numbered findings cleanly
-   without truncation (round 1: 2 P1 + 4 P2 + 1 P3; round 2:
-   1 P1 + 1 P2 + 0 P3). Technique validated — the remaining
-   work is folding the instruction into the R-NEW-6
-   `.claude/templates/codex-pre-flight-review.md` template
-   (R-NEW-25 watch-item) so future pre-flights inherit it
-   automatically. R-NEW-17's redactor-pattern check at
-   pre-flight applied as audit point W1 at the M24 pre-flight
-   review prompt; both rounds returned "W1: nothing flagged"
-   against the new `unknown_event_kind` detail-key surface —
-   pattern validated. R-NEW-17 fold-in to the template's
-   section-5 audit-points list is the remaining lift,
-   bundled with R-NEW-25 at next pre-flight.
 5. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
    OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
    as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M24 pre-flight)**
+**R-class state (post-M24 implementation)**
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
@@ -273,11 +238,13 @@ convention.
   same union shape; **R-NEW-17 redactor-pattern check at
   pre-flight** — surfaced at M23 impl (`column_token` rename;
   v0.3-plan §15 contract drift finding); MEDIUM priority.
-  Applied AT M24 pre-flight Codex review prompt as audit
-  point W1 — both rounds returned "W1: nothing flagged"
-  against the new `unknown_event_kind.details.{event, entity,
-  occurrence_count, hint}` detail-key surface. Template lift
-  to `.claude/templates/codex-pre-flight-review.md` section-5
+  Applied AT M24 pre-flight + impl review Codex prompts as
+  audit point W1 — all three rounds (pre-flight × 2 + impl
+  × 1) returned "W1: nothing flagged" against the new
+  `unknown_event_kind.details.{event, entity, occurrence_count,
+  hint}` + `internal_error.details.{item_id, board_id, hint,
+  issues}` detail-key surfaces. Template lift to
+  `.claude/templates/codex-pre-flight-review.md` section-5
   audit-points remains the outstanding work — fires at M25/
   M27 pre-flight kickoff; **R-NEW-18 sequential
   per-board fan-out builder** — surfaced at M23 impl
@@ -292,14 +259,21 @@ convention.
   5 sites across M21+M22+M23 (oauth + login + usage + favorites
   Stage 1 + Stage 2 + cross-board walker) migrated to the R18
   helper that already existed in `src/utils/parse-boundary.ts`
-  (same pattern miss + mass-migrate cadence as R-NEW-14/15/16); **R-NEW-20 `MondayClient` seam-
-  injection stub factory** — 2 consumers at M23 impl
-  (board-favorites + cross-board-search unit tests); LOW
-  priority watch-item. M24 pre-flight added no new test
-  consumers (action + walker stubs under `c8 ignore start/
-  stop`); 3rd consumer fires at M24 IMPLEMENTATION when
-  the runtime walker + action body land their unit-test
-  matrix;
+  (same pattern miss + mass-migrate cadence as R-NEW-14/15/16);
+  **R-NEW-20 `MondayClient` seam-injection stub factory** —
+  **3 consumers at M24 impl** (board-favorites +
+  cross-board-search + item-history-projection unit tests; 3rd
+  consumer landed at `tests/unit/api/item-history-projection
+  .test.ts:553` in `d058172`). Lift decision: keep stub factory
+  inline this session — the three sites share the seam pattern
+  (mock `client.raw` only) but each carries different routing
+  logic (favorites by `operationName`, cross-board by `boardId`
+  variable, item-history by `operationName`). Lifting now would
+  force a parametrised factory that doesn't meaningfully reduce
+  duplication; the shared shape is the contract surface, not
+  the routing logic. **Status: 3-consumer trigger fired but
+  lift deferred with rationale.** Re-evaluate at 4th consumer
+  (M27 webhooks candidate);
   **R-NEW-22 probe-script `main().catch()` runner** —
   surfaced at post-R-NEW-5 audit (`fb77baf`); 14+
   consumers but each instance is 3 trivial defensive lines
@@ -311,9 +285,10 @@ convention.
   **R-NEW-23 two-source chronological merge projector**
   — surfaced at M24 pre-flight (`bad98ba`,
   `mergeByCreatedAt` in `src/api/item-history-projection.ts`);
-  1 consumer today; LOW priority watch-item, fires at 2nd
-  consumer (likely M27 webhooks if account-scoped +
-  board-scoped surfaces need a merged stream); **R-NEW-24
+  M24 impl (`d058172`) kept the helper inline (single
+  consumer); LOW priority watch-item, fires at 2nd consumer
+  (likely M27 webhooks if account-scoped + board-scoped
+  surfaces need a merged stream); **R-NEW-24
   schema field-name drift (wire ↔ CLI) documentation
   pattern** — 3 sites today: M22 `daily_limit` /
   `platform_api.daily_limit`, M23 column-tokens /
@@ -326,14 +301,37 @@ convention.
   front" instruction** — M23 impl-review truncation lesson
   (v0.3-plan §15) drove a custom "deliver findings up
   front, not after exhaustive exploration" instruction on
-  M24 pre-flight Codex prompts. Both rounds returned
-  numbered findings cleanly without truncation,
-  validating the technique. The R-NEW-6 template at
-  `.claude/templates/codex-pre-flight-review.md` doesn't
-  currently carry this guidance — fold in at next
+  M24 pre-flight + impl review Codex prompts. All three
+  rounds (pre-flight × 2 + impl × 1) returned numbered
+  findings cleanly without truncation, validating the
+  technique across three independent rounds. The R-NEW-6
+  template at `.claude/templates/codex-pre-flight-review.md`
+  doesn't currently carry this guidance — fold in at next
   pre-flight (M25 or M27) so the instruction is template-
   stable rather than per-prompt re-derived. LOW priority,
-  fires at next pre-flight prompt drafting.
+  fires at next pre-flight prompt drafting;
+  **R-NEW-26 defensive abort-listener race guard in async
+  test promises** — surfaced post-M24 impl (`4c83860`): three
+  tests in `tests/unit/cli/run.test.ts` flaked under full
+  coverage parallelism because the test's
+  `setTimeout(abort, 10ms)` could fire BEFORE the action's
+  promise constructor registered its `addEventListener
+  ('abort', ...)`. Node's AbortSignal does NOT replay 'abort'
+  for listeners attached after the event dispatched, so the
+  listener silently waited for an abort that already happened.
+  Fix: sync `if (signal.aborted) reject(...)` check before
+  listener registration. All three sites in run.test.ts now
+  carry the guard; LOW priority watch-item. Fires at next
+  async-abort-handling test site OR if the pattern repeats
+  enough to warrant a `buildAbortablePromise(signal,
+  onAbort)` helper in `tests/_helpers/`. The pattern lives
+  next to `.claude/rules/testing.md`'s
+  `c8 ignore start/stop` block-wrap discussion — the
+  race-window guards mentioned there are the production-side
+  analogue (`src/commands/auth/login.ts:fetchAccountId`'s
+  guards on the OAuth listener). Document the pattern at
+  v0.3-plan §22 R-NEW-26 entry for future-session
+  prophylactic application.
 
 ## Pre-flight contract diff discipline
 
