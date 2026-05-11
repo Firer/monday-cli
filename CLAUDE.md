@@ -11,7 +11,8 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M23 closed; M24 pre-flight ready (Decision 2 closed).**
+**v0.3-M23 closed; M24 pre-flight closed; M24 implementation
+unblocked.**
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
 `main`; M0–M23 closed. M23 implementation landed at `1f09a25`
 (cross-board `item search` + `board favorites` runtime bodies —
@@ -45,7 +46,7 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M23 implementation):**
+**Live numbers (post-M24 pre-flight):**
 - Test count: **2870** across 122 files (+3 post-cross-board-search
   saturation from the M24-prep branches-margin recovery pass:
   3 new tests in retry.test.ts targeting defensive paths +
@@ -65,15 +66,13 @@ in the plan docs — **do not duplicate them here**:
   93.27%, dry-run.ts 96.26%) are deferred — search.ts needs a
   cross-board `--where Owner=me` integration test; errors.ts +
   dry-run.ts uncovered branches are genuinely defensive.
-- ERROR_CODES count: **29** (unchanged — Decision 5's
-  hypothesised `complexity_budget_exhausted` rejected at
-  pre-flight; the M23 walker's three load-bearing warnings
-  (`inaccessible_boards`, `column_not_found_on_board`,
-  `cross_board_truncated`) and the favorites resolver's
-  `board_favorites_stale` warning are §6.1 `warnings[]` codes,
-  not `error.code` registry entries).
-  Command count: **77** (unchanged — `monday board favorites`
-  joined at M23 pre-flight; runtime body lift didn't add).
+- ERROR_CODES count: **29** (unchanged — Decision 2's
+  `unknown_event_kind` is a §6.1 `warnings[]` shape per the
+  M24-prep empirical probe ratification; the registry stays at
+  29 across M24 pre-flight too).
+  Command count: **77 → 78** — `monday item history <iid>`
+  joined at M24 pre-flight; M24 implementation will swap the
+  stub bodies for runtime walker without adding new commands.
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -89,32 +88,38 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M24 pre-flight contract diff (Decision 2 already closed).**
-   Decision 2 (history `kind` taxonomy) closed at the post-M23
-   M24-prep session via the live `scripts/probe/
-   m24-history-kinds.ts` empirical probe (2026-05-11; 19 rows
-   on a production board; full findings in v0.3-plan §8
-   Decision 2 closure). **Ratified shape**: zod discriminated
-   union (`kind` discriminator mapped from wire `event` —
-   schema field name drift) over the observed events
-   (`create_column`, `update_column_value`, `create_group`,
-   `board_workspace_id_changed`, `update_board_name`,
-   `update_board_nickname`) with an `unknown` fallback variant
-   + `unknown_event_kind` warning (§6.1 warnings[]; NOT
-   `error.code`). The walker filters
-   `entity = 'pulse'` to drop board-level noise; `item_ids`
-   alone doesn't exclude board-scoped events. Next session's
-   M24 pre-flight ships: new `src/api/item-history-projection
-   .ts` (stub) + `src/commands/item/history.ts` (stub); cli-
-   design §13 v0.3 entry; output-shapes.md new entry; the 3
-   remaining §3 M24 decisions (pagination shape; merge
-   semantics; streaming reuse of startNdjsonStream). Probe
-   tooling already shipped (`introspectType()` + `trialQuery()`
-   in `scripts/probe/_lib.ts`); no further probing needed
-   ahead of the contract diff. **Caveat to document at
-   contract-diff time**: activity_logs eventual-consistency
-   lag empirically >30s — CLI must NOT promise immediate-
-   history for newly-modified items.
+1. **M24 implementation — fill the stubbed `fetchItemHistory`
+   walker + `itemHistoryCommand.action` body.** Pre-flight
+   contract diff shipped this session (commit __SHA__): full
+   zod discriminated union historyEventSchema; argv schema
+   with `--since` / `--until` / `--activity-logs-page` /
+   `--updates-page` / `--limit` / `--kinds` / `--stream`;
+   cli-design §13 v0.3 entry; output-shapes.md new top-level
+   entry. M24 implementation drops in: (a) runtime
+   `fetchItemHistory` walker — issues `boards.activity_logs
+   (item_ids:, from:, to:, page:, limit:)` Stage 1, filters
+   `entity === 'pulse'`, projects each row via
+   `projectActivityLogRow`; issues `items(ids:).updates(...)
+   { replies { ... } }` Stage 2, projects via
+   `projectUpdateRow` + `projectReplyRow`, applies client-
+   side wall-clock filter on `Update.created_at`; merges
+   chronologically via `mergeByCreatedAt`; aggregates
+   `unknown_event_kind` warnings; (b) per-`column_type`
+   typed `before` / `after` projection inside
+   `projectActivityLogRow` for `update_column_value` events
+   (case-by-case: status → `{label, index}`, date → ISO,
+   etc.); (c) `monday item history <iid>` action body —
+   item-board lookup (existing `ItemBoardLookup`), call
+   `fetchItemHistory` with parsed argv, optional
+   `--kinds`-projection filter, optional `--stream` NDJSON
+   via `startNdjsonStream`, `emitSuccess` with
+   `SourceAggregator` merge of cache-state + live-fetch
+   source. Full unit + integration test matrix mirroring
+   M22/M23 cassette pattern (`MondayClient` seam-injection
+   stub factory — watch R-NEW-20 third-consumer trigger);
+   target +60–90 tests, branches margin 0.52pp → ≥0.4pp
+   post-impl. Eventual-consistency lag >30s caveat already
+   pinned in cli-design §13 v0.3 entry + verb help text.
 2. **Branches-margin recovery, deferred residuals.** retry.ts +
    filters.ts saturated in the M24-prep pass (margin 0.30pp →
    0.52pp; target exceeded). Three deferred files carry the

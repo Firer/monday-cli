@@ -147,6 +147,15 @@ import { usageCommand } from './usage.js';
 // runtime cross-board fan-out walker + the 2-stage favorites
 // resolver per cli-design §13 v0.3 entries.
 import { boardFavoritesCommand } from './board/favorites.js';
+// M24 (v0.3) — `monday item history <iid>`. Per-item activity log
+// + comment-thread merged chronologically. Pre-flight stub
+// registers the argv shape (`--since` / `--until` / `--kinds` /
+// `--stream` / per-source page flags); implementation lands the
+// two-source walker (`activity_logs(item_ids:)` filtered to
+// `entity = 'pulse'` per Decision 2 closure `a1f3025` + `updates`
+// + Reply fan-out + merge projector ordered by `created_at`) at
+// the M24 implementation session.
+import { itemHistoryCommand } from './item/history.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -206,6 +215,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemFindCommand,
     itemSearchCommand,
     itemSubitemsCommand,
+    itemHistoryCommand,
     itemSetCommand,
     itemClearCommand,
     itemUpdateCommand,

@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
-| [item (reads)](#item-reads) | list, get, find, search, subitems |
+| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24 stub) |
 | [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
@@ -1657,6 +1657,116 @@ Collection. Like `item list` but routed through Monday's
 ### `item subitems <item-id>`
 
 Collection of direct subitems. Sorted by ID asc per page.
+
+### `item history <iid>` (v0.3-M24)
+
+Per-item activity log + comment thread merged chronologically.
+Pre-flight stub at `__SHA__` registers the argv shape + the typed
+event-object discriminated union; runtime two-source walker
+(`boards.activity_logs(item_ids:, ...)` + `items.updates(...)`)
+lands at M24 implementation per cli-design §13 v0.3 entry.
+
+The output is a flat array of typed event-objects discriminated
+on `kind`. Variants (per Decision 2 closure `a1f3025`):
+
+| `kind` | source | `before` | `after` |
+|---|---|---|---|
+| `update_column_value` | `activity_logs` (item-scoped) | `unknown` (raw `previous_value` JSON; typed at M24 impl) | `unknown` (raw `value` JSON) |
+| `create_column` / `create_group` / `update_board_name` / `update_board_nickname` / `board_workspace_id_changed` | `activity_logs` (board-scoped — filtered out at walker via `entity = 'pulse'`; kept as defensive parser variants) | `unknown` | `unknown` |
+| `update_posted` | `updates` (synthesized) | `null` | `{body, text_body, reply_count}` |
+| `update_replied` | `updates.replies` (synthesized, one per Reply row) | `null` | `{body, text_body}` |
+| `unknown` | `activity_logs` (fallback for unrecognised wire events) | `null` | raw `data` JSON; raw `event` + `entity` slots on the event for agent introspection |
+
+Every variant carries `id` + `created_at` + `actor_id` + `kind`.
+`update_column_value` additionally carries `column_id` +
+`column_type` + `textual_value` + `pulse_id` + `pulse_name`.
+`update_replied` additionally carries `parent_update_id` +
+`reply_kind` (Reply's own taxonomy — separate from
+`activity_logs.event`).
+
+Sample envelope with a mixed-source merged stream (ordered by
+`created_at` ascending):
+
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "act-1001",
+      "created_at": "2026-05-10T09:00:00Z",
+      "actor_id": "12345",
+      "kind": "update_column_value",
+      "column_id": "status",
+      "column_type": "status",
+      "before": { "id": 0 },
+      "after": { "id": 2 },
+      "textual_value": "Working on it",
+      "pulse_id": "2880477916",
+      "pulse_name": "Refactor login"
+    },
+    {
+      "id": "upd-5001",
+      "created_at": "2026-05-10T09:15:00Z",
+      "actor_id": "12345",
+      "kind": "update_posted",
+      "before": null,
+      "after": {
+        "body": "<p>Started the auth refactor</p>",
+        "text_body": "Started the auth refactor",
+        "reply_count": 1
+      }
+    },
+    {
+      "id": "rep-7001",
+      "created_at": "2026-05-10T09:30:00Z",
+      "actor_id": "67890",
+      "kind": "update_replied",
+      "parent_update_id": "upd-5001",
+      "reply_kind": "reply",
+      "before": null,
+      "after": {
+        "body": "<p>+1 — need this by Thursday</p>",
+        "text_body": "+1 — need this by Thursday"
+      }
+    }
+  ],
+  "meta": { /* §6.1 */ },
+  "warnings": []
+}
+```
+
+**Possible warnings:**
+- `unknown_event_kind` — Monday's `activity_logs` returned an
+  event value not in the typed-variant set. Surfaced as a typed
+  fallback on the `data` array (kind: `unknown` carrying raw
+  `event` + `entity` + `data`) AND a `warnings[]` entry with
+  `{event, entity, occurrence_count, hint}`. Aggregation: one
+  warning per unique unrecognised event (NOT per occurrence) so
+  the array stays bounded on degenerate inputs. **NOT an
+  `error.code` registry entry** per Decision 2 closure — the
+  29-stable-error-code registry stays at 29.
+
+**Eventual-consistency caveat (M24 pre-flight empirical probe
+finding, 2026-05-11).** Monday's `activity_logs` has a
+propagation lag empirically >30s on freshly-edited boards.
+Agents polling `monday item history` after a write should wait
+at least 30s before expecting the new event to surface.
+
+**Pagination.** Per-source page-numbered: `--activity-logs-page
+<n>` (1-indexed; Monday's `activity_logs(page:, limit:)`) +
+`--updates-page <n>` (1-indexed; independent denominator).
+`--limit <n>` is the per-source per-call slice (default 100,
+hard cap 10000 per Monday's documented ceiling).
+
+**Streaming (`--stream`).** NDJSON output via
+`startNdjsonStream` (R52). The merge is NOT incremental (the
+entire `--since`-bounded slice must be resident to order it);
+the NDJSON path emits the merged array post-merge with the
+trailer carrying per-source pagination state for resumption.
+
+`meta.source: "live"` (both sources are pure live reads in v0.3;
+M24 impl's action layer aggregates with the item-board lookup's
+cache state via `SourceAggregator`).
 
 ---
 

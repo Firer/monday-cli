@@ -1794,8 +1794,45 @@ monday item delete <iid> --yes [--dry-run]                                   v0.
                                           # No `restore` — see §5.4
 monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.4
                                           # polls; emits NDJSON change events
-monday item history <iid>                 # activity log: status / col / assign  v0.3
-                                          # changes + comments, chronological
+monday item history <iid> [--since <iso>] [--until <iso>] [--activity-logs-page <n>] [--updates-page <n>] [--limit <n>] [--kinds <list>] [--stream]   v0.3
+                                          # activity log: status / column / group /
+                                          # board edits + comment thread, merged
+                                          # chronologically by created_at ascending
+                                          # (ties broken by id lexicographic). Two-
+                                          # source GraphQL merge:
+                                          # `boards.activity_logs(item_ids:, from:,
+                                          # to:, page:, limit:)` for board-stored
+                                          # events + `items.updates(page:, limit:)
+                                          # { replies { ... } }` for comment thread.
+                                          # Walker filters `entity = 'pulse'` to
+                                          # drop board-scoped events (the `item_ids`
+                                          # filter alone is INSUFFICIENT — empirical
+                                          # probe finding 2026-05-11). Discriminated-
+                                          # union event-objects per Decision 2
+                                          # closure (`a1f3025`): variants
+                                          # `update_column_value` (dominant item-
+                                          # scoped), `update_posted` /
+                                          # `update_replied` (synthesized from
+                                          # Update + Reply sources), board-scoped
+                                          # variants (filtered out at walker, kept
+                                          # as defensive parser-roundtrip targets),
+                                          # `unknown` fallback for forward-compat
+                                          # with new wire events. Unknown wire
+                                          # events surface a `unknown_event_kind`
+                                          # warning (§6.1 warnings[]; NOT a new
+                                          # error.code — registry stays at 29).
+                                          # **Eventual-consistency caveat**:
+                                          # Monday's `activity_logs` has an
+                                          # empirically-measured propagation lag
+                                          # >30s on freshly-edited boards; agents
+                                          # polling history after a write should
+                                          # wait at least 30s before expecting the
+                                          # new event to surface. `--stream` emits
+                                          # NDJSON via `startNdjsonStream` (R52);
+                                          # merge is non-incremental (full slice
+                                          # must be resident to order), trailer
+                                          # meta carries per-source `last_page`
+                                          # for resumption.
 
 # Time tracking — verb-shaped column-type extension (§5.2 carve-out 2)
 # DOCUMENTATION-ONLY at v0.3-M20: an empirical probe (2026-05-10,
@@ -6390,7 +6427,106 @@ scoped idempotent changes, and post comments narrating its work.**
   Introduces a new §6 envelope shape (event objects with
   `created_at`, `actor_id`, `kind`, `before` / `after`); distinct
   from the org-wide audit feed listed as a non-goal candidate in
-  §13.5
+  §13.5. **Decision 2 closure (M24 pre-flight; empirical probe
+  2026-05-11, `a1f3025`; 19 activity_logs rows captured on a
+  production board over 30 days; scripts/probe/m24-history-kinds.ts,
+  local-only per the probe-script gitignore convention).** Six
+  load-bearing findings reshape the M24 contract surface:
+  - **Schema field name is `event`, NOT `kind`.** Monday's
+    `ActivityLogType` exposes 7 NON_NULL String fields:
+    `account_id`, `created_at`, `data`, `entity`, `event`, `id`,
+    `user_id`. The CLI agent-facing discriminator stays `kind`
+    (domain-neutral) but maps 1:1 from the wire's `event` slot
+    inside the projector. Pre-flight pins the zod discriminated
+    union over the observed event taxonomy.
+  - **Observed item-scoped event taxonomy.** `update_column_value`
+    is the dominant ITEM-SCOPED kind (4× of 19 rows; the only
+    item-scoped event in the sample). Payload carries
+    `column_id` + `column_type` + `value` + `previous_value` +
+    `textual_value` + `pulse_id` + `pulse_name`;
+    `previous_value` is sometimes `{}` for first-set events
+    (decode defensively as "previously-unset"). Per-`column_type`
+    typed `before` / `after` projection lands case-by-case at
+    M24 implementation; pre-flight pins the discriminator +
+    raw-shape fallback (`before` / `after` as `z.unknown()`
+    slots).
+  - **`entity` field discriminates item-scoped from board-scoped
+    events.** Observed values: `pulse` (4×; item-scoped) and
+    `board` (15×; board-scoped — `create_column`, `create_group`,
+    `board_workspace_id_changed`, `update_board_name`,
+    `update_board_nickname`). The walker filters
+    `entity = 'pulse'` to drop board-level noise; **the
+    `item_ids` filter on `activity_logs(...)` is INSUFFICIENT on
+    its own** — passing it does NOT exclude board-scoped events
+    from the response. Board-scoped event variants stay in the
+    zod discriminated union as defensive parser-roundtrip
+    targets (so a regression that bypasses the entity filter
+    falls back to the typed variant rather than `unknown`).
+  - **Unknown-event-kind shape is `warnings[]`, not `error.code`.**
+    The 29-stable-error-code registry stays at 29. Unrecognised
+    event values surface under the `kind: 'unknown'` fallback
+    variant (carrying the raw wire `event` + `entity` + `data`
+    slots for agent introspection) alongside a
+    `unknown_event_kind` `warnings[]` entry with
+    `{event, entity, occurrence_count, hint}` details. One
+    warning per unique unrecognised event observed (not per
+    occurrence) so the warnings array stays bounded on
+    degenerate inputs.
+  - **Two-source merge.** The CLI merges
+    `boards.activity_logs(item_ids:, ...)` with
+    `items.updates(...)` chronologically by `created_at`
+    ascending; ties break by `id` lexicographic for
+    deterministic output across runs. Updates source
+    contributes synthesized `update_posted` (Update→event) +
+    `update_replied` (Reply→event, one per Reply row carrying
+    `parent_update_id` for thread reconstruction) variants.
+    `Reply.kind` is a SEPARATE taxonomy from
+    `activity_logs.event` — surfaced under the
+    `update_replied.reply_kind` slot for agent
+    introspection.
+  - **Eventual-consistency lag >30s.** Monday's `activity_logs`
+    has an empirically-measured propagation lag exceeding 30s
+    on freshly-edited boards. The verb's `--help` text + this
+    cli-design entry pin the caveat: agents polling history
+    after a write should wait at least 30s before expecting
+    the new event to surface. M24 implementation MUST NOT
+    promise immediate-history for newly-modified items.
+  **Pagination shape (M24 pre-flight decision close).** Per-
+  source page-numbered: `--activity-logs-page <n>` (1-indexed)
+  for `activity_logs(page:, limit:)`; `--updates-page <n>`
+  (1-indexed; independent denominator) for `updates(page:,
+  limit:)`. The two sources paginate independently — merging
+  them onto a single `--page <n>` flag would conflate two
+  different denominators. `--limit <n>` is the per-source
+  per-call slice (default 100; hard cap 10000 per Monday's
+  documented ceiling).
+  **Merge semantics (M24 pre-flight decision close).** Both
+  sources drain to the `--since <iso>` / `--until <iso>`
+  wall-clock cap (Monday's `activity_logs(from:, to:)` accepts
+  ISO8601DateTime args server-side; the updates source filters
+  client-side against `Update.created_at` since Monday's
+  `updates` resolver doesn't expose a wall-clock filter as of
+  API `2026-01`). The merge projector orders the unified
+  stream by `created_at` ascending with `id` lexicographic
+  tie-break.
+  **`before` / `after` shape (M24 pre-flight decision close).**
+  Per Decision 2: typed projection per `column_type` lands at
+  M24 implementation (case-by-case for `update_column_value`'s
+  `data.value` + `data.previous_value` JSON payloads); pre-
+  flight pins each variant's `before` / `after` slots as
+  `z.unknown()` carrying the raw parsed JSON payload. Comment-
+  event `before` is always `null` (append-only events);
+  `after` carries `{body, text_body, reply_count}` for
+  `update_posted` and `{body, text_body}` for `update_replied`.
+  **Streaming (M24 pre-flight decision close).** Reuses
+  `startNdjsonStream` (R52) when `--stream` is on. The merge
+  is NOT incremental (the entire `--since`-bounded slice must
+  be resident to order it); the NDJSON path emits the merged
+  array post-merge with the trailer carrying per-source
+  pagination state (`activity_logs.last_page` +
+  `updates.last_page`) + complexity + source. Agents
+  resuming a partial walk re-issue with the trailer's
+  `last_page` values bumped by 1 per source.
 - `board favorites` — current user's starred boards. Pairs with the
   v0.3 cross-board `item search` as a natural scoping lever
   (`item search --favorites`); shipping it in isolation buys little
