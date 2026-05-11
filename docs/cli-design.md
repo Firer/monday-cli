@@ -4944,16 +4944,36 @@ boundary as the M13 / M14 / M15 partial-success envelopes —
   `--set-raw` / `--where` / `--filter-json`);
 - the column-resolution pre-pass failed (e.g. token resolved
   to no column → the v0.1 fail-fast precedent applies; column
-  resolution is whole-call, not per-item).
+  resolution is whole-call, not per-item);
+- a per-item wire call surfaces an `internal_error`
+  (response missing the expected mutation root key, malformed
+  payload, schema drift) — `dispatchSequential` re-throws
+  these whole-call rather than papering over them as a
+  per-record slot, since `internal_error` signals CLI bugs
+  or Monday-side response drift that agents need to see
+  directly (M14 round-2 F1 / round-3 F1 precedent at
+  `src/api/partial-success-mutation.ts:82`);
+- a programmer-bug exception (TypeError / RangeError / etc.)
+  raised inside the per-item dispatch callback — non-
+  `MondayCliError` throws propagate through
+  `dispatchSequential`'s non-CliError branch unchanged,
+  surfacing as whole-call `internal_error` via the runner's
+  catch-all (mirrors `src/api/users-fan-out-mutation.ts`'s
+  resolver-fan-out treatment).
 
-Per-item dispatch failures NEVER bubble to top-level under
-`--continue-on-error` — they land per-record. This widens the
-partial-success contract uniformly: the M13 / M14 / M15 family
-captures resolver-leg + dispatch-leg per-target failures; M25
-captures dispatch-leg per-item failures under an explicitly-
-opted-in flag. The opt-in is critical for the v0.1 fail-fast
-default's preservation — agents who haven't migrated to read
-`data.results[]` continue to receive the v0.1 envelope shape.
+Recoverable per-item dispatch failures (every `MondayCliError`
+EXCEPT `internal_error` — `column_archived`,
+`validation_failed`, `complexity_exceeded`, `rate_limited`,
+`ambiguous_column`, `unsupported_column_type`, `usage_error`,
+`not_found`, etc.) DO NOT bubble to top-level under
+`--continue-on-error` — they land per-record in
+`data.results[]`. This widens the partial-success contract
+uniformly: the M13 / M14 / M15 family captures resolver-leg +
+dispatch-leg per-target failures; M25 captures dispatch-leg
+per-item failures under an explicitly-opted-in flag. The opt-in
+is critical for the v0.1 fail-fast default's preservation —
+agents who haven't migrated to read `data.results[]` continue
+to receive the v0.1 envelope shape.
 
 **Confirmation gate (`--yes`).** The bulk-update confirmation
 gate per §3.1 #7 still fires for `--continue-on-error` —

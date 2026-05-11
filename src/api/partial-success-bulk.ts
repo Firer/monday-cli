@@ -53,26 +53,28 @@
  * envelope it would have emitted on the v0.1 fail-fast bulk
  * path's success branch.
  *
- * **Stub bodies under `c8 ignore start/stop` block-wraps.**
- * M25 pre-flight contract diff (`d5839a9`) pins the module
- * signatures + per-item result schema; runtime body lift lands
- * at M25 implementation. The stub rejects with
- * `internal_error.details.hint` pointing at the M25 impl
- * session per the M21 oauth-stub / M24 history-stub precedent
- * (`5c07840` / `bad98ba`).
+ * **Shipped at M25 IMPL (`fe15181`).** Pre-flight contract
+ * diff (`d5839a9`) pinned the module signatures + per-item
+ * result schema + pure-helper bodies; the M25 IMPL feat fills
+ * the runtime body of `runPartialSuccessBulkUpdate` + drops
+ * the `c8 ignore start/stop` block-wraps that surrounded both
+ * the wrapper body and the action-body routing branch at
+ * `src/commands/item/update.ts:runBulk`. The `executeMutation`
+ * lift to `src/api/item-mutation-execute.ts` (renamed
+ * `executeItemMutation`) shipped ahead at `78889df` (R-NEW-29
+ * 3-consumer trigger: single-item + fail-fast bulk + M25
+ * partial-success bulk).
  *
- * **Per-item dispatch wiring.** At M25 impl, the runtime body
- * loops `dispatchSequential` over `matchedItemIds` with the
+ * **Per-item dispatch wiring.** Runtime body loops
+ * {@link dispatchSequential} over `matchedItemIds` with
  * id-field `'item_id'`. The per-item dispatch callback fires
- * one `executeMutation` call (lifted from
- * `commands/item/update.ts:executeMutation` or shared into
- * `src/api/item-mutation-execute.ts` if the test-double seam
- * demands it). Successes populate `results[i].item` with the
- * `ProjectedItem`; failures land in `results[i].error: {code,
- * message}` via `dispatchSequential`'s built-in error
- * decoration. `internal_error` codes re-throw as whole-call
- * (M14 round-2 F1 precedent — schema-drift in the response
- * MUST NOT be papered over as a per-item failure).
+ * one `executeItemMutation` call. Successes populate
+ * `results[i].item` with the `ProjectedItem` via a side-map
+ * fold; failures land in `results[i].error: {code, message}`
+ * via `dispatchSequential`'s built-in error decoration.
+ * `internal_error` codes re-throw as whole-call (M14 round-2
+ * F1 precedent — schema-drift in the response MUST NOT be
+ * papered over as a per-item failure).
  *
  * **`data.summary.failed_count` invariant.** The action body
  * derives `failed_count` from the result records
