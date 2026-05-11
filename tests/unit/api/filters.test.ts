@@ -176,16 +176,29 @@ describe('buildFilterRules', () => {
   });
 
   it('emits scalar compare_value for numeric < / <= / > / >=', async () => {
-    const out = await buildFilterRules({
-      metadata: meta,
-      resolveMe,
-      clauses: [parseWhereSyntax('Priority>=3')],
-    });
-    expect(out.queryParams?.rules[0]).toEqual({
-      column_id: 'numbers',
-      operator: 'greater_than_or_equals',
-      compare_value: '3',
-    });
+    // Exercises every binary numeric operator's case arm in
+    // wrapForOperator (filters.ts:409-413) — the original variant
+    // tested only `>=` despite the name; the missing arms shipped
+    // uncovered + drove the per-file branches percentage down at
+    // the post-M23 audit.
+    const cases: { input: string; operator: string }[] = [
+      { input: 'Priority<3', operator: 'lower_than' },
+      { input: 'Priority<=3', operator: 'lower_than_or_equals' },
+      { input: 'Priority>3', operator: 'greater_than' },
+      { input: 'Priority>=3', operator: 'greater_than_or_equals' },
+    ];
+    for (const c of cases) {
+      const out = await buildFilterRules({
+        metadata: meta,
+        resolveMe,
+        clauses: [parseWhereSyntax(c.input)],
+      });
+      expect(out.queryParams?.rules[0]).toEqual({
+        column_id: 'numbers',
+        operator: c.operator,
+        compare_value: '3',
+      });
+    }
   });
 
   it('emits no compare_value for unary :is_empty / :is_not_empty', async () => {

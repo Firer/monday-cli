@@ -354,6 +354,118 @@ describe('withRetry', () => {
     expect(caught).toMatchObject({ code: 'timeout' });
   });
 
+  it('default sleep — pre-aborted signal short-circuits inside the Promise executor', async () => {
+    // The outer `isAborted()` check (retry.ts:203/210) catches a
+    // pre-aborted signal in normal flow, so the defensive
+    // `signal.aborted` pre-check inside `defaultSleep` (retry.ts:
+    // 89-91) is unreachable via the natural retry path. Drive it
+    // by aborting synchronously inside the `random` callback —
+    // `random` runs between the catch block's isAborted check and
+    // the `await sleep(...)` call, so the abort lands between
+    // those points and the next thing to look at signal.aborted is
+    // defaultSleep's promise executor.
+    const ctrl = new AbortController();
+    let aborted = false;
+    let n = 0;
+    let caught: unknown;
+    try {
+      await withRetry(
+        (): Promise<never> => {
+          n++;
+          return Promise.reject(new ApiError('rate_limited', 'transient'));
+        },
+        {
+          retries: 2,
+          signal: ctrl.signal,
+          baseBackoffMs: 100,
+          maxBackoffMs: 100,
+          random: (): number => {
+            if (!aborted) {
+              aborted = true;
+              ctrl.abort('via-random');
+            }
+            return 0.5;
+          },
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: 'internal_error' });
+    expect(n).toBe(1);
+  });
+
+  it('signalAbortError falls back to "aborted" when reason is neither Error nor string', async () => {
+    // Exercises the non-Error non-string fallback in signalAbortError
+    // (retry.ts:111) AND the parallel fallback in wrapAbortAsApiError
+    // (retry.ts:164). Abort with a plain object reason during sleep:
+    // - defaultSleep's onAbort fires signalAbortError → reason is not
+    //   Error / not string → fallback to 'aborted' (line 111).
+    // - The promise rejects with that bare Error; retry's catch
+    //   re-wraps via wrapAbortAsApiError → reason still object →
+    //   fallback to 'aborted after N attempts' (line 164).
+    const ctrl = new AbortController();
+    let n = 0;
+    let caught: unknown;
+    try {
+      await withRetry(
+        async () => {
+          n++;
+          if (n === 1) {
+            setTimeout(() => { ctrl.abort({ via: 'object-reason' }); }, 20);
+            throw new ApiError('rate_limited', 'transient');
+          }
+          return await Promise.resolve('unreachable');
+        },
+        {
+          retries: 3,
+          signal: ctrl.signal,
+          baseBackoffMs: 200,
+          maxBackoffMs: 200,
+          random: fixedRandom(0.5),
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: 'internal_error' });
+    const apiErr = caught as MondayCliError;
+    expect(apiErr.message).toMatch(/aborted after \d+ attempt/);
+    expect(n).toBe(1);
+  });
+
+  it('exhausted-retry decoration preserves a present requestId', async () => {
+    // The final-error decoration at retry.ts:223 spreads requestId
+    // only when defined — covers the truthy arm of that conditional
+    // (existing exhaustion test throws without requestId).
+    let caught: MondayCliError | undefined;
+    try {
+      await withRetry(
+        async () => {
+          throw new ApiError('rate_limited', 'try again', {
+            retryAfterSeconds: 0,
+            requestId: 'req-fixture-001',
+            httpStatus: 429,
+            mondayCode: 'ComplexityException',
+          });
+          return await Promise.resolve(null);
+        },
+        {
+          retries: 2,
+          signal: liveSignal,
+          sleep: noopSleep,
+          random: fixedRandom(0.5),
+        },
+      );
+    } catch (err) {
+      caught = err as MondayCliError;
+    }
+    expect(caught?.requestId).toBe('req-fixture-001');
+    expect(caught?.httpStatus).toBe(429);
+    expect(caught?.mondayCode).toBe('ComplexityException');
+    expect((caught?.details as { attempts: number }).attempts).toBe(3);
+  });
+
   it('aborts mid-backoff and re-throws an abort error', async () => {
     const ctrl = new AbortController();
     let n = 0;

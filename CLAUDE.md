@@ -39,24 +39,25 @@ in the plan docs — **do not duplicate them here**:
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
 **Live numbers (post-M23 implementation):**
-- Test count: **2867** across 122 files (+2 post-R-NEW-21 from the
-  cross-board-search.ts defensive-path seam tests covering lines
-  483 + 765; was 2865 post-R-NEW-21).
-- Coverage: **99.02 / 95.75 / 99.21 / 99.21** (stmts / branches /
+- Test count: **2870** across 122 files (+3 post-cross-board-search
+  saturation from the M24-prep branches-margin recovery pass:
+  3 new tests in retry.test.ts targeting defensive paths +
+  1 extended existing filters.test.ts case covering all 4 numeric
+  comparison operators).
+- Coverage: **99.05 / 95.97 / 99.21 / 99.25** (stmts / branches /
   fns / lines), at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin shifted 0.24pp → 0.30pp** at the post-R-NEW-21
-  cross-board-search.ts defensive-path saturation pass. The
-  cross-board-search.ts file itself recovered 95.23% → **100%**
-  on branches (both uncovered branches at lines 483 + 765 now
-  covered by direct unit + seam-injected tests); aggregate gain
-  is limited to the +0.06pp the two branches contribute against
-  the 3554-branch denominator. The 0.4pp recovery target named
-  pre-session is partial — cross-board-search.ts is now
-  saturated, so any further branches-margin recovery has to come
-  from re-targeting onto a different file under `src/api/` or
-  `src/commands/` (largest remaining file-level gaps: dry-run.ts
-  96.26%, errors.ts 93.27%, filters.ts 89.36%, retry.ts 86.95%,
-  search.ts 88.23%). Above floor.
+  margin shifted 0.30pp → 0.52pp** at the M24-prep recovery pass —
+  exceeds the 0.4pp pre-session target by 0.12pp ahead of M24
+  denominator growth. retry.ts recovered 86.95% → 97.82% (lines
+  89-91 defaultSleep pre-aborted check + line 111 signalAbortError
+  fallback + line 223 requestId-present decoration); filters.ts
+  recovered 89.36% → 95.74% (lines 409-412 case statements for
+  `lower_than` / `lower_than_or_equals` / `greater_than` now
+  covered alongside the pre-existing `greater_than_or_equals`).
+  Remaining file-level gaps (item/search.ts 88.23%, errors.ts
+  93.27%, dry-run.ts 96.26%) are deferred — search.ts needs a
+  cross-board `--where Owner=me` integration test; errors.ts +
+  dry-run.ts uncovered branches are genuinely defensive.
 - ERROR_CODES count: **29** (unchanged — Decision 5's
   hypothesised `complexity_budget_exhausted` rejected at
   pre-flight; the M23 walker's three load-bearing warnings
@@ -96,20 +97,18 @@ convention.
    use the shipped `trialQuery(label, query, options?)`
    helper (R-NEW-21) — defaults match the 4 M23 probes'
    most-common settings.
-2. **Branches-margin recovery, residual gap.**
-   cross-board-search.ts saturated to 100% branches in the
-   post-R-NEW-21 follow-up (lines 483 + 765 covered;
-   aggregate 95.69 → 95.75, margin 0.24pp → 0.30pp). The
-   original 0.4pp target is partial — to close the residual
-   0.10pp before M24 lands its denominator growth, re-target
-   onto the next file-level gaps under `src/api/` and
-   `src/commands/`: `dry-run.ts` 96.26% (lines 289,
-   473-474, 1132); `retry.ts` 86.95% (lines 90-91);
-   `filters.ts` 89.36% (lines 403, 408-413);
-   `item/search.ts` 88.23% (lines 548-549, 569, 575);
-   `errors.ts` 93.27%. Each is a small bounded follow-up;
-   the M24 pre-flight kickoff session can ship 1-2 of
-   these alongside its contract diff.
+2. **Branches-margin recovery, deferred residuals.** retry.ts +
+   filters.ts saturated in the M24-prep pass (margin 0.30pp →
+   0.52pp; target exceeded). Three deferred files carry the
+   remaining residual: `item/search.ts` 88.23% — needs a new
+   cross-board integration test driving `--where Owner=me` to
+   cover buildPerBoardPlan's me-resolution helper (lines
+   546-549) + the same-column-twice push branch (line 575);
+   `errors.ts` 93.27% — defensive lines (272 message fallback,
+   318 status<400, 367 path-present) — could be c8-ignored OR
+   covered with targeted unit tests; `dry-run.ts` 96.26% —
+   defensive `env === undefined ? {}` spreads. Each is a small
+   bounded follow-up if a future session needs more margin.
 3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
