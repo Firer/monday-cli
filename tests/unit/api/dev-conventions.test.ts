@@ -289,42 +289,62 @@ describe('Codex M26a IMPL P2-1: per-check details discriminated union pinning', 
   });
 
   it('devDoctorCheckResultSchema rejects a fail WITHOUT details.reason', async () => {
+    // Codex round-3 P3-1: assert on the safeParse-issue path rather
+    // than generic throw — verifies the rejection is specifically at
+    // `details.reason`, not some unrelated schema mismatch.
     const mod = await import('../../../src/api/dev-conventions.js');
-    // The discriminated union's fail variant carries
-    // `details: failCheckDetailsSchema` with a required `reason`
-    // enum field — zod rejects with the native enum-mismatch error.
-    expect(() =>
-      mod.devDoctorCheckResultSchema.parse({
-        name: 'tasks_board_exists',
-        status: 'fail',
-        message: 'something failed',
-        details: { slot: 'tasks_board' },
-      }),
-    ).toThrow();
+    const result = mod.devDoctorCheckResultSchema.safeParse({
+      name: 'tasks_board_exists',
+      status: 'fail',
+      message: 'something failed',
+      details: { slot: 'tasks_board' },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const reasonIssue = result.error.issues.find(
+        (i) => i.path.join('.') === 'details.reason',
+      );
+      expect(reasonIssue).toBeDefined();
+    }
   });
 
   it('devDoctorCheckResultSchema rejects a fail with null details', async () => {
     const mod = await import('../../../src/api/dev-conventions.js');
-    expect(() =>
-      mod.devDoctorCheckResultSchema.parse({
-        name: 'tasks_board_exists',
-        status: 'fail',
-        message: 'something failed',
-        details: null,
-      }),
-    ).toThrow();
+    const result = mod.devDoctorCheckResultSchema.safeParse({
+      name: 'tasks_board_exists',
+      status: 'fail',
+      message: 'something failed',
+      details: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // Failure is at `details` itself — fail variant requires a
+      // structured object, not null.
+      const detailsIssue = result.error.issues.find(
+        (i) => i.path.join('.') === 'details',
+      );
+      expect(detailsIssue).toBeDefined();
+      expect(detailsIssue?.code).toBe('invalid_type');
+    }
   });
 
   it('devDoctorCheckResultSchema rejects an unknown reason enum value', async () => {
     const mod = await import('../../../src/api/dev-conventions.js');
-    expect(() =>
-      mod.devDoctorCheckResultSchema.parse({
-        name: 'tasks_board_exists',
-        status: 'fail',
-        message: 'something failed',
-        details: { reason: 'invented_reason_typo' },
-      }),
-    ).toThrow(/Invalid option/);
+    const result = mod.devDoctorCheckResultSchema.safeParse({
+      name: 'tasks_board_exists',
+      status: 'fail',
+      message: 'something failed',
+      details: { reason: 'invented_reason_typo' },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const reasonIssue = result.error.issues.find(
+        (i) => i.path.join('.') === 'details.reason',
+      );
+      expect(reasonIssue).toBeDefined();
+      // Zod's enum-mismatch issue code is `invalid_value`.
+      expect(reasonIssue?.code).toBe('invalid_value');
+    }
   });
 
   it('devDoctorCheckResultSchema accepts ok without reason', async () => {
