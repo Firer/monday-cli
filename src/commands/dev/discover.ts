@@ -10,8 +10,11 @@
  * accessible boards (optionally scoped via `--workspace <wid>` if
  * a future contract amendment opts that in), run the heuristic
  * via `groupCandidatesByDevNoun`, surface ambiguous / unmapped
- * nouns as warnings, and — when `--apply` is set — write the
- * resulting mapping into the active profile's
+ * nouns on the success envelope's `matches[]` array (zero-match
+ * surfaces with `matched: []`; ambiguous surfaces with
+ * `matched.length > 1`; no warning code registered at M26 pre-
+ * flight — round-1 + round-2 Codex P2 fix), and — when `--apply`
+ * is set — write the resulting mapping into the active profile's
  * `[profiles.<name>.dev]` block via `saveDevMapping`.
  *
  * Mirrors the M21 oauth-stub / M24 history-stub precedent — argv

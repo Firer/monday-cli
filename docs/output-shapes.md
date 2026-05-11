@@ -3477,13 +3477,19 @@ or a numeric sprint item ID. Returns a collection of
 Set a task's status to "Working on it" on the configured
 `tasks_board`. Returns the post-mutation `ProjectedItem` (mutation
 envelope per cli-design §6.4). Idempotent on equal status values.
+The top-level `resolved_ids` echo (per cli-design §5.3 step 2) carries
+the resolved status-column ID so an agent's "set then re-read" loop
+can use the stable ID without a second metadata lookup (round-2 Codex
+P3-1 — resolved_ids is a top-level mutation-envelope slot per
+`src/utils/output/envelope.ts:99-117`).
 
 ```json
 {
   "ok": true,
   "data": { /* ProjectedItem with columns.status.label = "Working on it" */ },
-  "meta": { /* §6.1 + §6.4 (resolved_ids echo) */ },
-  "warnings": []
+  "meta": { /* §6.1 */ },
+  "warnings": [],
+  "resolved_ids": { "status": "status_4" }
 }
 ```
 
@@ -3505,7 +3511,8 @@ under `meta`):
   "warnings": [],
   "side_effects": [
     { "kind": "update_created", "update_id": "5678901" }
-  ]
+  ],
+  "resolved_ids": { "status": "status_4" }
 }
 ```
 
@@ -3530,7 +3537,8 @@ Codex P1-2 fix):
   "warnings": [],
   "side_effects": [
     { "kind": "update_created", "update_id": "5678902" }
-  ]
+  ],
+  "resolved_ids": { "status": "status_4" }
 }
 ```
 

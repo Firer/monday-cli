@@ -10,7 +10,10 @@
  * the status change to "Stuck" via `executeItemMutation`, then
  * fire `update create` with the supplied `--reason <r>` body. The
  * two side-effects are surfaced in `data` (post-mutation
- * `ProjectedItem`) + `meta.side_effects` (`update_created` entry).
+ * `ProjectedItem`) + the top-level `side_effects` mutation-
+ * envelope slot per `src/utils/output/envelope.ts:99-117` (the
+ * `update_created` entry; round-2 Codex P2-4 fix —
+ * `side_effects` sits at envelope top-level, NOT under `meta`).
  *
  * **`--reason` is required.** Unlike `task done`'s optional
  * `--message`, blocking ALWAYS posts a comment with the reason —

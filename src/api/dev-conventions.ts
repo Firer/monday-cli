@@ -113,8 +113,9 @@ export type DevMapping = ProfileDevBlock;
  * Pinned in the order the heuristic considers them. Order matters
  * only for tie-breaking when a single board matches multiple
  * patterns (rare; e.g. a board named "Tasks & Bugs" matches both
- * `tasks` and `bugs` — the heuristic surfaces an ambiguity
- * warning rather than auto-mapping).
+ * `tasks` and `bugs` — the heuristic surfaces such ambiguity on
+ * the success envelope's `matches[]` array via
+ * `matched.length > 1` rather than auto-mapping).
  *
  * Localised workspaces (Spanish "Tareas", French "Sprints" — same
  * spelling but different language) round-trip the English form
@@ -157,8 +158,10 @@ export const discoverBoardCandidateSchema = z
 /**
  * One per-noun match result from the heuristic. The `matched`
  * array carries every board that matched the noun's patterns; the
- * heuristic surfaces ambiguity (>1 match) as a warning at the
- * `dev discover` action layer rather than auto-resolving silently.
+ * `dev discover` action layer surfaces ambiguity (`matched.length
+ * > 1`) and zero-match (`matched.length === 0`) cases via the
+ * success envelope's `matches[]` array rather than auto-resolving
+ * silently or emitting a warning code.
  */
 export interface DevNounMatchResult {
   readonly noun: keyof DevMapping;
@@ -215,8 +218,10 @@ export const matchBoardByConvention = (
  * Runs the heuristic across `candidates` and groups by dev-noun.
  * Returns one {@link DevNounMatchResult} per noun in
  * {@link DEV_NOUN_PATTERNS} order; nouns with zero matches surface
- * with empty `matched` arrays (the caller emits a warning per
- * unmapped noun). Pure helper — real implementation at pre-flight.
+ * with empty `matched` arrays (the caller surfaces these on the
+ * `dev discover` success envelope's `matches[]` array via
+ * `matched.length === 0` — no warning code registered at M26
+ * pre-flight). Pure helper — real implementation at pre-flight.
  */
 export const groupCandidatesByDevNoun = (
   candidates: readonly DiscoverBoardCandidate[],
@@ -260,8 +265,10 @@ export const buildDiscoverMappingFromMatches = (
 /**
  * Output shape for `monday dev discover` (cli-design §11.3 +
  * §4.3 `dev discover [--apply]` row). Surfaces the heuristic's
- * findings + the would-be-written mapping + per-noun warnings
- * for unmapped / ambiguous nouns.
+ * findings + the would-be-written mapping. Per-noun outcomes
+ * (matched / unmapped / ambiguous) are surfaced via the
+ * `matches[]` array's per-entry `matched.length` rather than
+ * via a separate warning surface.
  */
 export interface DevDiscoverOutput {
   readonly profile: string;
@@ -320,6 +327,16 @@ export const devConfigureOutputSchema = z
  * **Round-1 Codex fix (P2-2).** Added `bugs_board_exists` so the
  * `bugs_board` mapping slot is diagnosed by the doctor like every
  * other dev-noun slot.
+ *
+ * **Round-2 Codex fix (P2-3).** Replaced `epics_to_releases_relation`
+ * with `tasks_to_epics_relation` — the round-1 list had a relation
+ * check for an epic↔release wiring that no M26 verb consumes
+ * (there's no `dev release items` verb at v0.3), while the
+ * actually-consumed epic↔task relation (`dev epic items <eid>`
+ * walks tasks linked to a given epic) was missing. The release-
+ * to-epic relation can rejoin in a v0.3.x / v0.4 follow-up when /
+ * if a `dev release items` verb lands. Total check count holds at
+ * 10.
  */
 export const DEV_DOCTOR_CHECK_NAMES = [
   'tasks_board_exists',
@@ -331,7 +348,7 @@ export const DEV_DOCTOR_CHECK_NAMES = [
   'releases_board_exists',
   'bugs_board_exists',
   'tasks_to_sprints_relation',
-  'epics_to_releases_relation',
+  'tasks_to_epics_relation',
 ] as const;
 
 export type DevDoctorCheckName = (typeof DEV_DOCTOR_CHECK_NAMES)[number];

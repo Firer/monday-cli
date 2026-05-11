@@ -9,8 +9,10 @@
  * through items_page, and filter client-side by date-range against
  * `ctx.clock()` — `active` = today within [start, end]; `past` =
  * end < today; `future` = start > today. Sprints without
- * resolvable date columns are surfaced under `past` with a
- * `sprint_dates_missing` warning per cli-design §6.1.
+ * resolvable date columns fall through to the `past` bucket — no
+ * warning code registered at M26 pre-flight (round-1 + round-2
+ * Codex P2 fix); the structural drift is diagnosed via
+ * `dev doctor`'s `sprints_date_columns_present` check.
  *
  * **NaN-guard discipline.** Date parses (`Date.parse(startDate)`)
  * MUST `Number.isNaN`-guard before comparison — Monday's date

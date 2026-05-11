@@ -11,8 +11,10 @@
  * `--message <m>` is supplied — additionally fire `update create`
  * against the item with the message body. The two side-effects
  * are surfaced as `data` (the post-mutation `ProjectedItem`) +
- * `meta.side_effects` (per cli-design §6.4 — the `update_created`
- * entry carries the new update's ID).
+ * the top-level `side_effects` mutation-envelope slot per
+ * `src/utils/output/envelope.ts:99-117` (the `update_created`
+ * entry carries the new update's ID; round-2 Codex P2-4 fix —
+ * `side_effects` sits at envelope top-level, NOT under `meta`).
  *
  * **Idempotency caveat.** The status flip is idempotent (same as
  * `task start`); the optional `--message` post-create is NOT — a
