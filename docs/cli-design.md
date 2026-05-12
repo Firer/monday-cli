@@ -6932,6 +6932,25 @@ scoped idempotent changes, and post comments narrating its work.**
   at 29 — M27 wire failures route through existing codes
   (`not_found` / `usage_error` / `unauthorized` / `forbidden` /
   `validation_failed`).
+  **Implementation shipped** at `9cb6a74` (feat — 4 runtime
+  fetchers in `src/api/webhooks.ts` + `src/api/notifications.ts`
+  + 4 verb action bodies + 34 new integration tests across
+  `tests/integration/commands/{webhook,notification}.test.ts`)
+  + 4 Codex impl review rounds: `6f59a83` (round 1 — 0 P1 + 1 P2
+  + 1 P3; P2-1 pinned operationName literals on the 4 fetcher
+  inputs to close the R-NEW-37 W2 audit-point safely-by-
+  construction); `2402a76` (round 2 — 0 P1 + 0 P2 + 1 P3, W7
+  + W8 doc/test prose drift across 3 sites); `ff724fd` (round 3
+  — 0 P1 + 0 P2 + 1 P3', W8 prose precision across 4 sites);
+  `64d94d7` (round 4 — 0 P1 + 0 P2 + 1 P3'', W8 prose
+  precision across 2 final sites). Runtime behaviour converged
+  at round 1; W8 wording took 4 passes to fully reflect that
+  Monday validates target visibility as a `Project` but cannot
+  verify the CLI-declared `--target-type` (item-vs-board)
+  against the underlying record — the pairing is trusted, not
+  enforced. Coverage 99.08 / 95.92 / 99.29 / 99.31 post-close
+  (branches margin 0.47pp, up from 0.43pp at pre-flight). Test
+  count 3183 → 3217.
 
 ### v0.4 (polish + nice-to-haves)
 

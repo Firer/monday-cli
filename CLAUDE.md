@@ -11,41 +11,66 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M27 pre-flight pinned; M27 IMPL unblocked.**
-M27 pre-flight contract diff shipped at `af1c2f8` + Codex
-pre-flight review fix-ups across 3 rounds: round 1 `4c402d8`
-(1 P1 + 2 P2 + 3 P3 — `--dry-run` contract pin for all 3 write
-verbs + `listWebhooks` operationName pin + HTTPS-only URL guard
-+ R-NEW-37 template-stable ratification + event-family doc
-count rebalance + ids.ts header "eight ID kinds" bump) + round
-2 `deca893` (1 P1' + 1 P2 + 1 P3 — dry-run envelope `data: null`
-shape fix per `DryRunEnvelope` canonical contract + live-only
-wording narrowing + NotificationTargetType "two wire values"
-wording cleanup) + round 3 `affbb6b` (0 P1 + 1 P2'' + 1 P3 —
-collapsed `webhook delete --dry-run` to strictly argv-derived
-since `webhooks(board_id:)` is board-scoped + webhook/delete.ts
-stub surfaces dry-run support). Round 4 confirmed convergence
-with 0 P1 + 0 P2 + 0 P3 across all 6 W audit-points. M27 IMPL
-unblocked.
-**M27 pre-flight highlights.** Two new `src/api/*` modules
-(`webhooks.ts` with the 21-value `WEBHOOK_EVENT_TYPES` closed
-enum + `webhookSchema` + 3 stub fetchers; `notifications.ts`
-with the 2-value CLI-side `NOTIFICATION_TARGET_TYPES` enum +
-`notificationSendOutputSchema` + 1 stub fetcher) + 4 new
-command stubs (`webhook list/create/delete` +
-`notification send`) + one new ID brand (`WebhookIdSchema`).
-Cross-doc count bump: `command_count` 91 → 95; ERROR_CODES
-unchanged at 29 (M27 wire failures route through existing
-`not_found` / `usage_error` / `unauthorized` / `forbidden` /
-`validation_failed` codes). **Decision 9 (webhook event-type
+**v0.3-M27 closed end-to-end; M28 unblocked.**
+M27 IMPL shipped at `9cb6a74` (`feat(m27): runtime bodies for
+webhook list/create/delete + notification send`) + Codex impl
+review fix-ups across 4 rounds: round 1 `6f59a83` (0 P1 + 1 P2
++ 1 P3 — pinned operationName literals on all 4 fetcher input
+interfaces to close R-NEW-37 W2 audit-point safely-by-
+construction + two stale pre-IMPL docstring lines); round 2
+`2402a76` (0 P1 + 0 P2 + 1 P3 — W7 + W8 doc/test prose drift
+across 3 sites including a misnamed integration test); round 3
+`ff724fd` (0 P1 + 0 P2 + 1 P3' — W8 prose precision across 4
+sites correcting the round-2 overstatement of Monday's server-
+side kind validation); round 4 `64d94d7` (0 P1 + 0 P2 + 1 P3''
+— 2 final W8 sites Monday's wire doesn't cross-validate item-
+vs-board pairing). Runtime behaviour clean from round 1;
+rounds 2-4 were doc/test prose precision only. The W8 wire-
+semantics convergence (CLI validates enum + numeric ID shape;
+Monday validates target visibility as a `Project`; neither
+verifies the CLI-declared kind against the underlying record)
+took 4 passes to fully settle across 9 prose sites — filed as
+the lesson "doc/test prose precision can take 4+ rounds to
+converge for subtle wire semantics" in §20 M27 post-mortem.
+M27 pre-flight closed at `af1c2f8` + 3 round fix-ups (`4c402d8`
+/ `deca893` / `affbb6b`; round 4 converged).
+**M27 IMPL highlights.** 4 wire fetchers (`listWebhooks` /
+`createWebhook` / `deleteWebhook` in `src/api/webhooks.ts`;
+`sendNotification` in `src/api/notifications.ts`) each issuing
+a single `client.raw` round-trip with literal pinned
+operationNames (`Webhooks` / `CreateWebhook` / `DeleteWebhook`
+/ `CreateNotification`) — operationName is NO LONGER a
+caller-overridable input slot (round-1 P2-1 closure), so the
+R-NEW-37 W2 audit-point is satisfied safely-by-construction.
+4 verb action bodies wired via `emitSuccess` / `emitMutation`
+/ `emitDryRun` per §6.1 + §6.4 envelopes. `webhook delete`'s
+`enforceDestructiveGate` fires BEFORE `resolveClient` per the
+M10 round-1 P2 invariant. `webhook create --config <json>`
+parses the JSON once at the parse boundary (raw string would
+double-encode against Monday's `JSON` scalar); an absent
+`--config` omits the wire variable so Monday's per-event
+server-side default applies. `notification send`'s
+`--target-type item|board` argv collapses to wire
+`NotificationTargetType.Project` at the fetcher boundary; the
+CLI-declared kind is trusted + echoed in the envelope but
+NOT verified against the underlying record (Monday only
+validates target visibility as a `Project`).
+**M27 pre-flight highlights** (last session, carried for
+context): Two new `src/api/*` modules (`webhooks.ts` with the
+21-value `WEBHOOK_EVENT_TYPES` closed enum +
+`notifications.ts` with the 2-value CLI-side
+`NOTIFICATION_TARGET_TYPES` enum) + 4 new command stubs +
+`WebhookIdSchema` brand. **Decision 9 (webhook event-type
 validation)** closed inline at pre-flight via the empirical-
 probe-pinned 21-value enum (probe ran 2026-05-12, API
 `2026-01`). **R-NEW-37 (Codex template W2 audit-point for
 GraphQL operation-name / named-operation parity) shipped** at
-round-1 P3-1 fix-up — `.claude/templates/codex-pre-flight
--review.md` now carries W2 as template-stable alongside W1
-(redactor); 2nd confirming repetition fired when round-1 P2-1
-caught `listWebhooks` missing its operationName pin.
+pre-flight round-1 P3-1 fix-up — `.claude/templates/codex-pre-
+flight-review.md` carries W2 as template-stable alongside W1
+(redactor). M27 IMPL fired W2's first IMPL-side audit run
+and caught a real P2 (round-1 caller-overridable
+operationName slots), validating the audit-point's IMPL-side
+utility.
 **v0.3-M26 closed end-to-end** (carried over from prior
 session).
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
@@ -177,7 +202,7 @@ findings in v0.3-plan §8.
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
-  §16 M24, §17 M25, §18 M26a, §19 M26b post-mortems + §22 R-class
+  §16 M24, §17 M25, §18 M26a, §19 M26b, §20 M27 post-mortems + §22 R-class
   backlog (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 +
   R-NEW-14/15/16 + R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 +
   R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 + R-NEW-37
@@ -189,38 +214,40 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M27 pre-flight close):**
-- Test count: **3183** across 127 files (+0 net at M27 pre-
-  flight — pre-flight stubs are c8-wrapped so no new
-  behavioural tests; the envelope snapshot test recomputes
-  `command_count: 91 → 95` automatically. M27 IMPL adds the
-  full test surface for the 4 new verbs).
-- Coverage: **99.07 / 95.88 / 99.27 / 99.30** (stmts / branches
+**Live numbers (post-M27 IMPL close):**
+- Test count: **3217** across 129 files (+34 net at M27 IMPL
+  — 24 new integration tests at
+  `tests/integration/commands/webhook.test.ts` covering happy
+  paths + dry-run envelopes + confirmation gate ordering +
+  not_found / internal_error surfaces + LEAK_CANARY redaction
+  sanity; 10 new at `tests/integration/commands/notification.test.ts`
+  covering both target-types collapsing to wire `Project` +
+  dry-run envelope + argv validation).
+- Coverage: **99.08 / 95.92 / 99.29 / 99.31** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.43pp** (unchanged at M27 pre-flight —
-  stub bodies under `c8 ignore start/stop` block-wraps don't
-  widen the branches denominator). Three deferred
+  **Branches margin 0.47pp** (was 0.43pp at M27 pre-flight;
+  +0.04pp recovery — runtime bodies replaced previously-c8-
+  ignored stubs, contributing covered branches that net
+  positive against the IMPL-added denominator). Three deferred
   file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
-  ~95.37%, `dry-run.ts` 96.26% — same set as pre-M26a (genuinely
-  defensive or requires new cross-board integration test).
-  **v8 instrumentation glitch on `dev-conventions.ts`** —
-  carried over from M26b close; investigate at M28 release-prep
-  if it spreads further. Watch whether the new
-  `src/api/webhooks.ts` and `src/api/notifications.ts` modules
-  trip the same glitch at M27 IMPL.
-- ERROR_CODES count: **29** (unchanged at M27 pre-flight — M27
+  ~95.37%, `dry-run.ts` 96.26% — same set as pre-M26a
+  (genuinely defensive or requires new cross-board
+  integration test). **v8 instrumentation glitch on
+  `dev-conventions.ts`** (M26b carry-over) did NOT spread to
+  the 6 new M27 modules — `coverage/lcov.info` shows full
+  FNF/FNH parity on `src/api/{webhooks,notifications}.ts` +
+  the 4 verb modules. Investigate at M28 release-prep only if
+  the glitch spreads.
+- ERROR_CODES count: **29** (unchanged at M27 IMPL — M27
   routes webhook + notification runtime failures through the
-  existing `not_found` (missing board / missing webhook),
-  `usage_error` (unknown event-type / malformed URL via the
-  `WEBHOOK_EVENT_TYPES` parse-boundary check + the HTTPS-only
-  `z.url({ protocol: /^https$/u })` guard), `unauthorized`
-  (token lacks webhook-management scope), `forbidden` (account
-  permissions), `validation_failed` (Monday-side rejection)
-  codes).
-  Command count: **95** (was 91 at M26b close; +4 at M27
-  pre-flight — `webhook list/create/delete` +
-  `notification send`). 4 stubs added; runtime bodies fill at
-  M27 IMPL.
+  existing `not_found` (target missing / `Project` invisible),
+  `usage_error` (unknown event-type / malformed URL / malformed
+  --config JSON / non-numeric --target ID), `unauthorized`
+  (token lacks webhook-management or notification scope),
+  `forbidden` (account permissions), `validation_failed`
+  (Monday-side rejection) codes).
+  Command count: **95** (unchanged from M27 pre-flight — IMPL
+  fills the 4 stub bodies; commands don't add/remove).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -236,66 +263,48 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M27 IMPL — runtime bodies for `webhook list/create/delete`
-   + `notification send`.** M27 pre-flight pinned the contract
-   surface at `af1c2f8` (+ 3 round fix-ups: `4c402d8` /
-   `deca893` / `affbb6b`; round 4 confirmed convergence). IMPL
-   fills 6 stub bodies: 4 wire fetchers in `src/api/webhooks.ts`
-   (`listWebhooks`, `createWebhook`, `deleteWebhook`) +
-   `src/api/notifications.ts` (`sendNotification`) + 4 verb
-   action bodies (the wire fetcher count is 4, not 6; the 4
-   verb action bodies use the 4 fetchers respectively). Pre-
-   flight docstrings already pin the GraphQL operation names
-   (`Webhooks` / `CreateWebhook` / `DeleteWebhook` /
-   `CreateNotification` — R-NEW-37 W2 template-stable
-   audit-point now catches any drift at impl review).
-   **Per-verb shape highlights:**
-   - `webhook list <bid>`: single `Query.webhooks(board_id:)`
-     round-trip + project through `webhookSchema`. Live-only;
-     no pagination (Monday returns the full list in one shot).
-   - `webhook create <bid> --url <u> --event <e>
-     [--config <json>] [--dry-run]`: `client.raw` against
-     `CreateWebhook` mutation; `--config` threaded through as
-     JSON scalar (opaque CLI-side). HTTPS-only URL guard fires
-     at parse boundary (P2-2 fix at round 1). `--dry-run` is
-     strictly argv-derived (`meta.source: "none"`,
-     `planned_changes: [{operation, board_id, url, event,
-     config}]`).
-   - `webhook delete <wid> --yes [--dry-run]`: `client.raw`
-     against `DeleteWebhook`. Confirmation gate via
-     `enforceDestructiveGate({verb: 'webhook delete', target:
-     parsed.webhookId, detailKey: 'webhook_id', ...})` per the
-     M10 / M15 / M16 pattern. `--dry-run` is strictly argv-
-     derived — no pre-mutation read (round-3 P2-1'' closure;
-     `webhooks(board_id:)` is board-scoped but the verb's argv
-     carries no board ID).
-   - `notification send --user <uid> --target <iid|bid>
-     --target-type item|board --text <t> [--dry-run]`:
-     `client.raw` against `CreateNotification`. CLI's 2-value
-     `target-type` maps to wire `Project` (both items and
-     boards collapse to that enum value on the wire); CLI
-     verifies the `--target <id>` actually names the supplied
-     kind via a wire round-trip (or skips the verification
-     for performance — IMPL decides). Output echoes the
-     inputs alongside `id` + `text` for agent verification.
-   **Expected size:** M (4 verb action bodies + 4 wire
-   fetchers; no new helpers expected — all wire calls are
-   single-shot; no items_page walks). Mirror the M24/M25/M26b
-   IMPL cadence: feat commit per noun + per Codex round
-   fix-ups.
-   **Test surface to add:** unit tests on the api/* fetcher
-   stubs once they ship (response parsing, error rewrap if
-   needed); integration tests at
-   `tests/integration/commands/webhook.test.ts` +
-   `tests/integration/commands/notification.test.ts` covering
-   happy path + each Monday-side failure mode (e.g.
-   `not_found` on missing board, `usage_error` on unknown
-   event, `validation_failed` on Monday-side rejection,
-   `confirmation_required` on missing `--yes`, `--dry-run`
-   envelopes for the 3 write verbs).
-   **R-NEW-37 W2 audit-point now template-stable** — the
-   Codex impl review prompt will catch any operation-name /
-   named-op drift at impl review time.
+1. **M28 pre-flight — multi-level subitems + 0.3.0 release
+   prep.** M27 closed end-to-end at `64d94d7` (4 IMPL Codex
+   rounds, runtime converged at round 1). M28 is the v0.3
+   closing milestone — bundles multi-level subitem creation
+   + release prep into a single milestone per v0.3-plan §3.
+   **Pre-flight gates** (per v0.3-plan §9 "Before M28
+   starts"):
+   - **Decision 10 — subitem hierarchy depth limit.** Monday
+     allows arbitrary subitem nesting; the CLI surface needs
+     to pick a max depth (0 = item-only / 1 = items + 1
+     subitem level / N = arbitrary nesting). Empirical-probe
+     candidate before pre-flight.
+   - **Decision 11 — multi-level subitem creation as v0.3
+     scope.** Either lands via a cli-design §13 v0.3
+     amendment PR (extending the v0.3 contract) OR
+     resolves as "drop from M28; M28 ships polish + release
+     prep only". The amendment PR is the harder path —
+     budget for the discussion + Codex review of the
+     cli-design diff before any code ships.
+   - **0.3.0 release prep** — envelope-snapshot suite
+     refresh, README quickstart updates, CHANGELOG 0.3.0
+     entry, version bump in `package.json`. **OAUTH_CLIENT_ID
+     / OAUTH_CLIENT_SECRET swap** is the externally-blocked
+     pre-publish prerequisite (register a Monday OAuth app at
+     https://developer.monday.com/apps with redirect URI
+     `http://127.0.0.1:9876/callback`, then swap the
+     constants in `src/api/oauth.ts`). Until then production
+     users hit `oauth_failed.code_exchange_failed` on `monday
+     auth login`; tests don't depend on the values
+     (cassettes intercept `/oauth2/token`).
+   **R-NEW-40 watch-item fires if M28 adds a new write
+   verb** — the audit-point asks the reviewer to verify
+   `[--dry-run]` discipline on every NEW write verb's §4.3
+   row + output-shapes.md entry. M28 has at least one
+   write-verb candidate (`monday item create-subitem-tree
+   <bid> --tree <json>` or similar if Decision 11 lands), so
+   plan to enumerate R-NEW-40 explicitly at M28 pre-flight
+   round 1.
+   **R-NEW-41 watch-item fires if M28 surfaces another
+   asymmetric wire-type pair** — likely candidate is the
+   v0.4 `add_file_to_column` if M28 reaches that surface
+   (probably not in M28 scope, but watch).
 2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
@@ -307,19 +316,21 @@ convention.
    targeted unit tests; `dry-run.ts` 96.26% — defensive
    `env === undefined ? {}` spreads. Each is a small bounded
    follow-up if a future session needs more margin (margin
-   at 0.34pp post-M26b-IMPL, comfortable surplus above floor
-   but worth investing for M27's new runtime surface).
+   at 0.47pp post-M27-IMPL, comfortable surplus above floor
+   but worth investing during M28 release prep before 0.3.0
+   tag).
 3. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+
-   integration tests exercising the new helpers. Same
-   module-level glitch the M25 close noted on
-   `partial-success-bulk.ts`; pre-M26b `dev-conventions.ts`
-   v8-instrumented correctly so something about the M26b
-   additions trips per-module instrumentation. Investigate
-   at M28 release-prep if it spreads further (the workaround
-   is `coverage.include` overrides in `vitest.config.ts` if
-   it becomes systematic).
+   integration tests exercising the new helpers. M27 IMPL
+   did NOT spread the glitch — all 6 new M27 modules show
+   full FNF/FNH parity in `coverage/lcov.info`. The glitch
+   remains isolated to `dev-conventions.ts`; investigate at
+   M28 release-prep before 0.3.0 tag (the workaround is
+   `coverage.include` overrides in `vitest.config.ts` if it
+   becomes systematic; currently the file-level lcov gap
+   doesn't drag the global percentages below floor so it's
+   cosmetic).
 4. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
@@ -335,7 +346,7 @@ convention.
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M27 pre-flight close):**
+**R-class state (post-M27 IMPL close):**
 - **R-NEW-35 — `_shared.ts:requireDevBoard` slot-check helper
   (10 consumers at M26b).** Per-noun
   `mapping[slot] === undefined → throw dev_not_configured`
@@ -362,18 +373,22 @@ convention.
   3-consumer threshold. Shipped at `10cd1c5` + `34a5bc1`.
   **Status: shipped.**
 - **R-NEW-37 — Codex template audit-point for GraphQL
-  operation-name / named-operation parity (2 consumers
-  across M26b + M27).** Shipped at M27 pre-flight Codex
-  round-1 P3-1 fix-up (`4c402d8`). The M26b round-2 P1-1
-  catch (static-named doc + per-call operationName override
-  would have failed live) was the 1st confirming repetition;
-  M27 pre-flight round-1 P2-1 (`listWebhooks` shipped with
-  no operationName pin) was the 2nd. Template extension lifted
-  W2 to template-stable status in
-  `.claude/templates/codex-pre-flight-review.md` alongside
-  W1 (redactor-pattern). W2 returned "nothing flagged" on
-  its first 3 template-stable runs (M27 rounds 2-4).
-  **Status: shipped.**
+  operation-name / named-operation parity (3 consumers
+  across M26b + M27 pre-flight + M27 IMPL).** Shipped at M27
+  pre-flight Codex round-1 P3-1 fix-up (`4c402d8`). The M26b
+  round-2 P1-1 catch was the 1st confirming repetition; M27
+  pre-flight round-1 P2-1 was the 2nd; **M27 IMPL round-1
+  P2-1 (`6f59a83`) was the 3rd — first IMPL-side W2 catch,
+  validating the audit-point's IMPL-side utility.** The
+  pre-flight stubs documented expected operationNames in
+  docstrings only; the IMPL feat shipped with the unsafe
+  `inputs.operationName ?? '<PinnedName>'` shape leaving the
+  exported contract caller-overridable. W2's IMPL-side run
+  caught it; fix dropped the slot entirely. W2 then returned
+  "nothing flagged" across M27 IMPL rounds 2-4 (3 confirming
+  clean runs). **Status: shipped; 7 total template-stable
+  runs across M27 (4 pre-flight + 3 IMPL post-round-1) with
+  1 P2 catch (round-1 IMPL) and 6 clean runs.**
 - **R-NEW-38 — sprint date-range helpers lift out of
   `commands/dev/sprint/list.ts:_internals` (3 consumers at
   M26b IMPL).** Shipped at the post-M26b drift sweep. Moved
@@ -436,22 +451,28 @@ convention.
   confirming repetition (M28 if Decision 11 amendment lands
   + introduces a `create-subitem-tree` or similar write
   verb).
-- **R-NEW-41 — Asymmetric wire-type schema documentation
-  pattern (1 consumer at M27; LOW priority watch-item).**
-  Surfaced at M27 pre-flight empirical probe Finding 4.
-  Monday's `Webhook.config` is `JSON` scalar on
-  `create_webhook` input + `String` scalar on read. The
-  CLI's `webhookSchema.config: z.string().nullable()`
-  mirrors the read-side; the create-input passes through
-  opaque at the JSON-scalar boundary. **Not a code lift**
-  — the asymmetry is wire-side fact, not CLI surface; the
-  CLI just mirrors what Monday returns. Documentation
-  pattern candidate: if a 2nd + 3rd asymmetric-type site
-  appears (v0.4 `add_file_to_column` is a candidate), the
-  asymmetry might warrant a shared
-  `## Wire-type asymmetry conventions` documentation
-  section alongside R-NEW-24's potential field-name
-  appendix.
+- **R-NEW-41 — Asymmetric wire-vs-CLI semantics
+  documentation pattern (2 consumers at M27; LOW priority
+  watch-item).** Surfaced at M27 pre-flight empirical probe
+  Finding 4 (asymmetric `Webhook.config` typing — `JSON`
+  scalar on `create_webhook` input + `String` scalar on
+  read). **M27 IMPL surfaced a 2nd consumer of the same
+  class**: Monday's `NotificationTargetType` wire enum
+  collapses CLI's 2-value `--target-type item|board` into
+  a single wire `Project` value, meaning the CLI-declared
+  kind can't be cross-validated against the underlying
+  record at any layer. The W8 wire-semantics convergence
+  took 4 Codex IMPL rounds to settle across 9 prose sites
+  (§20 M27 post-mortem "Contract drift findings" #2)
+  because the asymmetry is subtle. Different shape
+  (cardinality-collapse vs scalar-type-mismatch) but same
+  documentation-precision-needed class. **Not a code lift**
+  — both asymmetries are wire-side facts. **Watch-item
+  fires at 3rd consumer for a shared
+  `## Wire-vs-CLI semantics documentation conventions`
+  section** in `docs/architecture.md`, possibly alongside
+  R-NEW-24's potential field-name appendix. v0.4
+  `add_file_to_column` is the next likely candidate.
 - R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
   2 consumers (M22 usage + M23 favorites); M26 dev namespace
   doesn't introduce a 3rd consumer (the workflow verbs are
