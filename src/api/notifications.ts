@@ -69,9 +69,13 @@ import type { Complexity } from '../utils/output/envelope.js';
  * --target-type <type>`. Both values map to Monday's wire
  * `NotificationTargetType.Project` (which represents both items and
  * boards) — the CLI keeps the item-vs-board distinction for argv
- * validation discipline (the runtime body at M27 IMPL will verify
- * the supplied `--target <id>` actually names an item or board to
- * match the supplied type before firing the wire mutation).
+ * validation discipline AND to echo the agent-supplied kind in the
+ * output envelope. The CLI does NOT pre-verify the supplied
+ * `--target <id>` against the declared type — Monday's server-side
+ * validation surfaces mismatches as `not_found` at mutation time;
+ * doubling the wire-call count to pre-read the target would add no
+ * agent-visible recovery surface and is deferred (v0.3.x / v0.4
+ * contract-extension if needed).
  *
  * Monday's wire enum has only two values (`Post` / `Project`); the
  * `Post` value targets Updates and is intentionally not surfaced
@@ -119,7 +123,6 @@ export interface SendNotificationInputs {
   readonly targetId: string;
   readonly targetType: NotificationTargetType;
   readonly text: string;
-  readonly operationName?: string;
 }
 
 export interface SendNotificationResult {
@@ -192,7 +195,7 @@ export const sendNotification = async (
       targetType: wireTargetType,
       text: inputs.text,
     },
-    { operationName: inputs.operationName ?? 'CreateNotification' },
+    { operationName: 'CreateNotification' },
   );
   assertResponseFieldPresent({
     data: response.data,

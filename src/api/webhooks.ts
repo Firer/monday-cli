@@ -25,8 +25,10 @@
  * `create_webhook` arg is typed `JSON` (any valid JSON value); the
  * read-side `Webhook.config` field is typed `String` (Monday echoes
  * back the stored JSON-encoded string). The CLI's read schema treats
- * `config` as `string | null`; the create-input passes `--config`
- * through as a JSON string at the wire boundary.
+ * `config` as `string | null`; the create-input parses `--config`
+ * once at the parse boundary (in the command's action body) and
+ * threads the resulting JS value to Monday's `JSON` scalar (sending
+ * the raw string would double-encode).
  *
  * **Decision 9 (webhook event-type validation) — CLOSED at M27
  * pre-flight via the `WEBHOOK_EVENT_TYPES` 21-value closed enum.**
@@ -188,7 +190,6 @@ export type WebhookDeleteOutput = Webhook;
 export interface ListWebhooksInputs {
   readonly client: MondayClient;
   readonly boardId: string;
-  readonly operationName?: string;
 }
 
 export interface ListWebhooksResult {
@@ -232,7 +233,7 @@ export const listWebhooks = async (
   const response = await inputs.client.raw<unknown>(
     LIST_WEBHOOKS_QUERY,
     { boardId: inputs.boardId },
-    { operationName: inputs.operationName ?? 'Webhooks' },
+    { operationName: 'Webhooks' },
   );
   const parsed = unwrapOrThrow(
     listWebhooksResponseSchema.safeParse(response.data),
@@ -271,7 +272,6 @@ export interface CreateWebhookInputs {
    * argument entirely so Monday's per-event default applies.
    */
   readonly config?: unknown;
-  readonly operationName?: string;
 }
 
 export interface CreateWebhookResult {
@@ -333,7 +333,7 @@ export const createWebhook = async (
   const response = await inputs.client.raw<CreateWebhookResponse>(
     CREATE_WEBHOOK_MUTATION,
     variables,
-    { operationName: inputs.operationName ?? 'CreateWebhook' },
+    { operationName: 'CreateWebhook' },
   );
   assertResponseFieldPresent({
     data: response.data,
@@ -371,7 +371,6 @@ export const createWebhook = async (
 export interface DeleteWebhookInputs {
   readonly client: MondayClient;
   readonly webhookId: string;
-  readonly operationName?: string;
 }
 
 export interface DeleteWebhookResult {
@@ -414,7 +413,7 @@ export const deleteWebhook = async (
   const response = await inputs.client.raw<DeleteWebhookResponse>(
     DELETE_WEBHOOK_MUTATION,
     { id: inputs.webhookId },
-    { operationName: inputs.operationName ?? 'DeleteWebhook' },
+    { operationName: 'DeleteWebhook' },
   );
   assertResponseFieldPresent({
     data: response.data,
