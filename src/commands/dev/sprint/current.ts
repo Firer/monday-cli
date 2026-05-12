@@ -22,6 +22,9 @@ import { parseArgv } from '../../parse-argv.js';
 import { emitSuccess } from '../../emit.js';
 import { resolveClient } from '../../../api/resolve-client.js';
 import {
+  classifySprint,
+  dayEpoch,
+  extractDateRange,
   loadDevMapping,
   walkDevBoardItems,
 } from '../../../api/dev-conventions.js';
@@ -30,7 +33,6 @@ import {
   projectedItemSchema,
   type ProjectedItem,
 } from '../../../api/item-projection.js';
-import { _internals as listInternals } from './list.js';
 
 const inputSchema = z.object({}).strict();
 
@@ -85,17 +87,13 @@ export const devSprintCurrentCommand: CommandModule<
           now: ctx.clock,
         });
 
-        const todayEpoch = listInternals.dayEpoch(ctx.clock().toISOString());
+        const todayEpoch = dayEpoch(ctx.clock().toISOString());
         /* c8 ignore next 3 */
         if (todayEpoch === null) {
           throw new Error('unreachable: ctx.clock() produced an unparseable ISO string');
         }
         const active = items.find(
-          (i) =>
-            listInternals.classifySprint(
-              listInternals.extractDateRange(i),
-              todayEpoch,
-            ) === 'active',
+          (i) => classifySprint(extractDateRange(i), todayEpoch) === 'active',
         );
         if (active === undefined) {
           throw new ApiError(

@@ -29,6 +29,9 @@ import { parseArgv } from '../../parse-argv.js';
 import { emitSuccess } from '../../emit.js';
 import { resolveClient } from '../../../api/resolve-client.js';
 import {
+  classifySprint,
+  dayEpoch,
+  extractDateRange,
   extractLinkedItemIds,
   findRelationColumnIdToBoard,
   hydrateDevBoardColumns,
@@ -42,7 +45,6 @@ import {
   type ProjectedItem,
 } from '../../../api/item-projection.js';
 import type { Complexity } from '../../../utils/output/envelope.js';
-import { _internals as listInternals } from '../sprint/list.js';
 
 const TASK_STATUS_LITERALS = ['not_done', 'done', 'stuck', 'working_on_it'] as const;
 export type TaskStatusFilter = (typeof TASK_STATUS_LITERALS)[number];
@@ -213,17 +215,13 @@ export const devTaskListCommand: CommandModule<
               operationName: 'DevTaskListSprintCurrent',
               now: ctx.clock,
             });
-            const todayEpoch = listInternals.dayEpoch(ctx.clock().toISOString());
+            const todayEpoch = dayEpoch(ctx.clock().toISOString());
             /* c8 ignore next 3 */
             if (todayEpoch === null) {
               throw new Error('unreachable: ctx.clock() produced an unparseable ISO string');
             }
             const active = sprintWalk.items.find(
-              (i) =>
-                listInternals.classifySprint(
-                  listInternals.extractDateRange(i),
-                  todayEpoch,
-                ) === 'active',
+              (i) => classifySprint(extractDateRange(i), todayEpoch) === 'active',
             );
             if (active === undefined) {
               throw new ApiError(

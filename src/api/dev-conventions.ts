@@ -152,6 +152,7 @@ import { paginate } from './pagination.js';
 import {
   idFromRawItem,
   projectItem,
+  type ProjectedColumn,
   type ProjectedItem,
 } from './item-projection.js';
 import { ITEM_FIELDS_FRAGMENT, parseRawItem } from './item-helpers.js';
@@ -1511,6 +1512,112 @@ export const saveDevMapping = async (
 // rather than the per-verb files so the wire-call surface lives
 // one module away from the action body.
 // =============================================================
+
+/**
+ * Sprint date-range state literal — `active` (today within range),
+ * `past` (range ended before today), `future` (range starts after
+ * today). Surfaced as the argv shape for `dev sprint list --state`
+ * + the classification output of {@link classifySprint}.
+ *
+ * R-NEW-38 lift (post-M26b drift sweep): hoisted from
+ * `commands/dev/sprint/list.ts:_internals` after the 3-consumer
+ * threshold fired across `sprint/list.ts` + `sprint/current.ts` +
+ * `task/list.ts` (the verb-file-to-verb-file cross-import via
+ * `_internals` was the anti-pattern that surfaced the lift).
+ */
+export const SPRINT_STATE_LITERALS = ['active', 'past', 'future'] as const;
+export type SprintState = (typeof SPRINT_STATE_LITERALS)[number];
+
+/**
+ * Parses a YYYY-MM-DD string into an epoch-ms day boundary (UTC).
+ * NaN-guards per the M24 round-2 P3-1 precedent (`4c83860`) —
+ * returns `null` on an unparseable / malformed date so the caller
+ * falls through to the `past` default rather than emitting NaN-
+ * shaped state buckets.
+ */
+export const dayEpoch = (raw: string | null | undefined): number | null => {
+  if (raw === null || raw === undefined || raw.length === 0) return null;
+  // Truncate any time component — Monday's date columns carry just
+  // YYYY-MM-DD; timeline columns carry plain YYYY-MM-DD too.
+  const head = raw.slice(0, 10);
+  const epoch = Date.parse(`${head}T00:00:00Z`);
+  if (Number.isNaN(epoch)) return null;
+  return epoch;
+};
+
+export interface SprintDateRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+const firstDate = (col: ProjectedColumn | undefined): string | null => {
+  if (col === undefined) return null;
+  return typeof col.date === 'string' ? col.date : null;
+};
+
+/**
+ * Extracts a sprint's date range from its projected columns. Prefers
+ * a `timeline` column (parses `value.from` / `value.to`); falls back
+ * to the first two `date` columns sorted by id (single date column
+ * = single-day range; reversed start/end auto-normalised by epoch).
+ * Returns `null` when no usable date columns are present.
+ */
+export const extractDateRange = (
+  item: ProjectedItem,
+): SprintDateRange | null => {
+  const cols = Object.values(item.columns);
+  // Prefer the timeline column when present.
+  const timeline = cols.find((c) => c.type === 'timeline');
+  if (timeline !== undefined && timeline.value !== null && typeof timeline.value === 'object') {
+    const v = timeline.value as { from?: unknown; to?: unknown };
+    const start = typeof v.from === 'string' ? dayEpoch(v.from) : null;
+    const end = typeof v.to === 'string' ? dayEpoch(v.to) : null;
+    if (start !== null && end !== null) {
+      return { start, end };
+    }
+  }
+  // Fall back to date columns (sorted by id for deterministic
+  // start/end assignment).
+  const dateCols = cols
+    .filter((c) => c.type === 'date')
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const firstEpoch = dateCols.length > 0
+    ? dayEpoch(firstDate(dateCols[0]))
+    : null;
+  const secondEpoch = dateCols.length > 1
+    ? dayEpoch(firstDate(dateCols[1]))
+    : null;
+  if (firstEpoch === null) return null;
+  if (secondEpoch === null) {
+    // Single date column = single-day "range".
+    return { start: firstEpoch, end: firstEpoch };
+  }
+  // Order-normalise — lowest epoch is start regardless of column id
+  // order (a user who named columns "end_date" / "start_date" would
+  // otherwise get reversed ranges).
+  if (secondEpoch < firstEpoch) {
+    return { start: secondEpoch, end: firstEpoch };
+  }
+  return { start: firstEpoch, end: secondEpoch };
+};
+
+/**
+ * Classifies a sprint's state from its date range + the current
+ * day's epoch. Sprints without a resolvable date range default to
+ * `past` so a `--state past` filter catches misconfigured rows
+ * (the structural drift is diagnosed via `dev doctor`'s
+ * `sprints_date_columns_present` check; no warning code).
+ */
+export const classifySprint = (
+  range: SprintDateRange | null,
+  todayEpoch: number,
+): SprintState => {
+  if (range === null) return 'past';
+  if (todayEpoch < range.start) return 'future';
+  if (todayEpoch > range.end) return 'past';
+  return 'active';
+};
 
 /**
  * True iff the `details.issues` array carries exactly the

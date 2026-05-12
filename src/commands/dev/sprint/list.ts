@@ -32,18 +32,20 @@ import { parseArgv } from '../../parse-argv.js';
 import { emitSuccess } from '../../emit.js';
 import { resolveClient } from '../../../api/resolve-client.js';
 import {
+  SPRINT_STATE_LITERALS,
+  classifySprint,
+  dayEpoch,
+  extractDateRange,
   loadDevMapping,
   walkDevBoardItems,
 } from '../../../api/dev-conventions.js';
 import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
-  type ProjectedColumn,
   type ProjectedItem,
 } from '../../../api/item-projection.js';
 
-const SPRINT_STATE_LITERALS = ['active', 'past', 'future'] as const;
-export type SprintState = (typeof SPRINT_STATE_LITERALS)[number];
+export type { SprintState } from '../../../api/dev-conventions.js';
 
 const inputSchema = z
   .object({
@@ -52,82 +54,6 @@ const inputSchema = z
   .strict();
 
 const outputSchema = z.array(projectedItemSchema);
-
-/**
- * Parses a YYYY-MM-DD string into an epoch-ms day boundary (UTC).
- * NaN-guards per the M24 round-2 P3-1 precedent — returns `null` on
- * an unparseable / malformed date so the caller falls through to
- * the `past` default rather than emitting NaN-shaped buckets.
- */
-const dayEpoch = (raw: string | null | undefined): number | null => {
-  if (raw === null || raw === undefined || raw.length === 0) return null;
-  // Truncate any time component — Monday's date columns carry just
-  // YYYY-MM-DD; timeline columns carry plain YYYY-MM-DD too.
-  const head = raw.slice(0, 10);
-  const epoch = Date.parse(`${head}T00:00:00Z`);
-  if (Number.isNaN(epoch)) return null;
-  return epoch;
-};
-
-interface DateRange {
-  readonly start: number;
-  readonly end: number;
-}
-
-/**
- * Extracts a sprint's date range from its projected columns.
- * Returns `null` when neither a usable timeline column nor a
- * single/pair of date columns is present.
- */
-const extractDateRange = (item: ProjectedItem): DateRange | null => {
-  const cols = Object.values(item.columns);
-  // Prefer the timeline column when present.
-  const timeline = cols.find((c) => c.type === 'timeline');
-  if (timeline !== undefined && timeline.value !== null && typeof timeline.value === 'object') {
-    const v = timeline.value as { from?: unknown; to?: unknown };
-    const start = typeof v.from === 'string' ? dayEpoch(v.from) : null;
-    const end = typeof v.to === 'string' ? dayEpoch(v.to) : null;
-    if (start !== null && end !== null) {
-      return { start, end };
-    }
-  }
-  // Fall back to date columns (sorted by id for deterministic
-  // start/end assignment).
-  const dateCols = cols
-    .filter((c) => c.type === 'date')
-    .slice()
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const firstEpoch = dateCols.length > 0
-    ? dayEpoch(firstDate(dateCols[0]))
-    : null;
-  const secondEpoch = dateCols.length > 1
-    ? dayEpoch(firstDate(dateCols[1]))
-    : null;
-  if (firstEpoch === null) return null;
-  if (secondEpoch === null) {
-    // Single date column = single-day "range".
-    return { start: firstEpoch, end: firstEpoch };
-  }
-  // Order-normalise — lowest epoch is start regardless of column id
-  // order (a user who named columns "end_date" / "start_date" would
-  // otherwise get reversed ranges).
-  if (secondEpoch < firstEpoch) {
-    return { start: secondEpoch, end: firstEpoch };
-  }
-  return { start: firstEpoch, end: secondEpoch };
-};
-
-const firstDate = (col: ProjectedColumn | undefined): string | null => {
-  if (col === undefined) return null;
-  return typeof col.date === 'string' ? col.date : null;
-};
-
-const classifySprint = (range: DateRange | null, todayEpoch: number): SprintState => {
-  if (range === null) return 'past';
-  if (todayEpoch < range.start) return 'future';
-  if (todayEpoch > range.end) return 'past';
-  return 'active';
-};
 
 export const devSprintListCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -214,9 +140,3 @@ export const devSprintListCommand: CommandModule<
   },
 };
 
-// Exported for unit testing.
-export const _internals = {
-  dayEpoch,
-  extractDateRange,
-  classifySprint,
-};

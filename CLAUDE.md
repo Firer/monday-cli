@@ -144,11 +144,10 @@ in the plan docs — **do not duplicate them here**:
   §16 M24, §17 M25, §18 M26a, §19 M26b post-mortems + §22 R-class
   backlog (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 +
   R-NEW-14/15/16 + R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 +
-  R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 shipped +
-  R-NEW-2 / R-NEW-3 candidates open + R-NEW-38 (sprint-state
-  helpers lift, MEDIUM-priority overdue) + R-watch-items including
-  R-NEW-20 / R-NEW-26 / R-NEW-28 / R-NEW-31 / R-NEW-32 / R-NEW-33 /
-  R-NEW-37 / R-NEW-39).
+  R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 + R-NEW-38
+  shipped + R-NEW-2 / R-NEW-3 candidates open + R-watch-items
+  including R-NEW-20 / R-NEW-26 / R-NEW-28 / R-NEW-31 / R-NEW-32 /
+  R-NEW-33 / R-NEW-37 / R-NEW-39).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -165,11 +164,12 @@ in the plan docs — **do not duplicate them here**:
   rewrap regression + round-2 P1-1 GraphQL operation-name parity
   regression + round-2 P2-1 narrowed-rewrap regression; 1 skipped
   unchanged — auth-probe real-network placeholder).
-- Coverage: **99.04 / 95.79 / 99.28 / 99.31** (stmts / branches
+- Coverage: **99.07 / 95.88 / 99.27 / 99.30** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.34pp** (was 0.51pp post-M26a; small dip
-  from the 10 new dev workflow verbs widening the denominator —
-  stays above floor with comfortable surplus). Three deferred
+  **Branches margin 0.43pp** (was 0.34pp at M26b IMPL close;
+  recovered 0.09pp at the post-M26b drift sweep via the
+  R-NEW-38 lift dropping the `_internals` re-export shim
+  uncovered surface). Three deferred
   file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
   ~95.37%, `dry-run.ts` 96.26% — same set as pre-M26a (genuinely
   defensive or requires new cross-board integration test).
@@ -330,18 +330,20 @@ convention.
   `delete_webhook` mutations).
 - **R-NEW-38 — sprint date-range helpers lift out of
   `commands/dev/sprint/list.ts:_internals` (3 consumers at
-  M26b IMPL; lift overdue).** Surfaced at the post-M26b drift
-  sweep. `sprint/list.ts` exports a private `_internals`
-  namespace carrying `dayEpoch` + `extractDateRange` +
-  `classifySprint`; two other verb files (`sprint/current.ts`,
-  `task/list.ts`) cross-import the namespace to find the
-  active sprint. The cross-verb-file import is an anti-pattern
-  the rest of the M26b R-NEW-36 cluster avoids. **MEDIUM
-  priority** — already past R7/R8 3-consumer threshold; lift
-  is ~30 LOC + 3 import statements with no behaviour change.
-  Documented; lift expected at the next session touching the
-  `commands/dev/sprint/` cluster (M27 doesn't; M28 cleanup or
-  a focused post-M27 sweep is the natural slot).
+  M26b IMPL).** Shipped at the post-M26b drift sweep. Moved
+  `dayEpoch` + `extractDateRange` + `classifySprint` + the
+  `SprintState` literal union + `SPRINT_STATE_LITERALS` const
+  from `sprint/list.ts:_internals` to
+  `src/api/dev-conventions.ts`; updated imports in
+  `sprint/current.ts` + `task/list.ts`; dropped the
+  `_internals` re-export shim. Behaviour preserved — all
+  3183 tests pass; coverage even improved slightly (branches
+  margin 0.34pp → 0.43pp). The initial drift-sweep draft
+  filed this as MEDIUM-priority "lift overdue" + deferred to
+  M28; on re-evaluation against the project's lift discipline
+  (R-NEW-29/30/35/36 all shipped at 3-consumer threshold),
+  deferring was inconsistent + the right call was to ship
+  inline. **Status: shipped.**
 - **R-NEW-39 — `projectedStatusLabel` / `taskStatusLabel`
   first-status-column helper duplication (2 consumers, M26b;
   LOW priority watch-item).** Surfaced at the post-M26b drift
