@@ -1526,6 +1526,28 @@ export const saveDevMapping = async (
  * envelope reflects the freshest budget snapshot per `cli-design.md`
  * §6.1 — mirrors the {@link paginate} walker's idiom.
  */
+/**
+ * True iff the `details.issues` array carries exactly the
+ * `boards`/`too_small` zod issue `fetchItemsPage`'s `.min(1)` schema
+ * raises on an empty `boards` response. Used by
+ * {@link walkDevBoardItems} to narrow the `internal_error` →
+ * `dev_board_misconfigured` rewrap to the specific runtime mapping
+ * drift surface; other schema-drift parse failures (e.g. Monday
+ * adding a required field we haven't modeled) keep their original
+ * `internal_error` + `details.issues` shape (Codex round-2 P2-1 fix).
+ */
+const isEmptyBoardsArrayIssue = (
+  details: Readonly<Record<string, unknown>> | undefined,
+): boolean => {
+  const issues = (details as { issues?: unknown } | undefined)?.issues;
+  if (!Array.isArray(issues)) return false;
+  return issues.some((issue: unknown): boolean => {
+    if (typeof issue !== 'object' || issue === null) return false;
+    const i = issue as { path?: unknown; code?: unknown };
+    return i.path === 'boards' && i.code === 'too_small';
+  });
+};
+
 export const walkDevBoardItems = async (inputs: {
   readonly client: MondayClient;
   readonly boardId: string;
@@ -1564,21 +1586,28 @@ export const walkDevBoardItems = async (inputs: {
       now: inputs.now,
     });
   } catch (err) {
-    // Codex M26b IMPL round-1 P2-2: an inaccessible dev board (deleted /
-    // access revoked / never existed) returns `{boards: []}`, which
-    // `fetchItemsPage`'s `.min(1)` schema rejects as malformed → bare
-    // `internal_error`. For a dev workflow read that's runtime mapping
-    // drift; rewrap to the namespace-stable `dev_board_misconfigured`
-    // with `reason: 'not_accessible'`, mirroring
-    // `hydrateDevBoardColumns`'s shape so the per-verb error surface is
-    // consistent across read + mutation paths. Narrow by both code +
-    // `details.board_id` so we don't accidentally swallow unrelated
-    // internal errors.
+    // Codex M26b IMPL round-1 P2-2 + round-2 P2-1: an inaccessible
+    // dev board (deleted / access revoked / never existed) returns
+    // `{boards: []}`, which `fetchItemsPage`'s `.min(1)` schema rejects
+    // as malformed → bare `internal_error`. For a dev workflow read
+    // that's runtime mapping drift; rewrap to the namespace-stable
+    // `dev_board_misconfigured` with `reason: 'not_accessible'`,
+    // mirroring `hydrateDevBoardColumns`'s shape so the per-verb error
+    // surface is consistent across read + mutation paths.
+    //
+    // **Narrowed to the exact `boards`/`too_small` zod issue** (round-2
+    // P2-1 fix) so genuine schema drift on the items_page payload
+    // (e.g. Monday adding a required field we haven't modeled) still
+    // surfaces as `internal_error` with the full `details.issues`
+    // array intact — without the narrowing, ANY parse failure carrying
+    // this board's `board_id` would have collapsed into a misleading
+    // `not_accessible` rewrap that drops the failing field path.
     if (
       err instanceof ApiError &&
       err.code === 'internal_error' &&
       (err.details as { board_id?: unknown } | undefined)?.board_id ===
-        inputs.boardId
+        inputs.boardId &&
+      isEmptyBoardsArrayIssue(err.details)
     ) {
       throw new ApiError(
         'dev_board_misconfigured',
@@ -1849,8 +1878,20 @@ export interface DevCreateUpdateResult {
   readonly complexity: Complexity | null;
 }
 
-const DEV_CREATE_UPDATE_MUTATION = `
-  mutation DevCreateUpdate($itemId: ID!, $body: String!) {
+/**
+ * Builds the `create_update` mutation document with the supplied
+ * operation name embedded as the GraphQL named-operation. Codex
+ * round-2 P1-1 fix: prior to this builder, the doc was statically
+ * named `DevCreateUpdate` while the wire `operationName` was per-
+ * verb (`DevTaskDoneCreateUpdate` / `DevTaskBlockCreateUpdate`).
+ * GraphQL servers may reject mismatched operationName + named-op
+ * pairs ("Operation 'DevTaskDoneCreateUpdate' not found"); making
+ * the two agree at every call site removes the drift class.
+ * Mirrors the static pattern `executeItemMutation` uses (constants
+ * where doc name + operationName always match).
+ */
+const buildCreateUpdateMutation = (operationName: string): string => `
+  mutation ${operationName}($itemId: ID!, $body: String!) {
     create_update(item_id: $itemId, body: $body) {
       id
     }
@@ -1876,7 +1917,7 @@ export const fireDevCreateUpdate = async (inputs: {
   readonly operationName: string;
 }): Promise<DevCreateUpdateResult> => {
   const response = await inputs.client.raw<unknown>(
-    DEV_CREATE_UPDATE_MUTATION,
+    buildCreateUpdateMutation(inputs.operationName),
     { itemId: inputs.itemId, body: inputs.body },
     { operationName: inputs.operationName },
   );

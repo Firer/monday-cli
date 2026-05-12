@@ -2621,6 +2621,91 @@ describe('M26b branch-coverage backfills', () => {
     expect(envelope.resolved_ids).toEqual({ status: 'status' });
   });
 
+  it('task block create_update wire query is named to match the operationName (Codex round-2 P1-1)', async () => {
+    await seedTasksOnly(env.home, '100');
+    // The cassette match_query string asserts the GraphQL document
+    // carries the named operation `DevTaskBlockCreateUpdate`, which
+    // MUST match the operationName field on the wire body.
+    const cassette: Cassette = {
+      interactions: [
+        taskHydrate('DevTaskBlockHydrate'),
+        {
+          operation_name: 'ItemUpdateSimple',
+          response: projectedTaskResponse('5001', 'Stuck'),
+        },
+        {
+          operation_name: 'DevTaskBlockCreateUpdate',
+          match_query: 'mutation DevTaskBlockCreateUpdate',
+          response: { data: { create_update: { id: '90201' } } },
+        },
+      ],
+    };
+    const { exitCode } = await driveDev(
+      ['dev', 'task', 'block', '5001', '--reason', 'reason', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  it('task done create_update wire query is named to match the operationName (Codex round-2 P1-1)', async () => {
+    await seedTasksOnly(env.home, '100');
+    const cassette: Cassette = {
+      interactions: [
+        taskHydrate('DevTaskDoneHydrate'),
+        {
+          operation_name: 'ItemUpdateSimple',
+          response: projectedTaskResponse('5001', 'Done'),
+        },
+        {
+          operation_name: 'DevTaskDoneCreateUpdate',
+          match_query: 'mutation DevTaskDoneCreateUpdate',
+          response: { data: { create_update: { id: '90202' } } },
+        },
+      ],
+    };
+    const { exitCode } = await driveDev(
+      ['dev', 'task', 'done', '5001', '--message', 'done!', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  it('walkDevBoardItems lets genuine schema drift surface as internal_error, not dev_board_misconfigured (Codex round-2 P2-1)', async () => {
+    await seedFullMapping(env.home);
+    // Boards array has one entry but items_page is malformed
+    // (missing cursor key). Parse-boundary issue is NOT
+    // `boards`/`too_small` → walkDevBoardItems must NOT rewrap.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'DevReleaseList',
+          response: {
+            data: {
+              boards: [
+                {
+                  items_page: {
+                    // missing `cursor` key — schema rejects
+                    items: [],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const { exitCode, captured } = await driveDev(
+      ['dev', 'release', 'list', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(2);
+    const envelope = parseEnvelope(captured.stderr());
+    expect(envelope.error?.code).toBe('internal_error');
+  });
+
   it('release list surfaces dev_board_misconfigured when configured board is inaccessible (Codex round-1 P2-2)', async () => {
     await seedFullMapping(env.home);
     // Monday returns `{boards: []}` when the configured board ID
