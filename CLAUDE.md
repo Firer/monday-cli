@@ -11,18 +11,39 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M26a IMPL closed; M26b unblocked.**
+**v0.3-M26 closed end-to-end; M27 unblocked.**
 v0.2.0 published to npm 2026-05-08. v0.3 is in progress on
 `main`; M0–M25 closed + M26 pre-flight pinned across `1620220` /
 `4433297` / `f605260` / `d9b2d6d` + **M26a IMPL shipped at
-`19755e3`** (feat) + Codex impl review fix-ups across 3 rounds:
-round 1 `2be9021` (1 P1 + 1 P2 + 1 P3) + round 2 `c70deb3` (0 P1
-+ 2 P2 + 1 P3 — discriminated-union refactor on
-`devDoctorCheckResultSchema` for `monday schema` reason-enum
-surfacing) + round 3 `2a3c06c` (0 P1 + 0 P2 + 1 P3 — test
-assertion strengthening). **M26b (10 workflow verbs across
-sprint/epic/release/task)** stays stubbed for the next session
-per the setup-vs-workflow cleavage chosen at M26 IMPL kickoff.
+`19755e3`** (feat) + Codex impl review fix-ups across 3 rounds
+(`2be9021` / `c70deb3` / `2a3c06c`) + **M26b IMPL shipped at
+`10cd1c5`** (feat) + Codex impl review fix-ups across 3 rounds:
+round 1 `34a5bc1` (0 P1 + 3 P2 + 1 P3 — `resolved_ids.status`
+echo on 3 task verbs + `dev_board_misconfigured` rewrap of
+`walkDevBoardItems` on inaccessible board + `fireDevCreateUpdate`
+shared parse boundary + side-effect complexity threading) +
+round 2 `078dae3` (1 P1 + 1 P2 + 0 P3 — dynamic
+`buildCreateUpdateMutation` so doc named-operation + wire
+operationName always match + narrowed `walkDevBoardItems` rewrap
+to the exact `{path: 'boards', code: 'too_small'}` zod issue
+via `isEmptyBoardsArrayIssue`) + round 3 `8ea66c4` (0 P1 + 0 P2
++ 1 P3 — JSDoc positioning cleanup, cosmetic).
+**M26b IMPL highlights.** Runtime bodies of the 10 workflow
+verbs (`dev sprint current/list/items` + `dev epic list/items`
++ `dev release list` + `dev task list/start/done/block`). New
+shared helper `_shared.ts:requireDevBoard` (R-NEW-32 lifted at
+IMPL kickoff — 10-consumer trigger; one per workflow verb)
+surfaces `dev_not_configured` with `details.slot` when a
+noun-specific mapping slot is unset. Seven new helpers in
+`src/api/dev-conventions.ts` (R-NEW-33 — `walkDevBoardItems`
+across 7 read verbs + `hydrateDevBoardColumns` across 4 verbs +
+`findRelationColumnIdToBoard` across 3 verbs +
+`extractLinkedItemIds` (handles both `linkedPulseIds` legacy +
+`item_ids` newer 2026-01 shapes) + `resolveStatusColumn` +
+`resolveCanonicalLabel` + `flipTaskStatus` (3-consumer wrapper
+for the start/done/block flip preamble) + `fireDevCreateUpdate`
+(round-1 P2-3 lift — shared `create_update` parse boundary
+between task done + task block).
 **M26a IMPL highlights.** Runtime bodies of the four
 `src/api/dev-conventions.ts` stub fetchers (`discoverDevBoards` /
 `runDevDoctor` / `loadDevMapping` / `saveDevMapping`) + the three
@@ -120,45 +141,60 @@ findings in v0.3-plan §8.
 Per-milestone narratives, post-mortems, and R-class history live
 in the plan docs — **do not duplicate them here**:
 - `docs/v0.3-plan.md` §11 M19, §12 M20, §13 M21, §14 M22, §15 M23,
-  §16 M24, §17 M25, §18 M26a post-mortems + §22 R-class backlog
-  (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 + R-NEW-14/15/16 +
-  R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 + R-NEW-27 +
-  R-NEW-29 + R-NEW-30 shipped + R-NEW-2 / R-NEW-3 candidates
-  open + R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28 /
-  R-NEW-31).
+  §16 M24, §17 M25, §18 M26a, §19 M26b post-mortems + §22 R-class
+  backlog (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 +
+  R-NEW-14/15/16 + R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 +
+  R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 shipped +
+  R-NEW-2 / R-NEW-3 candidates open + R-watch-items including
+  R-NEW-20 / R-NEW-26 / R-NEW-28 / R-NEW-31 / R-NEW-32 / R-NEW-33 /
+  R-NEW-37).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M26a IMPL close):**
-- Test count: **3109** across 127 files (+98 net at M26a IMPL —
-  76 new unit tests in `tests/unit/api/dev-conventions.test.ts` +
-  22 integration tests in `tests/integration/commands/dev.test.ts`;
-  1 skipped unchanged — auth-probe real-network placeholder).
-- Coverage: **99.10 / 95.96 / 99.24 / 99.29** (stmts / branches
+**Live numbers (post-M26b IMPL close):**
+- Test count: **3183** across 127 files (+74 net at M26b IMPL —
+  15 new unit tests in `tests/unit/api/dev-conventions.test.ts`
+  for the M26b pure helpers (`extractLinkedItemIds`,
+  `findRelationColumnIdToBoard`, `resolveStatusColumn`,
+  `resolveCanonicalLabel`) + 59 integration tests in
+  `tests/integration/commands/dev.test.ts` across the 10
+  workflow verbs (74 total in the dev integration file, was 22
+  post-M26a) including the round-1 P2-2 `dev_board_misconfigured`
+  rewrap regression + round-2 P1-1 GraphQL operation-name parity
+  regression + round-2 P2-1 narrowed-rewrap regression; 1 skipped
+  unchanged — auth-probe real-network placeholder).
+- Coverage: **99.04 / 95.79 / 99.28 / 99.31** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.51pp** (was 0.58pp post-M25; small dip from
-  new dev-namespace runtime branches but well above floor). The
-  10 M26b workflow verbs stay stubbed under `c8 ignore start/stop`
-  block-wraps — their bodies will further widen the branches
-  denominator at M26b IMPL. Three deferred file-level gaps still:
-  `item/search.ts` 88.23%, `errors.ts` ~95.37%, `dry-run.ts`
-  96.26% — same set as pre-M24 (genuinely defensive or requires
-  new cross-board integration test). **v8 instrumentation glitch
-  on `partial-success-bulk.ts`** carried over from M25 close;
-  `dev-conventions.ts` v8-instruments correctly so the glitch is
-  module-specific. Investigate at M28 release-prep if it recurs.
-- ERROR_CODES count: **29** (unchanged at M26a IMPL — the two
-  `dev_*` codes (`dev_not_configured` + `dev_board_misconfigured`)
-  pre-registered in `src/utils/errors.ts:ERROR_CODES` ahead of
-  M5b for forward-compat per cli-design §5.9; M26a routes
-  `dev`-namespace failures through these existing codes + the
-  fully-pinned `DEV_DOCTOR_REASONS` 11-value enum in
-  `src/api/dev-conventions.ts` for per-check failure
-  discrimination).
-  Command count: **91** (unchanged at M26a IMPL — IMPL fills 3
+  **Branches margin 0.34pp** (was 0.51pp post-M26a; small dip
+  from the 10 new dev workflow verbs widening the denominator —
+  stays above floor with comfortable surplus). Three deferred
+  file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
+  ~95.37%, `dry-run.ts` 96.26% — same set as pre-M26a (genuinely
+  defensive or requires new cross-board integration test).
+  **v8 instrumentation glitch on `dev-conventions.ts`** — the
+  file now reports `FNF:0 LF:0 BRF:0` in `coverage/lcov.info`
+  despite the M26b unit + integration tests exercising the new
+  helpers (mirrors the M25-close glitch on
+  `partial-success-bulk.ts`; pre-M26b `dev-conventions.ts`
+  v8-instrumented correctly, so something about the M26b
+  additions trips per-module instrumentation). Investigate at
+  M28 release-prep if it spreads to further modules; the
+  workaround is `coverage.include` overrides in
+  `vitest.config.ts` if it becomes systematic.
+- ERROR_CODES count: **29** (unchanged at M26b IMPL — M26b
+  routes `dev`-namespace runtime failures through the existing
+  `dev_not_configured` (slot empty / no dev block) +
+  `dev_board_misconfigured` (runtime drift, e.g.
+  `reason: 'not_accessible'` / `'no_matching_relation'` /
+  `'no_status_column'`) + `not_found` (no active sprint for
+  `dev sprint current` / `dev task list --sprint current`)
+  codes).
+  Command count: **91** (unchanged at M26b IMPL — IMPL fills 10
   of the 13 stub bodies pre-flight pinned; commands themselves
-  don't add or remove).
+  don't add or remove). M26 fully closed end-to-end: 3 setup
+  verbs at M26a + 10 workflow verbs at M26b = all 13 stubs
+  filled.
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -174,38 +210,43 @@ Tests don't depend on the values (cassettes intercept
 convention.
 
 **Next session — likely scope:**
-1. **M26b implementation — `dev` namespace workflow verbs.**
-   M26a (3 setup verbs) closed across `19755e3` + `2be9021` +
-   `c70deb3` + `2a3c06c`; M26b lands the 10 workflow verbs that
-   READ/WRITE against the M26a-configured `[profiles.<name>.dev]`
-   mapping. Verbs: `dev sprint current/list/items`,
-   `dev epic list/items`, `dev release list`,
-   `dev task list/start/done/block`. Each verb follows the
-   same shape: (a) call `_shared.ts:resolveActiveDevProfile`,
-   (b) call `loadDevMapping` (which fires `dev_not_configured`
-   if no `[profiles.<name>.dev]` block exists — round-1 P2-4
-   closure pins doctor + workflow verbs as the ONLY verbs that
-   surface the code), (c) resolve the noun-specific board ID
-   from the mapping, (d) dispatch the underlying CRUD operation
-   via existing `api/items-page-walker.ts` /
-   `api/item-mutation-execute.ts` (M25's R-NEW-29 lift) /
-   `api/cross-board-search.ts` patterns, (e) emit via
-   `emitSuccess` or `emitMutation`. Drop the M26 pre-flight's
-   `c8 ignore start/stop` wraps on all 10 verbs.
-   **Shared preamble pattern (M26a R-NEW-30):**
-   `_shared.ts:resolveActiveDevProfile` is already 3 consumers
-   at M26a; expected to jump to 13 consumers at M26b (lift
-   already shipped at M26a IMPL).
-   **Expected size:** L (broad surface; 10 verbs). Mirror M13's
-   8-commit cluster shape — feat per noun-verb pair, then
-   Codex impl review fix-ups. Convergence target: 2-3 rounds
-   per M26a's cadence.
-   **No new probe needed** — M26a's empirical-probe findings
-   (Board.type filter, stock template names, board_kind
-   non-discrimination) cover the M26b read paths. M26b
-   workflow verbs hydrate boards by ID (existing
-   `boards(ids:)` patterns), not via the walker; the M26a
-   walker filter is in `dev-conventions.ts` only.
+1. **M27 pre-flight — `notification send` + `webhook
+   list/create/delete`.** M26 closed end-to-end (M26a setup
+   verbs + M26b workflow verbs); M27 introduces real wire
+   surface (the dev namespace was convention-not-API per
+   cli-design §2.7; M27 adds new GraphQL mutations:
+   `create_notification`, `create_webhook`, `delete_webhook`,
+   plus a `webhooks` query). Per cli-design §13 v0.3 entry +
+   the §8 Decisions list, M27 ships outbound writes bundled
+   because both are write-only + low surface. Webhooks are
+   live-only at v0.3 (outside cli-design §8's cache scope).
+   **Decision 9 (webhook event-type validation) is the M27
+   pre-flight gate** — closed enum vs open string vs server-
+   side-validated lookup shapes the input-schema pin on
+   `webhook create --event <type>`. Close Decision 9 BEFORE
+   the pre-flight contract diff.
+   **Expected size:** M-L (3–5 commands: `notification send` +
+   `webhook list` + `webhook create` + `webhook delete`).
+   Mirror the M25 pre-flight cadence (pre-flight contract diff
+   + 1-2 Codex pre-flight rounds + IMPL + 1-3 Codex impl
+   rounds).
+   **Empirical-probe step required** — fire
+   `scripts/probe/m27-{webhooks-query,create-webhook-input,
+   create-notification-shape}.ts` against an account with
+   live webhook configuration to pin the wire-shape of the
+   `webhooks` query results + `create_webhook`'s required /
+   optional inputs (per §22 R-watch-item "empirical-probe step
+   in pre-flight" — fired at M21 + M22 + M23 + M24 + M26;
+   M27's novel surface needs it).
+   **R-NEW-34 watch-item** — if M27 introduces custom GraphQL
+   mutations with non-trivial operationName + named-op pairs,
+   the codex-pre-flight-review template should add an explicit
+   audit-point per the §19 M26b round-2 P1-1 lesson. Today's
+   pre-flight rounds catch this only if the reviewer happens
+   to look at the doc text; making it template-stable closes
+   the loophole. Fires at the 2nd confirming repetition (M27
+   could be it; defer if M27 doesn't introduce a custom-named
+   mutation).
 2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
@@ -217,14 +258,19 @@ convention.
    targeted unit tests; `dry-run.ts` 96.26% — defensive
    `env === undefined ? {}` spreads. Each is a small bounded
    follow-up if a future session needs more margin (margin
-   at 0.58pp post-M25-IMPL, comfortable surplus).
-3. **v8 instrumentation glitch on `partial-success-bulk.ts`.**
-   The file reports `FNF:0 LF:0 BRF:0` in `coverage/lcov.info`
-   despite 32 unit tests exercising every export. Cache
-   clears didn't recover. Investigate at M26 kickoff if it
-   recurs on new module surfaces (the workaround is
-   `c8 include` overrides in `vitest.config.ts` if it
-   becomes systematic).
+   at 0.34pp post-M26b-IMPL, comfortable surplus above floor
+   but worth investing for M27's new runtime surface).
+3. **v8 instrumentation glitch on `dev-conventions.ts`.**
+   Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
+   `coverage/lcov.info` despite 15+ unit tests + 50+
+   integration tests exercising the new helpers. Same
+   module-level glitch the M25 close noted on
+   `partial-success-bulk.ts`; pre-M26b `dev-conventions.ts`
+   v8-instrumented correctly so something about the M26b
+   additions trips per-module instrumentation. Investigate
+   at M28 release-prep if it spreads further (the workaround
+   is `coverage.include` overrides in `vitest.config.ts` if
+   it becomes systematic).
 4. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
@@ -240,29 +286,66 @@ convention.
    registering a Monday OAuth app; tests don't depend on the
    values. Tracked for v0.3.0 release prep (after M28).
 
-**R-class state (post-M26a IMPL close):**
-- **R-NEW-30 — `_shared.ts:resolveActiveDevProfile` lift (3
-  consumers at M26a; pre-shipped at IMPL because the 3-consumer
-  trigger fires inside M26a's own setup verbs).** Shared
+**R-class state (post-M26b IMPL close):**
+- **R-NEW-35 — `_shared.ts:requireDevBoard` slot-check helper
+  (10 consumers at M26b).** Per-noun
+  `mapping[slot] === undefined → throw dev_not_configured`
+  preamble that fires 10 times across the M26b workflow verbs
+  (one per noun-specific slot check: `tasks_board` /
+  `sprints_board` / `epics_board` / `releases_board`).
+  Surfaces `dev_not_configured` with `details.slot` +
+  `details.profile` + `details.hint`. Lift shipped inline with
+  the M26b feat commit at `10cd1c5`. **Status: shipped.**
+- **R-NEW-36 — `dev-conventions.ts` workflow-verb helpers
+  cluster (7 new exports at M26b IMPL).** Lifts seven helpers
+  used across the M26b verbs: `walkDevBoardItems` (7 consumers
+  across read verbs), `hydrateDevBoardColumns` (4 consumers
+  across mutation + relation-walker verbs),
+  `findRelationColumnIdToBoard` (3 consumers across sprint
+  items / epic items / task list --sprint),
+  `extractLinkedItemIds` (handles both `linkedPulseIds` legacy
+  + `item_ids` newer 2026-01 shapes), `resolveStatusColumn` +
+  `resolveCanonicalLabel` (the 3 task mutation verbs share
+  these), `flipTaskStatus` (3-consumer wrapper for the
+  start/done/block flip preamble), plus `fireDevCreateUpdate`
+  (round-1 P2-3 lift — shared `create_update` parse boundary
+  between task done + task block). Each crosses the R7/R8
+  3-consumer threshold. Shipped at `10cd1c5` + `34a5bc1`.
+  **Status: shipped.**
+- **R-NEW-37 — Codex template audit-point for GraphQL
+  operation-name / named-operation parity (round-2 P1-1
+  watch-item).** The M26b round-2 P1-1 catch (static-named
+  doc + per-call operationName override would have failed
+  live) generalizes to any verb firing a custom GraphQL
+  mutation with a non-trivial `operationName`. Today the
+  codex-pre-flight-review template's W1 covers redactor-
+  pattern; a future template extension could add a W audit-
+  point asking the reviewer to verify that every `client.raw`
+  call's `operationName` matches a named operation in the
+  supplied document. **LOW priority watch-item;** fires at the
+  next milestone introducing a new custom mutation. Add to
+  the template after one more confirming repetition (M27
+  webhook surface is a candidate — `create_webhook` /
+  `delete_webhook` mutations).
+- **R-NEW-30 — `_shared.ts:resolveActiveDevProfile` lift (13
+  consumers at M26b).** Pre-shipped at M26a IMPL (3 consumers
+  at M26a — discover/configure/doctor); M26b adds 10 more
+  consumers (one per workflow verb). All 13 share the same
   "load profile mapping → resolve → throw if implicit-v1"
-  preamble used by `dev discover` / `dev configure` /
-  `dev doctor` (3 setup verbs) + all 10 M26b workflow verbs
-  will reuse it (13 total consumers at M26b IMPL). Shipped at
-  `19755e3`. **Status: shipped.**
+  preamble. Shipped at `19755e3`. **Status: shipped.**
 - **R-NEW-31 — discriminated-union per-status detail schema
-  pattern (1 consumer at M26a; LOW priority watch-item).** The
-  M26a round-2 P2-1 fix introduced per-status detail schemas
-  (`okCheckDetailsSchema` / `warnCheckDetailsSchema` /
-  `failCheckDetailsSchema`) + `z.discriminatedUnion('status',
-  [...])`. Generalizes to any verb whose output carries a status
-  discriminator with per-status detail variability. Fires at 2nd
-  + 3rd consumer (likely M27 webhook list with per-webhook status
-  OR M28 release-prep readiness checks).
+  pattern (1 consumer at M26b; LOW priority watch-item).**
+  Stays at 1 consumer (M26a round-2 P2-1 fix's per-status
+  detail schemas on `devDoctorCheckResultSchema`); M26b
+  workflow verbs don't carry per-status-discriminator detail
+  variability. Generalizes to any verb whose output carries a
+  status discriminator with per-status detail variability.
+  Fires at 2nd + 3rd consumer (likely M27 webhook list with
+  per-webhook status OR M28 release-prep readiness checks).
 - R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
-  2 consumers (M22 usage + M23 favorites); M26a `dev discover` is
-  a single-stage walk + projection, M26a `dev doctor` is a
-  single-stage `boards(ids:)` hydrate — neither fires the 3rd-
-  consumer trigger.
+  2 consumers (M22 usage + M23 favorites); M26 dev namespace
+  doesn't introduce a 3rd consumer (the workflow verbs are
+  single-stage walks + hydrates).
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
