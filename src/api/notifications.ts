@@ -68,10 +68,11 @@ import type { MondayClient } from './client.js';
  * the supplied `--target <id>` actually names an item or board to
  * match the supplied type before firing the wire mutation).
  *
- * Monday's third wire enum value (`Post`, for Update-targeted
- * notifications) is intentionally not surfaced at v0.3 per
- * cli-design §4.3. A v0.3.x / v0.4 contract-extension may add
- * `--target-type update`.
+ * Monday's wire enum has only two values (`Post` / `Project`); the
+ * `Post` value targets Updates and is intentionally not surfaced
+ * at v0.3 per cli-design §4.3. A v0.3.x / v0.4 contract-extension
+ * may add a CLI third target-type `update` that dispatches to wire
+ * `Post`.
  */
 export const NOTIFICATION_TARGET_TYPES = ['item', 'board'] as const;
 

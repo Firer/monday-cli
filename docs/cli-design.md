@@ -6906,9 +6906,14 @@ scoped idempotent changes, and post comments narrating its work.**
   mutations; the CLI never *receives* — webhooks land on the user's
   own HTTPS endpoint (§1 permanent non-goal: hosting webhooks).
   **Webhooks are live-only at v0.3** — outside §8's cache scope;
-  every `webhook list/create/delete` emits `meta.source: "live"`
-  with `meta.cache_age_seconds: null`. Adding webhooks to §8 cache
-  scope would be a contract extension (v0.3.x / v0.4 PR).
+  the live `webhook list` read and the live `webhook create` /
+  `webhook delete` mutation paths emit `meta.source: "live"` with
+  `meta.cache_age_seconds: null`. `--dry-run` paths follow the
+  canonical `DryRunEnvelope` source rules per
+  `output-shapes.md` (typically `"none"`; `webhook delete --dry-
+  run` may surface `"live"` if M27 IMPL fires a pre-mutation
+  source read). Adding webhooks to §8 cache scope would be a
+  contract extension (v0.3.x / v0.4 PR).
   **M27 pre-flight decisions closed inline
   (`<M27-PREFLIGHT-SHA>`):** Decision 9 (webhook event-type
   validation) — closed via the 21-value `WEBHOOK_EVENT_TYPES`
@@ -6918,12 +6923,13 @@ scoped idempotent changes, and post comments narrating its work.**
   **Asymmetric `Webhook.config` typing pinned:** create input
   accepts the `JSON` scalar; read-side returns `String` (Monday
   echoes the stored JSON-encoded config as a string). **Monday's
-  `NotificationTargetType.Post` value (Update-targeted
-  notifications) is unreachable at v0.3** — the documented
-  `--target-type item|board` argv vocabulary maps to wire
-  `NotificationTargetType.Project`; Monday's third enum value
-  `Post` is deferred to a v0.3.x / v0.4 contract-extension that
-  may add `--target-type update`. ERROR_CODES registry unchanged
+  `NotificationTargetType` wire enum has only two values (`Post` /
+  `Project`); the `Post` value (Update-targeted notifications) is
+  unreachable at v0.3** — the documented `--target-type
+  item|board` argv vocabulary maps to wire
+  `NotificationTargetType.Project`; the wire `Post` value is
+  deferred to a v0.3.x / v0.4 contract-extension that may add a
+  CLI third target-type `update` dispatching to wire `Post`. ERROR_CODES registry unchanged
   at 29 — M27 wire failures route through existing codes
   (`not_found` / `usage_error` / `unauthorized` / `forbidden` /
   `validation_failed`).

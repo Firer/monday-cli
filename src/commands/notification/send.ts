@@ -22,10 +22,11 @@
  * boards). The runtime body at M27 IMPL preserves the item-vs-board
  * argv distinction for CLI-side validation discipline (verifying the
  * supplied `--target <id>` actually names an item or board to match
- * the supplied type before firing the wire mutation). Monday's third
- * wire enum value (`Post`, for Update-targeted notifications) is
- * unreachable at v0.3 — a v0.3.x / v0.4 contract-extension may add
- * `--target-type update`.
+ * the supplied type before firing the wire mutation). Monday's wire
+ * enum has only two values (`Post` / `Project`); the `Post` value
+ * (Update-targeted notifications) is unreachable at v0.3 — a
+ * v0.3.x / v0.4 contract-extension may add a CLI third target-type
+ * `update` that dispatches to wire `Post`.
  *
  * **Idempotency.** `create_notification` is NOT idempotent —
  * re-running mints a fresh notification with a new ID. Agents

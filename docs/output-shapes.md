@@ -3620,25 +3620,26 @@ first and skip the create if a matching entry exists.
 
 **`--dry-run` envelope** (`meta.dry_run: true`; no wire mutation
 fires — argv parse + URL/event validation only). Same shape as
-M14/M15 create-verb dry-runs; the planned-change carries the
-intended `event` + `board_id` + `url` so an agent verifies before
-running for real:
+M14/M15 create-verb dry-runs per the canonical `DryRunEnvelope`
+contract (`src/utils/output/envelope.ts:119` — `data: null` plus
+top-level `planned_changes[]` sibling); the planned-change
+carries the intended `event` + `board_id` + `url` so an agent
+verifies before running for real:
 
 ```json
 {
   "ok": true,
-  "data": {
-    "planned_changes": [
-      {
-        "operation": "create_webhook",
-        "board_id": "12345678",
-        "url": "https://example.com/hook",
-        "event": "create_item",
-        "config": null
-      }
-    ]
-  },
+  "data": null,
   "meta": { /* §6.1 — source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "create_webhook",
+      "board_id": "12345678",
+      "url": "https://example.com/hook",
+      "event": "create_item",
+      "config": null
+    }
+  ],
   "warnings": []
 }
 ```
@@ -3678,24 +3679,25 @@ at the M27 IMPL session alongside the runtime body.
 
 **`--dry-run` envelope** (`meta.dry_run: true`; bypasses the
 confirmation gate per §3.1 #7). Same shape as M10 item-delete /
-M15 board-delete dry-runs — the planned change carries the
-`webhook_id` slot for agent verification before re-running with
-`--yes`. M27 IMPL decides whether to fire a pre-mutation
-`webhooks(board_id:)` read to surface the deleted webhook's
-`event` / `board_id` / `config` in the dry-run shape (the M10
-`item delete` dry-run reads the source item for this reason; the
-M27 IMPL session may follow suit if the pre-read cost is
-worthwhile).
+M15 board-delete dry-runs per the canonical `DryRunEnvelope`
+contract (`src/utils/output/envelope.ts:119` — `data: null` plus
+top-level `planned_changes[]` sibling); the planned change
+carries the `webhook_id` slot for agent verification before
+re-running with `--yes`. M27 IMPL decides whether to fire a
+pre-mutation `webhooks(board_id:)` read to surface the deleted
+webhook's `event` / `board_id` / `config` in the dry-run shape
+(the M10 `item delete` dry-run reads the source item for this
+reason; the M27 IMPL session may follow suit if the pre-read
+cost is worthwhile).
 
 ```json
 {
   "ok": true,
-  "data": {
-    "planned_changes": [
-      { "operation": "delete_webhook", "webhook_id": "98765" }
-    ]
-  },
+  "data": null,
   "meta": { /* §6.1 — source: "none" or "live" depending on pre-read, dry_run: true */ },
+  "planned_changes": [
+    { "operation": "delete_webhook", "webhook_id": "98765" }
+  ],
   "warnings": []
 }
 ```
@@ -3707,8 +3709,11 @@ or board. Single-recipient at v0.3 per cli-design §4.3 (`--user`
 is singular; multi-recipient fan-out is a v0.3.x / v0.4
 contract-extension). The CLI's `--target-type item|board`
 vocabulary maps to wire `NotificationTargetType.Project` (which
-represents both items and boards); Monday's third wire enum
-value `Post` (Update-targeted) is unreachable at v0.3. Returns
+represents both items and boards); Monday's wire enum has only
+two values (`Post` / `Project`), and the `Post` value
+(Update-targeted notifications) is unreachable at v0.3 — a
+v0.3.x / v0.4 contract-extension may add a CLI third
+target-type `update` that dispatches to wire `Post`. Returns
 the minted `Notification { id, text }` + the CLI-side echo of
 the inputs (`user_id`, `target_id`, `target_type`) for agent
 verification.
@@ -3742,23 +3747,24 @@ needing send-once-semantics dedup on the CLI side.
 **`--dry-run` envelope** (`meta.dry_run: true`; no wire
 mutation fires — argv parse + target-type validation only).
 Per §3.1 #6 the verb supports `--dry-run` so an agent can
-preview the planned send before committing:
+preview the planned send before committing. Canonical
+`DryRunEnvelope` shape (`src/utils/output/envelope.ts:119` —
+`data: null` plus top-level `planned_changes[]` sibling):
 
 ```json
 {
   "ok": true,
-  "data": {
-    "planned_changes": [
-      {
-        "operation": "create_notification",
-        "user_id": "12345",
-        "target_id": "67890",
-        "target_type": "item",
-        "text": "Please review"
-      }
-    ]
-  },
+  "data": null,
   "meta": { /* §6.1 — source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "create_notification",
+      "user_id": "12345",
+      "target_id": "67890",
+      "target_type": "item",
+      "text": "Please review"
+    }
+  ],
   "warnings": []
 }
 ```

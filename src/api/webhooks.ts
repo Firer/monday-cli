@@ -47,10 +47,14 @@
  * code-registry surface.
  *
  * **Webhooks are live-only for v0.3.** Per cli-design §8 cache scope,
- * webhooks aren't cached — every `webhook list/create/delete` emits
- * `meta.source: "live"` with `cache_age_seconds: null`. Adding
- * webhooks to the §8 cache scope would be a contract extension
- * (v0.3.x / v0.4).
+ * webhooks aren't cached — the live `webhook list` read and the live
+ * `webhook create` / `webhook delete` mutation paths emit
+ * `meta.source: "live"` with `cache_age_seconds: null`. `--dry-run`
+ * paths follow the canonical `DryRunEnvelope` source rules
+ * (typically `"none"`; `webhook delete --dry-run` may surface
+ * `"live"` if M27 IMPL fires a pre-mutation source read).
+ * Adding webhooks to the §8 cache scope would be a contract
+ * extension (v0.3.x / v0.4).
  *
  * **Pre-flight stubs.** Runtime fetchers (`listWebhooks` /
  * `createWebhook` / `deleteWebhook`) reject with `internal_error`
