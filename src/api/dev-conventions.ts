@@ -143,6 +143,20 @@ import {
   type ProfileDevBlock,
 } from '../config/profiles.js';
 import type { MondayClient } from './client.js';
+import {
+  fetchItemsPage,
+  fetchNextItemsPage,
+  type ItemsPagePayload,
+} from './items-page-walker.js';
+import { paginate } from './pagination.js';
+import {
+  idFromRawItem,
+  projectItem,
+  type ProjectedItem,
+} from './item-projection.js';
+import { ITEM_FIELDS_FRAGMENT, parseRawItem } from './item-helpers.js';
+import type { SelectedMutation } from './column-values.js';
+import { executeItemMutation } from './item-mutation-execute.js';
 
 /**
  * The per-profile Monday Dev board mapping. Alias over the
@@ -1485,5 +1499,334 @@ export const saveDevMapping = async (
     });
     /* c8 ignore stop */
   }
+};
+
+// =============================================================
+// M26b workflow-verb helpers — shared between dev sprint/epic/
+// release/task verbs (cli-design §5.9 + §11.3; v0.3-plan §3 M26).
+//
+// The M26b verbs hydrate the configured dev board(s) by ID, walk
+// items_page on them, resolve board_relation columns + canonical
+// status labels — same shape recurring across verbs. Lifted here
+// rather than the per-verb files so the wire-call surface lives
+// one module away from the action body.
+// =============================================================
+
+/**
+ * Walks every page of `items_page` on the supplied board and projects
+ * the rows through the M4 {@link projectItem} contract. Used by the
+ * read-side dev workflow verbs (`dev sprint list/items/current`,
+ * `dev epic list/items`, `dev release list`, `dev task list`).
+ *
+ * Skips board-metadata cache loading — dev verbs don't expose
+ * `--columns` selection, and the items_page rows include
+ * `column { title }` per the {@link ITEM_FIELDS_FRAGMENT}, so the
+ * fallback title path on {@link projectItem} is sufficient. Returns
+ * the `complexity` from the *last* response so the verb's success
+ * envelope reflects the freshest budget snapshot per `cli-design.md`
+ * §6.1 — mirrors the {@link paginate} walker's idiom.
+ */
+export const walkDevBoardItems = async (inputs: {
+  readonly client: MondayClient;
+  readonly boardId: string;
+  readonly operationName: string;
+  readonly queryParams?: Readonly<Record<string, unknown>>;
+  readonly now: () => Date;
+}): Promise<{
+  readonly items: readonly ProjectedItem[];
+  readonly complexity: Complexity | null;
+}> => {
+  const result = await paginate<unknown, ItemsPagePayload<unknown>>({
+    fetchInitial: (effectiveLimit) =>
+      fetchItemsPage<unknown>({
+        client: inputs.client,
+        operationName: inputs.operationName,
+        boardId: inputs.boardId,
+        limit: effectiveLimit,
+        queryParams: inputs.queryParams,
+        itemFields: ITEM_FIELDS_FRAGMENT,
+        itemSchema: walkerItemSchema,
+      }),
+    fetchNext: (cursor, effectiveLimit) =>
+      fetchNextItemsPage<unknown>({
+        client: inputs.client,
+        operationName: `${inputs.operationName}Next`,
+        cursor,
+        limit: effectiveLimit,
+        itemFields: ITEM_FIELDS_FRAGMENT,
+        itemSchema: walkerItemSchema,
+      }),
+    extractPage: (r) => r.data,
+    getId: idFromRawItem,
+    all: true,
+    now: inputs.now,
+  });
+  const items = result.items.map(
+    (raw) => projectItem({ raw: parseRawItem(raw) }),
+  );
+  return { items, complexity: result.complexity };
+};
+
+const walkerItemSchema = z.unknown();
+
+/**
+ * Hydrates one board's `columns { id title type settings_str }` slot
+ * via a single `boards(ids:)` call. Used by mutation verbs
+ * (`dev task start/done/block`) to resolve the status column ID +
+ * label vocabulary, and by the relation-filter verbs
+ * (`dev sprint items`, `dev epic items`) to find the board_relation
+ * column linking the tasks board to a target.
+ */
+export const hydrateDevBoardColumns = async (
+  client: MondayClient,
+  boardId: string,
+  operationName: string,
+): Promise<{
+  readonly columns: readonly RawDoctorColumn[];
+  readonly complexity: Complexity | null;
+}> => {
+  const response = await client.raw<unknown>(
+    `query ${operationName}($ids: [ID!]!) {
+       boards(ids: $ids, state: all) {
+         id
+         columns { id title type settings_str }
+       }
+     }`,
+    { ids: [boardId] },
+    { operationName },
+  );
+  const parsed = unwrapOrThrow(
+    rawDoctorResponseSchema.safeParse(response.data),
+    {
+      context: `Monday \`boards(ids:)\` response (${operationName})`,
+      details: { board_id: boardId },
+    },
+  );
+  const boards = (parsed.boards ?? []).filter(
+    (b): b is RawDoctorBoard => b !== null,
+  );
+  if (boards.length === 0) {
+    throw new ApiError(
+      'dev_board_misconfigured',
+      `board ${boardId} is not accessible — deleted, access revoked, or never existed`,
+      {
+        details: {
+          board_id: boardId,
+          reason: 'not_accessible',
+          hint: 'run `monday dev doctor` to diagnose, then re-run `monday dev discover --apply` or `monday dev configure` to update the mapping',
+        },
+      },
+    );
+  }
+  const board = boards[0];
+  /* c8 ignore next 3 */
+  if (board === undefined) {
+    throw new ApiError('internal_error', `${operationName}: empty boards array`);
+  }
+  const columns = (board.columns ?? []).filter(
+    (c): c is RawDoctorColumn => c !== null,
+  );
+  return { columns, complexity: response.complexity };
+};
+
+/**
+ * Walks `columns` looking for a `board_relation` column whose
+ * `settings_str.boardIds` (or `board_ids`) array includes
+ * `targetBoardId`. Returns the first match or `undefined`.
+ *
+ * Same `settings_str` parse as the doctor's
+ * `checkBoardRelation` — pinned at M26a IMPL. Lifted here for
+ * reuse by `dev sprint items` and `dev epic items`.
+ */
+export const findRelationColumnIdToBoard = (
+  columns: readonly { readonly id: string; readonly type: string; readonly settings_str: string | null }[],
+  targetBoardId: string,
+): string | undefined => {
+  for (const col of columns) {
+    if (col.type !== 'board_relation') continue;
+    const targets = parseBoardRelationTargets(col.settings_str);
+    if (targets?.includes(targetBoardId) === true) {
+      return col.id;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Extracts linked item IDs (as decimal strings) from a board_relation
+ * column's parsed `value` JSON. Monday's wire shape is one of:
+ *   - `{linkedPulseIds: [{linkedPulseId: 123 | "123"}, ...]}`
+ *   - `{item_ids: [123 | "123", ...]}` (newer 2026-01 shape)
+ * Returns an empty array on null / malformed / unrecognised shape.
+ */
+export const extractLinkedItemIds = (value: unknown): readonly string[] => {
+  if (value === null || typeof value !== 'object') return [];
+  const v = value as Record<string, unknown>;
+  const ids: string[] = [];
+  const linkedPulse = v.linkedPulseIds;
+  if (Array.isArray(linkedPulse)) {
+    for (const entry of linkedPulse) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const id = (entry as { linkedPulseId?: unknown }).linkedPulseId;
+      if (typeof id === 'number') ids.push(String(id));
+      else if (typeof id === 'string' && id.length > 0) ids.push(id);
+    }
+  }
+  const itemIds = v.item_ids;
+  if (Array.isArray(itemIds)) {
+    for (const id of itemIds) {
+      if (typeof id === 'number') ids.push(String(id));
+      else if (typeof id === 'string' && id.length > 0) ids.push(id);
+    }
+  }
+  return ids;
+};
+
+/**
+ * Finds the status (or color) column on a board. Returns the column
+ * + the parsed labels (id → label text). Throws
+ * `dev_board_misconfigured` with `reason: 'no_status_column'` when
+ * no status column is present (mirrors the doctor's
+ * `tasks_status_column_present` fail surface; if doctor passes, this
+ * lookup also passes).
+ */
+export const resolveStatusColumn = (
+  boardId: string,
+  columns: readonly RawDoctorColumn[],
+): {
+  readonly columnId: string;
+  readonly labels: ReadonlyMap<string, string>;
+} => {
+  const col = columns.find((c) => c.type === 'status' || c.type === 'color');
+  if (col === undefined) {
+    throw new ApiError(
+      'dev_board_misconfigured',
+      `board ${boardId} has no status column`,
+      {
+        details: {
+          board_id: boardId,
+          reason: 'no_status_column',
+          hint: 'add a Status column to the tasks board, then re-run `monday dev doctor` to verify',
+        },
+      },
+    );
+  }
+  const parsed = parseStatusLabels(col.settings_str);
+  const map = new Map<string, string>();
+  if (parsed !== null) {
+    for (const label of parsed) {
+      map.set(label.toLocaleLowerCase('und'), label);
+    }
+  }
+  return { columnId: col.id, labels: map };
+};
+
+/**
+ * Canonical status labels Monday Dev's stock Tasks template surfaces.
+ * The three task mutation verbs (`dev task start/done/block`) flip
+ * the status column to one of these. Exported for the
+ * {@link flipTaskStatus} helper + the verbs that import the literal
+ * union for argv shapes.
+ */
+export type DevTaskCanonicalLabel = 'Working on it' | 'Done' | 'Stuck';
+
+/**
+ * Resolves a canonical Monday Dev status label ("Working on it" /
+ * "Done" / "Stuck") to the actual label text written on the
+ * configured status column — case-insensitive match. Returns the
+ * exact stored form so the subsequent
+ * `change_simple_column_value` flips against bytes Monday accepts
+ * (the wire is case-sensitive on the value).
+ *
+ * Throws `dev_board_misconfigured` with
+ * `reason: 'no_status_column'` when the canonical label isn't
+ * present on the column — points at `monday dev doctor` for
+ * diagnostics. (Mirrors the doctor's
+ * `tasks_status_labels_canonical` warn surface; the doctor's warn
+ * doesn't block a workflow verb at the doctor layer, but the
+ * workflow verb itself can't proceed without a matching label.)
+ */
+export const resolveCanonicalLabel = (
+  boardId: string,
+  columnId: string,
+  labels: ReadonlyMap<string, string>,
+  canonical: DevTaskCanonicalLabel,
+): string => {
+  const match = labels.get(canonical.toLocaleLowerCase('und'));
+  if (match !== undefined) return match;
+  throw new ApiError(
+    'dev_board_misconfigured',
+    `tasks board ${boardId} status column \`${columnId}\` has no \`${canonical}\` label`,
+    {
+      details: {
+        board_id: boardId,
+        column_id: columnId,
+        reason: 'no_status_column',
+        canonical_label: canonical,
+        present_labels: Array.from(labels.values()),
+        hint: `add the \`${canonical}\` label to the status column, or run \`monday dev doctor\` to inspect the configured labels`,
+      },
+    },
+  );
+};
+
+/**
+ * Flips a task's status column to the supplied canonical label
+ * ("Working on it" / "Done" / "Stuck") on the configured tasks
+ * board.
+ *
+ * **3-consumer helper.** `dev task start` + `dev task done` +
+ * `dev task block` all share this exact shape (hydrate tasks board
+ * columns → find status column → resolve canonical label → fire
+ * `change_simple_column_value`). Lifted here at M26b IMPL so the
+ * three verb files stay focused on their side-effects (start: none;
+ * done: optional comment; block: required comment).
+ *
+ * Returns the post-mutation {@link ProjectedItem}, the resolved
+ * status `columnId` + `label` for any caller that wants to log them,
+ * and the `complexity` accumulated across the hydrate + mutation
+ * calls (caller picks the freshest snapshot for envelope meta).
+ */
+export const flipTaskStatus = async (inputs: {
+  readonly client: MondayClient;
+  readonly tasksBoard: string;
+  readonly itemId: string;
+  readonly canonical: DevTaskCanonicalLabel;
+  readonly hydrateOperation: string;
+}): Promise<{
+  readonly projected: ProjectedItem;
+  readonly columnId: string;
+  readonly label: string;
+  readonly complexity: Complexity | null;
+}> => {
+  const { columns, complexity: hydrateComplexity } = await hydrateDevBoardColumns(
+    inputs.client,
+    inputs.tasksBoard,
+    inputs.hydrateOperation,
+  );
+  const { columnId, labels } = resolveStatusColumn(inputs.tasksBoard, columns);
+  const label = resolveCanonicalLabel(
+    inputs.tasksBoard,
+    columnId,
+    labels,
+    inputs.canonical,
+  );
+  const mutation: SelectedMutation = {
+    kind: 'change_simple_column_value',
+    columnId,
+    value: label,
+  };
+  const result = await executeItemMutation(inputs.client, {
+    mutation,
+    itemId: inputs.itemId,
+    boardId: inputs.tasksBoard,
+    createLabelsIfMissing: false,
+  });
+  return {
+    projected: result.projected,
+    columnId,
+    label,
+    complexity: result.response.complexity ?? hydrateComplexity,
+  };
 };
 

@@ -1,22 +1,27 @@
 /**
  * `monday dev release list` — list releases for the configured
- * releases board (cli-design §4.3 + §5.9; v0.3-plan §3 M26).
+ * releases board (cli-design §4.3 + §5.9; v0.3-plan §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `releases_board`, page
- * through items_page, and surface every release as a
- * `ProjectedItem`. Unlike sprints + epics, releases don't carry a
- * documented per-release-state taxonomy at v0.3 — a future
- * v0.3.x / v0.4 may add `--state shipped|upcoming` once the date-
- * column conventions stabilise.
+ * **Runtime body landed at M26b IMPL.** Loads the active profile's
+ * dev mapping, walks `items_page` on the configured `releases_board`,
+ * and surfaces every release as a {@link ProjectedItem}. No per-state
+ * filter at v0.3 — releases don't carry a documented per-release-
+ * state taxonomy yet; a future v0.3.x / v0.4 may add
+ * `--state shipped|upcoming` once the date-column conventions
+ * stabilise.
  *
  * Idempotent: yes (pure read).
  */
 import { z } from 'zod';
-import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitSuccess } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
+import {
+  loadDevMapping,
+  walkDevBoardItems,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -39,7 +44,7 @@ export const devReleaseListCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -62,21 +67,32 @@ export const devReleaseListCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (opts: unknown) => {
-          parseArgv(devReleaseListCommand.inputSchema, opts);
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev release list not yet implemented (v0.3-M26 pre-flight stub)',
-            {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
-            },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+      .action(async (rawOpts: unknown) => {
+        parseArgv(devReleaseListCommand.inputSchema, rawOpts);
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const boardId = requireDevBoard(mapping, 'releases_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { items, complexity } = await walkDevBoardItems({
+          client,
+          boardId,
+          operationName: 'DevReleaseList',
+          now: ctx.clock,
+        });
+
+        emitSuccess({
+          ctx,
+          data: items,
+          schema: devReleaseListCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'collection',
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity,
+        });
+      });
   },
 };

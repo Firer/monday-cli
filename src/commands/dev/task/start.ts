@@ -1,31 +1,34 @@
 /**
  * `monday dev task start <iid>` — set a task's status to
  * "Working on it" on the configured tasks board (cli-design §4.3
- * + §5.9; v0.3-plan §3 M26).
+ * + §5.9; v0.3-plan §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `tasks_board`, resolve
- * the canonical "Working on it" label via cached `board describe`
- * metadata, and route through `executeItemMutation` (M25-prep
- * R-NEW-29 lift in `src/api/item-mutation-execute.ts`) with the
- * `change_simple_column_value` mutation against the status column.
+ * **Runtime body landed at M26b IMPL.** Loads the active profile's
+ * dev mapping, routes the status flip through the shared
+ * {@link flipTaskStatus} helper (hydrates the tasks board's status
+ * column, resolves the canonical "Working on it" label
+ * case-insensitively, fires `change_simple_column_value` via the
+ * shared {@link executeItemMutation}).
  *
- * **Convention, not API.** This verb is pure convenience —
- * equivalent to `monday item update <iid> --board <tasks_board>
- * --set status="Working on it"`. The `dev` namespace's value is
- * naming the workflow concept (`task start`) over the CRUD
- * primitive (`item update --set status=...`).
+ * **Convention, not API.** Pure convenience over
+ * `monday item update <iid> --board <tasks_board> --set status=
+ * "Working on it"`. The dev namespace's value is naming the
+ * workflow concept (`task start`) over the CRUD primitive.
  *
- * Idempotent: yes (re-running against an already-started task is
- * a no-op — Monday's `change_simple_column_value` is idempotent
- * on equal values).
+ * Idempotent: yes — Monday's `change_simple_column_value` is
+ * idempotent for equal values.
  */
 import { z } from 'zod';
-import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitMutation } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
 import { ItemIdSchema } from '../../../types/ids.js';
+import {
+  flipTaskStatus,
+  loadDevMapping,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -50,7 +53,7 @@ export const devTaskStartCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: projectedItemSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -73,23 +76,35 @@ export const devTaskStartCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (itemIdArg: unknown) => {
-          parseArgv(devTaskStartCommand.inputSchema, {
-            itemId: itemIdArg,
-          });
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev task start not yet implemented (v0.3-M26 pre-flight stub)',
-            {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
-            },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+      .action(async (itemIdArg: unknown) => {
+        const parsed = parseArgv(devTaskStartCommand.inputSchema, {
+          itemId: itemIdArg,
+        });
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const tasksBoard = requireDevBoard(mapping, 'tasks_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+
+        const flip = await flipTaskStatus({
+          client,
+          tasksBoard,
+          itemId: parsed.itemId,
+          canonical: 'Working on it',
+          hydrateOperation: 'DevTaskStartHydrate',
+        });
+
+        emitMutation({
+          ctx,
+          data: flip.projected,
+          schema: devTaskStartCommand.outputSchema,
+          programOpts: program.opts(),
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity: flip.complexity,
+        });
+      });
   },
 };

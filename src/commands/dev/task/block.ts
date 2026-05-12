@@ -2,34 +2,33 @@
  * `monday dev task block <iid> --reason <r>` — set a task's
  * status to "Stuck" + post the blocking reason as a comment on
  * the configured tasks board (cli-design §4.3 + §5.9; v0.3-plan
- * §3 M26).
+ * §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `tasks_board`, route
- * the status change to "Stuck" via `executeItemMutation`, then
- * fire `update create` with the supplied `--reason <r>` body. The
- * two side-effects are surfaced in `data` (post-mutation
- * `ProjectedItem`) + the top-level `side_effects` mutation-
- * envelope slot per `src/utils/output/envelope.ts:99-117` (the
- * `update_created` entry; round-2 Codex P2-4 fix —
- * `side_effects` sits at envelope top-level, NOT under `meta`).
+ * **Runtime body landed at M26b IMPL.** Routes the status flip
+ * through the shared {@link flipTaskStatus} helper, then fires a
+ * `create_update` mutation with the supplied `--reason <r>` body.
+ * The side-effect lands in the {@link MutationEnvelope} top-level
+ * `side_effects[]` slot (M26 round-1 P1-2 closure).
  *
  * **`--reason` is required.** Unlike `task done`'s optional
- * `--message`, blocking ALWAYS posts a comment with the reason —
- * the audit trail is the load-bearing value of `task block` over
- * a bare status flip. Argv-parse-time validation rejects missing
- * `--reason` via `usage_error`.
+ * `--message`, blocking ALWAYS posts a comment — the audit trail is
+ * the load-bearing value of `task block` over a bare status flip.
  *
  * **Idempotency caveat.** The status flip is idempotent; the
  * `update create` post is NOT — re-runs post additional comments.
- * Document in `--help` so agents on retry loops handle accordingly.
  */
 import { z } from 'zod';
 import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitMutation } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
 import { ItemIdSchema } from '../../../types/ids.js';
+import {
+  flipTaskStatus,
+  loadDevMapping,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -42,6 +41,18 @@ const inputSchema = z
   })
   .strict();
 
+const CREATE_UPDATE_MUTATION = `
+  mutation DevTaskBlockCreateUpdate($itemId: ID!, $body: String!) {
+    create_update(item_id: $itemId, body: $body) {
+      id
+    }
+  }
+`;
+
+interface CreateUpdateResponseShape {
+  readonly create_update: { readonly id: string } | null;
+}
+
 export const devTaskBlockCommand: CommandModule<
   z.infer<typeof inputSchema>,
   ProjectedItem
@@ -53,11 +64,10 @@ export const devTaskBlockCommand: CommandModule<
     'monday dev task block 12345678 --reason "Waiting on legal review"',
     'monday dev task block 12345678 --reason "API rate limit until tomorrow" --json',
   ],
-  // status flip idempotent; `update create` is NOT (see docstring).
   idempotent: false,
   inputSchema,
   outputSchema: projectedItemSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -84,24 +94,58 @@ export const devTaskBlockCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (itemIdArg: unknown, opts: { reason: string }) => {
-          parseArgv(devTaskBlockCommand.inputSchema, {
-            itemId: itemIdArg,
-            reason: opts.reason,
-          });
-          await Promise.reject(new ApiError(
+      .action(async (itemIdArg: unknown, opts: { reason: string }) => {
+        const parsed = parseArgv(devTaskBlockCommand.inputSchema, {
+          itemId: itemIdArg,
+          reason: opts.reason,
+        });
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const tasksBoard = requireDevBoard(mapping, 'tasks_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+
+        const flip = await flipTaskStatus({
+          client,
+          tasksBoard,
+          itemId: parsed.itemId,
+          canonical: 'Stuck',
+          hydrateOperation: 'DevTaskBlockHydrate',
+        });
+
+        const response = await client.raw<CreateUpdateResponseShape>(
+          CREATE_UPDATE_MUTATION,
+          { itemId: parsed.itemId, body: parsed.reason },
+          { operationName: 'DevTaskBlockCreateUpdate' },
+        );
+        const update = response.data.create_update;
+        if (update === null) {
+          throw new ApiError(
             'internal_error',
-            'monday dev task block not yet implemented (v0.3-M26 pre-flight stub)',
+            `Monday returned no update payload from create_update for item ${parsed.itemId}`,
+            { details: { item_id: parsed.itemId } },
+          );
+        }
+
+        emitMutation({
+          ctx,
+          data: flip.projected,
+          schema: devTaskBlockCommand.outputSchema,
+          programOpts: program.opts(),
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity: flip.complexity,
+          sideEffects: [
             {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
+              kind: 'update_created',
+              update_id: update.id,
+              item_id: parsed.itemId,
+              body: parsed.reason,
             },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+          ],
+        });
+      });
   },
 };

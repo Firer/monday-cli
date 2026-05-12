@@ -1237,3 +1237,199 @@ describe('runDevDoctor', () => {
 
 // Sanity reference — used to ensure ConfigError import isn't pruned.
 void ConfigError;
+
+// =============================================================
+// M26b workflow-verb helpers — surface tests for the pure pieces.
+// =============================================================
+import {
+  extractLinkedItemIds,
+  findRelationColumnIdToBoard,
+  resolveCanonicalLabel,
+  resolveStatusColumn,
+} from '../../../src/api/dev-conventions.js';
+
+describe('extractLinkedItemIds (M26b)', () => {
+  it('reads linkedPulseIds with numeric ids', () => {
+    expect(
+      extractLinkedItemIds({
+        linkedPulseIds: [{ linkedPulseId: 100 }, { linkedPulseId: 200 }],
+      }),
+    ).toEqual(['100', '200']);
+  });
+
+  it('reads linkedPulseIds with string ids', () => {
+    expect(
+      extractLinkedItemIds({
+        linkedPulseIds: [{ linkedPulseId: '777' }],
+      }),
+    ).toEqual(['777']);
+  });
+
+  it('reads item_ids array (newer shape)', () => {
+    expect(extractLinkedItemIds({ item_ids: [1, 2, '3'] })).toEqual([
+      '1',
+      '2',
+      '3',
+    ]);
+  });
+
+  it('combines both shapes if both are present', () => {
+    expect(
+      extractLinkedItemIds({
+        linkedPulseIds: [{ linkedPulseId: 100 }],
+        item_ids: [200],
+      }),
+    ).toEqual(['100', '200']);
+  });
+
+  it('returns [] on null / non-object / unrecognised shape', () => {
+    expect(extractLinkedItemIds(null)).toEqual([]);
+    expect(extractLinkedItemIds(undefined)).toEqual([]);
+    expect(extractLinkedItemIds('string')).toEqual([]);
+    expect(extractLinkedItemIds({})).toEqual([]);
+    expect(extractLinkedItemIds({ other: 'field' })).toEqual([]);
+  });
+
+  it('skips empty / malformed linkedPulseIds entries', () => {
+    expect(
+      extractLinkedItemIds({
+        linkedPulseIds: [
+          { linkedPulseId: 100 },
+          null,
+          { linkedPulseId: '' },
+          { other: 200 },
+        ],
+      }),
+    ).toEqual(['100']);
+  });
+});
+
+describe('findRelationColumnIdToBoard (M26b)', () => {
+  const col = (
+    id: string,
+    type: string,
+    settings_str: string | null,
+  ): { id: string; type: string; settings_str: string | null } => ({
+    id,
+    type,
+    settings_str,
+  });
+
+  it('returns the relation column when settings_str.boardIds matches', () => {
+    const id = findRelationColumnIdToBoard(
+      [
+        col(
+          'rel_sprint',
+          'board_relation',
+          JSON.stringify({ boardIds: ['200'] }),
+        ),
+      ],
+      '200',
+    );
+    expect(id).toBe('rel_sprint');
+  });
+
+  it('supports the alternate board_ids key (snake_case)', () => {
+    const id = findRelationColumnIdToBoard(
+      [
+        col(
+          'rel_sprint',
+          'board_relation',
+          JSON.stringify({ board_ids: [200] }),
+        ),
+      ],
+      '200',
+    );
+    expect(id).toBe('rel_sprint');
+  });
+
+  it('returns undefined when no relation column targets the board', () => {
+    const id = findRelationColumnIdToBoard(
+      [
+        col(
+          'rel_other',
+          'board_relation',
+          JSON.stringify({ boardIds: ['999'] }),
+        ),
+      ],
+      '200',
+    );
+    expect(id).toBeUndefined();
+  });
+
+  it('skips non-board_relation columns', () => {
+    const id = findRelationColumnIdToBoard(
+      [
+        col(
+          'status',
+          'status',
+          JSON.stringify({ labels: { '0': 'Done' } }),
+        ),
+      ],
+      '200',
+    );
+    expect(id).toBeUndefined();
+  });
+});
+
+describe('resolveStatusColumn (M26b)', () => {
+  const col = (
+    id: string,
+    type: string,
+    settings_str: string | null,
+  ): { id: string; type: string; title: string; settings_str: string | null } => ({
+    id,
+    type,
+    title: id,
+    settings_str,
+  });
+
+  it('returns the status column + parsed labels (case-folded keys)', () => {
+    const result = resolveStatusColumn('100', [
+      col('status', 'status', JSON.stringify({
+        labels: { '0': 'Working on it', '1': 'Done', '2': 'Stuck' },
+      })),
+    ]);
+    expect(result.columnId).toBe('status');
+    expect(result.labels.get('done')).toBe('Done');
+    expect(result.labels.get('working on it')).toBe('Working on it');
+  });
+
+  it('accepts color columns too', () => {
+    const result = resolveStatusColumn('100', [
+      col('status', 'color', JSON.stringify({
+        labels: { '0': 'Done' },
+      })),
+    ]);
+    expect(result.columnId).toBe('status');
+  });
+
+  it('throws dev_board_misconfigured (no_status_column) when missing', () => {
+    expect(() => resolveStatusColumn('100', [])).toThrow(
+      /no status column/,
+    );
+  });
+});
+
+describe('resolveCanonicalLabel (M26b)', () => {
+  const labels = new Map([
+    ['working on it', 'working on it'],
+    ['done', 'Done'],
+    ['stuck', 'STUCK'],
+  ]);
+
+  it('resolves canonical labels case-insensitively + returns the stored form', () => {
+    expect(resolveCanonicalLabel('100', 'status', labels, 'Working on it')).toBe(
+      'working on it',
+    );
+    expect(resolveCanonicalLabel('100', 'status', labels, 'Done')).toBe('Done');
+    expect(resolveCanonicalLabel('100', 'status', labels, 'Stuck')).toBe('STUCK');
+  });
+
+  it('throws dev_board_misconfigured when canonical missing', () => {
+    const limited = new Map([['done', 'Done']]);
+    expect(() =>
+      resolveCanonicalLabel('100', 'status', limited, 'Working on it'),
+    ).toThrow(/Working on it/);
+  });
+});

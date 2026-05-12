@@ -1,19 +1,25 @@
 /**
  * `monday dev sprint items <sid>` — list the task items linked to
- * a named sprint (cli-design §4.3 + §5.9; v0.3-plan §3 M26).
+ * a named sprint (cli-design §4.3 + §5.9; v0.3-plan §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `tasks_board` + read
- * the configured sprint→task `board_relation` column ID (probed
- * at `dev doctor`'s `tasks_to_sprints_relation` check), then
- * page through tasks filtered by the relation. Surfaces the
- * tasks as `ProjectedItem` rows.
+ * **Runtime body landed at M26b IMPL.** Loads the active profile's
+ * dev mapping, hydrates the configured `tasks_board`'s columns to
+ * locate the `board_relation` column that references the configured
+ * `sprints_board` (`tasks_to_sprints_relation` per the M26a doctor
+ * check), walks all tasks, and filters client-side by inspecting
+ * the relation column's `value.linkedPulseIds` / `value.item_ids`
+ * payload.
  *
  * **<sid> resolution.** Positional sprint ID is an item ID on the
  * sprints board (sprints are items, not first-class entities).
- * Validated via `ItemIdSchema` — invalid IDs surface
- * `usage_error` at the parse boundary.
+ * `ItemIdSchema` validates the shape at the argv layer; invalid IDs
+ * surface `usage_error`. The sprint item is NOT hydrated by this
+ * verb — only the tasks linked to it.
+ *
+ * **`dev_board_misconfigured` surfaces** when the tasks board has no
+ * `board_relation` column linking to `sprints_board` (the
+ * `tasks_to_sprints_relation` doctor check would fail). Points the
+ * agent at `monday dev doctor` for diagnostics.
  *
  * Idempotent: yes (pure read).
  */
@@ -21,7 +27,17 @@ import { z } from 'zod';
 import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitSuccess } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
 import { ItemIdSchema } from '../../../types/ids.js';
+import {
+  extractLinkedItemIds,
+  findRelationColumnIdToBoard,
+  hydrateDevBoardColumns,
+  loadDevMapping,
+  walkDevBoardItems,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -48,7 +64,7 @@ export const devSprintItemsCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -71,23 +87,74 @@ export const devSprintItemsCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (sprintIdArg: unknown) => {
-          parseArgv(devSprintItemsCommand.inputSchema, {
-            sprintId: sprintIdArg,
-          });
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev sprint items not yet implemented (v0.3-M26 pre-flight stub)',
+      .action(async (sprintIdArg: unknown) => {
+        const parsed = parseArgv(devSprintItemsCommand.inputSchema, {
+          sprintId: sprintIdArg,
+        });
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const tasksBoard = requireDevBoard(mapping, 'tasks_board', profile.name);
+        const sprintsBoard = requireDevBoard(mapping, 'sprints_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+
+        // Resolve the board_relation column on tasks_board linking to
+        // sprints_board. Doctor's `tasks_to_sprints_relation` check
+        // validates this wiring at diagnostic time; the workflow verb
+        // re-resolves at runtime since the relation column ID isn't
+        // stored in the mapping.
+        const { columns, complexity: hydrateComplexity } =
+          await hydrateDevBoardColumns(
+            client,
+            tasksBoard,
+            'DevSprintItemsHydrate',
+          );
+        const relationColumnId = findRelationColumnIdToBoard(
+          columns,
+          sprintsBoard,
+        );
+        if (relationColumnId === undefined) {
+          throw new ApiError(
+            'dev_board_misconfigured',
+            `tasks board ${tasksBoard} has no board_relation column linking to sprints board ${sprintsBoard}`,
             {
               details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
+                board_id: tasksBoard,
+                target_slot: 'sprints_board',
+                target_board_id: sprintsBoard,
+                reason: 'no_matching_relation',
+                hint: 'run `monday dev doctor` for the `tasks_to_sprints_relation` check, then add or fix the Connect Boards column on the tasks board',
               },
             },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+          );
+        }
+
+        const { items, complexity: walkComplexity } = await walkDevBoardItems({
+          client,
+          boardId: tasksBoard,
+          operationName: 'DevSprintItemsWalk',
+          now: ctx.clock,
+        });
+
+        const filtered = items.filter((task) => {
+          const relCol = task.columns[relationColumnId];
+          if (relCol === undefined) return false;
+          const linked = extractLinkedItemIds(relCol.value);
+          return linked.includes(parsed.sprintId);
+        });
+
+        emitSuccess({
+          ctx,
+          data: filtered,
+          schema: devSprintItemsCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'collection',
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity: walkComplexity ?? hydrateComplexity,
+        });
+      });
   },
 };

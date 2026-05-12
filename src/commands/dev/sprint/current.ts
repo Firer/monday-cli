@@ -1,29 +1,36 @@
 /**
  * `monday dev sprint current` — the active sprint for the active
- * profile (cli-design §4.3 + §5.9 + §11.3; v0.3-plan §3 M26).
+ * profile (cli-design §4.3 + §5.9 + §11.3; v0.3-plan §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `sprints_board` via
- * `loadDevMapping`, page through items_page filtered to sprint
- * rows whose date-range straddles `ctx.clock()`, surface the
- * winning sprint as a `ProjectedItem`. If no sprint is active,
- * throws `not_found` with a hint pointing at `monday dev sprint
- * list --state future` for upcoming sprints.
+ * **Runtime body landed at M26b IMPL.** Loads the active profile's
+ * `sprints_board`, walks `items_page`, picks the first sprint whose
+ * date range straddles `ctx.clock()` (per the same date-range
+ * derivation `dev sprint list` uses). Throws `not_found` when no
+ * sprint is active, with a hint pointing at
+ * `monday dev sprint list --state future` for upcoming sprints.
  *
  * Idempotent: yes (pure read). Output is non-deterministic at the
  * day boundary — agents polling on the cutover should expect the
- * sprint to flip mid-day if their workspace's sprints have
- * adjacent date ranges.
+ * sprint to flip mid-day if their workspace's sprints have adjacent
+ * date ranges. When two sprints overlap (rare but legal), the first
+ * encountered (per the items_page sort-by-id-asc walker) wins.
  */
 import { z } from 'zod';
 import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitSuccess } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
+import {
+  loadDevMapping,
+  walkDevBoardItems,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
 } from '../../../api/item-projection.js';
+import { _internals as listInternals } from './list.js';
 
 const inputSchema = z.object({}).strict();
 
@@ -40,7 +47,7 @@ export const devSprintCurrentCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema: projectedItemSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -63,21 +70,57 @@ export const devSprintCurrentCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (opts: unknown) => {
-          parseArgv(devSprintCurrentCommand.inputSchema, opts);
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev sprint current not yet implemented (v0.3-M26 pre-flight stub)',
+      .action(async (rawOpts: unknown) => {
+        parseArgv(devSprintCurrentCommand.inputSchema, rawOpts);
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const boardId = requireDevBoard(mapping, 'sprints_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { items, complexity } = await walkDevBoardItems({
+          client,
+          boardId,
+          operationName: 'DevSprintCurrent',
+          now: ctx.clock,
+        });
+
+        const todayEpoch = listInternals.dayEpoch(ctx.clock().toISOString());
+        /* c8 ignore next 3 */
+        if (todayEpoch === null) {
+          throw new Error('unreachable: ctx.clock() produced an unparseable ISO string');
+        }
+        const active = items.find(
+          (i) =>
+            listInternals.classifySprint(
+              listInternals.extractDateRange(i),
+              todayEpoch,
+            ) === 'active',
+        );
+        if (active === undefined) {
+          throw new ApiError(
+            'not_found',
+            `no active sprint on board ${boardId} for profile \`${profile.name}\``,
             {
               details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
+                profile: profile.name,
+                board_id: boardId,
+                hint: 'inspect upcoming sprints with `monday dev sprint list --state future`',
               },
             },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+          );
+        }
+
+        emitSuccess({
+          ctx,
+          data: active,
+          schema: devSprintCurrentCommand.outputSchema,
+          programOpts: program.opts(),
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity,
+        });
+      });
   },
 };

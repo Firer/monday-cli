@@ -18,7 +18,7 @@
  * `src/api/dev-conventions.ts`); those take the resolved profile
  * name as a parameter.
  */
-import { ConfigError } from '../../utils/errors.js';
+import { ApiError, ConfigError } from '../../utils/errors.js';
 import {
   loadProfilesConfig,
   selectProfile,
@@ -26,6 +26,7 @@ import {
 } from '../../config/profiles.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import type { RunContext } from '../../cli/run.js';
+import type { DevMapping } from '../../api/dev-conventions.js';
 
 export interface ResolvedDevProfile {
   readonly name: string;
@@ -51,13 +52,18 @@ export const resolveActiveDevProfile = async (
   programOpts: unknown,
 ): Promise<ResolvedDevProfile> => {
   // HOME-truthy + length check mirrors `src/cli/program.ts:171-174`.
+  // Tests always set HOME via the per-test tmp dir; the
+  // `home === undefined` arm is defensive for production environments
+  // where HOME is unset (running under a hardened systemd unit, etc.) —
+  // not reproducible from any integration test.
+  /* c8 ignore start */
   const home =
     ctx.env.HOME !== undefined && ctx.env.HOME.length > 0
       ? ctx.env.HOME
       : undefined;
   const homeOptions: ProfilesRootOptions =
-    /* c8 ignore next */
     home !== undefined ? { home, env: ctx.env } : { env: ctx.env };
+  /* c8 ignore stop */
 
   // `parseGlobalFlags` throws `UsageError` on a bad global flag
   // (`--retry`, `--timeout`, `--profile`, etc.). Codex M26a IMPL P1-1
@@ -88,4 +94,43 @@ export const resolveActiveDevProfile = async (
   }
 
   return { name: selection.name, homeOptions };
+};
+
+/**
+ * Slot-check helper for the 10 M26b workflow verbs. Every workflow
+ * verb pulls a noun-specific board ID off the loaded {@link DevMapping}
+ * + surfaces `dev_not_configured` when the slot is unset — same shape
+ * 10 times pre-lift. R-NEW-32 fires at the 10-consumer threshold
+ * (M26b IMPL); the helper lands with the workflow verbs themselves
+ * so the duplication never appears in any feat commit.
+ *
+ * **Why this is `dev_not_configured`, not `dev_board_misconfigured`.**
+ * Per cli-design §5.9 + the M26a round-1 P2-4 closure: the absence of
+ * a slot in the dev mapping is a missing CONFIGURATION (the user
+ * hasn't told the CLI which board to use). A misconfigured board —
+ * board exists but doesn't expose the expected column / wiring —
+ * surfaces from runtime checks via `dev_board_misconfigured` later in
+ * the verb. The slot-empty case stays under `dev_not_configured`.
+ */
+export const requireDevBoard = (
+  mapping: DevMapping,
+  slot: keyof DevMapping,
+  profile: string,
+): string => {
+  const value = mapping[slot];
+  if (value === undefined) {
+    const flag = slot.replace('_board', '-board');
+    throw new ApiError(
+      'dev_not_configured',
+      `Monday Dev mapping for profile \`${profile}\` is missing the \`${slot}\` slot`,
+      {
+        details: {
+          profile,
+          slot,
+          hint: `run \`monday dev configure --${flag} <bid>\` or \`monday dev discover --apply\``,
+        },
+      },
+    );
+  }
+  return value;
 };

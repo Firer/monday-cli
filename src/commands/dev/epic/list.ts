@@ -1,27 +1,35 @@
 /**
- * `monday dev epic list [--state active|done]` — list epics
- * filtered by completion state (cli-design §4.3 + §5.9; v0.3-plan
- * §3 M26).
+ * `monday dev epic list [--state active|done]` — list epics filtered
+ * by completion state (cli-design §4.3 + §5.9; v0.3-plan §3 M26b).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M26 implementation lands the
- * runtime body: load the active profile's `epics_board`, page
- * through items_page, and filter client-side by the epic's
- * status column — `active` = not `Done` / `Cancelled`; `done` =
- * `Done` / `Cancelled`. Epics with no resolvable status column
- * fall through to `active`; the structural misconfiguration is
- * diagnosed via `dev doctor`'s `epics_board_exists` check (round-1
- * Codex P2-3 clarification — `dev_board_misconfigured` is an
- * ERROR code in the §6.5 registry, not a warning code, so soft
- * status-column drift on `epic list` surfaces as a normal
- * pass-through rather than a same-named warning).
+ * **Runtime body landed at M26b IMPL.** Loads the active profile's
+ * dev mapping, walks `items_page` on the configured `epics_board`,
+ * and filters client-side by the per-row status column — `active` =
+ * NOT `Done`/`Cancelled`; `done` = `Done`/`Cancelled`. Epics without
+ * a resolvable status column fall through to the `active` bucket;
+ * the structural misconfiguration is diagnosed via `dev doctor`'s
+ * board-existence check (no warning code registered at M26 pre-flight
+ * — see the M26 round-1 Codex P2-3 clarification).
+ *
+ * **Status-column heuristic.** Walks every column on a row looking for
+ * the first `status` or `color` column whose projected `text` /
+ * `label` field carries a non-empty string. The first such field
+ * decides the row's state. Reading from `column_values` (already
+ * carried on the items_page projection's columns map) means no extra
+ * round-trip; the epic board's column ID isn't needed up front.
  *
  * Idempotent: yes (pure read).
  */
 import { z } from 'zod';
-import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
+import { emitSuccess } from '../../emit.js';
+import { resolveClient } from '../../../api/resolve-client.js';
+import {
+  loadDevMapping,
+  walkDevBoardItems,
+} from '../../../api/dev-conventions.js';
+import { resolveActiveDevProfile, requireDevBoard } from '../_shared.js';
 import {
   projectedItemSchema,
   type ProjectedItem,
@@ -38,6 +46,36 @@ const inputSchema = z
 
 const outputSchema = z.array(projectedItemSchema);
 
+const DONE_LABELS: ReadonlySet<string> = new Set([
+  'done',
+  'cancelled',
+  'canceled',
+]);
+
+/**
+ * Returns the projected status-label string for an item, if any.
+ * Walks the projected columns looking for the first status / color
+ * column with a non-empty `label` or `text`.
+ */
+const projectedStatusLabel = (item: ProjectedItem): string | null => {
+  for (const col of Object.values(item.columns)) {
+    if (col.type !== 'status' && col.type !== 'color') continue;
+    if (typeof col.label === 'string' && col.label.length > 0) {
+      return col.label;
+    }
+    if (typeof col.text === 'string' && col.text.length > 0) {
+      return col.text;
+    }
+  }
+  return null;
+};
+
+const isDoneEpic = (item: ProjectedItem): boolean => {
+  const label = projectedStatusLabel(item);
+  if (label === null) return false;
+  return DONE_LABELS.has(label.toLocaleLowerCase('und'));
+};
+
 export const devEpicListCommand: CommandModule<
   z.infer<typeof inputSchema>,
   readonly ProjectedItem[]
@@ -52,7 +90,7 @@ export const devEpicListCommand: CommandModule<
   idempotent: true,
   inputSchema,
   outputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const dev = ensureSubcommand(
       program,
       'dev',
@@ -79,21 +117,38 @@ export const devEpicListCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M26 IMPL */
-        async (opts: unknown) => {
-          parseArgv(devEpicListCommand.inputSchema, opts);
-          await Promise.reject(new ApiError(
-            'internal_error',
-            'monday dev epic list not yet implemented (v0.3-M26 pre-flight stub)',
-            {
-              details: {
-                hint: 'M26 implementation lands the runtime body; see docs/v0.3-plan.md §3 M26',
-              },
-            },
-          ));
-        },
-        /* c8 ignore stop */
-      );
+      .action(async (rawOpts: unknown) => {
+        const opts = parseArgv(devEpicListCommand.inputSchema, rawOpts);
+
+        const profile = await resolveActiveDevProfile(ctx, program.opts());
+        const mapping = await loadDevMapping(profile.name, profile.homeOptions);
+        const boardId = requireDevBoard(mapping, 'epics_board', profile.name);
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const { items, complexity } = await walkDevBoardItems({
+          client,
+          boardId,
+          operationName: 'DevEpicList',
+          now: ctx.clock,
+        });
+
+        const filtered = opts.state === undefined
+          ? items
+          : items.filter((i) =>
+              opts.state === 'done' ? isDoneEpic(i) : !isDoneEpic(i),
+            );
+
+        emitSuccess({
+          ctx,
+          data: filtered,
+          schema: devEpicListCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'collection',
+          apiVersion,
+          source: 'live',
+          cacheAgeSeconds: null,
+          complexity,
+        });
+      });
   },
 };
