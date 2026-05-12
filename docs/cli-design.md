@@ -6914,7 +6914,7 @@ scoped idempotent changes, and post comments narrating its work.**
   (no pre-mutation read fires). Adding webhooks to §8 cache scope
   would be a contract extension (v0.3.x / v0.4 PR).
   **M27 pre-flight decisions closed inline
-  (`<M27-PREFLIGHT-SHA>`):** Decision 9 (webhook event-type
+  (`af1c2f8`):** Decision 9 (webhook event-type
   validation) — closed via the 21-value `WEBHOOK_EVENT_TYPES`
   closed enum in `src/api/webhooks.ts` (empirical probe
   2026-05-12, API `2026-01`); `webhook create --event <type>`
