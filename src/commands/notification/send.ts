@@ -4,54 +4,57 @@
  * to a single recipient (cli-design §2.7 + §4.3 + §13 v0.3 entry;
  * v0.3-plan §3 M27).
  *
- * **Pre-flight stub action.** Argv schema is real; action body
- * `c8 ignore start/stop` wrapped. M27 implementation lands the
- * runtime body via `client.raw` against the `CreateNotification`
- * mutation with `operationName: 'CreateNotification'` (R-NEW-37
- * watch-item: keep doc-named-operation + wire-operationName in
- * sync).
+ * **Wire shape.** Single `client.raw` round-trip via
+ * {@link sendNotification} against `mutation CreateNotification`
+ * with `operationName: 'CreateNotification'` (R-NEW-37 W2 audit-
+ * point).
  *
  * **Single-recipient at v0.3.** `--user <uid>` accepts ONE user ID;
  * multi-recipient fan-out is a v0.3.x / v0.4 contract-extension
  * (agents needing fan-out call `notification send` N times). Per
  * v0.3-plan §3 M27 sibling decisions list.
  *
- * **`--target-type` argv is `item|board`** (cli-design §4.3). The
- * CLI's 2-value vocabulary maps to Monday's wire
- * `NotificationTargetType.Project` (which represents both items and
- * boards). The runtime body at M27 IMPL preserves the item-vs-board
- * argv distinction for CLI-side validation discipline (verifying the
- * supplied `--target <id>` actually names an item or board to match
- * the supplied type before firing the wire mutation). Monday's wire
- * enum has only two values (`Post` / `Project`); the `Post` value
- * (Update-targeted notifications) is unreachable at v0.3 — a
- * v0.3.x / v0.4 contract-extension may add a CLI third target-type
- * `update` that dispatches to wire `Post`.
+ * **`--target-type` argv is `item|board`** (cli-design §4.3). Both
+ * CLI values map to Monday's wire `NotificationTargetType.Project`
+ * at the runtime boundary inside {@link sendNotification} — Monday's
+ * wire enum doesn't distinguish items from boards (server-side
+ * validates that `target_id` actually names the kind the caller
+ * declared, surfacing mismatches as `not_found`). The CLI keeps the
+ * 2-value vocabulary for argv-validation discipline AND so the
+ * output envelope echoes the agent-supplied kind. Monday's `Post`
+ * wire value (Update-targeted notifications) is unreachable at v0.3.
+ *
+ * **No pre-mutation target verification.** The CLI trusts the
+ * `--target <id>` + `--target-type` argv pair and lets Monday's
+ * server-side validation surface mismatches as `not_found`. A
+ * stricter CLI-side check (e.g. pre-read against `Query.items` /
+ * `Query.boards`) is deferred — it would double the wire-call
+ * count without adding any agent-visible recovery surface.
  *
  * **Idempotency.** `create_notification` is NOT idempotent —
  * re-running mints a fresh notification with a new ID. Agents
  * needing send-once-semantics dedup on the CLI side.
  *
- * **`--dry-run` support per §3.1 #6.** Argv parse + target-type
- * validation only; no wire mutation fires. Envelope shape pinned
- * in output-shapes.md; runtime engine lands at M27 IMPL.
+ * **`--dry-run` shape** per §3.1 #6 + §6.4. Strictly argv-derived;
+ * no wire mutation fires. `meta.source: "none"`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UserIdSchema } from '../../types/ids.js';
 import {
   notificationSendOutputSchema,
   notificationTargetTypeSchema,
+  sendNotification,
   type NotificationSendOutput,
 } from '../../api/notifications.js';
 
 // `target` is either an ItemId or BoardId depending on `target-type`.
 // At the argv parse boundary we accept any numeric ID string and let
-// the runtime body (M27 IMPL) verify the ID kind matches `target-type`
-// via a wire round-trip; surfacing the mismatch as `usage_error` per
-// cli-design §6.5.
+// Monday's server-side validation surface mismatches as `not_found`
+// (per the module header trust-the-argv decision).
 const numericIdRegex = /^\d+$/u;
 
 const inputSchema = z
@@ -79,7 +82,7 @@ export const notificationSendCommand: CommandModule<
   idempotent: false,
   inputSchema,
   outputSchema: notificationSendOutputSchema,
-  attach: (program) => {
+  attach: (program, ctx) => {
     const noun = ensureSubcommand(
       program,
       'notification',
@@ -113,33 +116,66 @@ export const notificationSendCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      .action(
-        /* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
-        async (opts: {
-          user: string;
-          target: string;
-          targetType: string;
-          text: string;
-        }) => {
-          parseArgv(notificationSendCommand.inputSchema, {
-            user: opts.user,
-            target: opts.target,
-            targetType: opts.targetType,
-            text: opts.text,
-          });
-          await Promise.reject(
-            new ApiError(
-              'internal_error',
-              'monday notification send not yet implemented (v0.3-M27 pre-flight stub)',
+      .action(async (opts: {
+        user: string;
+        target: string;
+        targetType: string;
+        text: string;
+      }) => {
+        const parsed = parseArgv(notificationSendCommand.inputSchema, {
+          user: opts.user,
+          target: opts.target,
+          targetType: opts.targetType,
+          text: opts.text,
+        });
+
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
+        );
+
+        if (globalFlags.dryRun) {
+          // Strictly argv-derived per cli-design §6.4 — no wire
+          // call fires.
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
               {
-                details: {
-                  hint: 'M27 implementation lands the runtime body; see docs/v0.3-plan.md §3 M27',
-                },
+                operation: 'create_notification',
+                user_id: parsed.user,
+                target_id: parsed.target,
+                target_type: parsed.targetType,
+                text: parsed.text,
               },
-            ),
-          );
-        },
-        /* c8 ignore stop */
-      );
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await sendNotification({
+          client,
+          userId: parsed.user,
+          targetId: parsed.target,
+          targetType: parsed.targetType,
+          text: parsed.text,
+        });
+
+        emitMutation({
+          ctx,
+          data: result.notification,
+          schema: notificationSendCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
+      });
   },
 };

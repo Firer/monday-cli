@@ -48,16 +48,21 @@
  * needing send-once-semantics dedup on the CLI side; the verb
  * does not enforce idempotency.
  *
- * **Pre-flight stub.** Runtime fetcher (`sendNotification`)
- * rejects with `internal_error` under `c8 ignore start/stop`
- * block-wraps; M27 IMPL drops the wraps + lands the wire body
- * (mirrors the M21 oauth-stub / M24 history-stub / M25
- * partial-success-bulk / M26 dev-conventions precedents).
+ * **Runtime body (M27 IMPL).** Single `client.raw` round-trip
+ * against `mutation CreateNotification` with `operationName:
+ * 'CreateNotification'` (R-NEW-37 W2 audit-point). The CLI's
+ * 2-value `--target-type` enum collapses to wire `Project` at the
+ * runtime boundary; the CLI-side echo (`user_id` / `target_id` /
+ * `target_type`) is composed at the parse boundary so the envelope
+ * carries both the Monday-minted `id` + the agent-supplied inputs.
  */
 
 import { z } from 'zod';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { assertResponseFieldPresent } from './response-root.js';
 import { ApiError } from '../utils/errors.js';
 import type { MondayClient } from './client.js';
+import type { Complexity } from '../utils/output/envelope.js';
 
 /**
  * CLI-side `target_type` vocabulary for `monday notification send
@@ -121,32 +126,118 @@ export interface SendNotificationResult {
   readonly notification: NotificationSendOutput;
   readonly source: 'live';
   readonly cacheAgeSeconds: null;
-  readonly complexity: number | null;
+  readonly complexity: Complexity | null;
 }
 
+const CREATE_NOTIFICATION_MUTATION = `
+  mutation CreateNotification(
+    $userId: ID!,
+    $targetId: ID!,
+    $targetType: NotificationTargetType!,
+    $text: String!
+  ) {
+    create_notification(
+      user_id: $userId,
+      target_id: $targetId,
+      target_type: $targetType,
+      text: $text
+    ) {
+      id
+      text
+    }
+  }
+`;
+
+interface CreateNotificationResponse {
+  readonly create_notification: unknown;
+}
+
+const wireNotificationSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string().nullable(),
+  })
+  .strict();
+
 /**
- * Stub fetcher for {@link notificationSendCommand}. M27 IMPL lands
- * the wire body: a single `Mutation.create_notification` round-trip
- * via `client.raw` with `operationName: 'CreateNotification'`
- * (R-NEW-37 watch-item: keep doc-named-operation + wire-
- * operationName in sync). Both CLI `--target-type` values map to
- * wire `Project`; the IMPL body translates at the parse boundary.
+ * Fires Monday's `create_notification` mutation. Both CLI
+ * `--target-type` values (`item`/`board`) map to the wire enum
+ * `NotificationTargetType.Project` — Monday's wire surface doesn't
+ * distinguish items from boards at the enum level (server-side
+ * validates that the supplied `target_id` actually names the kind
+ * the caller declared).
+ *
+ * The wire payload returns only `{id, text}`; the CLI-side echo
+ * (`user_id` / `target_id` / `target_type`) is composed at the
+ * caller's parse boundary so the resulting envelope carries both the
+ * Monday-minted `id` and the agent-supplied inputs in one read.
+ *
+ * `operationName: 'CreateNotification'` stays in sync with the named
+ * operation in {@link CREATE_NOTIFICATION_MUTATION} (R-NEW-37 W2
+ * audit-point). Not idempotent — re-running mints a fresh
+ * notification with a new ID.
  */
-/* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
 export const sendNotification = async (
-  _inputs: SendNotificationInputs,
+  inputs: SendNotificationInputs,
 ): Promise<SendNotificationResult> => {
-  await Promise.reject(
-    new ApiError(
-      'internal_error',
-      'sendNotification not yet implemented (v0.3-M27 pre-flight stub)',
+  // CLI's 2-value enum collapses to wire `Project` (Monday's wire
+  // surface has no item-vs-board distinction). The `Post` wire value
+  // is unreachable at v0.3 per cli-design §4.3.
+  const wireTargetType = 'Project';
+  const response = await inputs.client.raw<CreateNotificationResponse>(
+    CREATE_NOTIFICATION_MUTATION,
+    {
+      userId: inputs.userId,
+      targetId: inputs.targetId,
+      targetType: wireTargetType,
+      text: inputs.text,
+    },
+    { operationName: inputs.operationName ?? 'CreateNotification' },
+  );
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'create_notification',
+    operationLabel: 'CreateNotification',
+    details: {
+      user_id: inputs.userId,
+      target_id: inputs.targetId,
+      target_type: inputs.targetType,
+    },
+    nullHandling: 'caller_handles',
+  });
+  const raw = response.data.create_notification;
+  if (raw === null || raw === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no notification payload from create_notification for user ${inputs.userId} on target ${inputs.targetId}`,
       {
         details: {
-          hint: 'M27 IMPL session lands the wire body; see docs/v0.3-plan.md §3 M27',
+          user_id: inputs.userId,
+          target_id: inputs.targetId,
+          target_type: inputs.targetType,
         },
       },
-    ),
-  );
-  throw new Error('unreachable');
+    );
+  }
+  const wire = unwrapOrThrow(wireNotificationSchema.safeParse(raw), {
+    context: 'Monday `create_notification` response',
+    details: {
+      user_id: inputs.userId,
+      target_id: inputs.targetId,
+      target_type: inputs.targetType,
+    },
+    hint: 'Monday may have amended the `Notification` selection — re-probe and amend `src/api/notifications.ts` if so',
+  });
+  return {
+    notification: {
+      id: wire.id,
+      text: wire.text,
+      user_id: inputs.userId,
+      target_id: inputs.targetId,
+      target_type: inputs.targetType,
+    },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */

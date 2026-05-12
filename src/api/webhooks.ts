@@ -58,16 +58,23 @@
  * Adding webhooks to the §8 cache scope would be a contract
  * extension (v0.3.x / v0.4).
  *
- * **Pre-flight stubs.** Runtime fetchers (`listWebhooks` /
- * `createWebhook` / `deleteWebhook`) reject with `internal_error`
- * under `c8 ignore start/stop` block-wraps; M27 IMPL drops the wraps
- * + lands the wire bodies (mirrors M21 oauth-stub / M24 history-stub
- * / M25 partial-success-bulk / M26 dev-conventions precedents).
+ * **Runtime bodies (M27 IMPL).** Three fetchers — `listWebhooks` /
+ * `createWebhook` / `deleteWebhook` — each issue a single
+ * `client.raw` round-trip with a named operation (`Webhooks` /
+ * `CreateWebhook` / `DeleteWebhook`) matching the document's named
+ * operation per the R-NEW-37 W2 audit-point. Results parse through
+ * {@link webhookSchema} via `unwrapOrThrow` so payload drift surfaces
+ * `internal_error` with `details.issues`; null payloads surface
+ * `not_found` with `details.webhook_id` (or `details.board_id` for
+ * the list verb).
  */
 
 import { z } from 'zod';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { assertResponseFieldPresent } from './response-root.js';
 import { ApiError } from '../utils/errors.js';
 import type { MondayClient } from './client.js';
+import type { Complexity } from '../utils/output/envelope.js';
 
 /**
  * Monday's `WebhookEventType` enum vocabulary (empirical probe
@@ -188,44 +195,82 @@ export interface ListWebhooksResult {
   readonly webhooks: readonly Webhook[];
   readonly source: 'live';
   readonly cacheAgeSeconds: null;
-  readonly complexity: number | null;
+  readonly complexity: Complexity | null;
 }
 
+const LIST_WEBHOOKS_QUERY = `
+  query Webhooks($boardId: ID!) {
+    webhooks(board_id: $boardId) {
+      id
+      board_id
+      event
+      config
+    }
+  }
+`;
+
+const listWebhooksResponseSchema = z
+  .object({
+    webhooks: z.array(webhookSchema).nullable(),
+  })
+  .loose();
+
 /**
- * Stub fetcher for {@link webhookListCommand}. M27 IMPL lands the
- * wire body: a single `Query.webhooks(board_id:)` round-trip via
- * `client.raw` with `operationName: 'Webhooks'` (R-NEW-37 watch-
- * item: keep doc-named-operation + wire-operationName in sync).
- * The supplied document carries a named `query Webhooks` operation
- * that aligns with the threaded operationName. Result is projected
- * through {@link webhookSchema} via the parse-boundary helpers.
- * Source is always `'live'` per cli-design §8 cache scope.
+ * Fetches the webhooks configured on `inputs.boardId` via a single
+ * `Query.webhooks(board_id:)` round-trip. `operationName: 'Webhooks'`
+ * stays in sync with the named operation in {@link LIST_WEBHOOKS_QUERY}
+ * (R-NEW-37 W2 audit-point). Source is always `'live'` per cli-design
+ * §8 cache scope; webhooks aren't cached at v0.3.
+ *
+ * A null `webhooks` root surfaces `not_found` with `details.board_id`
+ * — matches the M10/M15 lifecycle verbs so agents key off one error
+ * code regardless of which read they ran.
  */
-/* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
 export const listWebhooks = async (
-  _inputs: ListWebhooksInputs,
+  inputs: ListWebhooksInputs,
 ): Promise<ListWebhooksResult> => {
-  await Promise.reject(
-    new ApiError(
-      'internal_error',
-      'listWebhooks not yet implemented (v0.3-M27 pre-flight stub)',
-      {
-        details: {
-          hint: 'M27 IMPL session lands the wire body; see docs/v0.3-plan.md §3 M27',
-        },
-      },
-    ),
+  const response = await inputs.client.raw<unknown>(
+    LIST_WEBHOOKS_QUERY,
+    { boardId: inputs.boardId },
+    { operationName: inputs.operationName ?? 'Webhooks' },
   );
-  throw new Error('unreachable');
+  const parsed = unwrapOrThrow(
+    listWebhooksResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday `Query.webhooks` response',
+      details: { board_id: inputs.boardId },
+      hint: 'Monday may have amended the `webhooks(board_id:)` selection — re-probe and amend `src/api/webhooks.ts` if so',
+    },
+  );
+  if (parsed.webhooks === null) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no webhooks payload for board ${inputs.boardId}`,
+      { details: { board_id: inputs.boardId } },
+    );
+  }
+  return {
+    webhooks: parsed.webhooks,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface CreateWebhookInputs {
   readonly client: MondayClient;
   readonly boardId: string;
   readonly url: string;
   readonly event: WebhookEventType;
-  readonly config?: string;
+  /**
+   * Pre-parsed JSON value threaded to Monday's `JSON` scalar `config`
+   * arg. The CLI accepts `--config <json>` at argv as a JSON-encoded
+   * string; the command's action body parses it once at the parse
+   * boundary (surfacing malformed JSON as `usage_error`) and threads
+   * the resulting JS value through. Omitting the field skips the
+   * argument entirely so Monday's per-event default applies.
+   */
+  readonly config?: unknown;
   readonly operationName?: string;
 }
 
@@ -233,36 +278,95 @@ export interface CreateWebhookResult {
   readonly webhook: Webhook;
   readonly source: 'live';
   readonly cacheAgeSeconds: null;
-  readonly complexity: number | null;
+  readonly complexity: Complexity | null;
+}
+
+const CREATE_WEBHOOK_MUTATION = `
+  mutation CreateWebhook(
+    $boardId: ID!,
+    $url: String!,
+    $event: WebhookEventType!,
+    $config: JSON
+  ) {
+    create_webhook(
+      board_id: $boardId,
+      url: $url,
+      event: $event,
+      config: $config
+    ) {
+      id
+      board_id
+      event
+      config
+    }
+  }
+`;
+
+interface CreateWebhookResponse {
+  readonly create_webhook: unknown;
 }
 
 /**
- * Stub fetcher for {@link webhookCreateCommand}. M27 IMPL lands the
- * wire body via `client.raw` against the `CreateWebhook` mutation
- * with `operationName: 'CreateWebhook'` (R-NEW-37 watch-item: keep
- * doc-named-operation + wire-operationName in sync). The `config`
- * input crosses the wire as the `JSON` scalar — the CLI accepts an
- * opaque JSON string at argv and threads it through; per-event
- * structural validation lives server-side at Monday.
+ * Registers a new webhook against Monday's `create_webhook` mutation.
+ * `operationName: 'CreateWebhook'` stays in sync with the named
+ * operation in {@link CREATE_WEBHOOK_MUTATION} (R-NEW-37 W2 audit-
+ * point). The `config` input crosses the wire as the `JSON` scalar
+ * — the caller threads any pre-parsed JSON value (or `null` when
+ * absent); per-event structural validation lives server-side at
+ * Monday.
+ *
+ * Re-running creates a fresh webhook with a new ID — `idempotent:
+ * false`. Agents needing register-once semantics should `webhook
+ * list` first and skip the create if a matching entry exists.
  */
-/* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
 export const createWebhook = async (
-  _inputs: CreateWebhookInputs,
+  inputs: CreateWebhookInputs,
 ): Promise<CreateWebhookResult> => {
-  await Promise.reject(
-    new ApiError(
+  const variables: Record<string, unknown> = {
+    boardId: inputs.boardId,
+    url: inputs.url,
+    event: inputs.event,
+  };
+  if (inputs.config !== undefined) {
+    variables.config = inputs.config;
+  }
+  const response = await inputs.client.raw<CreateWebhookResponse>(
+    CREATE_WEBHOOK_MUTATION,
+    variables,
+    { operationName: inputs.operationName ?? 'CreateWebhook' },
+  );
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'create_webhook',
+    operationLabel: 'CreateWebhook',
+    details: { board_id: inputs.boardId, event: inputs.event },
+    nullHandling: 'caller_handles',
+  });
+  const raw = response.data.create_webhook;
+  if (raw === null || raw === undefined) {
+    throw new ApiError(
       'internal_error',
-      'createWebhook not yet implemented (v0.3-M27 pre-flight stub)',
+      `Monday returned no webhook payload from create_webhook for board ${inputs.boardId}`,
       {
         details: {
-          hint: 'M27 IMPL session lands the wire body; see docs/v0.3-plan.md §3 M27',
+          board_id: inputs.boardId,
+          event: inputs.event,
         },
       },
-    ),
-  );
-  throw new Error('unreachable');
+    );
+  }
+  const webhook = unwrapOrThrow(webhookSchema.safeParse(raw), {
+    context: 'Monday `create_webhook` response',
+    details: { board_id: inputs.boardId, event: inputs.event },
+    hint: 'Monday may have amended the `Webhook` selection — re-probe and amend `src/api/webhooks.ts` if so',
+  });
+  return {
+    webhook,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface DeleteWebhookInputs {
   readonly client: MondayClient;
@@ -274,31 +378,68 @@ export interface DeleteWebhookResult {
   readonly webhook: Webhook;
   readonly source: 'live';
   readonly cacheAgeSeconds: null;
-  readonly complexity: number | null;
+  readonly complexity: Complexity | null;
+}
+
+const DELETE_WEBHOOK_MUTATION = `
+  mutation DeleteWebhook($id: ID!) {
+    delete_webhook(id: $id) {
+      id
+      board_id
+      event
+      config
+    }
+  }
+`;
+
+interface DeleteWebhookResponse {
+  readonly delete_webhook: unknown;
 }
 
 /**
- * Stub fetcher for {@link webhookDeleteCommand}. M27 IMPL lands the
- * wire body via `client.raw` against the `DeleteWebhook` mutation
- * with `operationName: 'DeleteWebhook'`. Re-deleting an already-
- * deleted webhook surfaces `not_found` (matches the M10/M15 lifecycle
- * verbs).
+ * Deletes a webhook via Monday's `delete_webhook` mutation.
+ * `operationName: 'DeleteWebhook'` stays in sync with the named
+ * operation in {@link DELETE_WEBHOOK_MUTATION} (R-NEW-37 W2 audit-
+ * point). Returns the deleted record so an agent confirms what was
+ * removed (event / board / config) in a single envelope.
+ *
+ * A null `delete_webhook` surfaces `not_found` with
+ * `details.webhook_id` (matches the M10/M15 lifecycle verbs so
+ * agents key off one error code regardless of which delete verb
+ * they ran).
  */
-/* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
 export const deleteWebhook = async (
-  _inputs: DeleteWebhookInputs,
+  inputs: DeleteWebhookInputs,
 ): Promise<DeleteWebhookResult> => {
-  await Promise.reject(
-    new ApiError(
-      'internal_error',
-      'deleteWebhook not yet implemented (v0.3-M27 pre-flight stub)',
-      {
-        details: {
-          hint: 'M27 IMPL session lands the wire body; see docs/v0.3-plan.md §3 M27',
-        },
-      },
-    ),
+  const response = await inputs.client.raw<DeleteWebhookResponse>(
+    DELETE_WEBHOOK_MUTATION,
+    { id: inputs.webhookId },
+    { operationName: inputs.operationName ?? 'DeleteWebhook' },
   );
-  throw new Error('unreachable');
+  assertResponseFieldPresent({
+    data: response.data,
+    key: 'delete_webhook',
+    operationLabel: 'DeleteWebhook',
+    details: { webhook_id: inputs.webhookId },
+    nullHandling: 'caller_handles',
+  });
+  const raw = response.data.delete_webhook;
+  if (raw === null || raw === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no webhook payload from delete_webhook for id ${inputs.webhookId}`,
+      { details: { webhook_id: inputs.webhookId } },
+    );
+  }
+  const webhook = unwrapOrThrow(webhookSchema.safeParse(raw), {
+    context: 'Monday `delete_webhook` response',
+    details: { webhook_id: inputs.webhookId },
+    hint: 'Monday may have amended the `Webhook` selection — re-probe and amend `src/api/webhooks.ts` if so',
+  });
+  return {
+    webhook,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
