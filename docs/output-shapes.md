@@ -3678,23 +3678,23 @@ at the M27 IMPL session alongside the runtime body.
 ```
 
 **`--dry-run` envelope** (`meta.dry_run: true`; bypasses the
-confirmation gate per §3.1 #7). Same shape as M10 item-delete /
-M15 board-delete dry-runs per the canonical `DryRunEnvelope`
-contract (`src/utils/output/envelope.ts:119` — `data: null` plus
+confirmation gate per §3.1 #7). Strictly argv-derived shape per
+the canonical `DryRunEnvelope` contract
+(`src/utils/output/envelope.ts:119` — `data: null` plus
 top-level `planned_changes[]` sibling); the planned change
 carries the `webhook_id` slot for agent verification before
-re-running with `--yes`. M27 IMPL decides whether to fire a
-pre-mutation `webhooks(board_id:)` read to surface the deleted
-webhook's `event` / `board_id` / `config` in the dry-run shape
-(the M10 `item delete` dry-run reads the source item for this
-reason; the M27 IMPL session may follow suit if the pre-read
-cost is worthwhile).
+re-running with `--yes`. **No pre-mutation read fires** —
+Monday's `webhooks(board_id:)` query is board-scoped and the
+`webhook delete <wid>` argv carries no board ID, so M27 IMPL
+cannot enrich the dry-run with the deleted webhook's `event` /
+`board_id` / `config` without amending the §4.3 row. Source is
+always `"none"`.
 
 ```json
 {
   "ok": true,
   "data": null,
-  "meta": { /* §6.1 — source: "none" or "live" depending on pre-read, dry_run: true */ },
+  "meta": { /* §6.1 — source: "none", dry_run: true */ },
   "planned_changes": [
     { "operation": "delete_webhook", "webhook_id": "98765" }
   ],

@@ -6908,12 +6908,11 @@ scoped idempotent changes, and post comments narrating its work.**
   **Webhooks are live-only at v0.3** — outside §8's cache scope;
   the live `webhook list` read and the live `webhook create` /
   `webhook delete` mutation paths emit `meta.source: "live"` with
-  `meta.cache_age_seconds: null`. `--dry-run` paths follow the
-  canonical `DryRunEnvelope` source rules per
-  `output-shapes.md` (typically `"none"`; `webhook delete --dry-
-  run` may surface `"live"` if M27 IMPL fires a pre-mutation
-  source read). Adding webhooks to §8 cache scope would be a
-  contract extension (v0.3.x / v0.4 PR).
+  `meta.cache_age_seconds: null`. `--dry-run` paths emit
+  `meta.source: "none"` per the canonical `DryRunEnvelope`
+  contract — all 3 write-verb dry-runs are strictly argv-derived
+  (no pre-mutation read fires). Adding webhooks to §8 cache scope
+  would be a contract extension (v0.3.x / v0.4 PR).
   **M27 pre-flight decisions closed inline
   (`<M27-PREFLIGHT-SHA>`):** Decision 9 (webhook event-type
   validation) — closed via the 21-value `WEBHOOK_EVENT_TYPES`

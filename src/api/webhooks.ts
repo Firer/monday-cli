@@ -50,9 +50,11 @@
  * webhooks aren't cached — the live `webhook list` read and the live
  * `webhook create` / `webhook delete` mutation paths emit
  * `meta.source: "live"` with `cache_age_seconds: null`. `--dry-run`
- * paths follow the canonical `DryRunEnvelope` source rules
- * (typically `"none"`; `webhook delete --dry-run` may surface
- * `"live"` if M27 IMPL fires a pre-mutation source read).
+ * paths emit `meta.source: "none"` per the canonical `DryRunEnvelope`
+ * contract; all 3 write-verb dry-runs are strictly argv-derived (no
+ * pre-mutation read fires — Monday's `webhooks(board_id:)` query is
+ * board-scoped but `webhook delete <wid>` carries no board ID, so a
+ * pre-read enrichment would require a §4.3 amendment).
  * Adding webhooks to the §8 cache scope would be a contract
  * extension (v0.3.x / v0.4).
  *
