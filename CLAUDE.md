@@ -183,7 +183,8 @@ in the plan docs — **do not duplicate them here**:
   R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 + R-NEW-37
   + R-NEW-38 shipped + R-NEW-2 / R-NEW-3 candidates open +
   R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28 /
-  R-NEW-31 / R-NEW-32 / R-NEW-33 / R-NEW-39).
+  R-NEW-31 / R-NEW-32 / R-NEW-33 / R-NEW-39 / R-NEW-40 /
+  R-NEW-41).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -413,16 +414,50 @@ convention.
 - **R-NEW-31 — discriminated-union per-status detail schema
   pattern (1 consumer at M26b; LOW priority watch-item).**
   Stays at 1 consumer (M26a round-2 P2-1 fix's per-status
-  detail schemas on `devDoctorCheckResultSchema`); M26b
-  workflow verbs don't carry per-status-discriminator detail
-  variability. Generalizes to any verb whose output carries a
-  status discriminator with per-status detail variability.
-  Fires at 2nd + 3rd consumer (likely M27 webhook list with
-  per-webhook status OR M28 release-prep readiness checks).
+  detail schemas on `devDoctorCheckResultSchema`); M27
+  webhook list doesn't carry per-webhook status either
+  (Monday's `Webhook` object has no status field — just
+  `id` / `board_id` / `event` / `config`). M26b/M27 didn't
+  introduce a 2nd consumer; generalizes to any verb whose
+  output carries a status discriminator with per-status
+  detail variability. Fires at 2nd + 3rd consumer (likely
+  M28 release-prep readiness checks).
+- **R-NEW-40 — Codex template W audit-point for
+  `[--dry-run]` discipline on new write verbs (1 consumer
+  at M27; LOW priority watch-item).** Surfaced at M27 pre-
+  flight Codex round 1 P1-1 (`4c402d8`). The initial pre-
+  flight contract diff for M27 omitted `[--dry-run]` from
+  the §4.3 rows for 3 new write verbs + didn't pin dry-run
+  envelope shapes; Codex caught it as P1 because cli-
+  design §3.1 #6 + #7 are explicit. Template-stable
+  candidate: add a W audit-point asking the reviewer to
+  verify `[--dry-run]` discipline at every NEW write verb's
+  §4.3 row + output-shapes.md entries. Fires at 2nd
+  confirming repetition (M28 if Decision 11 amendment lands
+  + introduces a `create-subitem-tree` or similar write
+  verb).
+- **R-NEW-41 — Asymmetric wire-type schema documentation
+  pattern (1 consumer at M27; LOW priority watch-item).**
+  Surfaced at M27 pre-flight empirical probe Finding 4.
+  Monday's `Webhook.config` is `JSON` scalar on
+  `create_webhook` input + `String` scalar on read. The
+  CLI's `webhookSchema.config: z.string().nullable()`
+  mirrors the read-side; the create-input passes through
+  opaque at the JSON-scalar boundary. **Not a code lift**
+  — the asymmetry is wire-side fact, not CLI surface; the
+  CLI just mirrors what Monday returns. Documentation
+  pattern candidate: if a 2nd + 3rd asymmetric-type site
+  appears (v0.4 `add_file_to_column` is a candidate), the
+  asymmetry might warrant a shared
+  `## Wire-type asymmetry conventions` documentation
+  section alongside R-NEW-24's potential field-name
+  appendix.
 - R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
   2 consumers (M22 usage + M23 favorites); M26 dev namespace
   doesn't introduce a 3rd consumer (the workflow verbs are
-  single-stage walks + hydrates).
+  single-stage walks + hydrates). M27 also doesn't trigger
+  (webhook list + notification send are single-shot wire
+  calls).
 (full detail in `docs/v0.3-plan.md` §22):
 - **Shipped:** R-NEW-1 `isENOENT` lift into `src/utils/fs.ts`
   (`1c77699`, M21 close); R-NEW-4 `statusOutputSchema` +
