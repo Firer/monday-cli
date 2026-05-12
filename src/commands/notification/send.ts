@@ -30,6 +30,10 @@
  * **Idempotency.** `create_notification` is NOT idempotent —
  * re-running mints a fresh notification with a new ID. Agents
  * needing send-once-semantics dedup on the CLI side.
+ *
+ * **`--dry-run` support per §3.1 #6.** Argv parse + target-type
+ * validation only; no wire mutation fires. Envelope shape pinned
+ * in output-shapes.md; runtime engine lands at M27 IMPL.
  */
 import { z } from 'zod';
 import { ApiError } from '../../utils/errors.js';

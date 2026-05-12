@@ -23,6 +23,15 @@
  * lives server-side at Monday (rejecting malformed configs surfaces
  * as `validation_failed`).
  *
+ * **`--url` requires HTTPS at parse boundary.** Monday rejects
+ * non-HTTPS webhook endpoints server-side; surfacing the rejection
+ * at the CLI boundary keeps the failure mode local (usage_error
+ * before any wire call fires).
+ *
+ * **`--dry-run` support per §3.1 #6.** Argv parse + URL/event
+ * validation only; no wire mutation fires. Envelope shape pinned
+ * in output-shapes.md; runtime engine lands at M27 IMPL.
+ *
  * **Idempotency caveat.** `create_webhook` is NOT idempotent —
  * re-running with the same args mints a fresh webhook with a new
  * ID. Agents needing register-once semantics should `webhook list`
@@ -42,7 +51,7 @@ import {
 const inputSchema = z
   .object({
     boardId: BoardIdSchema,
-    url: z.url(),
+    url: z.url({ protocol: /^https$/u }),
     event: webhookEventTypeSchema,
     config: z.string().optional(),
   })

@@ -3578,7 +3578,7 @@ session.
 }
 ```
 
-### `monday webhook create <bid> --url <u> --event <e> [--config <json>]` (v0.3-M27, pre-flight stub)
+### `monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run]` (v0.3-M27, pre-flight stub)
 
 Register a new webhook on the supplied board. `--event` is
 validated at parse boundary against the closed
@@ -3586,6 +3586,9 @@ validated at parse boundary against the closed
 Decision 9 closure). `--config <json>` is an opaque JSON string —
 the CLI threads it through to Monday's `JSON` scalar input arg;
 per-event sub-shape validation lives server-side at Monday.
+`--url` requires HTTPS at parse boundary (Monday rejects non-
+HTTPS webhook endpoints server-side; surfacing the rejection at
+the CLI boundary keeps the failure mode local).
 Returns the freshly-minted `Webhook` record (with the
 Monday-assigned `id`).
 
@@ -3599,6 +3602,8 @@ re-running with the same args mints a fresh webhook with a new
 ID. Agents needing register-once semantics should `webhook list`
 first and skip the create if a matching entry exists.
 
+**Live success envelope:**
+
 ```json
 {
   "ok": true,
@@ -3613,11 +3618,36 @@ first and skip the create if a matching entry exists.
 }
 ```
 
-### `monday webhook delete <wid> --yes` (v0.3-M27, pre-flight stub)
+**`--dry-run` envelope** (`meta.dry_run: true`; no wire mutation
+fires — argv parse + URL/event validation only). Same shape as
+M14/M15 create-verb dry-runs; the planned-change carries the
+intended `event` + `board_id` + `url` so an agent verifies before
+running for real:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "planned_changes": [
+      {
+        "operation": "create_webhook",
+        "board_id": "12345678",
+        "url": "https://example.com/hook",
+        "event": "create_item",
+        "config": null
+      }
+    ]
+  },
+  "meta": { /* §6.1 — source: "none", dry_run: true */ },
+  "warnings": []
+}
+```
+
+### `monday webhook delete <wid> --yes [--dry-run]` (v0.3-M27, pre-flight stub)
 
 Delete a webhook by ID. `--yes` is mandatory for the live path
-(cli-design §3.1 #7 confirmation gate); without `--yes` (and
-without `--dry-run`) the command fails fast with
+(cli-design §3.1 #7 confirmation gate); without `--yes` AND
+without `--dry-run` the command fails fast with
 `confirmation_required` carrying `details.webhook_id`. Returns
 the deleted `Webhook` record (Monday echoes the deleted state).
 Re-deleting an already-deleted webhook surfaces `not_found`
@@ -3630,6 +3660,8 @@ they ran).
 pointing at M27 IMPL. Runtime body + destructive-gate landing
 at the M27 IMPL session alongside the runtime body.
 
+**Live success envelope:**
+
 ```json
 {
   "ok": true,
@@ -3644,7 +3676,31 @@ at the M27 IMPL session alongside the runtime body.
 }
 ```
 
-### `monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>` (v0.3-M27, pre-flight stub)
+**`--dry-run` envelope** (`meta.dry_run: true`; bypasses the
+confirmation gate per §3.1 #7). Same shape as M10 item-delete /
+M15 board-delete dry-runs — the planned change carries the
+`webhook_id` slot for agent verification before re-running with
+`--yes`. M27 IMPL decides whether to fire a pre-mutation
+`webhooks(board_id:)` read to surface the deleted webhook's
+`event` / `board_id` / `config` in the dry-run shape (the M10
+`item delete` dry-run reads the source item for this reason; the
+M27 IMPL session may follow suit if the pre-read cost is
+worthwhile).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "planned_changes": [
+      { "operation": "delete_webhook", "webhook_id": "98765" }
+    ]
+  },
+  "meta": { /* §6.1 — source: "none" or "live" depending on pre-read, dry_run: true */ },
+  "warnings": []
+}
+```
+
+### `monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]` (v0.3-M27, pre-flight stub)
 
 Fire a Monday notification to a single recipient about an item
 or board. Single-recipient at v0.3 per cli-design §4.3 (`--user`
@@ -3666,6 +3722,8 @@ session.
 — re-running mints a fresh notification with a new ID. Agents
 needing send-once-semantics dedup on the CLI side.
 
+**Live success envelope:**
+
 ```json
 {
   "ok": true,
@@ -3677,6 +3735,30 @@ needing send-once-semantics dedup on the CLI side.
     "target_type": "item"
   },
   "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+**`--dry-run` envelope** (`meta.dry_run: true`; no wire
+mutation fires — argv parse + target-type validation only).
+Per §3.1 #6 the verb supports `--dry-run` so an agent can
+preview the planned send before committing:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "planned_changes": [
+      {
+        "operation": "create_notification",
+        "user_id": "12345",
+        "target_id": "67890",
+        "target_type": "item",
+        "text": "Please review"
+      }
+    ]
+  },
+  "meta": { /* §6.1 — source: "none", dry_run: true */ },
   "warnings": []
 }
 ```

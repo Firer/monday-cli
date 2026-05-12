@@ -87,7 +87,34 @@ milestone-specific (re-fill each round / each milestone).
      ratification (M23 caught `column_token` at impl gate;
      M24's four Codex rounds verified the audit-point shape
      returned "nothing flagged" against every new M24 detail-
-     key surface). Milestone-specific watch-items start at W2.
+     key surface).
+
+     **W2 is template-stable: GraphQL operation-name / named-
+     operation parity check.** Every pre-flight (and every
+     impl review) introducing new custom GraphQL operations
+     enumerates W2 with this shape:
+
+     > W2: operation-name parity audit — every `client.raw`
+     > call in this diff (or planned for the matching IMPL
+     > session) MUST thread an `operationName` that matches a
+     > named operation in the supplied GraphQL document. A
+     > mismatch silently fails live (server picks "first
+     > operation in document" when the name doesn't resolve;
+     > if the doc has multiple operations, the wrong one
+     > fires). The check is one-line: every `client.raw(doc,
+     > vars, { operationName: 'Foo' })` must pair with `query
+     > Foo` / `mutation Foo` inside `doc`. Stub fetchers must
+     > document the expected operationName in the module
+     > docstring so the IMPL session pins it correctly.
+
+     Folded in at M27 pre-flight close-docs sweep post-
+     R-NEW-37 ratification — M26b round-2 P1-1 caught a
+     static-named doc + per-call operationName override that
+     would have failed live; M27 pre-flight round 1 P2-1
+     caught a missing operationName pin on `listWebhooks` +
+     P3-1 explicitly flagged the audit-point as
+     template-ready. Milestone-specific watch-items start at
+     W3.
   6. **Things explicitly OUT of scope for this review** —
      *template-stable*. Standard exclusions:
        - Existing modules NOT touched by this diff.

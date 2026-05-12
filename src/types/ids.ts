@@ -1,9 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Branded zod schemas for the seven ID kinds Monday surfaces. Brands
- * make `BoardId`/`ItemId`/etc. nominally distinct at the type level
- * even though they're all numeric strings on the wire — passing a
+ * Branded zod schemas for the eight ID kinds Monday surfaces (M27
+ * added `WebhookId` alongside the seven v0.1 brands). Brands make
+ * `BoardId`/`ItemId`/etc. nominally distinct at the type level even
+ * though they're all numeric strings on the wire — passing a
  * `BoardId` where an `ItemId` is wanted becomes a compile error,
  * which is the whole point.
  *

@@ -2026,15 +2026,15 @@ monday user team-remove-members <tid> --users <id|email>,...                 v0.
 
 # === WEBHOOK (board-scoped; CLI never *receives*) ===
 monday webhook list <bid>                                                    v0.3
-monday webhook create <bid> --url <u> --event <e> [--config <json>]          v0.3
-monday webhook delete <wid> --yes                                            v0.3
+monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run]   v0.3
+monday webhook delete <wid> --yes [--dry-run]                                v0.3
 
 # === DOC (read-only in v0.4) ===
 monday doc list [--workspace <wid>]                                          v0.4
 monday doc get <did>                                                         v0.4
 
 # === NOTIFICATION ===
-monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>   v0.3
+monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]   v0.3
 
 # === DEV (workflow shortcuts; see §5.2 carve-out 1, §5.9) ===
 monday dev discover [--apply]             # auto-detect & write config       v0.3

@@ -75,15 +75,16 @@ import type { MondayClient } from './client.js';
  * bump for the CLI — extend this list and the per-command flag
  * help. Renames or removals are a major version bump.
  *
- * The 21 values cover three event families:
- *   - **Column-value events (5):** `change_column_value`,
+ * The 21 values cover three event families (6 + 10 + 5 = 21):
+ *   - **Column-value + name-change events (6):** `change_column_value`,
  *     `change_specific_column_value`, `change_status_column_value`,
- *     `change_subitem_column_value`, `change_column_value`'s
- *     sibling `change_name` / `change_subitem_name`.
- *   - **Item-lifecycle events (8):** `create_item`, `create_subitem`,
- *     `item_archived`, `item_deleted`, `item_moved_to_any_group`,
- *     `item_moved_to_specific_group`, `item_restored`,
- *     `move_subitem`, `subitem_archived`, `subitem_deleted`.
+ *     `change_subitem_column_value`, `change_name`,
+ *     `change_subitem_name`.
+ *   - **Item / subitem lifecycle events (10):** `create_item`,
+ *     `create_subitem`, `item_archived`, `item_deleted`,
+ *     `item_moved_to_any_group`, `item_moved_to_specific_group`,
+ *     `item_restored`, `move_subitem`, `subitem_archived`,
+ *     `subitem_deleted`.
  *   - **Update / column-management events (5):** `create_update`,
  *     `create_subitem_update`, `edit_update`, `delete_update`,
  *     `create_column`.
@@ -186,9 +187,13 @@ export interface ListWebhooksResult {
 
 /**
  * Stub fetcher for {@link webhookListCommand}. M27 IMPL lands the
- * wire body: a single `Query.webhooks(board_id:)` round-trip,
- * projected through {@link webhookSchema} via the parse-boundary
- * helpers. Source is always `'live'` per cli-design §8 cache scope.
+ * wire body: a single `Query.webhooks(board_id:)` round-trip via
+ * `client.raw` with `operationName: 'Webhooks'` (R-NEW-37 watch-
+ * item: keep doc-named-operation + wire-operationName in sync).
+ * The supplied document carries a named `query Webhooks` operation
+ * that aligns with the threaded operationName. Result is projected
+ * through {@link webhookSchema} via the parse-boundary helpers.
+ * Source is always `'live'` per cli-design §8 cache scope.
  */
 /* c8 ignore start -- pre-flight stub; runtime body at M27 IMPL */
 export const listWebhooks = async (
