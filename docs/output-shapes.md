@@ -3547,6 +3547,140 @@ Codex P1-2 fix):
 **Idempotency caveat.** As with `task done` — status flip
 idempotent, `update create` is NOT.
 
+### `monday webhook list <bid>` (v0.3-M27, pre-flight stub)
+
+List webhooks configured on the supplied board. Pure read via
+Monday's `webhooks(board_id:)` query. Live-only (cli-design §8
+cache scope excludes webhooks). Returns a flat collection of
+`Webhook { id, board_id, event, config }` records — the
+asymmetric `config` field is a JSON-encoded string on read
+(Monday's `Webhook.config` field is typed `String`, even though
+the `create_webhook` input arg accepts the `JSON` scalar).
+
+**Pre-flight stub at this milestone** — action body
+`c8`-wrapped, rejects with `internal_error.details.hint`
+pointing at M27 IMPL. Runtime body lands at the M27 IMPL
+session.
+
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "98765",
+      "board_id": "12345678",
+      "event": "create_item",
+      "config": null
+    }
+  ],
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+### `monday webhook create <bid> --url <u> --event <e> [--config <json>]` (v0.3-M27, pre-flight stub)
+
+Register a new webhook on the supplied board. `--event` is
+validated at parse boundary against the closed
+`WEBHOOK_EVENT_TYPES` 21-value enum (cli-design §13 v0.3 entry +
+Decision 9 closure). `--config <json>` is an opaque JSON string —
+the CLI threads it through to Monday's `JSON` scalar input arg;
+per-event sub-shape validation lives server-side at Monday.
+Returns the freshly-minted `Webhook` record (with the
+Monday-assigned `id`).
+
+**Pre-flight stub at this milestone** — action body
+`c8`-wrapped, rejects with `internal_error.details.hint`
+pointing at M27 IMPL. Runtime body lands at the M27 IMPL
+session.
+
+**Idempotency caveat.** `create_webhook` is NOT idempotent —
+re-running with the same args mints a fresh webhook with a new
+ID. Agents needing register-once semantics should `webhook list`
+first and skip the create if a matching entry exists.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "98765",
+    "board_id": "12345678",
+    "event": "create_item",
+    "config": null
+  },
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+### `monday webhook delete <wid> --yes` (v0.3-M27, pre-flight stub)
+
+Delete a webhook by ID. `--yes` is mandatory for the live path
+(cli-design §3.1 #7 confirmation gate); without `--yes` (and
+without `--dry-run`) the command fails fast with
+`confirmation_required` carrying `details.webhook_id`. Returns
+the deleted `Webhook` record (Monday echoes the deleted state).
+Re-deleting an already-deleted webhook surfaces `not_found`
+(matches the M10 `item delete` / M15 `board delete` shape so
+agents key off one error code regardless of which delete verb
+they ran).
+
+**Pre-flight stub at this milestone** — action body
+`c8`-wrapped, rejects with `internal_error.details.hint`
+pointing at M27 IMPL. Runtime body + destructive-gate landing
+at the M27 IMPL session alongside the runtime body.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "98765",
+    "board_id": "12345678",
+    "event": "create_item",
+    "config": null
+  },
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+### `monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t>` (v0.3-M27, pre-flight stub)
+
+Fire a Monday notification to a single recipient about an item
+or board. Single-recipient at v0.3 per cli-design §4.3 (`--user`
+is singular; multi-recipient fan-out is a v0.3.x / v0.4
+contract-extension). The CLI's `--target-type item|board`
+vocabulary maps to wire `NotificationTargetType.Project` (which
+represents both items and boards); Monday's third wire enum
+value `Post` (Update-targeted) is unreachable at v0.3. Returns
+the minted `Notification { id, text }` + the CLI-side echo of
+the inputs (`user_id`, `target_id`, `target_type`) for agent
+verification.
+
+**Pre-flight stub at this milestone** — action body
+`c8`-wrapped, rejects with `internal_error.details.hint`
+pointing at M27 IMPL. Runtime body lands at the M27 IMPL
+session.
+
+**Idempotency caveat.** `create_notification` is NOT idempotent
+— re-running mints a fresh notification with a new ID. Agents
+needing send-once-semantics dedup on the CLI side.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "55555",
+    "text": "Please review",
+    "user_id": "12345",
+    "target_id": "67890",
+    "target_type": "item"
+  },
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
 ---
 
 ## Versioning

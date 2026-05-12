@@ -48,6 +48,7 @@ export const ItemIdSchema = numericIdSchema.brand<'ItemId'>();
 export const UserIdSchema = numericIdSchema.brand<'UserId'>();
 export const WorkspaceIdSchema = numericIdSchema.brand<'WorkspaceId'>();
 export const UpdateIdSchema = numericIdSchema.brand<'UpdateId'>();
+export const WebhookIdSchema = numericIdSchema.brand<'WebhookId'>();
 
 // Column and group IDs are stable lower-snake-case slugs ("status_4",
 // "topics") — not numeric. Validate as non-empty strings only.
@@ -61,3 +62,4 @@ export type GroupId = z.infer<typeof GroupIdSchema>;
 export type UserId = z.infer<typeof UserIdSchema>;
 export type WorkspaceId = z.infer<typeof WorkspaceIdSchema>;
 export type UpdateId = z.infer<typeof UpdateIdSchema>;
+export type WebhookId = z.infer<typeof WebhookIdSchema>;

@@ -172,6 +172,17 @@ import { devTaskListCommand } from './dev/task/list.js';
 import { devTaskStartCommand } from './dev/task/start.js';
 import { devTaskDoneCommand } from './dev/task/done.js';
 import { devTaskBlockCommand } from './dev/task/block.js';
+// M27 (v0.3) — `notification send` + `webhook list/create/delete`.
+// Outbound writes — bundled because both are write-only, low surface
+// (cli-design §4.3 + §13 v0.3 entry). Pre-flight stubs at this commit;
+// runtime bodies + tests land at M27 IMPL. `WebhookEventType` argv
+// validation closed Decision 9 against Monday's 21-value wire enum
+// (empirical probe `scripts/probe/m27-create-webhook-input.ts`,
+// 2026-05-12, API `2026-01`).
+import { webhookListCommand } from './webhook/list.js';
+import { webhookCreateCommand } from './webhook/create.js';
+import { webhookDeleteCommand } from './webhook/delete.js';
+import { notificationSendCommand } from './notification/send.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -269,6 +280,10 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     devTaskStartCommand,
     devTaskDoneCommand,
     devTaskBlockCommand,
+    webhookListCommand,
+    webhookCreateCommand,
+    webhookDeleteCommand,
+    notificationSendCommand,
     rawCommand,
     boardDoctorCommand,
   ];

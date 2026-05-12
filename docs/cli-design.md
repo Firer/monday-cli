@@ -6897,8 +6897,36 @@ scoped idempotent changes, and post comments narrating its work.**
   only per §6.1 + §11.5.3)
 - Profiles in `~/.monday-cli/config.toml`
 - `monday auth login` — OAuth flow + credentials cache (mode 0600)
-- `notification send`
-- `webhook list/create/delete` (board webhooks; CLI never *receives*)
+- `notification send` + `webhook list/create/delete` — v0.3-M27
+  outbound writes, bundled because both are write-only + low
+  surface. `notification send` fires Monday's `create_notification`
+  mutation (single-recipient at v0.3 per §4.3; `--user <uid>` is
+  singular). `webhook list/create/delete` wraps Monday's
+  `webhooks(board_id:)` query + `create_webhook` / `delete_webhook`
+  mutations; the CLI never *receives* — webhooks land on the user's
+  own HTTPS endpoint (§1 permanent non-goal: hosting webhooks).
+  **Webhooks are live-only at v0.3** — outside §8's cache scope;
+  every `webhook list/create/delete` emits `meta.source: "live"`
+  with `meta.cache_age_seconds: null`. Adding webhooks to §8 cache
+  scope would be a contract extension (v0.3.x / v0.4 PR).
+  **M27 pre-flight decisions closed inline
+  (`<M27-PREFLIGHT-SHA>`):** Decision 9 (webhook event-type
+  validation) — closed via the 21-value `WEBHOOK_EVENT_TYPES`
+  closed enum in `src/api/webhooks.ts` (empirical probe
+  2026-05-12, API `2026-01`); `webhook create --event <type>`
+  surfaces `usage_error` for unknown events at parse boundary.
+  **Asymmetric `Webhook.config` typing pinned:** create input
+  accepts the `JSON` scalar; read-side returns `String` (Monday
+  echoes the stored JSON-encoded config as a string). **Monday's
+  `NotificationTargetType.Post` value (Update-targeted
+  notifications) is unreachable at v0.3** — the documented
+  `--target-type item|board` argv vocabulary maps to wire
+  `NotificationTargetType.Project`; Monday's third enum value
+  `Post` is deferred to a v0.3.x / v0.4 contract-extension that
+  may add `--target-type update`. ERROR_CODES registry unchanged
+  at 29 — M27 wire failures route through existing codes
+  (`not_found` / `usage_error` / `unauthorized` / `forbidden` /
+  `validation_failed`).
 
 ### v0.4 (polish + nice-to-haves)
 
