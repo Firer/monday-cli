@@ -104,6 +104,11 @@ export const devTaskStartCommand: CommandModule<
           source: 'live',
           cacheAgeSeconds: null,
           complexity: flip.complexity,
+          // cli-design §5.3 step 2 + docs/output-shapes.md §M26 task
+          // verb shapes: echo the resolved status-column ID so an
+          // agent's "set then re-read" loop can reuse the stable ID
+          // without a second metadata lookup (Codex round-1 P2-1).
+          resolvedIds: { status: flip.columnId },
         });
       });
   },

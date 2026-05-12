@@ -1536,31 +1536,65 @@ export const walkDevBoardItems = async (inputs: {
   readonly items: readonly ProjectedItem[];
   readonly complexity: Complexity | null;
 }> => {
-  const result = await paginate<unknown, ItemsPagePayload<unknown>>({
-    fetchInitial: (effectiveLimit) =>
-      fetchItemsPage<unknown>({
-        client: inputs.client,
-        operationName: inputs.operationName,
-        boardId: inputs.boardId,
-        limit: effectiveLimit,
-        queryParams: inputs.queryParams,
-        itemFields: ITEM_FIELDS_FRAGMENT,
-        itemSchema: walkerItemSchema,
-      }),
-    fetchNext: (cursor, effectiveLimit) =>
-      fetchNextItemsPage<unknown>({
-        client: inputs.client,
-        operationName: `${inputs.operationName}Next`,
-        cursor,
-        limit: effectiveLimit,
-        itemFields: ITEM_FIELDS_FRAGMENT,
-        itemSchema: walkerItemSchema,
-      }),
-    extractPage: (r) => r.data,
-    getId: idFromRawItem,
-    all: true,
-    now: inputs.now,
-  });
+  let result;
+  try {
+    result = await paginate<unknown, ItemsPagePayload<unknown>>({
+      fetchInitial: (effectiveLimit) =>
+        fetchItemsPage<unknown>({
+          client: inputs.client,
+          operationName: inputs.operationName,
+          boardId: inputs.boardId,
+          limit: effectiveLimit,
+          queryParams: inputs.queryParams,
+          itemFields: ITEM_FIELDS_FRAGMENT,
+          itemSchema: walkerItemSchema,
+        }),
+      fetchNext: (cursor, effectiveLimit) =>
+        fetchNextItemsPage<unknown>({
+          client: inputs.client,
+          operationName: `${inputs.operationName}Next`,
+          cursor,
+          limit: effectiveLimit,
+          itemFields: ITEM_FIELDS_FRAGMENT,
+          itemSchema: walkerItemSchema,
+        }),
+      extractPage: (r) => r.data,
+      getId: idFromRawItem,
+      all: true,
+      now: inputs.now,
+    });
+  } catch (err) {
+    // Codex M26b IMPL round-1 P2-2: an inaccessible dev board (deleted /
+    // access revoked / never existed) returns `{boards: []}`, which
+    // `fetchItemsPage`'s `.min(1)` schema rejects as malformed → bare
+    // `internal_error`. For a dev workflow read that's runtime mapping
+    // drift; rewrap to the namespace-stable `dev_board_misconfigured`
+    // with `reason: 'not_accessible'`, mirroring
+    // `hydrateDevBoardColumns`'s shape so the per-verb error surface is
+    // consistent across read + mutation paths. Narrow by both code +
+    // `details.board_id` so we don't accidentally swallow unrelated
+    // internal errors.
+    if (
+      err instanceof ApiError &&
+      err.code === 'internal_error' &&
+      (err.details as { board_id?: unknown } | undefined)?.board_id ===
+        inputs.boardId
+    ) {
+      throw new ApiError(
+        'dev_board_misconfigured',
+        `board ${inputs.boardId} is not accessible — deleted, access revoked, or never existed`,
+        {
+          cause: err,
+          details: {
+            board_id: inputs.boardId,
+            reason: 'not_accessible',
+            hint: 'run `monday dev doctor` to diagnose, then re-run `monday dev discover --apply` or `monday dev configure` to update the mapping',
+          },
+        },
+      );
+    }
+    throw err;
+  }
   const items = result.items.map(
     (raw) => projectItem({ raw: parseRawItem(raw) }),
   );
@@ -1787,6 +1821,85 @@ export const resolveCanonicalLabel = (
  * and the `complexity` accumulated across the hydrate + mutation
  * calls (caller picks the freshest snapshot for envelope meta).
  */
+/**
+ * Wire-shape parser for the `create_update` mutation Monday returns
+ * on `dev task done --message` + `dev task block --reason` side-
+ * effects. Mirrors the parse-boundary discipline `src/commands/
+ * update/create.ts` uses (`assertResponseFieldPresent` + zod parse)
+ * so the side-effect's `update_id` lands typed rather than via the
+ * compile-time-only `client.raw<T>` generic.
+ *
+ * Codex M26b IMPL round-1 P2-3 fix: prior to this helper, both task
+ * verbs read `response.data.create_update.id` via an unparsed
+ * generic, which would have surfaced a raw TypeError on a malformed
+ * response (and silently accepted a missing `id` field as
+ * `undefined`).
+ */
+const createUpdateResponseSchema = z
+  .object({
+    create_update: z
+      .object({ id: z.string().min(1) })
+      .strict()
+      .nullable(),
+  })
+  .loose();
+
+export interface DevCreateUpdateResult {
+  readonly updateId: string;
+  readonly complexity: Complexity | null;
+}
+
+const DEV_CREATE_UPDATE_MUTATION = `
+  mutation DevCreateUpdate($itemId: ID!, $body: String!) {
+    create_update(item_id: $itemId, body: $body) {
+      id
+    }
+  }
+`;
+
+/**
+ * Fires the `create_update` mutation for a dev task side-effect
+ * (`task done --message` / `task block --reason`) and returns the
+ * created update's ID + the wire complexity. Shared by both verbs
+ * (3-consumer threshold not yet reached, but the parse-boundary
+ * discipline matters at every site).
+ *
+ * Throws `internal_error` when Monday's response carries
+ * `create_update: null` (the documented null-payload escape hatch
+ * for failed update creation; mirrors M5b's `internal_error` shape
+ * per `item-mutation-result.ts`'s `caller_handles` semantics).
+ */
+export const fireDevCreateUpdate = async (inputs: {
+  readonly client: MondayClient;
+  readonly itemId: string;
+  readonly body: string;
+  readonly operationName: string;
+}): Promise<DevCreateUpdateResult> => {
+  const response = await inputs.client.raw<unknown>(
+    DEV_CREATE_UPDATE_MUTATION,
+    { itemId: inputs.itemId, body: inputs.body },
+    { operationName: inputs.operationName },
+  );
+  const parsed = unwrapOrThrow(
+    createUpdateResponseSchema.safeParse(response.data),
+    {
+      context: `Monday returned a malformed ${inputs.operationName} response`,
+      details: { item_id: inputs.itemId },
+    },
+  );
+  if (parsed.create_update === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no update payload from create_update for item ${inputs.itemId}`,
+      { details: { item_id: inputs.itemId } },
+    );
+  }
+  return {
+    updateId: parsed.create_update.id,
+    complexity: response.complexity,
+  };
+};
+
 export const flipTaskStatus = async (inputs: {
   readonly client: MondayClient;
   readonly tasksBoard: string;

@@ -2547,6 +2547,103 @@ describe('M26b branch-coverage backfills', () => {
     expect(envelope.data.map((d) => d.id)).toEqual(['1001']);
   });
 
+  it('task start echoes resolved_ids.status (Codex round-1 P2-1)', async () => {
+    await seedTasksOnly(env.home, '100');
+    const cassette: Cassette = {
+      interactions: [
+        taskHydrate('DevTaskStartHydrate'),
+        {
+          operation_name: 'ItemUpdateSimple',
+          match_variables: { value: 'Working on it' },
+          response: projectedTaskResponse('5001', 'Working on it'),
+        },
+      ],
+    };
+    const { exitCode, captured } = await driveDev(
+      ['dev', 'task', 'start', '5001', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(captured.stdout()) as {
+      resolved_ids: Record<string, string>;
+    };
+    expect(envelope.resolved_ids).toEqual({ status: 'status' });
+  });
+
+  it('task done echoes resolved_ids.status (Codex round-1 P2-1)', async () => {
+    await seedTasksOnly(env.home, '100');
+    const cassette: Cassette = {
+      interactions: [
+        taskHydrate('DevTaskDoneHydrate'),
+        {
+          operation_name: 'ItemUpdateSimple',
+          response: projectedTaskResponse('5001', 'Done'),
+        },
+      ],
+    };
+    const { exitCode, captured } = await driveDev(
+      ['dev', 'task', 'done', '5001', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(captured.stdout()) as {
+      resolved_ids: Record<string, string>;
+    };
+    expect(envelope.resolved_ids).toEqual({ status: 'status' });
+  });
+
+  it('task block echoes resolved_ids.status (Codex round-1 P2-1)', async () => {
+    await seedTasksOnly(env.home, '100');
+    const cassette: Cassette = {
+      interactions: [
+        taskHydrate('DevTaskBlockHydrate'),
+        {
+          operation_name: 'ItemUpdateSimple',
+          response: projectedTaskResponse('5001', 'Stuck'),
+        },
+        {
+          operation_name: 'DevTaskBlockCreateUpdate',
+          response: { data: { create_update: { id: '90099' } } },
+        },
+      ],
+    };
+    const { exitCode, captured } = await driveDev(
+      ['dev', 'task', 'block', '5001', '--reason', 'why', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(captured.stdout()) as {
+      resolved_ids: Record<string, string>;
+    };
+    expect(envelope.resolved_ids).toEqual({ status: 'status' });
+  });
+
+  it('release list surfaces dev_board_misconfigured when configured board is inaccessible (Codex round-1 P2-2)', async () => {
+    await seedFullMapping(env.home);
+    // Monday returns `{boards: []}` when the configured board ID
+    // can't be hydrated (deleted / access revoked / never existed).
+    // walkDevBoardItems rewraps `internal_error` → `dev_board_misconfigured`.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'DevReleaseList',
+          response: { data: { boards: [] } },
+        },
+      ],
+    };
+    const { exitCode, captured } = await driveDev(
+      ['dev', 'release', 'list', '--json'],
+      env,
+      cassette,
+    );
+    expect(exitCode).toBe(2);
+    const envelope = parseEnvelope(captured.stderr());
+    expect(envelope.error?.code).toBe('dev_board_misconfigured');
+  });
+
   it('task list --sprint <sid> skips tasks without the relation column', async () => {
     await seedFullMapping(env.home);
     const cassette: Cassette = {

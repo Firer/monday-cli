@@ -18,13 +18,13 @@
  * `update create` post is NOT — re-runs post additional comments.
  */
 import { z } from 'zod';
-import { ApiError } from '../../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../../types.js';
 import { parseArgv } from '../../parse-argv.js';
 import { emitMutation } from '../../emit.js';
 import { resolveClient } from '../../../api/resolve-client.js';
 import { ItemIdSchema } from '../../../types/ids.js';
 import {
+  fireDevCreateUpdate,
   flipTaskStatus,
   loadDevMapping,
 } from '../../../api/dev-conventions.js';
@@ -40,18 +40,6 @@ const inputSchema = z
     reason: z.string().min(1),
   })
   .strict();
-
-const CREATE_UPDATE_MUTATION = `
-  mutation DevTaskBlockCreateUpdate($itemId: ID!, $body: String!) {
-    create_update(item_id: $itemId, body: $body) {
-      id
-    }
-  }
-`;
-
-interface CreateUpdateResponseShape {
-  readonly create_update: { readonly id: string } | null;
-}
 
 export const devTaskBlockCommand: CommandModule<
   z.infer<typeof inputSchema>,
@@ -114,19 +102,12 @@ export const devTaskBlockCommand: CommandModule<
           hydrateOperation: 'DevTaskBlockHydrate',
         });
 
-        const response = await client.raw<CreateUpdateResponseShape>(
-          CREATE_UPDATE_MUTATION,
-          { itemId: parsed.itemId, body: parsed.reason },
-          { operationName: 'DevTaskBlockCreateUpdate' },
-        );
-        const update = response.data.create_update;
-        if (update === null) {
-          throw new ApiError(
-            'internal_error',
-            `Monday returned no update payload from create_update for item ${parsed.itemId}`,
-            { details: { item_id: parsed.itemId } },
-          );
-        }
+        const update = await fireDevCreateUpdate({
+          client,
+          itemId: parsed.itemId,
+          body: parsed.reason,
+          operationName: 'DevTaskBlockCreateUpdate',
+        });
 
         emitMutation({
           ctx,
@@ -136,11 +117,16 @@ export const devTaskBlockCommand: CommandModule<
           apiVersion,
           source: 'live',
           cacheAgeSeconds: null,
-          complexity: flip.complexity,
+          // Codex round-1 P3-1: prefer the create_update leg's
+          // complexity (last GraphQL response) over the flip's.
+          complexity: update.complexity ?? flip.complexity,
+          // Codex round-1 P2-1: echo the resolved status-column ID
+          // per cli-design §5.3 step 2 + docs/output-shapes.md §M26.
+          resolvedIds: { status: flip.columnId },
           sideEffects: [
             {
               kind: 'update_created',
-              update_id: update.id,
+              update_id: update.updateId,
               item_id: parsed.itemId,
               body: parsed.reason,
             },
