@@ -37,9 +37,11 @@
  * single envelope read.
  *
  * **No new ERROR_CODES (29 stays).** Notification send failures
- * route through the existing codes: `not_found` (target user / item
- * / board missing or invisible to the token), `usage_error` (text
- * empty / malformed argv / target_type / target_id mismatch),
+ * route through the existing codes: `not_found` (target user /
+ * `Project` invisible to the token or non-existent — Monday's
+ * visibility check; CLI-declared kind vs underlying record is NOT
+ * verified), `usage_error` (text empty / malformed argv — invalid
+ * `--target-type` enum value or non-numeric `--target` ID),
  * `unauthorized` (token lacks notification scope), `forbidden`
  * (account permissions), `validation_failed` (Monday-side rejection).
  *

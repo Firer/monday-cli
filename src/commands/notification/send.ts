@@ -57,9 +57,12 @@ import {
 } from '../../api/notifications.js';
 
 // `target` is either an ItemId or BoardId depending on `target-type`.
-// At the argv parse boundary we accept any numeric ID string and let
-// Monday's server-side validation surface mismatches as `not_found`
-// (per the module header trust-the-argv decision).
+// At the argv parse boundary we accept any numeric ID string. The
+// kind pairing (item|board ↔ target-id) is trusted, not verified —
+// Monday only validates target visibility as a `Project`; the wire
+// enum collapses both kinds, so a passing argv with mismatched kind
+// still succeeds. See the module header for the full trust-the-argv
+// rationale.
 const numericIdRegex = /^\d+$/u;
 
 const inputSchema = z
