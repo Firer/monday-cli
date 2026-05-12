@@ -1513,20 +1513,6 @@ export const saveDevMapping = async (
 // =============================================================
 
 /**
- * Walks every page of `items_page` on the supplied board and projects
- * the rows through the M4 {@link projectItem} contract. Used by the
- * read-side dev workflow verbs (`dev sprint list/items/current`,
- * `dev epic list/items`, `dev release list`, `dev task list`).
- *
- * Skips board-metadata cache loading — dev verbs don't expose
- * `--columns` selection, and the items_page rows include
- * `column { title }` per the {@link ITEM_FIELDS_FRAGMENT}, so the
- * fallback title path on {@link projectItem} is sufficient. Returns
- * the `complexity` from the *last* response so the verb's success
- * envelope reflects the freshest budget snapshot per `cli-design.md`
- * §6.1 — mirrors the {@link paginate} walker's idiom.
- */
-/**
  * True iff the `details.issues` array carries exactly the
  * `boards`/`too_small` zod issue `fetchItemsPage`'s `.min(1)` schema
  * raises on an empty `boards` response. Used by
@@ -1548,6 +1534,20 @@ const isEmptyBoardsArrayIssue = (
   });
 };
 
+/**
+ * Walks every page of `items_page` on the supplied board and projects
+ * the rows through the M4 {@link projectItem} contract. Used by the
+ * read-side dev workflow verbs (`dev sprint list/items/current`,
+ * `dev epic list/items`, `dev release list`, `dev task list`).
+ *
+ * Skips board-metadata cache loading — dev verbs don't expose
+ * `--columns` selection, and the items_page rows include
+ * `column { title }` per the {@link ITEM_FIELDS_FRAGMENT}, so the
+ * fallback title path on {@link projectItem} is sufficient. Returns
+ * the `complexity` from the *last* response so the verb's success
+ * envelope reflects the freshest budget snapshot per `cli-design.md`
+ * §6.1 — mirrors the {@link paginate} walker's idiom.
+ */
 export const walkDevBoardItems = async (inputs: {
   readonly client: MondayClient;
   readonly boardId: string;
