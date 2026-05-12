@@ -19,9 +19,12 @@
  * preserves the item-vs-board distinction at the parse boundary
  * for argv-validation discipline and to echo the agent-supplied
  * kind in the output envelope; the CLI does NOT pre-verify that
- * the supplied `--target <id>` actually names the declared kind
- * (Monday's server-side validation surfaces mismatches as
- * `not_found` at mutation time). Monday's `Post` variant is
+ * the supplied `--target <id>` actually names the declared kind,
+ * and Monday cannot either (the wire enum collapses both kinds to
+ * `Project`). Invisible / non-existent targets surface `not_found`
+ * at mutation time, but a passing `--target-type item` with a
+ * board-shaped ID succeeds and echoes the CLI-declared kind even
+ * though the record is a board. Monday's `Post` variant is
  * unreachable at v0.3 — a v0.3.x / v0.4 contract-extension may add
  * `--target-type update` once a clean argv-discriminator design is
  * pinned (cli-design §13 v0.3 entry M27 sub-block carries the
@@ -73,12 +76,15 @@ import type { Complexity } from '../utils/output/envelope.js';
  * `NotificationTargetType.Project` (which represents both items and
  * boards) — the CLI keeps the item-vs-board distinction for argv
  * validation discipline AND to echo the agent-supplied kind in the
- * output envelope. The CLI does NOT pre-verify the supplied
- * `--target <id>` against the declared type — Monday's server-side
- * validation surfaces mismatches as `not_found` at mutation time;
- * doubling the wire-call count to pre-read the target would add no
- * agent-visible recovery surface and is deferred (v0.3.x / v0.4
- * contract-extension if needed).
+ * output envelope. The pairing of `--target-type` with `--target
+ * <id>` is **trusted, not verified**: the CLI validates the enum +
+ * numeric ID shape; Monday validates that the target is a visible
+ * `Project` (surfacing invisible / non-existent targets as
+ * `not_found`); but neither side verifies that the CLI-declared
+ * kind matches what the ID actually names — the wire enum
+ * collapses both kinds to `Project`. A CLI-side pre-read is
+ * deferred (v0.3.x / v0.4 contract-extension if agents need
+ * strict-kind enforcement).
  *
  * Monday's wire enum has only two values (`Post` / `Project`); the
  * `Post` value targets Updates and is intentionally not surfaced
@@ -169,9 +175,11 @@ const wireNotificationSchema = z
  * Fires Monday's `create_notification` mutation. Both CLI
  * `--target-type` values (`item`/`board`) map to the wire enum
  * `NotificationTargetType.Project` — Monday's wire surface doesn't
- * distinguish items from boards at the enum level (server-side
- * validates that the supplied `target_id` actually names the kind
- * the caller declared).
+ * distinguish items from boards at the enum level. Monday
+ * validates that `target_id` is a visible `Project` (invisible /
+ * non-existent targets surface `not_found`) but does NOT verify
+ * that the kind matches the CLI-declared `target_type`; the
+ * pairing is trusted and echoed but not enforced.
  *
  * The wire payload returns only `{id, text}`; the CLI-side echo
  * (`user_id` / `target_id` / `target_type`) is composed at the

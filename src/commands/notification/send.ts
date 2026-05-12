@@ -17,19 +17,24 @@
  * **`--target-type` argv is `item|board`** (cli-design §4.3). Both
  * CLI values map to Monday's wire `NotificationTargetType.Project`
  * at the runtime boundary inside {@link sendNotification} — Monday's
- * wire enum doesn't distinguish items from boards (server-side
- * validates that `target_id` actually names the kind the caller
- * declared, surfacing mismatches as `not_found`). The CLI keeps the
- * 2-value vocabulary for argv-validation discipline AND so the
+ * wire enum doesn't distinguish items from boards. The CLI keeps
+ * the 2-value vocabulary for argv-validation discipline AND so the
  * output envelope echoes the agent-supplied kind. Monday's `Post`
  * wire value (Update-targeted notifications) is unreachable at v0.3.
  *
- * **No pre-mutation target verification.** The CLI trusts the
- * `--target <id>` + `--target-type` argv pair and lets Monday's
- * server-side validation surface mismatches as `not_found`. A
- * stricter CLI-side check (e.g. pre-read against `Query.items` /
- * `Query.boards`) is deferred — it would double the wire-call
- * count without adding any agent-visible recovery surface.
+ * **The item-vs-board pairing is trusted, not verified.** The CLI
+ * validates the enum (`item|board`) + the numeric ID shape at the
+ * parse boundary. Monday validates that `target_id` is a visible
+ * `Project` (item OR board) — invisible / non-existent targets
+ * surface `not_found`. Monday CANNOT validate that the CLI-declared
+ * `--target-type` matches what the ID actually names (the wire enum
+ * collapses both to `Project`), so passing `--target-type item`
+ * with a board ID succeeds and the envelope echoes `target_type:
+ * 'item'` even though the underlying record is a board. Agents
+ * needing strict kind verification should pre-read `Query.items` /
+ * `Query.boards` themselves; the CLI-side pre-read is deferred to
+ * a v0.3.x / v0.4 contract-extension because doubling the wire-call
+ * count adds no agent-visible recovery surface.
  *
  * **Idempotency.** `create_notification` is NOT idempotent —
  * re-running mints a fresh notification with a new ID. Agents
