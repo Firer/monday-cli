@@ -311,9 +311,11 @@ interface CreateWebhookResponse {
  * `operationName: 'CreateWebhook'` stays in sync with the named
  * operation in {@link CREATE_WEBHOOK_MUTATION} (R-NEW-37 W2 audit-
  * point). The `config` input crosses the wire as the `JSON` scalar
- * — the caller threads any pre-parsed JSON value (or `null` when
- * absent); per-event structural validation lives server-side at
- * Monday.
+ * when supplied — the caller threads any pre-parsed JSON value;
+ * when `inputs.config` is `undefined` the `$config` variable is
+ * omitted entirely so Monday's per-event server-side default
+ * applies (rather than overwriting with `null`). Per-event
+ * structural validation lives server-side at Monday.
  *
  * Re-running creates a fresh webhook with a new ID — `idempotent:
  * false`. Agents needing register-once semantics should `webhook

@@ -342,9 +342,10 @@ describe('monday webhook create (M27)', () => {
     expect(env.planned_changes[0]?.config).toBeNull();
   });
 
-  it('--dry-run does not validate --config JSON when --config is malformed', async () => {
-    // The JSON parse-boundary fires regardless of `--dry-run` —
-    // malformed JSON is a usage_error before any envelope work.
+  it('--dry-run still rejects malformed --config JSON at the parse boundary', async () => {
+    // The JSON parse-boundary fires before the --dry-run branch —
+    // malformed JSON is a usage_error before any envelope work,
+    // regardless of whether --dry-run was supplied.
     const out = await drive(
       [
         'webhook',

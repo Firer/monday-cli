@@ -17,8 +17,11 @@
  * documented `--target-type item|board` argv vocabulary from
  * cli-design §4.3 — both CLI values map to wire `Project`. The CLI
  * preserves the item-vs-board distinction at the parse boundary
- * (driving target-shape validation at M27 IMPL) even though the
- * wire collapses both to one enum. Monday's `Post` variant is
+ * for argv-validation discipline and to echo the agent-supplied
+ * kind in the output envelope; the CLI does NOT pre-verify that
+ * the supplied `--target <id>` actually names the declared kind
+ * (Monday's server-side validation surfaces mismatches as
+ * `not_found` at mutation time). Monday's `Post` variant is
  * unreachable at v0.3 — a v0.3.x / v0.4 contract-extension may add
  * `--target-type update` once a clean argv-discriminator design is
  * pinned (cli-design §13 v0.3 entry M27 sub-block carries the
