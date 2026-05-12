@@ -206,7 +206,7 @@ in the plan docs — **do not duplicate them here**:
   backlog (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 +
   R-NEW-14/15/16 + R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 +
   R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 + R-NEW-37
-  + R-NEW-38 shipped + R-NEW-2 / R-NEW-3 candidates open +
+  + R-NEW-38 + R-NEW-42 shipped + R-NEW-2 / R-NEW-3 candidates open +
   R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28 /
   R-NEW-31 / R-NEW-32 / R-NEW-33 / R-NEW-39 / R-NEW-40 /
   R-NEW-41).
@@ -405,6 +405,21 @@ convention.
   (R-NEW-29/30/35/36 all shipped at 3-consumer threshold),
   deferring was inconsistent + the right call was to ship
   inline. **Status: shipped.**
+- **R-NEW-42 — `parseJsonArg` argv-JSON-parse-boundary helper
+  (3 consumers at M27 IMPL close).** Surfaced at the post-M27-
+  close drift sweep + lifted inline at the 3-consumer threshold,
+  mirroring R-NEW-38's same-cadence inline lift at the post-M26b
+  drift sweep. Three argv-parse-boundary sites in `src/commands/*`
+  shared the same try/catch JSON.parse → UsageError shape with
+  per-verb message + details: `monday raw --vars` /
+  `board column-create --settings` / `webhook create --config`
+  (the 4th JSON.parse site in `item create.ts` is response-side
+  recovery, not argv-parse; deliberately NOT migrated). Helper
+  lives in `src/utils/json.ts` next to R-NEW-27's `isPlainObject`.
+  Behaviour-preserving for agent-facing contracts (`error.code`
+  + `cause` identical across all 3 sites); 7 new unit tests at
+  `tests/unit/utils/json.test.ts` pin the helper's branch matrix.
+  **Status: shipped.**
 - **R-NEW-39 — `projectedStatusLabel` / `taskStatusLabel`
   first-status-column helper duplication (2 consumers, M26b;
   LOW priority watch-item).** Surfaced at the post-M26b drift

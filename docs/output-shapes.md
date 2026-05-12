@@ -3547,20 +3547,21 @@ Codex P1-2 fix):
 **Idempotency caveat.** As with `task done` — status flip
 idempotent, `update create` is NOT.
 
-### `monday webhook list <bid>` (v0.3-M27, pre-flight stub)
+### `monday webhook list <bid>` (v0.3-M27)
 
 List webhooks configured on the supplied board. Pure read via
-Monday's `webhooks(board_id:)` query. Live-only (cli-design §8
-cache scope excludes webhooks). Returns a flat collection of
-`Webhook { id, board_id, event, config }` records — the
-asymmetric `config` field is a JSON-encoded string on read
-(Monday's `Webhook.config` field is typed `String`, even though
-the `create_webhook` input arg accepts the `JSON` scalar).
+Monday's `webhooks(board_id:)` query (operationName `Webhooks`).
+Live-only (cli-design §8 cache scope excludes webhooks).
+Returns a flat collection of `Webhook { id, board_id, event,
+config }` records — the asymmetric `config` field is a JSON-
+encoded string on read (Monday's `Webhook.config` field is
+typed `String`, even though the `create_webhook` input arg
+accepts the `JSON` scalar).
 
-**Pre-flight stub at this milestone** — action body
-`c8`-wrapped, rejects with `internal_error.details.hint`
-pointing at M27 IMPL. Runtime body lands at the M27 IMPL
-session.
+**Runtime body shipped** at M27 IMPL `9cb6a74` (+ 4 Codex
+rounds `6f59a83` / `2402a76` / `ff724fd` / `64d94d7`). A null
+`webhooks` root surfaces `not_found` with `details.board_id`
+(matches the M10/M15 lifecycle verbs).
 
 ```json
 {
@@ -3578,24 +3579,29 @@ session.
 }
 ```
 
-### `monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run]` (v0.3-M27, pre-flight stub)
+### `monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run]` (v0.3-M27)
 
-Register a new webhook on the supplied board. `--event` is
-validated at parse boundary against the closed
+Register a new webhook on the supplied board via Monday's
+`create_webhook` mutation (operationName `CreateWebhook`).
+`--event` is validated at parse boundary against the closed
 `WEBHOOK_EVENT_TYPES` 21-value enum (cli-design §13 v0.3 entry +
-Decision 9 closure). `--config <json>` is an opaque JSON string —
-the CLI threads it through to Monday's `JSON` scalar input arg;
-per-event sub-shape validation lives server-side at Monday.
-`--url` requires HTTPS at parse boundary (Monday rejects non-
-HTTPS webhook endpoints server-side; surfacing the rejection at
-the CLI boundary keeps the failure mode local).
-Returns the freshly-minted `Webhook` record (with the
-Monday-assigned `id`).
+Decision 9 closure). `--config <json>` is parsed once at the
+CLI parse boundary — the resulting JS value is threaded to
+Monday's `JSON` scalar input arg (sending the raw string would
+double-encode against the JSON scalar); malformed JSON surfaces
+`usage_error` before any wire call fires. An absent `--config`
+omits the wire variable entirely so Monday's per-event server-
+side default applies. Per-event sub-shape validation lives
+server-side at Monday. `--url` requires HTTPS at parse boundary
+(Monday rejects non-HTTPS webhook endpoints server-side;
+surfacing the rejection at the CLI boundary keeps the failure
+mode local). Returns the freshly-minted `Webhook` record (with
+the Monday-assigned `id`).
 
-**Pre-flight stub at this milestone** — action body
-`c8`-wrapped, rejects with `internal_error.details.hint`
-pointing at M27 IMPL. Runtime body lands at the M27 IMPL
-session.
+**Runtime body shipped** at M27 IMPL `9cb6a74` (+ 4 Codex
+rounds). A null `create_webhook` payload surfaces
+`internal_error` (the contract is "every successful create
+returns a Webhook" — same shape M15 `board create` uses).
 
 **Idempotency caveat.** `create_webhook` is NOT idempotent —
 re-running with the same args mints a fresh webhook with a new
@@ -3644,11 +3650,12 @@ verifies before running for real:
 }
 ```
 
-### `monday webhook delete <wid> --yes [--dry-run]` (v0.3-M27, pre-flight stub)
+### `monday webhook delete <wid> --yes [--dry-run]` (v0.3-M27)
 
-Delete a webhook by ID. `--yes` is mandatory for the live path
-(cli-design §3.1 #7 confirmation gate); without `--yes` AND
-without `--dry-run` the command fails fast with
+Delete a webhook by ID via Monday's `delete_webhook` mutation
+(operationName `DeleteWebhook`). `--yes` is mandatory for the
+live path (cli-design §3.1 #7 confirmation gate); without
+`--yes` AND without `--dry-run` the command fails fast with
 `confirmation_required` carrying `details.webhook_id`. Returns
 the deleted `Webhook` record (Monday echoes the deleted state).
 Re-deleting an already-deleted webhook surfaces `not_found`
@@ -3656,10 +3663,10 @@ Re-deleting an already-deleted webhook surfaces `not_found`
 agents key off one error code regardless of which delete verb
 they ran).
 
-**Pre-flight stub at this milestone** — action body
-`c8`-wrapped, rejects with `internal_error.details.hint`
-pointing at M27 IMPL. Runtime body + destructive-gate landing
-at the M27 IMPL session alongside the runtime body.
+**Runtime body shipped** at M27 IMPL `9cb6a74` (+ 4 Codex
+rounds). Confirmation gate fires BEFORE `resolveClient` per the
+M10 round-1 P2 invariant — missing token surfaces
+`confirmation_required` (exit 1), not `config_error` (exit 3).
 
 **Live success envelope:**
 
@@ -3685,10 +3692,10 @@ top-level `planned_changes[]` sibling); the planned change
 carries the `webhook_id` slot for agent verification before
 re-running with `--yes`. **No pre-mutation read fires** —
 Monday's `webhooks(board_id:)` query is board-scoped and the
-`webhook delete <wid>` argv carries no board ID, so M27 IMPL
-cannot enrich the dry-run with the deleted webhook's `event` /
-`board_id` / `config` without amending the §4.3 row. Source is
-always `"none"`.
+`webhook delete <wid>` argv carries no board ID, so the dry-run
+cannot enrich the planned change with the deleted webhook's
+`event` / `board_id` / `config` without amending the §4.3 row.
+Source is always `"none"`.
 
 ```json
 {
@@ -3702,26 +3709,32 @@ always `"none"`.
 }
 ```
 
-### `monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]` (v0.3-M27, pre-flight stub)
+### `monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]` (v0.3-M27)
 
 Fire a Monday notification to a single recipient about an item
-or board. Single-recipient at v0.3 per cli-design §4.3 (`--user`
-is singular; multi-recipient fan-out is a v0.3.x / v0.4
-contract-extension). The CLI's `--target-type item|board`
-vocabulary maps to wire `NotificationTargetType.Project` (which
-represents both items and boards); Monday's wire enum has only
-two values (`Post` / `Project`), and the `Post` value
-(Update-targeted notifications) is unreachable at v0.3 — a
-v0.3.x / v0.4 contract-extension may add a CLI third
-target-type `update` that dispatches to wire `Post`. Returns
-the minted `Notification { id, text }` + the CLI-side echo of
-the inputs (`user_id`, `target_id`, `target_type`) for agent
-verification.
+or board via `create_notification` (operationName
+`CreateNotification`). Single-recipient at v0.3 per cli-design
+§4.3 (`--user` is singular; multi-recipient fan-out is a
+v0.3.x / v0.4 contract-extension). The CLI's `--target-type
+item|board` vocabulary maps to wire
+`NotificationTargetType.Project` (which represents both items
+and boards); Monday's wire enum has only two values (`Post` /
+`Project`), and the `Post` value (Update-targeted
+notifications) is unreachable at v0.3 — a v0.3.x / v0.4
+contract-extension may add a CLI third target-type `update`
+that dispatches to wire `Post`. **The item-vs-board pairing
+of `--target-type` with `--target <id>` is trusted, not
+verified** — the wire enum collapses both kinds, so neither
+the CLI nor Monday cross-validates the declared kind against
+the underlying record; Monday only validates target visibility
+as a `Project`. Returns the minted `Notification { id, text }`
++ the CLI-side echo of the inputs (`user_id`, `target_id`,
+`target_type`) for agent verification.
 
-**Pre-flight stub at this milestone** — action body
-`c8`-wrapped, rejects with `internal_error.details.hint`
-pointing at M27 IMPL. Runtime body lands at the M27 IMPL
-session.
+**Runtime body shipped** at M27 IMPL `9cb6a74` (+ 4 Codex
+rounds). A null `create_notification` payload surfaces
+`not_found` with `details.user_id` + `details.target_id` +
+`details.target_type`.
 
 **Idempotency caveat.** `create_notification` is NOT idempotent
 — re-running mints a fresh notification with a new ID. Agents

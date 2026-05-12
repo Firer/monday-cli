@@ -83,8 +83,8 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError, errorMessage } from '../../utils/errors.js';
-import { isPlainObject } from '../../utils/json.js';
+import { UsageError } from '../../utils/errors.js';
+import { isPlainObject, parseJsonArg } from '../../utils/json.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { withBoardInvalidationSingleLeg } from '../../api/board-mutation-invalidation.js';
@@ -323,32 +323,23 @@ const parseSettingsFlag = (
   raw: string,
   columnType: string,
 ): Readonly<Record<string, unknown>> => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    // JSON.parse throws SyntaxError, which is an Error — the
-    // String(err) fallback is defensive against a future host that
-    // throws a non-Error here. Leaving the narrowing in for safety
-    // (useUnknownInCatchVariables) but ignoring the unreachable
-    // branch for coverage purposes.
-    const message = errorMessage(err);
-    throw new UsageError(
-      `--settings: malformed JSON (${message})`,
-      {
-        cause: err,
-        details: {
-          column_type: columnType,
-          raw,
-          parse_error: message,
-          hint:
-            'pass a well-formed JSON object literal (e.g. ' +
-            '--settings \'{"labels":["Low","Med","High"]}\'); use ' +
-            'single-quote-around-double-quote shell quoting on POSIX shells.',
-        },
-      },
-    );
-  }
+  // R-NEW-42 lift: shared `parseJsonArg` helper (3-consumer
+  // threshold; same shape `monday raw --vars` + `webhook create
+  // --config` use). Pre-lift this site put `details.parse_error`
+  // (redundant with `error.message`) + `details.raw` (the
+  // unparseable input echo) on the envelope; both dropped since
+  // neither is asserted on or contract-documented — `cause`
+  // preserves the SyntaxError for debugging.
+  const parsed = parseJsonArg(raw, {
+    context: '--settings: malformed JSON',
+    details: {
+      column_type: columnType,
+      hint:
+        'pass a well-formed JSON object literal (e.g. ' +
+        '--settings \'{"labels":["Low","Med","High"]}\'); use ' +
+        'single-quote-around-double-quote shell quoting on POSIX shells.',
+    },
+  });
   if (!isPlainObject(parsed)) {
     throw new UsageError(
       `--settings: expected a JSON object, got ${

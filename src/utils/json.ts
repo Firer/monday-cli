@@ -28,3 +28,90 @@ export const isPlainObject = (
   v: unknown,
 ): v is Readonly<Record<string, unknown>> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * `parseJsonArg` (R-NEW-42 lift, post-M27-close drift sweep).
+ *
+ * Three sites in `src/commands/*` consume a JSON-encoded argv
+ * string + reject malformed JSON as `usage_error`:
+ *
+ *   - `monday raw --vars <json>` / `--vars-file <path>`
+ *     (`src/commands/raw/index.ts`)
+ *   - `monday board column-create --settings <json>`
+ *     (`src/commands/board/column-create.ts`)
+ *   - `monday webhook create --config <json>`
+ *     (`src/commands/webhook/create.ts`, M27 IMPL)
+ *
+ * Each site pre-lift wrapped `JSON.parse` in try/catch + threw
+ * `UsageError` with a verb-specific message + `cause: err` +
+ * verb-specific `details`. The shape is structurally identical;
+ * the only variation is the message prefix + which detail-keys
+ * land. M27 IMPL pushed the count to 3, crossing the R7/R8
+ * 3-consumer threshold; this lift ships at the post-M27-close
+ * drift sweep mirroring R-NEW-38's same-cadence lift at
+ * `c71a96d`.
+ *
+ * Behavioural note: pre-lift, `webhook/create.ts` did NOT
+ * interpolate the underlying `JSON.parse` error message
+ * (just the static `'--config must be a valid JSON-encoded
+ * string'` text). The other two sites used `errorMessage(err)`
+ * to surface the SyntaxError detail. The lift normalises to
+ * always interpolate — better diagnostic value, no
+ * agent-facing contract change (the `error.code` stays
+ * `usage_error`; only `error.message` widens).
+ */
+
+import { UsageError } from './errors.js';
+import { errorMessage } from './errors.js';
+
+export interface ParseJsonArgOptions {
+  /**
+   * Free-form message prefix. Lands in `error.message` as
+   * `${context} (${errorMessage(err)})` on parse failure.
+   * Verb-specific phrasing (e.g. `'monday raw: GraphQL
+   * variables are not valid JSON'`, `'--settings: malformed
+   * JSON'`, `'--config must be a valid JSON-encoded string'`).
+   */
+  readonly context: string;
+  /**
+   * Optional `details` map echoed on the surfaced `UsageError`.
+   * Each call site contributes verb-specific keys (e.g.
+   * `source` for `monday raw`, `column_type` + `raw` for
+   * `board column-create`, `board_id` + `hint` for `webhook
+   * create`). Schema is per-verb; the helper passes through
+   * verbatim.
+   */
+  readonly details?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Parses a JSON-encoded argv string. Returns the parsed value
+ * (`unknown` — caller narrows via downstream zod / type-guard);
+ * on `SyntaxError` (or any other thrown value from `JSON.parse`)
+ * throws `UsageError` with the supplied context, the underlying
+ * error as `cause`, and the supplied `details`.
+ *
+ * Use at every argv-parse-boundary that consumes user-supplied
+ * JSON (`--vars`, `--settings`, `--config`, future
+ * `--<field>-json` flags). Do NOT use for response-side parsing
+ * (Monday wire returns) — those go through `unwrapOrThrow` +
+ * a zod schema.
+ */
+export const parseJsonArg = (
+  raw: string,
+  options: ParseJsonArgOptions,
+): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new UsageError(
+      `${options.context} (${errorMessage(err)})`,
+      {
+        cause: err,
+        ...(options.details === undefined
+          ? {}
+          : { details: options.details }),
+      },
+    );
+  }
+};

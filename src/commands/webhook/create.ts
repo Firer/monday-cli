@@ -44,7 +44,7 @@ import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { BoardIdSchema } from '../../types/ids.js';
-import { UsageError } from '../../utils/errors.js';
+import { parseJsonArg } from '../../utils/json.js';
 import {
   createWebhook,
   webhookCreateOutputSchema,
@@ -120,24 +120,19 @@ export const webhookCreateCommand: CommandModule<
           // boundary. Threading the raw string to Monday's `JSON`
           // scalar would double-encode (Monday sees a JSON-string-of-
           // a-string); parsing to a JS value first sends the intended
-          // shape.
-          let parsedConfig: unknown;
-          if (parsed.config !== undefined) {
-            try {
-              parsedConfig = JSON.parse(parsed.config);
-            } catch (err) {
-              throw new UsageError(
-                '--config must be a valid JSON-encoded string',
-                {
+          // shape. R-NEW-42 lift: shared `parseJsonArg` helper
+          // (3-consumer threshold; same shape `monday raw --vars` +
+          // `board column-create --settings` use).
+          const parsedConfig =
+            parsed.config === undefined
+              ? undefined
+              : parseJsonArg(parsed.config, {
+                  context: '--config must be a valid JSON-encoded string',
                   details: {
                     board_id: parsed.boardId,
                     hint: 'check the JSON syntax — strings need double-quotes; the shell may consume quotes if --config is not single-quoted',
                   },
-                  cause: err,
-                },
-              );
-            }
-          }
+                });
 
           const { client, globalFlags, apiVersion } = resolveClient(
             ctx,

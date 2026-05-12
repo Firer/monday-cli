@@ -88,6 +88,7 @@ import { emitSuccess, emitDryRun } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UsageError, errorMessage } from '../../utils/errors.js';
+import { parseJsonArg } from '../../utils/json.js';
 import { analyzeRawDocument } from '../../api/raw-document.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { PINNED_API_VERSION } from '../../api/client.js';
@@ -311,20 +312,15 @@ const readVars = async (
       );
     }
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err: unknown) {
-    throw new UsageError(
-      `monday raw: GraphQL variables are not valid JSON (${errorMessage(err)}).`,
-      {
-        cause: err,
-        details: {
-          source: inlineVars !== undefined ? 'inline' : varsFile,
-        },
-      },
-    );
-  }
+  // R-NEW-42 lift: shared `parseJsonArg` helper (3-consumer
+  // threshold; same shape `board column-create --settings` +
+  // `webhook create --config` use).
+  const parsed = parseJsonArg(raw, {
+    context: 'monday raw: GraphQL variables are not valid JSON',
+    details: {
+      source: inlineVars !== undefined ? 'inline' : varsFile,
+    },
+  });
   if (
     parsed === null ||
     typeof parsed !== 'object' ||

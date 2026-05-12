@@ -174,11 +174,12 @@ import { devTaskDoneCommand } from './dev/task/done.js';
 import { devTaskBlockCommand } from './dev/task/block.js';
 // M27 (v0.3) — `notification send` + `webhook list/create/delete`.
 // Outbound writes — bundled because both are write-only, low surface
-// (cli-design §4.3 + §13 v0.3 entry). Pre-flight stubs at this commit;
-// runtime bodies + tests land at M27 IMPL. `WebhookEventType` argv
-// validation closed Decision 9 against Monday's 21-value wire enum
-// (empirical probe `scripts/probe/m27-create-webhook-input.ts`,
-// 2026-05-12, API `2026-01`).
+// (cli-design §4.3 + §13 v0.3 entry). Runtime bodies + integration
+// tests shipped at M27 IMPL `9cb6a74` (+ 4 Codex rounds). The
+// `WebhookEventType` argv validation closed Decision 9 against
+// Monday's 21-value wire enum (empirical probe
+// `scripts/probe/m27-create-webhook-input.ts`, 2026-05-12, API
+// `2026-01`).
 import { webhookListCommand } from './webhook/list.js';
 import { webhookCreateCommand } from './webhook/create.js';
 import { webhookDeleteCommand } from './webhook/delete.js';
