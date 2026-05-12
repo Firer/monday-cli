@@ -31,11 +31,11 @@ via `isEmptyBoardsArrayIssue`) + round 3 `8ea66c4` (0 P1 + 0 P2
 **M26b IMPL highlights.** Runtime bodies of the 10 workflow
 verbs (`dev sprint current/list/items` + `dev epic list/items`
 + `dev release list` + `dev task list/start/done/block`). New
-shared helper `_shared.ts:requireDevBoard` (R-NEW-32 lifted at
+shared helper `_shared.ts:requireDevBoard` (R-NEW-35 lifted at
 IMPL kickoff — 10-consumer trigger; one per workflow verb)
 surfaces `dev_not_configured` with `details.slot` when a
 noun-specific mapping slot is unset. Seven new helpers in
-`src/api/dev-conventions.ts` (R-NEW-33 — `walkDevBoardItems`
+`src/api/dev-conventions.ts` (R-NEW-36 — `walkDevBoardItems`
 across 7 read verbs + `hydrateDevBoardColumns` across 4 verbs +
 `findRelationColumnIdToBoard` across 3 verbs +
 `extractLinkedItemIds` (handles both `linkedPulseIds` legacy +
@@ -145,9 +145,10 @@ in the plan docs — **do not duplicate them here**:
   backlog (R-NEW-1 + R-NEW-4 + R-NEW-5 + R-NEW-6 + R-NEW-7 +
   R-NEW-14/15/16 + R-NEW-17 + R-NEW-19 + R-NEW-21 + R-NEW-25 +
   R-NEW-27 + R-NEW-29 + R-NEW-30 + R-NEW-35 + R-NEW-36 shipped +
-  R-NEW-2 / R-NEW-3 candidates open + R-watch-items including
+  R-NEW-2 / R-NEW-3 candidates open + R-NEW-38 (sprint-state
+  helpers lift, MEDIUM-priority overdue) + R-watch-items including
   R-NEW-20 / R-NEW-26 / R-NEW-28 / R-NEW-31 / R-NEW-32 / R-NEW-33 /
-  R-NEW-37).
+  R-NEW-37 / R-NEW-39).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -238,7 +239,7 @@ convention.
    optional inputs (per §22 R-watch-item "empirical-probe step
    in pre-flight" — fired at M21 + M22 + M23 + M24 + M26;
    M27's novel surface needs it).
-   **R-NEW-34 watch-item** — if M27 introduces custom GraphQL
+   **R-NEW-37 watch-item** — if M27 introduces custom GraphQL
    mutations with non-trivial operationName + named-op pairs,
    the codex-pre-flight-review template should add an explicit
    audit-point per the §19 M26b round-2 P1-1 lesson. Today's
@@ -327,6 +328,35 @@ convention.
   the template after one more confirming repetition (M27
   webhook surface is a candidate — `create_webhook` /
   `delete_webhook` mutations).
+- **R-NEW-38 — sprint date-range helpers lift out of
+  `commands/dev/sprint/list.ts:_internals` (3 consumers at
+  M26b IMPL; lift overdue).** Surfaced at the post-M26b drift
+  sweep. `sprint/list.ts` exports a private `_internals`
+  namespace carrying `dayEpoch` + `extractDateRange` +
+  `classifySprint`; two other verb files (`sprint/current.ts`,
+  `task/list.ts`) cross-import the namespace to find the
+  active sprint. The cross-verb-file import is an anti-pattern
+  the rest of the M26b R-NEW-36 cluster avoids. **MEDIUM
+  priority** — already past R7/R8 3-consumer threshold; lift
+  is ~30 LOC + 3 import statements with no behaviour change.
+  Documented; lift expected at the next session touching the
+  `commands/dev/sprint/` cluster (M27 doesn't; M28 cleanup or
+  a focused post-M27 sweep is the natural slot).
+- **R-NEW-39 — `projectedStatusLabel` / `taskStatusLabel`
+  first-status-column helper duplication (2 consumers, M26b;
+  LOW priority watch-item).** Surfaced at the post-M26b drift
+  sweep. `dev/epic/list.ts:60` and `dev/task/list.ts:69` ship
+  byte-identical 11-line helpers walking projected columns for
+  the first status / color column with a non-empty `label` (or
+  `text` fallback). The companion done-label predicate
+  divergence (`DONE_LABELS` Set vs `isDoneOrCancelled` `||`
+  chain) is cosmetic. Lift candidate:
+  `firstProjectedStatusLabel(item)` + `DEV_DONE_LABELS` /
+  `isDoneStatusLabel(label)` in `src/api/dev-conventions.ts`.
+  Fires at the 3rd consumer (hypothetical v0.3.x / v0.4 `dev
+  release list --state` OR M28 release-prep readiness checks).
+  Could ship as a single dev-conventions.ts consolidation
+  commit alongside R-NEW-38 when that lift lands.
 - **R-NEW-30 — `_shared.ts:resolveActiveDevProfile` lift (13
   consumers at M26b).** Pre-shipped at M26a IMPL (3 consumers
   at M26a — discover/configure/doctor); M26b adds 10 more

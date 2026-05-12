@@ -1535,6 +1535,73 @@ document the verb cluster post-mortems. Briefly:
   profiles map is preserved as `{schema_version: '1', profiles:
   {}}` rather than the file being deleted outright).
 
+- **`api/dev-conventions.ts`** (v0.3 M26 — pre-flight at `1620220`,
+  M26a IMPL runtime fetchers at `19755e3`, M26b IMPL workflow-verb
+  helpers cluster at `10cd1c5` + `34a5bc1` round-1 P2-3 lift).
+  Owns the `monday dev …` namespace's convention-to-board-ID
+  resolution per cli-design §2.7 (Monday Dev is convention, not
+  API). Three layers:
+  1. **Discover heuristic + doctor diagnostics** (M26a):
+     `matchBoardByConvention` + `groupCandidatesByDevNoun` +
+     `buildDiscoverMappingFromMatches` (pure helpers seeding
+     auto-detection from stock English board names: `Tasks` /
+     `Sprints` / `Epics` / `Releases` / `Bugs`). `discoverDevBoards`
+     walks accessible boards via `boards(state: all,
+     workspace_ids:)` with a `Board.type === 'board'` filter
+     (drops `sub_items_board` virtual entries — empirical-probe
+     finding pinned at 2026-05-11). `runDevDoctor` validates a
+     mapping via 10 checks pinned in `DEV_DOCTOR_CHECK_NAMES`
+     (`tasks_board_exists` / `tasks_status_column_present` /
+     `tasks_status_labels_canonical` / `sprints_board_exists` /
+     `sprints_date_columns_present` / `epics_board_exists` /
+     `releases_board_exists` / `bugs_board_exists` /
+     `tasks_to_sprints_relation` / `tasks_to_epics_relation`)
+     with per-status detail surfaced via the structural
+     `z.discriminatedUnion('status', [ok, warn, fail])` schema +
+     the closed `DEV_DOCTOR_REASONS` 11-value enum
+     (`z.toJSONSchema` exposure for `monday schema dev.doctor`
+     introspection — M26a IMPL round-2 P2-1 refactor).
+  2. **Per-profile dev-block IO**: `loadDevMapping(profile,
+     options)` reads `[profiles.<name>.dev]` from
+     `~/.monday-cli/config.toml`; throws `dev_not_configured`
+     with `details.reason ∈ {no_config_file, profile_absent,
+     no_dev_block}` when absent. `saveDevMapping(profile,
+     mapping, options)` writes atomically via tmp-rename with
+     mode `0o600`. `smol-toml` `stringify` produces canonical
+     TOML (comments discarded — M26a IMPL contract correction).
+  3. **M26b workflow-verb helpers cluster** (R-NEW-36):
+     `walkDevBoardItems` (7 consumers across read verbs;
+     composes paginate + fetchItemsPage + parseRawItem +
+     projectItem; narrowed `dev_board_misconfigured` rewrap of
+     empty-`boards` parse failures via `isEmptyBoardsArrayIssue`
+     — Codex round-2 P2-1 fix), `hydrateDevBoardColumns` (4
+     consumers; single `boards(ids:)` + column projection),
+     `findRelationColumnIdToBoard` + `extractLinkedItemIds` (3
+     consumers; the sprint-items / epic-items / task-list-with-
+     sprint walkers filter tasks-board items by board_relation
+     column value), `resolveStatusColumn` +
+     `resolveCanonicalLabel` (3 consumers; the task mutation
+     verbs case-insensitively resolve the canonical
+     "Working on it" / "Done" / "Stuck" label against the
+     configured status column's labels), `flipTaskStatus` (3
+     consumers; composes hydrate + resolve + executeItemMutation
+     into the start/done/block flip preamble),
+     `fireDevCreateUpdate` (2 consumers; the `task done
+     --message` + `task block --reason` side-effect with a
+     strict zod parse boundary on Monday's `create_update`
+     mutation + dynamic operation-name builder so the doc
+     named-operation + wire `operationName` always agree —
+     Codex round-2 P1-1 fix).
+
+  **`commands/dev/_shared.ts`** owns the per-verb preamble:
+  `resolveActiveDevProfile(ctx, programOpts)` resolves the
+  active profile name via the same flag / env / default_profile
+  precedence `cli/program.ts`'s preAction hook uses for token
+  resolution (throws `config_error` in implicit-v1 mode); and
+  `requireDevBoard(mapping, slot, profile)` (R-NEW-35, 10
+  consumers) pulls a noun-specific board ID off the loaded
+  mapping or throws `dev_not_configured` with `details.slot`.
+
 ### `config/` (configuration boundary)
 
 - `config/load.ts` (M0) — env-var-only config loader. Parses

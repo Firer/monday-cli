@@ -3018,10 +3018,30 @@ v0.3-plan §18 M26a post-mortem. The
 {@link DEV_DOCTOR_REASONS} 11-value enum + per-status
 discriminated-union detail schemas surfaced via
 `z.toJSONSchema` so `monday schema dev.doctor` agents can
-introspect the closed reason vocabulary. **M26b** lands the
-10 remaining workflow verbs (`dev sprint/epic/release/task
-<verb>`); those verbs remain stubbed under `c8 ignore
-start/stop` block-wraps until M26b ships.
+introspect the closed reason vocabulary.
+**M26b IMPL** landed the 10 workflow verbs
+(`dev sprint current/list/items` + `dev epic list/items` +
+`dev release list` + `dev task list/start/done/block`) at
+`10cd1c5` + Codex impl review fix-ups across 3 rounds
+(`34a5bc1` / `078dae3` / `8ea66c4`). R-NEW-35
+(`_shared.ts:requireDevBoard`, 10-consumer slot-check
+helper) + R-NEW-36 (`dev-conventions.ts` workflow-verb
+helpers cluster — `walkDevBoardItems` / `hydrateDevBoardColumns`
+/ `findRelationColumnIdToBoard` / `extractLinkedItemIds` /
+`resolveStatusColumn` / `resolveCanonicalLabel` /
+`flipTaskStatus` / `fireDevCreateUpdate`) lifted inline
+with the M26b feat to share wire-call discipline across the
+10 verbs. Task mutation verbs (`dev task start/done/block`)
+flip a tasks-board status column via the canonical labels
+"Working on it" / "Done" / "Stuck" + emit `resolved_ids:
+{ status: <columnId> }` per §5.3 step 2; `dev task done
+--message` and `dev task block --reason` additionally fire
+a `create_update` mutation whose result lands in the
+top-level `side_effects` slot per §6.4 (M26 round-1 P1-2
+closure). All 13 stubs in the dev namespace are now
+filled; M26 closed end-to-end. Per-verb output shapes pinned
+in [`output-shapes.md`](./output-shapes.md) §M26 entries +
+v0.3-plan §19 M26b post-mortem.
 
 ## 6. Output schema (JSON contract)
 

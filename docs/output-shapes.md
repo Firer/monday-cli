@@ -64,7 +64,7 @@ no `data`); see the **Errors** section at the bottom.
 | [config](#config) | show, path |
 | [schema](#schema) | (no verb) |
 | [diagnostics](#diagnostics) | status, usage |
-| [dev](#dev) | discover (M26 stub), configure (M26 stub), doctor (M26 stub), sprint current/list/items (M26 stub), epic list/items (M26 stub), release list (M26 stub), task list/start/done/block (M26 stub) |
+| [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -3206,16 +3206,18 @@ API; §5.9 — board-mapping mechanics). Three setup verbs (`discover` /
 `configure` / `doctor`) + ten workflow verbs (sprint /epic / release
 / task × their per-noun verbs).
 
-All 13 verbs ship as **v0.3-M26 pre-flight stubs**: argv `inputSchema`
-+ output `outputSchema` are real (pinned at pre-flight so `monday
-schema` introspection is stable across the M26 drop-in); the action
-bodies are `c8 ignore start/stop`-wrapped + reject with
-`internal_error.details.hint` pointing at the M26 IMPL session. The
-output shapes below describe what `data` WILL carry once M26 IMPL
-lands the runtime bodies — agents pinning against the pre-flight
-stubs can rely on the documented shape post-drop-in.
+All 13 verbs are **live at v0.3-M26**: 3 setup verbs shipped at
+M26a IMPL (`19755e3`); 10 workflow verbs shipped at M26b IMPL
+(`10cd1c5` + Codex round-1/2/3 fix-ups `34a5bc1` / `078dae3` /
+`8ea66c4`). Argv `inputSchema` + output `outputSchema` were pinned
+at the M26 pre-flight contract diff (`1620220`) so `monday schema`
+introspection has been stable across both IMPL drops. The output
+shapes below describe what `data` carries today; the namespace is
+convention-not-API (every workflow verb translates to standard
+board / item CRUD against per-profile `[profiles.<name>.dev]`
+mappings — no new Monday GraphQL mutations).
 
-### `monday dev discover [--apply]` (v0.3-M26 stub)
+### `monday dev discover [--apply]` (v0.3-M26)
 
 Auto-detect Monday Dev board mappings via the heuristic in
 `src/api/dev-conventions.ts:matchBoardByConvention` (case-
@@ -3269,7 +3271,7 @@ does NOT fire from `dev discover` — that code is for verbs that
 REQUIRE an existing mapping (sprint / epic / release / task
 verbs + `dev doctor`).
 
-### `monday dev configure --tasks-board <bid> [...]` (v0.3-M26 stub)
+### `monday dev configure --tasks-board <bid> [...]` (v0.3-M26)
 
 Explicit per-board override of the Monday Dev mapping on the
 active profile. At least one of `--tasks-board` / `--sprints-board`
@@ -3296,7 +3298,7 @@ supplied. Idempotent on equal mappings.
 doesn't exist / no access); `cache_error` (profile config write
 failed).
 
-### `monday dev doctor` (v0.3-M26 stub)
+### `monday dev doctor` (v0.3-M26)
 
 Validate the active profile's mapping against current board shape.
 Runs every check in `DEV_DOCTOR_CHECK_NAMES` (pinned at M26 pre-
@@ -3334,7 +3336,7 @@ surfaces if the doctor verb itself can't complete (e.g. all
 configured boards inaccessible) — per-check drift is a `data`
 slot, not an error.
 
-### `monday dev sprint current` (v0.3-M26 stub)
+### `monday dev sprint current` (v0.3-M26)
 
 The active sprint on the configured `sprints_board`. Date-range
 straddle against `ctx.clock()` resolves "current". Returns a
@@ -3359,7 +3361,7 @@ returns).
 `sprints_board` in the active profile's mapping);
 `dev_board_misconfigured` (sprint date columns missing).
 
-### `monday dev sprint list [--state active|past|future]` (v0.3-M26 stub)
+### `monday dev sprint list [--state active|past|future]` (v0.3-M26)
 
 List sprints on the configured `sprints_board`, optionally filtered
 by date-range state against `ctx.clock()`. Returns a collection of
@@ -3385,7 +3387,7 @@ and surfaces inline via the verb's existing data shape). `dev
 doctor`'s `sprints_date_columns_present` check is where date-
 column drift is diagnosed as a structured `details` shape.
 
-### `monday dev sprint items <sid>` (v0.3-M26 stub)
+### `monday dev sprint items <sid>` (v0.3-M26)
 
 List task items on the configured `tasks_board` linked to a named
 sprint via the sprint→task `board_relation` column. Positional
@@ -3406,7 +3408,7 @@ sprints board); `dev_board_misconfigured` (sprint→task
 `board_relation` column not wired up — diagnose via `dev doctor`
 check `tasks_to_sprints_relation`).
 
-### `monday dev epic list [--state active|done]` (v0.3-M26 stub)
+### `monday dev epic list [--state active|done]` (v0.3-M26)
 
 List epics on the configured `epics_board`, optionally filtered by
 the epic's status column (`done` = `Done | Cancelled`; `active` =
@@ -3421,7 +3423,7 @@ not in that set). Returns a collection of `ProjectedItem`.
 }
 ```
 
-### `monday dev epic items <eid>` (v0.3-M26 stub)
+### `monday dev epic items <eid>` (v0.3-M26)
 
 List task items linked to a named epic via the epic→task
 `board_relation` column. Positional `<eid>` is an item ID on the
@@ -3436,7 +3438,7 @@ epics board. Returns a collection of `ProjectedItem`.
 }
 ```
 
-### `monday dev release list` (v0.3-M26 stub)
+### `monday dev release list` (v0.3-M26)
 
 List releases on the configured `releases_board`. v0.3 ships the
 list verb without a per-release-state filter (the release date-
@@ -3453,7 +3455,7 @@ flag at v0.3); a v0.3.x / v0.4 follow-up may add
 }
 ```
 
-### `monday dev task list [--mine] [--status not_done] [--sprint current]` (v0.3-M26 stub)
+### `monday dev task list [--mine] [--status not_done] [--sprint current]` (v0.3-M26)
 
 List tasks on the configured `tasks_board` filtered by the
 supplied flags. `--mine` resolves through the `me` token resolver
@@ -3472,7 +3474,7 @@ or a numeric sprint item ID. Returns a collection of
 }
 ```
 
-### `monday dev task start <iid>` (v0.3-M26 stub)
+### `monday dev task start <iid>` (v0.3-M26)
 
 Set a task's status to "Working on it" on the configured
 `tasks_board`. Returns the post-mutation `ProjectedItem` (mutation
@@ -3493,7 +3495,7 @@ P3-1 — resolved_ids is a top-level mutation-envelope slot per
 }
 ```
 
-### `monday dev task done <iid> [--message <m>]` (v0.3-M26 stub)
+### `monday dev task done <iid> [--message <m>]` (v0.3-M26)
 
 Set a task's status to "Done" + optionally post a completion
 comment. Returns the post-mutation `ProjectedItem`. When
@@ -3520,7 +3522,7 @@ under `meta`):
 optional `--message` post is NOT — a re-run with `--message`
 posts a second comment. Help text reproduces this caveat.
 
-### `monday dev task block <iid> --reason <r>` (v0.3-M26 stub)
+### `monday dev task block <iid> --reason <r>` (v0.3-M26)
 
 Set a task's status to "Stuck" + post the blocking reason as a
 comment. `--reason` is REQUIRED (the audit-trail comment is the
