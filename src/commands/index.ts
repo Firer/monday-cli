@@ -155,6 +155,13 @@ import { boardFavoritesCommand } from './board/favorites.js';
 // shipped at `d058172` with Codex impl review fix-ups at
 // `5f10cda` (round 1) + `a024961` (round 2).
 import { itemHistoryCommand } from './item/history.js';
+// M29 (v0.4) — `monday item watch <iid>`. Polling-based event stream
+// over the M24 `item-history-projection.ts` projector. Pre-flight stub
+// only at this commit (cli-design §14.4 closure at `31713fb`; runtime
+// body lands at M29 IMPL); stub registers the verb surface so the
+// command count + agent introspection via `monday schema` reflect the
+// shape without exposing the runtime to invocation.
+import { itemWatchCommand } from './item/watch.js';
 // M26 (v0.3) — `dev` namespace workflow shortcuts (cli-design §5.2
 // carve-out 1; convention, not API per §2.7). Three-level depth:
 // `dev sprint current`, `dev task done`, etc. Pre-flight stubs at
@@ -244,6 +251,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     itemSearchCommand,
     itemSubitemsCommand,
     itemHistoryCommand,
+    itemWatchCommand,
     itemSetCommand,
     itemClearCommand,
     itemUpdateCommand,

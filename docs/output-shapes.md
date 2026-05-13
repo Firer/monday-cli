@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
-| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24) |
+| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29 pre-flight stub) |
 | [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
@@ -1807,6 +1807,132 @@ trailer carrying per-source pagination state for resumption.
 `meta.source: "live"` (both sources are pure live reads in v0.3;
 M24 impl's action layer aggregates with the item-board lookup's
 cache state via `SourceAggregator`).
+
+### `item watch <iid>` (v0.4-M29 — pre-flight stub)
+
+Polling-based event stream over the M24 `item-history-projection.ts`
+projector. **Pre-flight stub at the M29 contract diff;** runtime body
+lands at M29 IMPL. Pinned per cli-design §13 v0.4 entry + §14.4
+closure (`31713fb`) + the M29 pre-flight empirical probe
+(`scripts/probe/m29-polling-burn.ts`, 2026-05-13, API `2026-01`).
+
+**NDJSON-only output.** Unlike every other verb, `item watch` emits
+NDJSON regardless of `--json` / `--table` / `--output` globals.
+Streaming is intrinsic to the verb: agents wait for events as they
+arrive, not for a buffered envelope at session end. One event record
+per stdout line (matching the M24 `historyEvent` shape verbatim
+— see `item history` above for the 9-variant discriminated union)
+plus a final trailer-meta record once the session exits.
+
+Event record (one per emitted line; mirrors the M24 projector):
+
+```json
+{
+  "id": "act-1042",
+  "created_at": "2026-05-13T14:30:00Z",
+  "actor_id": "12345",
+  "kind": "update_column_value",
+  "column_id": "status",
+  "column_type": "status",
+  "before": { "id": 0 },
+  "after": { "id": 2 },
+  "textual_value": "Working on it",
+  "pulse_id": "1234567890",
+  "pulse_name": "Refactor login"
+}
+```
+
+Trailer-meta record (one per session, emitted on graceful exit):
+
+```json
+{
+  "_meta": {
+    "ok": true,
+    "schema_version": 1,
+    "api_version": "2026-01",
+    "cli_version": "0.4.0",
+    "request_id": "...",
+    "source": "live",
+    "cache_age_seconds": null,
+    "retrieved_at": "2026-05-13T14:32:15Z",
+    "has_more": true,
+    "total_returned": 7,
+    "events_emitted": 7,
+    "polls_made": 12,
+    "failed_polls": 0,
+    "watch_duration_seconds": 360.5,
+    "last_seen_event_id": "act-1042",
+    "circuit_broken_at": null,
+    "exit_reason": "max_events"
+  }
+}
+```
+
+The trailer carries the M29-specific session counters
+(`events_emitted` / `polls_made` / `failed_polls` /
+`watch_duration_seconds` / `last_seen_event_id` /
+`circuit_broken_at` / `exit_reason`) on top of the standard
+§6.3 streaming trailer shape. `exit_reason` discriminates the
+trailer interpretation:
+
+| `exit_reason` | Trigger | Envelope |
+|---|---|---|
+| `max_events` | `--max-events <n>` ceiling reached | success (exit 0) |
+| `max_duration` | `--max-duration <seconds>` ceiling reached | success (exit 0) |
+| `once_complete` | `--once` backlog drained | success (exit 0) |
+| `signal` | SIGINT / SIGTERM graceful drain | exit 130 per §7 |
+| `circuit_broken` | N consecutive failed polls (default 5) | failure envelope; `circuit_broken_at` set to the trip-time ISO timestamp |
+
+**Circuit breaker (cli-design §14.4 closure).** Reactive on Monday
+wire errors (`complexity_exceeded` / `concurrency_exceeded` /
+`rate_limited`). Each failed poll emits a `warning` record to the
+NDJSON stream first (interleaved with event records); after 5
+consecutive failures (`CIRCUIT_BREAKER_CONSECUTIVE_FAILS`) the
+session trips with `exit_reason: 'circuit_broken'` + a failure
+envelope carrying the underlying Monday error code. The 29-stable-
+error-code registry stays at 29 — no new ERROR_CODE for M29.
+
+**Cadence (§14.4 closure).** Default 30s; range 1s–1h via
+`--interval <ms>`. Per the empirical probe each poll costs 10
+complexity points against Monday's 1,000,000/min budget (0.002%
+burn at 30s cadence). Politeness + the documented >30s
+`activity_logs` propagation lag (M24 finding) are the binding
+constraints, NOT budget. Faster than 1s would trip Monday's
+request-rate concerns; slower than 1h crosses the "no longer a
+watch" line — agents should use `cron + monday item history` for
+hourly+ cadences.
+
+**Restartability.** `--since <event-id>` accepts the
+`last_seen_event_id` slot from a prior session's trailer-meta;
+the runtime resolves it to a `created_at` once at startup and
+sets the initial poll-from timestamp. Distinct from a full
+`--resume <token>` mechanism (still open per cli-design §14.6).
+
+**Event-kind filter.** `--include <kind1>,<kind2>` accepts the
+M24 closed 9-kind enum (forward-compat). v0.4-M29 polls
+`activity_logs` only, so `--include update_posted` /
+`--include update_replied` returns no events at v0.4 — those
+synthesized kinds surface from the M24 `updates` source which
+M29 doesn't poll. A `--include-comments` flag adding a slower-
+cadence updates poll is a v0.4-stretch / v0.5 candidate.
+
+**Multi-watcher policy (§14.4 closure).** Each invocation
+independent. The last-seen-event-id watermark lives in-memory;
+two concurrent watchers double the poll volume against Monday.
+Agents needing N watchers spawn N processes per cli-design
+§3.1 #5.
+
+**SIGINT graceful drain (§14.4 closure clearance 5).** Ctrl-C
+triggers an in-flight poll completion or abort, the trailer-
+meta emits as a final NDJSON line, exit 130 per cli-design §7.
+The drain MUST emit valid NDJSON (no partial JSON line); the
+AbortController seam (`ctx.signal` threaded into the polling
+loop) is the mechanism.
+
+`meta.source: "live"` always — polling against Monday is the
+source of truth; the local §8 cache is irrelevant during a
+watch session (read-only over `activity_logs`; no per-call
+cache hook).
 
 ---
 
