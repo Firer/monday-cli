@@ -108,8 +108,10 @@ export const MAX_WATCH_INTERVAL_MS = 3_600_000;
 
 /**
  * Number of consecutive failed polls before the circuit breaker trips
- * per cli-design §14.4 closure. Each prior failure emits a `warning`
- * record to the NDJSON stream first; the Nth (default 5) failure
+ * per cli-design §14.4 closure. Each prior failure APPENDS a
+ * `WatchSessionWarning` to {@link WatchItemResult}.warnings (folded
+ * into the trailer's `_meta.warnings[]` slot at session end per §6.3
+ * — NOT interleaved with event lines); the Nth (default 5) failure
  * trips the session to a failure envelope.
  */
 export const CIRCUIT_BREAKER_CONSECUTIVE_FAILS = 5;
@@ -236,8 +238,12 @@ export interface WatchItemInputs {
  * progression (circuit-breaker firings, backoff sleeps, stale-
  * cursor recoveries).
  *
- * Discriminated on `code`; emit channel is the NDJSON stream's
- * `warning` shape per cli-design §6.1 `warnings[]` slot.
+ * Discriminated on `code`. Accumulates inside the polling loop and
+ * lands on {@link WatchItemResult}.warnings at session end; the
+ * action body folds the array into the trailer-meta's
+ * `_meta.warnings[]` slot per cli-design §6.1 `Warning[]` + §6.3
+ * streaming-trailer contract. NEVER emitted as a standalone NDJSON
+ * line (warnings are NOT interleaved with event records).
  */
 export type WatchSessionWarning =
   | {
