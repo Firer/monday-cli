@@ -11,9 +11,8 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3.0 pushed + tagged + GitHub release live — `npm
-publish` still pending user npm credential login.** M28
-IMPL shipped end-to-end across 8 release-prep commits
+**v0.3.0 published — release complete.** M28 IMPL
+shipped end-to-end across 8 release-prep commits
 (`d9ad757` CHANGELOG + `e7459c2` envelope-snapshot
 refresh + `f2600fa` ToC audit + stale-`deferred_to`
 slip-to-v0.4 + `4fddc38` README v0.3 quickstart +
@@ -21,24 +20,16 @@ slip-to-v0.4 + `4fddc38` README v0.3 quickstart +
 close-docs sweep + `472ad1e` branch-coverage residual
 tests +0.43pp margin + `5e8c210` housekeeping refresh
 of post-coverage stats) + the annotated `v0.3.0` git
-tag pointing at `5e8c210`. All 10 commits + the tag
-**pushed to `origin/main`**; **GitHub release v0.3.0
-live** at
+tag pointing at `5e8c210`. **Pushed to `origin/main`**
++ **GitHub release live** at
 https://github.com/Firer/monday-cli/releases/tag/v0.3.0
-with the full CHANGELOG body. v0.3.0 ships **no
-breaking changes vs v0.2.0** — every v0.3 surface is
-additive across M19–M28.
-**Remaining publish action** (waits on user npm
-credentials):
-1. `npm login` (browser-based) — `npm whoami` returned
-   401 at the session attempt; user opted to skip npm
-   publish this session and revisit with credentials
-   in place.
-2. `npm publish` from `main` — the `prepublishOnly`
-   hook runs typecheck + lint + unit + integration +
-   build before the publish fires. Published version
-   stays at `0.2.0` on the registry until this step
-   fires.
+with the full CHANGELOG body + **npm publish landed
+2026-05-13T12:24:51Z** (`monday-cli@0.3.0`, `latest`
+dist-tag). v0.3.0 ships **no breaking changes vs
+v0.2.0** — every v0.3 surface is additive across
+M19–M28. The npm publish step required the user to
+`npm login` separately (`npm whoami` returned 401 in
+the session shell — fixed user-side).
 
 **M28 pre-flight rejected Decisions 10 + 11** on
 empirical grounds — multi-level subitem creation
@@ -335,8 +326,8 @@ in the plan docs — **do not duplicate them here**:
   `5e8c210`'s housekeeping stats refresh); **pushed to
   `origin/main`** + **GitHub release live** at
   https://github.com/Firer/monday-cli/releases/tag/v0.3.0.
-- npm registry version: **0.2.0** (v0.3.0 publish pending user
-  `npm login` — see Status block).
+- npm registry version: **0.3.0** (`latest` dist-tag,
+  published 2026-05-13T12:24:51Z by `nickwebster`).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -359,19 +350,9 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **`npm publish` v0.3.0** — externally-blocked on user
-   npm credential login. Push + tag + GitHub release already
-   live (commits and the `v0.3.0` annotated tag are on
-   `origin/main`; the release page is up). User opted to
-   defer the npm publish step this session because
-   `npm whoami` returned 401. To proceed: `npm login`
-   (browser-based) then `npm publish` from `main`. The
-   `prepublishOnly` hook (typecheck + lint + unit +
-   integration + build) self-gates the publish.
-2. **v0.4 planning kickoff** — once the v0.3.0 npm publish
-   lands (or in parallel — the planning work doesn't depend
-   on the npm step),
-   open `docs/v0.4-plan.md` from the §13 v0.4 roadmap items
+1. **v0.4 planning kickoff** — v0.3.0 release fully complete
+   (push + tag + GitHub release + npm publish all landed).
+   Open `docs/v0.4-plan.md` from the §13 v0.4 roadmap items
    (`monday item watch` polling cadence; `--concurrency` bulk
    parallelism; asset upload `add_file_to_column`;
    `doc list/get`; `team` create/manage; multi-level subitems
@@ -380,7 +361,13 @@ path over `MONDAY_API_TOKEN`.
    `scripts/probe/m28-multi-level-subitem.ts` +
    `m28-depth-triangulate.ts` before reopening; OAuth
    registration if user demand surfaces for the browser-based
-   path over `MONDAY_API_TOKEN`).
+   path over `MONDAY_API_TOKEN`). Mirror v0.3-plan.md's
+   structure: §1 + §2 scope + §3 first-milestone entry with
+   Goal / Scope / Decisions / Empirical-probe-first / Pre-
+   flight contract diff / Exit criteria. **Do NOT start the
+   M29 pre-flight contract diff in the same session** — the
+   plan-doc skeleton + first-milestone §3 entry is one
+   session's worth on its own.
 3. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+
