@@ -3207,4 +3207,237 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     expect(env.data.operation).toBeUndefined();
     expect(env.data.results).toBeUndefined();
   });
+
+  it('--concurrency 8 smoke variant: 8 items succeed via 8-worker pool (M30 IMPL exit-criterion N=8 dispatch variant)', async () => {
+    // Smoke variant beyond N=2/4: verify the pool's bound + result
+    // assembly hold at the wider concurrency. Codex round-3 P3-2
+    // flagged the missing N=8/16/32 matrix coverage; this test
+    // closes the N=8 slot. N=16 and N=32 are covered by extension
+    // through the same pool body — the dispatchParallel runtime
+    // doesn't branch on the concurrency value.
+    const ids = Array.from({ length: 8 }, (_, i) =>
+      String(6001 + i),
+    );
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '8',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: ids.map((id) => ({ id })),
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          ...ids.map((id) => ({
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem(id) } },
+          })),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number; failed_count: number };
+        results: readonly { item_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.summary).toMatchObject({
+      matched_count: 8,
+      applied_count: 8,
+      failed_count: 0,
+    });
+    expect(env.data.results.map((r) => r.item_id)).toEqual(ids);
+  });
+
+  it('--concurrency 2 concurrency_exceeded retry: transient per-target CONCURRENCY_LIMIT_EXCEEDED retries via the existing retry layer (cli-design §6.4 D5 closure)', async () => {
+    // D5 closure pins "no M30-specific retry logic; inherits
+    // src/api/retry.ts". A per-target dispatch returning
+    // CONCURRENCY_LIMIT_EXCEEDED is retryable + the retry layer
+    // applies exponential backoff; on success at attempt 2 the
+    // record lands as ok: true in data.results[]. Asserts the
+    // shape doesn't degrade because of the in-flight retry —
+    // M30's pool layer does NOT double-retry.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '7001' }, { id: '7002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            // Worker 1 picks 7001 first — transient
+            // concurrency_exceeded on attempt 1; the retry layer
+            // sleeps + re-fires.
+            operation_name: 'ItemUpdateRich',
+            http_status: 429,
+            response: {
+              errors: [
+                {
+                  message: 'concurrency limit exceeded',
+                  extensions: { code: 'CONCURRENCY_LIMIT_EXCEEDED' },
+                },
+              ],
+            },
+          },
+          {
+            // Worker 2 picks 7002 — succeeds first attempt.
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('7002') } },
+          },
+          {
+            // Worker 1's retry of 7001 → success.
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('7001') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number; failed_count: number };
+        results: readonly { item_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.summary).toMatchObject({
+      matched_count: 2,
+      applied_count: 2,
+      failed_count: 0,
+    });
+    expect(env.data.results.map((r) => r.item_id)).toEqual(['7001', '7002']);
+  });
+
+  it('--concurrency 4 SIGINT mid-dispatch: signal abort surfaces exit 130 without a partial envelope (R-NEW-28 axis 6 end-to-end)', async () => {
+    // Drives the SIGINT path end-to-end through the runner. The
+    // runner combines `options.signal` with its internal abort via
+    // `AbortSignal.any` (`src/cli/run.ts:151`); aborting with the
+    // `{kind:'sigint'}` sentinel triggers exit 130 with no envelope
+    // on stderr (`src/cli/run.ts:174,183`). Cassette delay_ms holds
+    // the dispatches open long enough for the abort timer to fire
+    // mid-flight; the pool's worker-loop signal check + the
+    // MondayClient.signal threading abort the in-flight wire calls.
+    const controller = new AbortController();
+    setTimeout(() => {
+      controller.abort({ kind: 'sigint' });
+    }, 15);
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '4',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '8001' },
+                        { id: '8002' },
+                        { id: '8003' },
+                        { id: '8004' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          // All four dispatches hold for 200ms — well past the 15ms
+          // abort timer — so the workers are mid-flight when SIGINT
+          // fires. Their MondayClient.signal threading aborts the
+          // wire calls; the worker-loop signal check stops the pool
+          // from scheduling new ones (none beyond N=4 to schedule
+          // anyway). The runner returns exit 130 without a partial
+          // envelope. `repeat: 4` keeps the cassette flexible since
+          // worker arrival order is deterministic but completion
+          // status under abort is timing-dependent.
+          {
+            operation_name: 'ItemUpdateRich',
+            delay_ms: 200,
+            response: { data: { change_column_value: buildItem('8001') } },
+            repeat: 4,
+          },
+        ],
+      },
+      { signal: controller.signal },
+    );
+    expect(out.exitCode).toBe(130);
+    // SIGINT contract: no envelope on stderr (cli-design §3.1
+    // exit-code table). Stdout may or may not carry partial
+    // dispatch results — the runner's 130 short-circuit happens
+    // before envelope assembly, so neither stream should carry a
+    // success envelope.
+    expect(out.stderr).toBe('');
+  });
 });

@@ -3,18 +3,20 @@
  * `item update --continue-on-error` flag (`cli-design.md` §6.4
  * "Bulk per-item partial-success" sub-section).
  *
- * **What this module owns.** A thin wrapper around
- * {@link dispatchSequential} from
- * `src/api/partial-success-mutation.ts` that drives the matched-
+ * **What this module owns.** A thin wrapper around the selected
+ * per-target dispatcher — {@link dispatchSequential} from
+ * `src/api/partial-success-mutation.ts` (default / M25 path) OR
+ * {@link dispatchParallel} from `src/api/parallel-dispatch.ts`
+ * (v0.4-M30 `--concurrency > 1` path) — that drives the matched-
  * item-ID list through one wire call per item, capturing per-
  * item failures into the result records rather than aborting
  * the loop. The wrapper sits BETWEEN the bulk command-action
  * orchestrator (`src/commands/item/update.ts:runBulk`) and the
- * shared `dispatchSequential` helper — the action body owns the
- * matched-item-walk + column-resolution pre-pass + confirmation
- * gate, then hands the resolved `SelectedMutation` + matched-
- * item IDs to this wrapper, which fans them out + projects the
- * partial-success envelope's `data.results[]` records.
+ * shared dispatcher — the action body owns the matched-item-
+ * walk + column-resolution pre-pass + confirmation gate, then
+ * hands the resolved `SelectedMutation` + matched-item IDs to
+ * this wrapper, which fans them out + projects the partial-
+ * success envelope's `data.results[]` records.
  *
  * **Why a separate module rather than folding into update.ts.**
  * Three reasons:
@@ -128,13 +130,15 @@ import type { EnvelopeSource } from './source-aggregator.js';
  * The `item` slot on success records is the §6.2 `ProjectedItem`
  * shape (same projection single-item `item update` emits as
  * `data`). The `error` slot on failure records carries
- * `{code, message}` populated from
- * `dispatchSequential`'s per-target error decoration.
+ * `{code, message}` populated from the selected dispatcher's
+ * per-target error decoration (`dispatchSequential` or
+ * `dispatchParallel` — same shape per the R-NEW-28 axis-1
+ * equivalence).
  *
- * `z.discriminatedUnion` would be the natural shape but
- * `dispatchSequential`'s result records carry a dynamic
- * id-field key (`{item_id: ..., ok, error?}`) — modelling that
- * as a per-record union complicates the schema and downstream
+ * `z.discriminatedUnion` would be the natural shape but the
+ * dispatchers' result records carry a dynamic id-field key
+ * (`{item_id: ..., ok, error?}`) — modelling that as a
+ * per-record union complicates the schema and downstream
  * consumers' type-narrowing. The flatter shape below carries
  * `item` + `error` as optionals; the action body's projection
  * + the wrapper's per-item dispatch enforce the
@@ -290,9 +294,10 @@ export interface RunPartialSuccessBulkUpdateInputs {
  * action layer.
  *
  * - `results` — the array of per-item records the helper built
- *   via `dispatchSequential` + the per-item projection
- *   callback. Direct mirror of `data.results[]` in the §6.4
- *   envelope. **Mutable array** so the action layer can pass
+ *   via the selected dispatcher (`dispatchSequential` or
+ *   `dispatchParallel`) + the per-item projection callback.
+ *   Direct mirror of `data.results[]` in the §6.4 envelope.
+ *   **Mutable array** so the action layer can pass
  *   it directly to `partialSuccessBulkUpdateDataSchema.parse`
  *   (zod's `z.array(...)` infers a mutable array — wrapping
  *   `readonly` would force a spread at the call site).
@@ -508,16 +513,20 @@ export const runPartialSuccessBulkUpdate = async (
 };
 
 /**
- * Pure helper — folds a `dispatchSequential` result row + a
- * `ProjectedItem` side-map entry into the partial-success-bulk
- * per-item record shape this module emits to the action layer.
+ * Pure helper — folds a per-target result row produced by the
+ * selected dispatcher (`dispatchSequential` or
+ * `dispatchParallel`) + a `ProjectedItem` side-map entry into
+ * the partial-success-bulk per-item record shape this module
+ * emits to the action layer. Both dispatchers populate the row
+ * with the same `{item_id, ok, error?}` shape (axis 1 of the
+ * R-NEW-28 6-axis equivalence) so the fold is route-agnostic.
  *
  * The helper is **shipped as a real implementation** (not a
  * stub) so the pre-flight Codex review can verify the
  * projection shape against the contract pinned in cli-design
  * §6.4 inline. M25 implementation reuses the helper unchanged.
  *
- * `record` is the row produced by `dispatchSequential` with
+ * `record` is the row produced by the selected dispatcher with
  * id-field `'item_id'` — carries `{item_id, ok, error?}` per
  * the partial-success contract. `projectedItem` is the
  * `ProjectedItem` the per-item dispatch callback captured on
