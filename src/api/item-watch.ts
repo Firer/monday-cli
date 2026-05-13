@@ -30,11 +30,15 @@
  *   - **Reactive circuit breaker** (`CIRCUIT_BREAKER_CONSECUTIVE_FAILS`
  *     = 5). On `complexity_exceeded` / `concurrency_exceeded` /
  *     `rate_limited` wire errors the loop backs off respecting
- *     `reset_in_x_seconds` (60s default cap when absent); after N
- *     consecutive failed polls the session trips to a failure envelope
- *     carrying `circuit_broken_at` + `failed_polls` in trailer-meta.
- *     Each failure emits a `warning` record to the NDJSON stream
- *     first so agents see the trip-mode progression.
+ *     `reset_in_x_seconds` (60s default cap when absent; 300s
+ *     ceiling per `MAX_BACKOFF_SECONDS`); after N consecutive failed
+ *     polls the session trips to a failure envelope carrying
+ *     `circuit_broken_at` + `failed_polls` in trailer-meta. Each
+ *     failure APPENDS a `WatchSessionWarning` to
+ *     {@link WatchItemResult}.warnings; the action body folds the
+ *     accumulated warnings into the trailer-meta's `_meta.warnings`
+ *     slot at session end per cli-design §6.3 (resource lines +
+ *     final `_meta`; warnings are NOT interleaved with event lines).
  *   - **No new ERROR_CODE.** `complexity_exceeded` /
  *     `concurrency_exceeded` / `rate_limited` already in §6.5's
  *     29-code registry cover the circuit-breaker exit. The trailer-
@@ -363,11 +367,15 @@ export const WATCH_POLL_QUERY = `
  *      signal.aborted]). On signal: graceful drain + exit
  *      `exit_reason: 'signal'`.
  *   5. On Monday wire errors (`complexity_exceeded` /
- *      `concurrency_exceeded` / `rate_limited`): emit a `poll_failed`
- *      warning, backoff respecting `reset_in_x_seconds` (60s default
- *      cap; 300s ceiling), increment failed-poll counter. After
- *      {@link CIRCUIT_BREAKER_CONSECUTIVE_FAILS} consecutive failures
- *      trip with `exit_reason: 'circuit_broken'`.
+ *      `concurrency_exceeded` / `rate_limited`): APPEND a
+ *      `poll_failed` warning to the in-flight `warnings` accumulator
+ *      (folded into the trailer-meta's `_meta.warnings` at session
+ *      end — NOT emitted as an interleaved NDJSON line per §6.3),
+ *      backoff respecting `reset_in_x_seconds` (60s default cap;
+ *      300s ceiling per `MAX_BACKOFF_SECONDS`), increment failed-poll
+ *      counter. After {@link CIRCUIT_BREAKER_CONSECUTIVE_FAILS}
+ *      consecutive failures trip with `exit_reason:
+ *      'circuit_broken'`.
  *   6. On `--max-events` / `--max-duration` ceiling reached: clean
  *      exit with the matching `exit_reason`.
  */

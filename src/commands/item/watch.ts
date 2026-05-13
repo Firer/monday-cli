@@ -25,16 +25,24 @@
  *   - Watermark advance (last-seen-event-id; `--since <event-id>`
  *     bootstraps).
  *   - Circuit breaker (reactive on Monday wire errors; trip after 5
- *     consecutive failures; warnings emit per-failure first).
+ *     consecutive failures; per-failure warnings accumulate on
+ *     `WatchItemResult.warnings` and fold into the trailer's
+ *     `_meta.warnings` slot at session end per cli-design §6.3 —
+ *     NOT interleaved with event lines).
  *   - Limit enforcement (`--max-events <n>` / `--max-duration
  *     <seconds>`).
  *   - `--once` short-circuit (drain backlog and exit; do NOT poll).
  *
  * **Output:** NDJSON only at v0.4-M29 — `--json` / `--table` /
  * `--output` global flags ignored (this is a streaming verb).
- * Trailer-meta carries `events_emitted` + `polls_made` +
- * `watch_duration_seconds` + `last_seen_event_id` + `failed_polls`
- * + (on circuit-break) `circuit_broken_at`.
+ * Trailer-meta carries seven M29-specific slots:
+ * `events_emitted` + `polls_made` + `failed_polls` +
+ * `watch_duration_seconds` + `last_seen_event_id` +
+ * `circuit_broken_at` + `exit_reason`. Plus the standard §6.3
+ * `_meta.warnings[]` slot collects any `WatchSessionWarning`
+ * records the polling loop accumulated (poll_failed,
+ * circuit_breaker_armed, unknown_event_kind) — warnings are NOT
+ * interleaved with event lines.
  *
  * Idempotent: yes (pure read; re-running with the same `--since` is
  * safe).

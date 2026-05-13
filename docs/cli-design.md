@@ -1827,7 +1827,9 @@ monday item watch <iid> [--interval <ms>] [--since <event-id>] [--once] [--max-e
                                           # event-id filter against the M24
                                           # projector). `--once` emits the current
                                           # backlog from `--since` (or the most-
-                                          # recent N events if no `--since`) and
+                                          # recent 100 events per §14.4's
+                                          # DEFAULT_ONCE_BACKLOG_LIMIT if no
+                                          # `--since`) and
                                           # exits without polling — distinct from
                                           # `--max-events 1` which waits for the
                                           # NEXT event. `--max-events <n>` /
