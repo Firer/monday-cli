@@ -461,9 +461,13 @@ row `tags`, `board_relation`, `dependency`.
   deferred out of v0.3 per Decision 11 (Monday's `sub_items_board`
   carries no `subtasks` column at API `2026-01`).
 
-**v0.4:** `monday item watch`, `--concurrency` bulk parallelism,
-asset uploads, multi-level subitems if Monday's data model
-surfaces them.
+**v0.4 (in progress on `main`):** `monday item watch` (M29 shipped),
+`--concurrency` bulk parallelism (M30 shipped), asset uploads
+(`monday item upload` / `monday update upload`; **M31 pre-flight
+landed, IMPL pending**), plus `doc list/get`, `team` writers,
+shell completion, and 0.4.0 release prep sequenced after M31 IMPL.
+Multi-level subitems remain conditional on Monday's data model
+surfacing them.
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for the
