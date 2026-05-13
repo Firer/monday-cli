@@ -2024,18 +2024,25 @@ monday item upload <iid> --column <col> <file>                                v0
                                           # surface `unsupported_column_type`
                                           # per §5.3 writer-expansion
                                           # roadmap, hint points at this
-                                          # verb. No CLI-side file-size
-                                          # pre-check; Monday's per-file
-                                          # cap is plan-tier-dependent and
-                                          # not exposed via the schema
-                                          # (empirical probe `scripts/probe/
-                                          # m31-asset-upload.ts` 2026-05-13).
-                                          # Server-side rejection (typically
-                                          # `FILE_SIZE_LIMIT_EXCEEDED` or
-                                          # HTTP 413) is rewrapped as
-                                          # `usage_error` with `details.
-                                          # reason: 'file_too_large'` +
-                                          # `details.file_size_bytes`.
+                                          # verb. Local file failures
+                                          # route through `usage_error`
+                                          # with `details.reason` ∈
+                                          # {`file_not_readable` (ENOENT
+                                          # / EACCES / directory),
+                                          # `file_empty` (zero bytes),
+                                          # `file_too_large` (server-side
+                                          # rejection rewrap; carries
+                                          # `details.file_size_bytes`)};
+                                          # no CLI-side hardcoded
+                                          # file-size pre-check —
+                                          # Monday's per-file cap is
+                                          # plan-tier-dependent and not
+                                          # exposed via the schema
+                                          # (empirical probe
+                                          # `scripts/probe/m31-asset-
+                                          # upload.ts` 2026-05-13). See
+                                          # §6.4 asset-upload sub-section
+                                          # for the full constraint list.
                                           # Idempotent: NO — each successful
                                           # upload mints a new `Asset` with
                                           # a new ID. Agents needing

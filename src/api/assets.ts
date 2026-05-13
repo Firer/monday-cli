@@ -41,7 +41,7 @@
  * `body: JSON.stringify(...)` invariant doesn't compose with
  * multipart/form-data's `FormData`-driven boundary parameter, so
  * the two transports live in sibling modules with parallel
- * interfaces. See `docs/architecture.md` §X "Wire-vs-CLI semantics
+ * interfaces. See `docs/architecture.md` "Wire-vs-CLI semantics
  * documentation conventions" for the canonical writeup.
  *
  * **No new ERROR_CODES (29 stays).** Asset-upload failures route

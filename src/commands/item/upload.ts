@@ -10,7 +10,7 @@
  * Uses the new `MultipartTransport` seam (`src/api/multipart-
  * transport.ts`) — first v0.4 verb that does NOT cross the wire via
  * the JSON-only `client.request` transport. See R-NEW-41 lift at
- * `docs/architecture.md` §X "Wire-vs-CLI semantics documentation
+ * `docs/architecture.md` "Wire-vs-CLI semantics documentation
  * conventions" for the asymmetry context.
  *
  * **Argv shape.** Two positional args + one required flag:
