@@ -5416,12 +5416,16 @@ board metadata projection). `update upload` does not invalidate
   `'file_not_readable'` (ENOENT / EACCES / path is a directory),
   `'file_empty'` (zero-byte file — Monday rejects), or
   `'file_too_large'` (server-side size-cap rejection rewrap;
-  carries `details.file_size_bytes` so agents see Monday's
-  observed size). Monday's per-file size cap is plan-tier-
-  dependent and not exposed via the schema (empirical probe —
-  `Plan` + `Account` carry no file-quota fields), so the CLI
-  does NOT pre-check size against a hardcoded ceiling; the
-  rewrap fires only on Monday's runtime rejection at IMPL.
+  carries `details.file_size_bytes` from the **local
+  `fs.stat()` measurement at upload time**, NOT a Monday
+  error-payload field — Monday's wire rejection may not surface
+  a size, but the CLI already has the local size from the read
+  leg and threads it for a stable agent-keyed envelope).
+  Monday's per-file size cap is plan-tier-dependent and not
+  exposed via the schema (empirical probe — `Plan` + `Account`
+  carry no file-quota fields), so the CLI does NOT pre-check
+  size against a hardcoded ceiling; the rewrap fires only on
+  Monday's runtime rejection at IMPL.
 - **File path — local file only.** Stdin (`<file>='-'`) is NOT
   supported in v0.4-M31. A future contract extension may add
   stdin once a `--filename <name>` companion flag is pinned.

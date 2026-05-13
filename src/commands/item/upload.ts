@@ -58,9 +58,13 @@
  *     at enterprise) and NOT exposed via the GraphQL schema
  *     (empirical probe `scripts/probe/m31-asset-upload.ts`
  *     2026-05-13 — `Plan` + `Account` carry no file-quota
- *     fields). Rewrap carries `details.file_size_bytes`
- *     (Monday's observed size from the wire response) +
- *     `details.hint` pointing at the plan-tier dependency.
+ *     fields). Rewrap carries `details.file_size_bytes` from
+ *     the **local `fs.stat()` measurement at upload time**
+ *     (NOT a Monday error-payload field — Monday's wire
+ *     rejection may not surface a size; the CLI already has
+ *     the local size from the read leg and threads it into
+ *     the details slot for a stable agent-keyed envelope)
+ *     + `details.hint` pointing at the plan-tier dependency.
  *
  * **`--dry-run` shape** per cli-design §3.1 #6 + §6.4 asset-upload
  * variant. Strictly local-derived — no wire mutation fires. Planned
