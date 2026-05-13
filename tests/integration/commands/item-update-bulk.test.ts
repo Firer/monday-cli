@@ -1923,7 +1923,7 @@ describe('monday item update bulk — --continue-on-error (M25 partial-success)'
   // dispatch. Coverage of the parallel route's runtime behaviour is
   // M30 IMPL's scope.
 
-  it('rejects --concurrency on the single-item shape at argv-parse time (M30)', async () => {
+  it('rejects --concurrency on the single-item shape at validateInputShape (before any network call) (M30)', async () => {
     // `--concurrency` is only meaningful on the bulk partial-success
     // path. validateInputShape rejects before any network call,
     // mirroring the --continue-on-error single-item rejection above.
@@ -1946,7 +1946,7 @@ describe('monday item update bulk — --continue-on-error (M25 partial-success)'
     expect(env.error?.message).toMatch(/concurrency.*single-item/i);
   });
 
-  it('rejects --concurrency without --continue-on-error on the bulk shape at argv-parse time (M30)', async () => {
+  it('rejects --concurrency without --continue-on-error on the bulk shape at validateInputShape (before any network call) (M30)', async () => {
     // v0.4-plan §8 D2 closure: --concurrency requires
     // --continue-on-error. Fail-fast bulk parallel dispatch is
     // explicitly deferred (no defined "abort N in-flight" semantic).

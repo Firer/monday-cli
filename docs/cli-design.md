@@ -5193,9 +5193,13 @@ Constraints (v0.4-plan M30 D1–D5):
   surface.
 - **Rejected on single-item shape.** Single-item `monday item
   update <iid>` has no per-item dispatch loop to parallelise;
-  `--concurrency` on a single-item invocation rejects at argv-
-  parse with `usage_error` (mirrors the `--continue-on-error`
-  single-item rejection).
+  `--concurrency` on a single-item invocation rejects at
+  shape-validation time (`validateInputShape`, before any
+  network call) with `usage_error` (mirrors the
+  `--continue-on-error` single-item rejection). The argv parse
+  boundary itself accepts the combination — the schema is
+  shape-agnostic — and only the downstream
+  `validateInputShape` check fires the rejection.
 - **`concurrency_exceeded` handling.** When Monday returns
   `concurrency_exceeded` to a per-item dispatch (HTTP 200 with
   `errors[].extensions.code === 'CONCURRENCY_LIMIT_EXCEEDED'`),
@@ -6337,7 +6341,8 @@ dispatch on the partial-success bulk path (`monday item update
 requires `--continue-on-error` (rejected on the fail-fast bulk
 path; parallel fail-fast has no defined "abort N in-flight"
 semantic and is explicitly deferred). Single-item invocations
-reject `--concurrency` at argv-parse time. Envelope shape
+reject `--concurrency` at `validateInputShape` (before any
+network call). Envelope shape
 unchanged from M25 — same `data.results[]` per-item records,
 same `data.summary.{matched,applied,failed}_count` slot.
 Monday's `concurrency_exceeded` signal retries via the existing

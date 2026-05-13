@@ -163,10 +163,12 @@ export const dispatchParallel = <TargetId extends string>(
   concurrency: number,
 ): Promise<readonly PartialSuccessResult[]> => {
   // Stub body — runtime lands at v0.4-M30 IMPL per the §22 R-class
-  // entry. Non-`async` form because the stub throws synchronously
-  // (no `await` site under `require-await`); IMPL replaces with the
-  // async-pool implementation + an `async` declaration. `void`s
-  // suppress `no-unused-vars` on the contract surface.
+  // entry. Non-`async` form because the stub has no `await` site
+  // (lint's `require-await` rejects `async` without `await`); the
+  // function returns a rejected Promise from a non-async body
+  // instead. IMPL replaces with the async-pool implementation + an
+  // `async` declaration. `void`s suppress `no-unused-vars` on the
+  // contract surface.
   void targets;
   void idField;
   void dispatch;
