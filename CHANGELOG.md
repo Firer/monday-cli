@@ -3,9 +3,302 @@
 All notable changes to `monday-cli` are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 follows [SemVer](https://semver.org/spec/v2.0.0.html). The CLI's
-output envelope (`{ ok, data, meta, ... }`) and 27 stable error
+output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
+
+## [0.3.0] - 2026-05-13 — Monday Dev + multi-profile + diagnostics + outbound writes
+
+The "agent can drive a real backlog with a real workflow" milestone —
+v0.2's mutating core gains the Monday Dev convention layer (sprints /
+epics / releases / tasks), multi-profile auth, diagnostics
+(`monday status` / `monday usage`), cross-board search + favorites,
+per-item history, partial-success bulk updates, and outbound writes
+(webhooks + notifications). **No breaking changes vs `0.2.0` — every
+v0.3 surface is additive.** Built incrementally across M19–M28.
+
+### Breaking changes vs `0.2.0`
+
+**None.** Every command, error code, envelope key, and warning shape
+shipped in v0.2.0 is preserved byte-for-byte. v0.3 only adds.
+
+### Surface
+
+**~95 commands shipped (was ~75 in v0.2).** Four new noun-namespaces
+(`tag` reads under `account`, `auth`, `dev`, `webhook`,
+`notification`) plus two new top-level diagnostics verbs
+(`monday status` / `monday usage`).
+
+**Friendly-translator close-out (M19) — three new writable column
+types.** `tags`, `board_relation`, `dependency` graduate from the v0.2
+tentative row to first-class `--set` writers. The friendly tokens
+resolve through per-account / per-board directories with cache
+fallbacks. `WRITABLE_COLUMN_TYPES` reaches 13. M19 also ships
+`monday account tags` (the read verb that closes the
+`tag_not_found.details.hint` forward-reference from v0.2) and adds
+`tag_not_found` to the stable error-code registry.
+
+**Time-tracking placeholders (M20) — documentation-only.** `monday item
+time-track start <iid>` / `monday item time-track stop <iid>` are
+registered so agent scripts targeting these verbs are stable across
+the eventual swap when Monday ships API support. They reject every
+invocation today with `usage_error` carrying the empirical-probe
+context as the hint — an empirical probe (2026-05-10, API `2026-01`)
+confirmed Monday's public API does not currently support writing to
+`time_tracking` columns.
+
+**Multi-profile auth (M21).** `monday auth login --profile <name>` /
+`monday auth logout --profile <name>` implement the OAuth flow + the
+`~/.monday-cli/credentials` mode-`0600` cache; `~/.monday-cli/config.toml`
+ships per-profile metadata with the new `--profile <name>` global
+flag resolving through `cli/program.ts`'s preAction hook. `oauth_failed`
+joins the stable error-code registry. **OAuth login is deferred in
+v0.3.0** (see "Internals worth highlighting" → OAuth deferral); the
+`monday auth login` command surfaces a clear `usage_error` pointing
+agents at `MONDAY_API_TOKEN` until the canonical OAuth app is
+registered. The redaction runtime folds credentials-cache tokens into
+the secret-bag so the two-layer scrub covers them on every emission
+path.
+
+**Diagnostics cluster (M22).** `monday status` runs a seven-probe
+matrix (DNS / TCP / TLS / auth / cache writability / redaction
+self-test / env-var pickup) for "is everything working?" without
+touching account state; `--no-probe` skips the four network probes.
+`monday usage` reports the daily Monday API operation budget remaining
+from `platform_api.daily_limit` + `platform_api.daily_analytics`
+(operations-per-day on free tier; an empirical probe pivoted this
+away from `account.complexity`, which does not exist on the `Account`
+type at API `2026-01`).
+
+**Cross-board search + favorites (M23).** `monday item search` gains
+cross-board mode when `--board` is omitted: `--workspace <wid>` /
+`--favorites` / `--max-boards <n>` (default 25; hard cap 100) scope
+the fan-out. `monday board favorites` reads the current user's
+starred boards. Both fan-outs use single-call cross-board semantics
+(no resumable cross-board cursor in v0.3 — per-board cursor lifetime
+under cross-board aggregation is genuinely thorny; agents narrow with
+`--workspace` / `--favorites` or use the v0.1 `--board <bid>` path
+which carries its own resumable cursor). Four new load-bearing
+warnings: `inaccessible_boards`, `column_not_found_on_board`,
+`cross_board_truncated`, `board_favorites_stale`.
+
+**Per-item activity history (M24).** `monday item history <iid>`
+merges Monday's `boards.activity_logs(item_ids:)` with `items.updates`
+chronologically by `created_at` ascending (lexicographic `id` tie-
+break). Event taxonomy is a zod discriminated union over Monday's
+observed `event` slot (`update_column_value`, board-scoped variants,
+synthesized `update_posted` / `update_replied`); unrecognised events
+surface under `kind: 'unknown'` carrying raw `event` + `entity` slots,
+with one bounded `unknown_event_kind` warning per unique unrecognised
+event. Per-source pagination (`--activity-logs-page` /
+`--updates-page`; independent denominators) + `--since` / `--until`
+ISO8601 wall-clock filters + `--stream` NDJSON output reusing R52's
+`startNdjsonStream`. Eventual-consistency lag is empirically >30s on
+freshly-edited boards — the verb's `--help` text documents the
+caveat.
+
+**Partial-success bulk updates (M25).** `monday item update --where
+... --continue-on-error` attempts every matched item regardless of
+per-item failure and emits a partial-success envelope (cli-design
+§6.4): `ok: true` whenever dispatch ran, per-target outcomes in
+`data.results: [{ item_id, ok, error? }]`, with
+`data.summary.failed_count` joining the existing
+`matched_count`/`applied_count` invariant
+(`matched_count === applied_count + failed_count`). The flag is
+orthogonal to the `--yes` confirmation gate. ERROR_CODES registry
+stays at 29 — per-item failures route through existing codes
+(`column_archived`, `validation_failed`, `complexity_exceeded`, etc.).
+The pre-existing fail-fast bulk path is unchanged.
+
+**Monday Dev convention layer (M26).** Thirteen verbs land under the
+`monday dev` namespace — the workflow-namespace three-level carve-out
+(cli-design §5.2 carve-out 1; §5.9 mechanics). Three setup verbs at
+two-level depth: `dev discover [--apply]` (auto-detect Tasks /
+Sprints / Epics / Releases / Bugs boards by name), `dev configure
+--tasks-board <bid> [...]` (pin board IDs per profile), `dev doctor`
+(11-reason structured health-check enum surfaced via
+`monday schema dev.doctor`). Ten workflow verbs at three-level depth:
+`dev sprint current/list/items`, `dev epic list/items`, `dev release
+list`, `dev task list/start/done/block`. Every workflow verb
+translates to standard board / item CRUD against the per-profile
+configured board IDs — no new Monday GraphQL mutations introduced. Two
+new stable error codes activate (`dev_not_configured`,
+`dev_board_misconfigured`; reserved on the v0.1 registry, now live).
+
+**Outbound writes (M27).** Webhook lifecycle: `monday webhook list
+[--board <bid>]` / `webhook create --board <bid> --url <url> --event
+<type> [--config <json>]` (event-type validated against the 21-value
+`WEBHOOK_EVENT_TYPES` closed enum, probed against API `2026-01`) /
+`webhook delete <wid>` (destructive — `--yes` required;
+`enforceDestructiveGate` fires BEFORE the resolver per the M10
+invariant). Notifications: `monday notification send --user <uid>
+--target <id> --target-type item|board --text <body>` (single-
+recipient at v0.3). Webhooks are live-only — outside cli-design §8's
+cache scope. The CLI never receives — webhooks land on the user's own
+HTTPS endpoint (cli-design §1 permanent non-goal: hosting webhooks).
+ERROR_CODES registry unchanged.
+
+**Subitem multi-level creation — deferred out of v0.3 (M28).** Closed
+at M28 pre-flight on empirical grounds: an empirical probe
+(2026-05-13, API `2026-01`) confirmed Monday's `sub_items_board` does
+NOT carry a `subtasks` column at the pinned API version, so a depth-2
+subitem has structurally no place to live in the data model. Single-
+level subitems remain first-class via the existing M9 carve-in (`item
+create --parent <iid>`, `item subitems <iid>`, and every standard
+item verb operating uniformly on subitems). v0.3.x / v0.4 picks the
+feature up if Monday surfaces the capability.
+
+### Output contract additions
+
+**Two new stable error codes — registry grows from 27 to 29.**
+
+1. **`tag_not_found`** (M19) — `monday item set <iid> tags=<token>`
+   when the token doesn't resolve through the per-account tag
+   directory. `details.hint` points the agent at `monday account
+   tags` for discovery.
+2. **`oauth_failed`** (M21) — umbrella for OAuth-flow failures
+   (`monday auth login`). `details.reason` discriminates per failure
+   mode (`port_in_use`, `code_exchange_failed`, `state_mismatch`,
+   `redirect_invalid`, `oauth_unregistered` for the v0.3.0
+   placeholder-guard path, etc.) so agents key off the structured
+   reason rather than the umbrella code alone.
+
+The two `dev_*` codes reserved on the v0.1 registry
+(`dev_not_configured`, `dev_board_misconfigured`) activate at M26 —
+they were registry-stable but inactive in v0.1/v0.2.
+
+**Per-item history envelope shape** (M24). New under
+`docs/cli-design.md` §6 for the merged activity stream: event objects
+carry `created_at` (ISO), `actor_id`, `kind` (discriminator —
+`update_column_value` / `update_posted` / `update_replied` /
+board-scoped variants / `unknown`), `before`, `after` (typed where
+M24 ships the projector, raw JSON elsewhere — agents read `kind` and
+case on it).
+
+**Partial-success bulk envelope** (M25 — §6.4 sub-section).
+`data.summary.failed_count` joins the bulk-summary fields; per-item
+`data.results: [{ item_id, ok, error? }]`. The fail-fast bulk path
+(`details.applied_to` decoration on the error envelope) is unchanged
+— agents who haven't migrated to read `data.results[]` continue to
+receive the v0.1 envelope shape.
+
+**Cross-board search envelope** (M23 — additive on `item search`).
+The data shape is unchanged; the cross-board path adds per-board
+`state` breakdown inside `cross_board_truncated.details`
+(`exhausted` / `has_more` / `not_started`).
+
+**Four new warnings** (cross-board search + favorites):
+`inaccessible_boards`, `column_not_found_on_board`,
+`cross_board_truncated`, `board_favorites_stale`. Plus
+`unknown_event_kind` (item history). All warnings carry structured
+`details` agents can route on.
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.3"` resolves** for
+  the v0.2 tentative row (`tags`, `board_relation`, `dependency`
+  shipped at M19). The `--set-raw` escape hatch on these types
+  continues to work byte-identically; agents using the friendly form
+  pick it up automatically.
+- **Stable error-code registry expanded from 27 to 29.** Existing
+  codes' shapes are unchanged.
+- **`--profile <name>` is a new global flag.** Resolved through
+  `cli/program.ts`'s preAction hook; profile precedence is documented
+  at `docs/cli-design.md` §7.4. Single-profile installs (the v0.2
+  shape) need no change — the implicit default profile preserves the
+  v0.2 behaviour.
+- **`monday auth login` placeholder-guard.** The verb is registered
+  but returns `usage_error.details.reason: oauth_unregistered`
+  pointing at `MONDAY_API_TOKEN` until the canonical Monday OAuth app
+  is registered. `monday auth logout` works against any locally
+  cached credentials. The deferral is documented at cli-design §7.3.
+
+### Internals worth highlighting
+
+- **OAuth deferral.** `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` ship
+  as `<UNREGISTERED_PENDING_OAUTH_APP>` placeholders in `src/api/oauth.ts`
+  at v0.3.0. The full M21 OAuth source + test infrastructure stays as
+  dormant infrastructure (the `__test_oauth_helper` seam keeps the
+  M21 round-trip tests green). Whether a canonical `monday-cli`
+  OAuth app gets registered at v0.3.x / v0.4 is a separate product
+  decision — the CLI works fully with API tokens today, which is the
+  shape every agent harness already consumes. If registration lands,
+  the swap is one-sided in `src/api/oauth.ts` and the placeholder
+  guard drops in one edit.
+
+- **R-class refactors shipped during v0.3.** R-NEW-1 (`isENOENT`
+  lift), R-NEW-4 (`statusOutputSchema` / `probeResultSchema`
+  import-from-api lift), R-NEW-5 (`introspectType()` probe helper),
+  R-NEW-6 (`.claude/templates/codex-pre-flight-review.md` template
+  lift after M21 + M22 + M23 converged on the same prompt shape),
+  R-NEW-7 (`formatMode` lift), R-NEW-14 / R-NEW-15 / R-NEW-16
+  (`errorMessage` / `asError` / `errorCode` consolidation across 17
+  inline duplicates), R-NEW-17 (W1 redactor-pattern audit folded
+  template-stable), R-NEW-19 (manual `safeParse → ApiError` sites
+  migrated to `unwrapOrThrow`), R-NEW-21 (`trialQuery()` /
+  `ProbeRawErrors` probe lift), R-NEW-25 (W1's "findings up front"
+  Codex-prompt directive), R-NEW-27 (`isPlainObject`
+  consolidation), R-NEW-29 (`executeItemMutation` lift —
+  three-consumer trigger across single-item + fail-fast bulk + M25
+  partial-success bulk), R-NEW-30 (`resolveActiveDevProfile` —
+  13-consumer trigger across M26a + M26b), R-NEW-35
+  (`requireDevBoard` slot-check helper), R-NEW-36 (seven dev-conventions
+  workflow helpers), R-NEW-37 (Codex template W2 audit-point for
+  GraphQL operationName parity — caught the M27 IMPL caller-
+  overridable operationName slot), R-NEW-38 (sprint date-range
+  helpers consolidation), R-NEW-42 (`parseJsonArg` argv-JSON-parse-
+  boundary helper). Full register with shipped commit SHAs lives in
+  [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) §22.
+
+- **Empirical probes** ratified as always-run-for-novel-API-surface
+  pre-flight discipline. v0.3 fired the pattern across M21 OAuth /
+  M22 `platform_api.daily_*` reshape / M23 cross-board + favorites /
+  M24 history kinds / M26 dev-board discovery / M27 webhook
+  event-type enum / M28 multi-level subitems. Multiple milestones
+  pivoted contract surfaces at pre-flight on probe findings rather
+  than discovering API drift at IMPL.
+
+- **Two-AI review** (cli-design pre-flight + implementation review)
+  ran for every milestone M19–M27. Catches contract drift before
+  it reaches `main`; the cumulative finding count + per-milestone
+  Codex-round breakdown is in the per-milestone post-mortems in
+  [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) §11–§20.
+
+### Tests + quality gates
+
+- **3225+ unit/integration + E2E tests** at v0.3.0 (was 2280+38 ≈
+  2318 in v0.2.0). All green on Node 22 + 24.
+- **Coverage at 99.08 / 95.92 / 99.29 / 99.31** (statements /
+  branches / functions / lines) against the floor 95 / 95.45 / 95
+  / 95. The branches floor was raised at M22 (94% → 95.45%) and held
+  through M28. Branches margin is 0.47pp at v0.3.0.
+- **Envelope-snapshot suite refreshed** for v0.3 surfaces — every
+  new v0.3 command + the partial-success / history / cross-board /
+  dev / webhook / notification envelopes are pinned for byte-shape
+  regressions.
+- **Five test layers** held: unit, integration (in-process
+  `FixtureTransport`), E2E (subprocess against fixture server),
+  envelope-shape snapshot suite, published-tarball E2E.
+
+### Documentation
+
+- **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** new — the v0.3
+  active plan with M19–M28 milestones, decisions log, R-class
+  register (R-NEW-1 through R-NEW-43), per-milestone post-mortems
+  (§11–§21).
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3 grew ~25 new
+  verb entries; §6.4 added the M25 bulk partial-success sub-section;
+  §6.5 added two new error codes; §7.3 added the OAuth deferral
+  block; §7.4 added the multi-profile resolution surface; §11.5
+  added the seven-probe `monday status` matrix; §13 v0.3 entry
+  closed out.
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** — every
+  shipped v0.3 command has a per-section data shape entry, snapshot-
+  backed.
+- **README.md** quickstart expanded with v0.3 examples (`monday
+  status`, `monday dev sprint current`, `monday webhook list`).
+
+[0.3.0]: https://github.com/Firer/monday-cli/releases/tag/v0.3.0
 
 ## [0.2.0] - 2026-05-08 — Mutating core: agents can drive a backlog
 
