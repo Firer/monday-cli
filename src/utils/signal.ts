@@ -1,26 +1,29 @@
 /**
- * AbortSignal utilities shared across dispatchers + streaming verbs.
+ * AbortSignal utilities shared across dispatchers + streaming verbs
+ * (R-NEW-55).
  *
- * Lift trigger (v0.4-M30 IMPL post-Codex round 1 P3-1; R-NEW-55 in
- * v0.4-plan §22). Three consumers of the same "extract `signal.
- * reason` as an Error, fallback to a fresh `Error('aborted')`" pattern
- * surfaced at M30 IMPL:
+ * Three consumers today share the "extract `signal.reason` as an
+ * Error, fall back to a fresh `Error('aborted')`" pattern:
  *
- *   1. `src/api/item-watch.ts:sleepWithSignal` (M29) — inlines the
- *      pattern inside the promise constructor + the abort listener.
- *   2. `src/api/partial-success-mutation.ts:signalReason` (M30 IMPL)
- *      — re-exported helper used by `dispatchSequential` +
- *      `dispatchParallel`.
- *   3. `src/api/retry.ts:signalAbortError` (M2) — semantically
- *      adjacent but DELIBERATELY divergent: retry.ts assigns
- *      `name = 'AbortError'` to match the Web Platform's
- *      DOMException-style surface so callers can branch on
- *      `err.name === 'AbortError'`. Stays inline to preserve the
- *      DOMException naming.
+ *   1. `src/api/partial-success-mutation.ts:dispatchSequential` —
+ *      iteration-boundary signal check; re-throws the reason
+ *      whole-call.
+ *   2. `src/api/parallel-dispatch.ts:dispatchParallel` — worker-
+ *      loop signal check; re-throws + sets the pool's `aborted`
+ *      flag so other workers stop scheduling new dispatches.
+ *   3. `src/api/item-watch.ts:sleepWithSignal` — both the
+ *      race-window guard (sync `signal.aborted` check before
+ *      listener registration) and the abort-listener path
+ *      reject the sleep promise with the extracted reason.
  *
- * The lifted helper here matches the M29 / M30 semantics (no
- * `AbortError` rename); retry.ts continues to carry its own
- * naming-preserving variant.
+ * `src/api/retry.ts:signalAbortError` is semantically adjacent but
+ * DELIBERATELY divergent: retry.ts assigns `name = 'AbortError'` to
+ * match the Web Platform's DOMException-style surface so callers
+ * can branch on `err.name === 'AbortError'`. Stays inline to
+ * preserve the DOMException naming. {@link extractSignalReason}
+ * below matches the dispatcher / sleep-helper semantics (no
+ * `AbortError` rename); retry.ts carries its own naming-preserving
+ * variant.
  */
 
 /**
