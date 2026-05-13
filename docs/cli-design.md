@@ -5367,7 +5367,12 @@ v1 mode if no config file exists).
 Tokens are **never** stored in the config file. Reference an env var
 name (`api_token_env`) or use the `monday auth login` flow (shipped
 at v0.3-M21 Part 1) which writes a secrets file at
-`~/.monday-cli/credentials` (mode 0600).
+`~/.monday-cli/credentials` (mode 0600). **OAuth login is deferred
+indefinitely at v0.3.0** (v0.3-plan §8 Decision 11 closure) — the
+auth-login surface throws a clear `usage_error.details.reason:
+oauth_unregistered` pointing at `MONDAY_API_TOKEN` until a future
+version registers a canonical `monday-cli` OAuth app. See §7.3 for
+the deferral block + revival steps.
 
 ### 7.3 v3 — `monday auth login`
 
@@ -5393,10 +5398,25 @@ verified inline at Part 1 (`a4cb5b0`) against Monday's actual
 `/oauth2/token` 200 response and matches Monday's docs verbatim
 (`{access_token, token_type, scope}`, no `expires_in`); the
 `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` constants ship as
-`<UNREGISTERED_PENDING_OAUTH_APP>` placeholders that the user swaps
-with the registered Monday OAuth app's values pre-publish (one-time
-external registration step at https://developer.monday.com/apps with
-redirect URI exactly `http://127.0.0.1:9876/callback`).
+`<UNREGISTERED_PENDING_OAUTH_APP>` placeholders, originally intended
+for a pre-publish swap against a registered Monday OAuth app.
+
+**OAuth deferred at v0.3.0 (v0.3-plan §8 Decision 11 closure).**
+Registering a canonical `monday-cli` OAuth app + swapping the
+placeholders was deferred indefinitely at the M28 pre-flight pending
+clear user demand for browser-based login over the `MONDAY_API_TOKEN`
+env-var path (which works fully today). To prevent users hitting the
+cryptic upstream `oauth_failed.code_exchange_failed` when invoking
+`monday auth login` against the placeholder values, the action body
+ships a placeholder guard that throws a clear
+`usage_error.details.reason: oauth_unregistered` pointing at
+`MONDAY_API_TOKEN` (the `__test_oauth_helper` test seam bypasses the
+guard so the M21 integration test surface stays green). If a future
+v0.3.x or v0.4 picks OAuth back up, the steps are: register an app at
+https://developer.monday.com/apps with redirect URI exactly
+`http://127.0.0.1:9876/callback`, swap the two constants in
+`src/api/oauth.ts`, and drop the placeholder guard in
+`src/commands/auth/login.ts`.
 
 **Sibling verb.** `monday auth logout --profile <name>` deletes the
 named profile's entry from `~/.monday-cli/credentials` (§7.4) and is

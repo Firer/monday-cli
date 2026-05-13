@@ -250,7 +250,7 @@ in the plan docs — **do not duplicate them here**:
   + R-NEW-38 + R-NEW-42 shipped + R-NEW-2 / R-NEW-3 candidates open +
   R-watch-items including R-NEW-20 / R-NEW-26 / R-NEW-28 /
   R-NEW-31 / R-NEW-32 / R-NEW-33 / R-NEW-39 / R-NEW-40 /
-  R-NEW-41).
+  R-NEW-41 / R-NEW-43).
 - `docs/v0.2-plan.md` §3 + §X post-mortems for M8–M18 + §22 for
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
@@ -507,10 +507,12 @@ path over `MONDAY_API_TOKEN`.
   design §3.1 #6 + #7 are explicit. Template-stable
   candidate: add a W audit-point asking the reviewer to
   verify `[--dry-run]` discipline at every NEW write verb's
-  §4.3 row + output-shapes.md entries. Fires at 2nd
-  confirming repetition (M28 if Decision 11 amendment lands
-  + introduces a `create-subitem-tree` or similar write
-  verb).
+  §4.3 row + output-shapes.md entries. **M28 did NOT fire**
+  the watch-item — Decision 11 rejection narrowed M28 to
+  release-prep only; no new write verbs landed. Stays at
+  1 consumer post-M28; next candidate is any v0.3.x / v0.4
+  write verb (e.g., a v0.4 `notification send --users
+  <id,id,...>` multi-recipient extension).
 - **R-NEW-41 — Asymmetric wire-vs-CLI semantics
   documentation pattern (2 consumers at M27; LOW priority
   watch-item).** Surfaced at M27 pre-flight empirical probe
@@ -532,7 +534,41 @@ path over `MONDAY_API_TOKEN`.
   `## Wire-vs-CLI semantics documentation conventions`
   section** in `docs/architecture.md`, possibly alongside
   R-NEW-24's potential field-name appendix. v0.4
-  `add_file_to_column` is the next likely candidate.
+  `add_file_to_column` is the next likely candidate. **M28
+  did NOT add a 3rd site** — Decision 11 rejection
+  narrowed M28 to release-prep only; the M28 probe surfaced
+  a data-model gap (no `subtasks` column on
+  `sub_items_board`) but that's a data-model finding, not
+  a wire-typing asymmetry. Stays at 2 consumers post-M28.
+- **R-NEW-43 — Deferred-feature surface pattern
+  (placeholder guard + sentinel constant + production-
+  mode-no-seam integration test) (1 consumer at M28
+  pre-flight; LOW priority watch-item).** Surfaced at M28
+  pre-flight (`8aeebad`) when OAuth login was deferred
+  indefinitely per Decision 11 closure. The three-part
+  shape: (Part 1) top-of-action placeholder guard in
+  `auth/login.ts` that throws `usage_error.details.reason:
+  oauth_unregistered` before any side effect when the
+  shipped credentials are still the unregistered
+  placeholder AND `__test_oauth_helper` is unset; (Part 2)
+  sentinel constant `OAUTH_UNREGISTERED_PLACEHOLDER` in
+  `src/api/oauth.ts` with `as string` widening cast at the
+  value site to thread the
+  `@typescript-eslint/no-unnecessary-condition` vs
+  `no-inferrable-types` lint pair without inline disables;
+  (Part 3) production-mode-no-seam integration test in
+  `tests/integration/commands/auth.test.ts` that bypasses
+  the milestone's shared `driveAuth` helper (which
+  unconditionally sets the test seam) to construct `run()`
+  options manually, verifying the guard's truthy branch
+  fires before any wire call. Fires at 2nd consumer; lift
+  candidate at trigger is `assertFeatureRegistered()` in
+  `src/utils/deferred-feature.ts` + a `runWithoutTestSeam`
+  test helper. v0.3.x / v0.4 candidates: any future
+  deferred feature gated on external registration (e.g., a
+  webhook-delivery verifier needing an HMAC secret; or
+  multi-level subitems if Monday's `sub_items_board`
+  surfaces a `subtasks` column in a future API version).
 - R-NEW-9 (2-stage GraphQL filter+hydrate resolver) stays at
   2 consumers (M22 usage + M23 favorites); M26 dev namespace
   doesn't introduce a 3rd consumer (the workflow verbs are
