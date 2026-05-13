@@ -5390,6 +5390,23 @@ the JSON transport's hard-coded `application/json`). See
 conventions" for the asymmetry context (R-NEW-41 3rd consumer
 fired at M31 pre-flight).
 
+**Retry + signal threading (§2.5).** Asset upload honors the
+global `--retry <n>` contract: the IMPL session wraps the
+multipart wire dispatch in `withRetry(...)` using the same retry
+layer the JSON transport uses (`src/api/retry.ts`). Re-readability
+is safe — Web `Blob.stream()` returns a fresh `ReadableStream`
+per call, so multipart payload assembly re-executes per attempt
+without buffering. Retryable conditions match the JSON
+transport's set (`rate_limited` / `complexity_exceeded` /
+`concurrency_exceeded` / `ip_rate_limited` / `resource_locked`
+/ `network_error`); `usage_error.file_too_large` and other
+terminal failures surface immediately. The runner's combined
+signal (`ctx.signal`) is threaded through to
+`MultipartTransportRequest.signal` explicitly via the fetcher
+inputs — the fetcher signatures REQUIRE a `signal` slot
+(`MondayClient.signal` is private + multipart bypasses
+`MondayClient.raw`, so no implicit fallback exists).
+
 **Idempotency: NO.** Each successful upload mints a new `Asset`
 with a new ID — re-running both verbs uploads the file a second
 time. Agents needing register-once semantics dedupe on a

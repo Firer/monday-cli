@@ -265,24 +265,38 @@ export interface AddFileToColumnInputs {
   readonly file: Blob;
   readonly filename: string;
   /**
-   * Caller-supplied AbortSignal threaded into the multipart wire
-   * dispatch via `MultipartTransportRequest.signal` at IMPL — abort
-   * propagation to the in-flight upload follows the standard
-   * `--timeout` / SIGINT plumbing the JSON transport uses (cli.md
-   * "Signal handling" + `src/api/transport.ts`'s `combineSignals`).
-   * The `client` is retained on the input even though dispatch
-   * bypasses `MondayClient.raw` — its `signal` is the default if no
-   * caller-supplied signal arrives, and IMPL may consult it for
-   * verbose/complexity instrumentation. Retry semantics are pinned
-   * at IMPL: multipart wire calls do NOT pass through
-   * `withRetry` automatically (multipart bodies aren't safely
-   * re-readable from a `Blob` stream; the IMPL session decides
-   * whether to lift retry to the multipart layer via buffering or
-   * to surface transient failures uniformly). The pre-flight
-   * stub does not exercise any of this — the runtime body wires
-   * the signal + retry strategy at IMPL.
+   * **Required** AbortSignal threaded into the multipart wire
+   * dispatch via `MultipartTransportRequest.signal` at IMPL.
+   * Callers MUST pass the runner's combined signal (`ctx.signal`)
+   * explicitly — `MondayClient.signal` is private + multipart
+   * dispatch bypasses `MondayClient.raw`, so no implicit fallback
+   * exists. Abort propagation follows the standard
+   * `--timeout` / SIGINT plumbing (`src/api/transport.ts`'s
+   * `combineSignals` mirrors the multipart-transport's own
+   * combined-signal logic at IMPL).
+   *
+   * **Retry semantics pinned (cli-design §2.5).** Asset upload
+   * honors the global `--retry <n>` contract: the IMPL session
+   * wraps `multipart.request(...)` in `withRetry(...)` using the
+   * `retries` value threaded from `client.config`'s retry slot.
+   * Re-readability is safe — Web `Blob.stream()` returns a fresh
+   * `ReadableStream` per call, so multipart payload assembly can
+   * re-execute on each retry attempt without buffering.
+   * Retryable conditions match the JSON transport's set
+   * (`rate_limited` / `complexity_exceeded` /
+   * `concurrency_exceeded` / `ip_rate_limited` /
+   * `resource_locked` / `network_error`); non-retryable
+   * conditions (`forbidden`, `not_found`, `validation_failed`,
+   * `usage_error` with `file_too_large`) surface immediately.
    */
-  readonly signal?: AbortSignal;
+  readonly signal: AbortSignal;
+  /**
+   * Maximum retry count for transient failures (default
+   * `--retry 3`, range `[0, ...]`). Threaded through to
+   * `withRetry(...)` at IMPL — same retry layer the JSON
+   * transport uses (cli-design §2.5).
+   */
+  readonly retries: number;
 }
 
 export interface AddFileToColumnResult {
@@ -299,11 +313,18 @@ export interface AddFileToUpdateInputs {
   readonly file: Blob;
   readonly filename: string;
   /**
-   * Caller-supplied AbortSignal threaded into the multipart wire
-   * dispatch — same semantics as {@link AddFileToColumnInputs.signal}.
-   * Defaults to `client.signal` at IMPL if absent.
+   * **Required** — same semantics as
+   * {@link AddFileToColumnInputs.signal}. Callers MUST pass
+   * `ctx.signal` explicitly (no implicit fallback from
+   * `client`).
    */
-  readonly signal?: AbortSignal;
+  readonly signal: AbortSignal;
+  /**
+   * Same semantics as {@link AddFileToColumnInputs.retries} —
+   * threaded into `withRetry(...)` around the multipart
+   * dispatch at IMPL.
+   */
+  readonly retries: number;
 }
 
 export interface AddFileToUpdateResult {

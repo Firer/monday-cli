@@ -63,6 +63,16 @@
  * headers with case-insensitive matches against the reserved set
  * are stripped before the spread.
  *
+ * **Retry + signal contract.** The transport itself does NOT own
+ * retry — callers (the asset-upload fetchers in
+ * `src/api/assets.ts`) wrap the dispatch in `withRetry(...)` from
+ * `src/api/retry.ts` to honor `--retry <n>` per cli-design §2.5.
+ * The transport DOES own signal threading: callers pass `signal`
+ * on every `request()` (required slot on
+ * {@link MultipartTransportRequest}); abort propagation follows
+ * the standard `AbortSignal.any(timeout, caller)` chain mirroring
+ * `transport.ts`'s `combineSignals` (lands at IMPL).
+ *
  * **Status: PRE-FLIGHT STUB.** Wire-body builder + fetch dispatch
  * land at v0.4-M31 IMPL. The exported factory currently returns a
  * transport whose `request()` throws `internal_error` with
@@ -137,7 +147,15 @@ export interface MultipartTransportRequest {
    * validation (`USER_UNAUTHORIZED` / generic validation errors).
    */
   readonly filename: string;
-  readonly signal?: AbortSignal;
+  /**
+   * Caller-supplied signal threaded into the underlying `fetch`'s
+   * `signal` option (combined with `AbortSignal.timeout(timeoutMs)`
+   * at IMPL via `AbortSignal.any` mirroring `transport.ts`'s
+   * `combineSignals`). Required — callers MUST pass `ctx.signal`
+   * explicitly so SIGINT + `--timeout` propagate to the in-flight
+   * multipart upload.
+   */
+  readonly signal: AbortSignal;
 }
 
 export interface MultipartTransportResponse {
