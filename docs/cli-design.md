@@ -5215,11 +5215,17 @@ Constraints (v0.4-plan M30 D1–D5):
   whole-call re-throw + non-`MondayCliError` whole-call re-throw
   + empty-input no-dispatch + input-order preservation in
   `data.results[]` + AbortSignal threading — all mirror the M25
-  sequential path verbatim (AbortSignal threading lands as a
-  new slot at M30 IMPL on both routes; pre-flight stubs neither
-  route takes the signal yet). The two routes differ only in
-  dispatch ordering; the per-target dispatch closure is shared
-  between them at the wrapper layer.
+  sequential path verbatim. AbortSignal threading lands at M30
+  IMPL as an optional `signal?: AbortSignal` parameter on both
+  dispatchers (`dispatchSequential` + `dispatchParallel`); both
+  check `signal.aborted` at iteration / worker-loop top and
+  re-throw `signal.reason` whole-call. The dispatcher-level
+  signal is the pool **scheduler** short-circuit (stops picking
+  up new targets after abort); in-flight wire calls abort via
+  the existing `MondayClient.signal` configured at construction
+  time (the client threads its signal into every fetch). The
+  two routes differ only in dispatch ordering; the per-target
+  dispatch closure is shared between them at the wrapper layer.
 
 `--concurrency 1` (the default) preserves the M25 envelope
 byte-equivalence — agents who don't opt in continue to receive

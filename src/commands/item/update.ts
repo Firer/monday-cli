@@ -957,12 +957,18 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       env: ctx.env,
       noCache: globalFlags.noCache,
       resolutionSource: remapSource,
-      // v0.4-M30 pre-flight: thread the argv `--concurrency` slot
-      // through. `undefined` (default) preserves the M25 sequential
-      // dispatch; `> 1` routes through dispatchParallel (stub at
-      // pre-flight, runtime at M30 IMPL). Argv parser pinned the
-      // value to [MIN_CONCURRENCY, MAX_CONCURRENCY] (1..32).
+      // v0.4-M30: thread the argv `--concurrency` slot through.
+      // `undefined` (default) preserves the M25 sequential dispatch;
+      // `> 1` routes through dispatchParallel (bounded async-pool).
+      // Argv parser pinned the value to
+      // [MIN_CONCURRENCY, MAX_CONCURRENCY] (1..32) before reaching here.
       concurrency: parsed.concurrency,
+      // v0.4-M30: SIGINT during a parallel dispatch aborts the pool's
+      // scheduler at the next worker-loop iteration; in-flight wire
+      // calls abort via the MondayClient.signal. Sequential route
+      // sees the same signal so cooperative-abort semantics match
+      // (R-NEW-28 axis 6).
+      signal: ctx.signal,
     });
     // Per-item dispatch leg is always live — fold into the
     // aggregator. Mirrors the fail-fast path's terminal

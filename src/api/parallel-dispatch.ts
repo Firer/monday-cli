@@ -35,9 +35,9 @@
  *      timing (e.g., asserting "no more than N promises ever
  *      in-flight at any tick") is cleaner at the helper's seam
  *      than against the action body's branched control flow.
- *   3. **Stub-then-IMPL cadence.** Pre-flight ships the type
- *      surface + the stubbed body under `c8 ignore start/stop`
- *      (this commit); IMPL ships the runtime body + the
+ *   3. **Stub-then-IMPL cadence.** Pre-flight shipped the type
+ *      surface + the stubbed body under `c8 ignore start/stop`;
+ *      IMPL ships the runtime body (this commit) + the
  *      integration tests against `FixtureTransport` cassettes
  *      that exercise the parallel dispatch matrix.
  *
@@ -47,11 +47,6 @@
  * returns the per-item result rows; the caller folds them into
  * `data.results[]` via `foldPartialSuccessBulkResult` (unchanged
  * from M25).
- *
- * **Shipped at v0.4-M30 pre-flight (this commit).** Stub body
- * throws `internal_error` with `details.deferred_to:
- * "v0.4-M30 IMPL"` per the M29 stub-then-IMPL precedent. Runtime
- * body lands at M30 IMPL.
  *
  * **Empirical probe finding (2026-05-13, API 2026-01).** Monday's
  * per-account concurrency cap for trivial reads exceeds 100
@@ -67,10 +62,11 @@
  * §2.5; M30 IMPL inherits this without new logic.
  */
 
-import { ApiError } from '../utils/errors.js';
-import type {
-  PartialSuccessResult,
-  DispatchOneTargetInputs,
+import { MondayCliError } from '../utils/errors.js';
+import {
+  signalReason,
+  type PartialSuccessResult,
+  type DispatchOneTargetInputs,
 } from './partial-success-mutation.js';
 
 /**
@@ -128,61 +124,135 @@ export const DEFAULT_CONCURRENCY = 1;
  *      precedent at `src/api/partial-success-mutation.ts:82`).
  *      Other in-flight calls' results are NOT salvaged — the
  *      contract is "whole-call failure on internal_error" so a
- *      partial `data.results[]` would be misleading.
+ *      partial `data.results[]` would be misleading. The pool
+ *      sets an internal `aborted` flag so workers stop pulling
+ *      new targets; Promise.all rejection surfaces the original
+ *      error to the caller.
  *   3. **Non-`MondayCliError` re-throw** — programmer-bug
  *      exceptions (TypeError, RangeError, etc.) propagate
  *      whole-call via the same path as the
- *      `dispatchSequential`'s non-CliError branch.
+ *      `dispatchSequential`'s non-CliError branch. Same
+ *      `aborted` flag mechanism prevents new dispatches.
  *   4. **Empty input** — `targets.length === 0` returns `[]`
- *      synchronously; no dispatch fires. Matches
- *      `dispatchSequential`'s empty-input handling.
+ *      synchronously (after the leading await tick); no
+ *      dispatch fires. Matches `dispatchSequential`'s empty-
+ *      input handling.
  *   5. **Result ordering** — `results[i]` corresponds to
- *      `targets[i]`, regardless of completion order. Caller's
- *      `foldPartialSuccessBulkResult` side-map lookup keys off
- *      `record.item_id` so the side-map captures are order-
- *      independent; the result array's order matters for
- *      downstream UI / table-rendering / agent-side parsing.
- *   6. **AbortSignal threading (M30 IMPL).** When the runtime
- *      receives SIGINT, the in-flight dispatches must abort
- *      cleanly. The pre-flight stub body doesn't take a signal
- *      parameter — IMPL adds the `signal?: AbortSignal` slot
- *      threaded through to the per-target dispatch callback's
- *      `client.raw(..., { signal })` call site.
- *
- * Pre-flight stub body — throws `internal_error` with explicit
- * `details.deferred_to: "v0.4-M30 IMPL"` so the action layer's
- * routing branch surfaces a clear "feature not yet shipped"
- * envelope rather than a cryptic stack trace if invoked before
- * IMPL lands.
+ *      `targets[i]`, regardless of completion order. Workers
+ *      pull from a shared `cursor` to pick the next target's
+ *      index, then assign the result by that index — never
+ *      `push()`. A late-completing first target still lands at
+ *      `results[0]`.
+ *   6. **AbortSignal threading.** The optional `signal`
+ *      parameter is checked at every worker-loop iteration top.
+ *      When `signal.aborted` becomes true, the worker re-throws
+ *      `signal.reason` (via {@link signalReason}); the `aborted`
+ *      flag stops other workers from scheduling NEW dispatches.
+ *      In-flight wire calls abort via the existing
+ *      `MondayClient.signal` configured at construction time
+ *      (the client threads its signal into every fetch) — the
+ *      pool-level check is the scheduler short-circuit, not the
+ *      wire-call cancellation source. Mirrors
+ *      `dispatchSequential`'s axis-6 signal check at the
+ *      iteration boundary.
  */
-/* c8 ignore start */
-export const dispatchParallel = <TargetId extends string>(
+export const dispatchParallel = async <TargetId extends string>(
   targets: readonly TargetId[],
   idField: string,
   dispatch: (inputs: DispatchOneTargetInputs<TargetId>) => Promise<void>,
   concurrency: number,
+  signal?: AbortSignal,
 ): Promise<readonly PartialSuccessResult[]> => {
-  // Stub body — runtime lands at v0.4-M30 IMPL per the §22 R-class
-  // entry. Non-`async` form because the stub has no `await` site
-  // (lint's `require-await` rejects `async` without `await`); the
-  // function returns a rejected Promise from a non-async body
-  // instead. IMPL replaces with the async-pool implementation + an
-  // `async` declaration. `void`s suppress `no-unused-vars` on the
-  // contract surface.
-  void targets;
-  void idField;
-  void dispatch;
-  void concurrency;
-  return Promise.reject(
-    new ApiError(
-      'internal_error',
-      'dispatchParallel is a v0.4-M30 pre-flight stub — runtime body lands at M30 IMPL.',
-      {
-        details: {
-          deferred_to: 'v0.4-M30 IMPL',
-        },
-      },
-    ),
+  if (targets.length === 0) {
+    return [];
+  }
+
+  // Pre-allocated result array indexed by input position. Workers
+  // assign by index (NOT push) so completion order can't reorder
+  // results — axis 5 of the R-NEW-28 audit.
+  const results: PartialSuccessResult[] = new Array<PartialSuccessResult>(
+    targets.length,
   );
+
+  // Shared cursor across workers. Each worker reads the current
+  // value into `i`, increments, then dispatches `targets[i]`. The
+  // read-then-increment is safe in single-threaded JS — the worker
+  // is between awaits when it touches the cursor.
+  let cursor = 0;
+
+  // Whole-call abort flag. Set when a worker hits `internal_error`,
+  // a non-`MondayCliError` throw, or the signal aborting. Other
+  // workers see the flag at their next iteration top and return
+  // immediately without scheduling new dispatches. In-flight
+  // dispatches complete (or fail) on their own; their results
+  // never reach the caller because Promise.all rejects on the
+  // worker that threw.
+  let aborted = false;
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (aborted) {
+        return;
+      }
+      if (signal?.aborted === true) {
+        aborted = true;
+        throw signalReason(signal);
+      }
+      const i = cursor;
+      cursor += 1;
+      // `noUncheckedIndexedAccess` is on — read once + narrow rather
+      // than a separate length check + non-null assertion, which
+      // tripped both `@typescript-eslint/non-nullable-type-assertion-style`
+      // and `no-non-null-assertion` depending on the form.
+      const targetId = targets[i];
+      if (targetId === undefined) {
+        return;
+      }
+      try {
+        await dispatch({ targetId });
+        results[i] = {
+          [idField]: targetId,
+          ok: true,
+        };
+      } catch (err: unknown) {
+        if (err instanceof MondayCliError) {
+          // Mirror `dispatchSequential`'s axis-2 escape hatch:
+          // `internal_error` re-throws whole-call so schema-
+          // drift surfaces as top-level `ok: false` rather than
+          // being papered over as a per-record slot. The aborted
+          // flag prevents other workers from scheduling new
+          // dispatches once we throw.
+          if (err.code === 'internal_error') {
+            aborted = true;
+            throw err;
+          }
+          results[i] = {
+            [idField]: targetId,
+            ok: false,
+            error: { code: err.code, message: err.message },
+          };
+          continue;
+        }
+        // Non-MondayCliError — programmer bug. Mirrors
+        // `dispatchSequential`'s axis-3 non-CliError re-throw;
+        // runner's catch-all surfaces as `internal_error`.
+        aborted = true;
+        throw err;
+      }
+    }
+  };
+
+  // Spin up `min(concurrency, targets.length)` workers. Extra
+  // workers beyond the target count would immediately exit the
+  // loop (cursor >= targets.length on first iteration), so they
+  // add no value — bounding here keeps the Promise.all shape
+  // tight + makes the "N=8 against 4 targets" edge-case
+  // deterministic (4 workers, not 8).
+  const workerCount = Math.min(concurrency, targets.length);
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < workerCount; w += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return results;
 };
-/* c8 ignore stop */

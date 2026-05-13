@@ -48,18 +48,50 @@ export interface PartialSuccessEnvelopeData {
  * Errors thrown that aren't `MondayCliError` propagate up — those are
  * programmer bugs, not Monday-side failures, and the runner's catch-
  * all maps them to `internal_error`.
+ *
+ * **v0.4-M30 — optional `signal` parameter.** When the caller passes
+ * an `AbortSignal`, the loop checks `signal.aborted` between
+ * iterations and re-throws the signal's reason whole-call (mirrors
+ * `dispatchParallel`'s axis-6 behaviour for the R-NEW-28
+ * behavioural-equivalence audit). In-flight wire calls abort via the
+ * existing `MondayClient.signal` configured at construction time
+ * (the client threads its signal into every fetch); the dispatcher-
+ * level check stops the loop from scheduling NEW work after the
+ * abort fires. Omitting the signal preserves the v0.3-M25 behaviour
+ * verbatim — existing callers that don't pass a signal are
+ * byte-equivalent to pre-M30.
  */
 export interface DispatchOneTargetInputs<TargetId extends string> {
   readonly targetId: TargetId;
 }
 
+/**
+ * Extracts the `signal.reason` as an `Error` for re-throw at
+ * dispatcher abort boundaries. Mirrors `src/api/retry.ts:
+ * signalAbortError` + `src/api/item-watch.ts:sleepWithSignal`'s
+ * pattern (read `signal.reason`; if it's an `Error`, return it
+ * directly; otherwise wrap a fresh `Error('aborted')`). Shared
+ * between `dispatchSequential` (this module) and `dispatchParallel`
+ * (`src/api/parallel-dispatch.ts`) so both routes surface the same
+ * abort error shape — preserves the R-NEW-28 6-axis behavioural
+ * equivalence at axis 6.
+ */
+export const signalReason = (signal: AbortSignal): Error => {
+  const reason: unknown = signal.reason;
+  return reason instanceof Error ? reason : new Error('aborted');
+};
+
 export const dispatchSequential = async <TargetId extends string>(
   targets: readonly TargetId[],
   idField: string,
   dispatch: (inputs: DispatchOneTargetInputs<TargetId>) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<readonly PartialSuccessResult[]> => {
   const results: PartialSuccessResult[] = [];
   for (const targetId of targets) {
+    if (signal?.aborted === true) {
+      throw signalReason(signal);
+    }
     try {
       await dispatch({ targetId });
       // Build the result with the dynamic id-field name. Property

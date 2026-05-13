@@ -2709,3 +2709,502 @@ describe('monday item update bulk — --continue-on-error (M25 partial-success)'
     expect(collisionWarnings.length).toBeGreaterThan(0);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────
+// M30 — `--concurrency <N>` parallel dispatch on the partial-success
+// bulk path (cli-design §6.4 "Bulk per-item partial-success —
+// Parallel dispatch"). These tests drive the runtime body of
+// `src/api/parallel-dispatch.ts:dispatchParallel` via the cassette
+// transport; the per-target dispatch closure in
+// `src/api/partial-success-bulk.ts` is shared verbatim with the
+// sequential route so the envelope shape is byte-equivalent to M25.
+// ──────────────────────────────────────────────────────────────────
+
+describe('monday item update bulk — --concurrency (M30 parallel dispatch)', () => {
+  // Per-verb fixture helper — same shape as the M5b / M25 describe
+  // blocks above. Kept local to avoid coupling the M30 block to the
+  // M5b helper through a closure surface.
+  const buildItem = (id: string, name = `Item ${id}`): typeof sampleItem => ({
+    ...sampleItem,
+    id,
+    name,
+  });
+
+  it('--concurrency 2: 4 items all succeed → byte-equivalent envelope shape to sequential M25 path', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '5001' },
+                        { id: '5002' },
+                        { id: '5003' },
+                        { id: '5004' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5003') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5004') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: {
+          matched_count: number;
+          applied_count: number;
+          failed_count: number;
+          board_id: string;
+        };
+        results: readonly { item_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary).toEqual({
+      matched_count: 4,
+      applied_count: 4,
+      failed_count: 0,
+      board_id: '111',
+    });
+    expect(env.data.results).toHaveLength(4);
+    // Input-order preservation by index: results[i].item_id ===
+    // matchedItemIds[i] regardless of completion order.
+    expect(env.data.results.map((r) => r.item_id)).toEqual([
+      '5001',
+      '5002',
+      '5003',
+      '5004',
+    ]);
+    for (const r of env.data.results) {
+      expect(r.ok).toBe(true);
+    }
+  });
+
+  it('--concurrency 4 with delay on target[0]: input-order preserved despite late completion (R-NEW-28 axis 5)', async () => {
+    // Cassette interactions consume in ARRIVAL order at the
+    // transport. With N=4 workers spinning up simultaneously the
+    // first 4 dispatches arrive in worker pickup order (synchronous
+    // up to the first await inside client.raw), so interactions
+    // 2..5 below match targets 5001..5004 respectively. The
+    // delay_ms on the FIRST interaction (5001) means that target's
+    // wire response is the LAST to land; the result array's
+    // ordering by input index (not completion order) is the
+    // load-bearing invariant under test.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '4',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '5001' },
+                        { id: '5002' },
+                        { id: '5003' },
+                        { id: '5004' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            // target 5001 — slowest; completes LAST chronologically.
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+            delay_ms: 60,
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5003') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5004') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        results: readonly { item_id: string; ok: boolean; item?: { id: string } }[];
+      };
+    };
+    expect(env.data.results.map((r) => r.item_id)).toEqual([
+      '5001',
+      '5002',
+      '5003',
+      '5004',
+    ]);
+    expect(env.data.results[0]?.item?.id).toBe('5001');
+  });
+
+  it('--concurrency 2 mixed outcomes: per-record success/failure both land in data.results[] (R-NEW-28 axis 1)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [
+                        { id: '5001' },
+                        { id: '5002' },
+                        { id: '5003' },
+                        { id: '5004' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5003') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            http_status: 400,
+            response: {
+              errors: [
+                { message: 'invalid', extensions: { code: 'INVALID_ARGUMENT' } },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0); // universal partial-success: ok: true
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: {
+          matched_count: number;
+          applied_count: number;
+          failed_count: number;
+        };
+        results: readonly {
+          item_id: string;
+          ok: boolean;
+          error?: { code: string };
+        }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.summary).toMatchObject({
+      matched_count: 4,
+      applied_count: 2,
+      failed_count: 2,
+    });
+    expect(env.data.results.map((r) => r.item_id)).toEqual([
+      '5001',
+      '5002',
+      '5003',
+      '5004',
+    ]);
+    expect(env.data.results[0]?.ok).toBe(true);
+    expect(env.data.results[1]?.ok).toBe(false);
+    expect(env.data.results[1]?.error?.code).toBe('validation_failed');
+    expect(env.data.results[2]?.ok).toBe(true);
+    expect(env.data.results[3]?.ok).toBe(false);
+    expect(env.data.results[3]?.error?.code).toBe('validation_failed');
+  });
+
+  it('--concurrency 2 internal_error re-throws whole-call (top-level ok: false; no partial data.results[]) (R-NEW-28 axis 2)', async () => {
+    // Schema-drift in Monday's response: the `change_column_value`
+    // root key is `null`, which `assertResponseFieldPresent` rejects
+    // as `internal_error`. The partial-success wrapper re-throws
+    // internal_error whole-call rather than papering over it as a
+    // per-record slot (M14 round-2 F1 precedent) — agents need the
+    // malformed-response signal directly.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '2',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            // Response missing root key (`change_column_value: null`)
+            // → assertResponseFieldPresent throws internal_error.
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: null } },
+          },
+        ],
+        // The pool may bail without consuming all interactions if a
+        // worker throws internal_error before the others get to
+        // dispatch their second targets — assertion is the envelope
+        // shape, not cassette consumption.
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.ok).toBe(false);
+    expect(env.error?.code).toBe('internal_error');
+  });
+
+  it('--concurrency 1 explicit: byte-equivalent envelope to M25 sequential default (D3 closure)', async () => {
+    // `--concurrency 1` routes through dispatchSequential (the
+    // routing branch in partial-success-bulk.ts sends both
+    // `undefined` and `1` to the sequential helper). The envelope
+    // shape MUST be identical to the M25 baseline above (the
+    // `all-success` test in the M25 describe block) — agents who
+    // explicitly pin N=1 should see the same byte shape as omitting
+    // the flag.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '1',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        summary: { matched_count: number; applied_count: number; failed_count: number; board_id: string };
+        results: readonly { item_id: string; ok: boolean }[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary).toEqual({
+      matched_count: 2,
+      applied_count: 2,
+      failed_count: 0,
+      board_id: '111',
+    });
+    expect(env.data.results.map((r) => r.item_id)).toEqual(['5001', '5002']);
+  });
+
+  it('--concurrency 4 with empty match: emits v0.1 fail-fast empty-match envelope regardless of --concurrency (cli-design §6.4)', async () => {
+    // Empty-match branch fires BEFORE the dispatch helpers are
+    // invoked — neither dispatchSequential nor dispatchParallel
+    // sees the targets list at all. Asserts that --concurrency is
+    // orthogonal to the empty-match shape (cli-design §6.4 empty-
+    // match paragraph).
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Nonexistent',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--concurrency',
+        '4',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: { cursor: null, items: [] },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        summary: { matched_count: number; applied_count: number };
+        items: readonly unknown[];
+        operation?: string;
+        results?: readonly unknown[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.summary.matched_count).toBe(0);
+    expect(env.data.items).toEqual([]);
+    // Partial-success-specific fields stay absent — empty match
+    // emits the v0.1 envelope shape, NOT the partial-success shape
+    // (no `operation`, no `results`).
+    expect(env.data.operation).toBeUndefined();
+    expect(env.data.results).toBeUndefined();
+  });
+});

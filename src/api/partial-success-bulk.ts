@@ -267,11 +267,21 @@ export interface RunPartialSuccessBulkUpdateInputs {
    * through {@link dispatchParallel} (bounded async-pool).
    * Action layer's argv parser pins the value to
    * `[MIN_CONCURRENCY, MAX_CONCURRENCY]` (1..32) before reaching
-   * this helper. Pre-flight: the parallel route is c8-ignored
-   * because the dispatchParallel stub body throws; IMPL drops
-   * the ignore + the runtime body lands.
+   * this helper.
    */
   readonly concurrency: number | undefined;
+  /**
+   * v0.4-M30 SIGINT / abort threading. When the runner aborts
+   * `ctx.signal`, both dispatchers check `signal.aborted` at the
+   * iteration / worker-loop boundary and re-throw the signal's
+   * reason whole-call (mirrors {@link dispatchParallel} axis-6).
+   * In-flight wire calls abort via the existing
+   * `MondayClient.signal` configured at construction time
+   * (the client threads its signal into every fetch). Optional
+   * — omitting it preserves v0.3-M25 behaviour exactly for
+   * callers that don't need cooperative abort.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -394,6 +404,7 @@ export const runPartialSuccessBulkUpdate = async (
     noCache,
     resolutionSource,
     concurrency,
+    signal,
   } = inputs;
 
   const projectedById = new Map<string, ProjectedItem>();
@@ -454,27 +465,26 @@ export const runPartialSuccessBulkUpdate = async (
   };
 
   // v0.4-M30 routing: `--concurrency <N>` with N > 1 routes through
-  // {@link dispatchParallel} (bounded async-pool, runtime body lands
-  // at M30 IMPL); absent / N === 1 routes through the unchanged
-  // {@link dispatchSequential} path. The branch is the only mutation
-  // to the M25 runtime body at pre-flight — the c8 ignore on the
-  // parallel arm drops at IMPL when integration tests start
-  // exercising the parallel route.
+  // {@link dispatchParallel} (bounded async-pool); absent / N === 1
+  // routes through the unchanged {@link dispatchSequential} path.
+  // Both dispatchers thread the optional `signal` so SIGINT-aware
+  // callers see consistent cooperative abort semantics across routes
+  // (R-NEW-28 axis 6).
   let dispatchResults: readonly PartialSuccessResult[];
   if (concurrency !== undefined && concurrency > 1) {
-    /* c8 ignore start — M30 pre-flight: dispatchParallel runtime body lands at IMPL. */
     dispatchResults = await dispatchParallel(
       matchedItemIds,
       'item_id',
       perTargetDispatch,
       concurrency,
+      signal,
     );
-    /* c8 ignore stop */
   } else {
     dispatchResults = await dispatchSequential(
       matchedItemIds,
       'item_id',
       perTargetDispatch,
+      signal,
     );
   }
 
