@@ -1912,11 +1912,16 @@ describe('monday item update bulk — --continue-on-error (M25 partial-success)'
   });
 
   // v0.4-M30 pre-flight combination-rule rejections — both fire from
-  // validateInputShape before any network call. The stub
-  // dispatchParallel body's throw (deferred_to: "v0.4-M30 IMPL") is
-  // unreachable from the integration test surface until M30 IMPL
-  // lands the routing branch in production code; coverage of the
-  // parallel route's runtime behaviour is M30 IMPL's scope.
+  // validateInputShape before any network call. The routing branch in
+  // `partial-success-bulk.ts` IS in production code at pre-flight
+  // (`concurrency > 1` routes to `dispatchParallel`; `concurrency
+  // undefined / === 1` routes to `dispatchSequential`), but the
+  // `dispatchParallel` runtime body is a c8-ignored stub that throws
+  // `internal_error` with `details.deferred_to: "v0.4-M30 IMPL"`.
+  // No integration test exercises `concurrency > 1` at pre-flight
+  // because the rejection paths below stop the call before reaching
+  // dispatch. Coverage of the parallel route's runtime behaviour is
+  // M30 IMPL's scope.
 
   it('rejects --concurrency on the single-item shape at argv-parse time (M30)', async () => {
     // `--concurrency` is only meaningful on the bulk partial-success

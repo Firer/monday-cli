@@ -2150,9 +2150,11 @@ holds for every M25 success envelope.
 
 `data.operation: "item_update"` discriminates the partial-success
 envelope from M14's `add_users_to_workspace` / `delete_users_from_workspace`
-variants (same `data.operation` slot, different verbs). Inherits
-`dispatchSequential` from `src/api/partial-success-mutation.ts`
-via a thin wrapper at `src/api/partial-success-bulk.ts`.
+variants (same `data.operation` slot, different verbs). The thin
+wrapper at `src/api/partial-success-bulk.ts` routes between
+`dispatchSequential` (default — `concurrency` absent / `=== 1`) and
+`dispatchParallel` (v0.4-M30 — `concurrency > 1`, runtime at IMPL);
+both helpers live next to each other under `src/api/`.
 
 The `--continue-on-error` flag is **orthogonal** to `--yes` — both
 must be acknowledged for the live partial-success path to fire.

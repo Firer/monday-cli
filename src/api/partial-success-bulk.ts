@@ -77,12 +77,14 @@
  * keeping the R-NEW-28 6-axis behavioral-equivalence audit
  * straightforward at the impl-review pass.
  *
- * **Per-item dispatch wiring.** Runtime body loops
- * {@link dispatchSequential} over `matchedItemIds` with
- * id-field `'item_id'`. The per-item dispatch callback fires
- * one `executeItemMutation` call. Successes populate
- * `results[i].item` with the `ProjectedItem` via a side-map
- * fold; failures land in `results[i].error: {code, message}`
+ * **Per-item dispatch wiring.** Runtime body routes between
+ * {@link dispatchSequential} (default — `concurrency` absent /
+ * `=== 1`) and {@link dispatchParallel} (v0.4-M30 — `concurrency
+ * > 1`, runtime body lands at IMPL) over `matchedItemIds` with
+ * id-field `'item_id'`. The per-target dispatch callback (shared
+ * between routes verbatim) fires one `executeItemMutation` call.
+ * Successes populate `results[i].item` with the `ProjectedItem`
+ * via a side-map fold; failures land in `results[i].error: {code, message}`
  * via `dispatchSequential`'s built-in error decoration.
  * `internal_error` codes re-throw as whole-call (M14 round-2
  * F1 precedent — schema-drift in the response MUST NOT be
@@ -340,13 +342,16 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *      fail-modes).
  *   3. On success, capture the `ProjectedItem` into a side
  *      map keyed by `item_id`.
- *   4. After the loop, walk the `dispatchSequential` results
- *      and fold the per-item `ProjectedItem` from the side
+ *   4. After the loop, walk the result rows (from whichever
+ *      dispatcher fired — `dispatchSequential` by default;
+ *      {@link dispatchParallel} when `concurrency > 1` at M30
+ *      IMPL) and fold the per-item `ProjectedItem` from the side
  *      map into each `results[i].item` slot via
  *      {@link foldPartialSuccessBulkResult}. Failure records
  *      already carry `error: {code, message}` (with the
- *      foldAndRemap-applied code) via
- *      `dispatchSequential`'s built-in error decoration.
+ *      foldAndRemap-applied code) via the dispatcher's built-in
+ *      error decoration (both routes share the same per-target
+ *      error capture contract).
  *   5. Return `{results}` — the action layer folds the
  *      constant `'live'` dispatch source via
  *      `sourceAgg.record(PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE,

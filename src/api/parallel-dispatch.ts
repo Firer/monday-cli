@@ -14,9 +14,12 @@
  * see the same row sequence regardless of which target completed
  * first. Per-target error decoration + `internal_error` re-throw +
  * non-`MondayCliError` re-throw semantics MUST match
- * `dispatchSequential` exactly so the `--concurrency 1` route
- * (which still threads through this helper at IMPL) is byte-
- * equivalent to the existing sequential path.
+ * `dispatchSequential` exactly. Note: `--concurrency 1` does NOT
+ * route through this helper — the partial-success-bulk wrapper
+ * routes `concurrency === undefined || concurrency === 1` to
+ * `dispatchSequential` and only `concurrency > 1` to
+ * `dispatchParallel`. The byte-equivalence guarantee at N=1 holds
+ * by construction (the sequential path is unchanged from v0.3-M25).
  *
  * **Why a separate module.** Three reasons mirroring
  * `src/api/partial-success-bulk.ts`'s carve-out:
@@ -71,12 +74,13 @@ import type {
 } from './partial-success-mutation.js';
 
 /**
- * Minimum `--concurrency` argv value. `1` is a valid no-op that
- * routes through this helper but maintains sequential semantics
- * (one in-flight at a time). Lets agents flip the flag without
- * worrying about a `0`-edge case + keeps the byte-equivalence
- * guarantee with the existing `dispatchSequential` path when
- * `--concurrency 1` is passed explicitly.
+ * Minimum `--concurrency` argv value. `1` is a valid no-op:
+ * `partial-success-bulk.ts`'s routing branch sends
+ * `concurrency === 1` (and `undefined`) to `dispatchSequential`,
+ * NOT to this helper, so the byte-equivalence guarantee with the
+ * existing v0.3-M25 sequential path at N=1 holds by construction.
+ * Letting agents pass `1` explicitly lets them flip the flag
+ * without worrying about a `0`-edge case.
  */
 export const MIN_CONCURRENCY = 1;
 
