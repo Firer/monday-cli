@@ -65,30 +65,31 @@
  * 3-consumer trigger: single-item + fail-fast bulk + M25
  * partial-success bulk).
  *
- * **v0.4-M30 pre-flight extension.** Adds the `concurrency`
- * input slot + the routing branch to {@link dispatchParallel}
- * (new module `src/api/parallel-dispatch.ts` — stub body at
- * pre-flight, runtime body at IMPL). When the caller passes
- * `concurrency > 1`, the runtime fans out per-target dispatches
- * via a bounded async-pool; absent or `concurrency === 1`
- * preserves the M25 sequential path verbatim. The per-target
- * dispatch closure is hoisted to a named local so both routes
- * share the same `executeItemMutation` + `foldAndRemap` body —
- * keeping the R-NEW-28 6-axis behavioral-equivalence audit
- * straightforward at the impl-review pass.
+ * **v0.4-M30 extension.** Adds the `concurrency` input slot +
+ * the routing branch to {@link dispatchParallel} (new module
+ * `src/api/parallel-dispatch.ts` — runtime body landed at M30
+ * IMPL). When the caller passes `concurrency > 1`, the runtime
+ * fans out per-target dispatches via a bounded async-pool;
+ * absent or `concurrency === 1` preserves the M25 sequential
+ * path verbatim. The per-target dispatch closure is hoisted to
+ * a named local so both routes share the same
+ * `executeItemMutation` + `foldAndRemap` body — keeps the
+ * R-NEW-28 6-axis behavioral-equivalence audit straightforward.
+ * The M30 IMPL also threads an optional `signal?: AbortSignal`
+ * through both dispatchers (axis-6 scheduler short-circuit).
  *
  * **Per-item dispatch wiring.** Runtime body routes between
  * {@link dispatchSequential} (default — `concurrency` absent /
- * `=== 1`) and {@link dispatchParallel} (v0.4-M30 — `concurrency
- * > 1`, runtime body lands at IMPL) over `matchedItemIds` with
- * id-field `'item_id'`. The per-target dispatch callback (shared
- * between routes verbatim) fires one `executeItemMutation` call.
+ * `=== 1`) and {@link dispatchParallel} (v0.4-M30 —
+ * `concurrency > 1`) over `matchedItemIds` with id-field
+ * `'item_id'`. The per-target dispatch callback (shared between
+ * routes verbatim) fires one `executeItemMutation` call.
  * Successes populate `results[i].item` with the `ProjectedItem`
- * via a side-map fold; failures land in `results[i].error: {code, message}`
- * via `dispatchSequential`'s built-in error decoration.
- * `internal_error` codes re-throw as whole-call (M14 round-2
- * F1 precedent — schema-drift in the response MUST NOT be
- * papered over as a per-item failure).
+ * via a side-map fold; failures land in
+ * `results[i].error: {code, message}` via the dispatcher's
+ * built-in error decoration. `internal_error` codes re-throw
+ * as whole-call (M14 round-2 F1 precedent — schema-drift in
+ * the response MUST NOT be papered over as a per-item failure).
  *
  * **`data.summary.failed_count` invariant.** The action body
  * derives `failed_count` from the result records
@@ -334,8 +335,8 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *
  *   1. Loop {@link dispatchSequential} (default / M25 path) OR
  *      {@link dispatchParallel} (v0.4-M30 `--concurrency > 1`
- *      path; runtime body lands at IMPL) over `matchedItemIds`
- *      with id-field `'item_id'`.
+ *      path; runtime body landed at M30 IMPL) over
+ *      `matchedItemIds` with id-field `'item_id'`.
  *   2. Per-item dispatch callback fires
  *      {@link executeItemMutation} against the resolved
  *      `SelectedMutation`. On a {@link MondayCliError} catch,
@@ -354,8 +355,8 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *      map keyed by `item_id`.
  *   4. After the loop, walk the result rows (from whichever
  *      dispatcher fired — `dispatchSequential` by default;
- *      {@link dispatchParallel} when `concurrency > 1` at M30
- *      IMPL) and fold the per-item `ProjectedItem` from the side
+ *      {@link dispatchParallel} when `concurrency > 1`) and
+ *      fold the per-item `ProjectedItem` from the side
  *      map into each `results[i].item` slot via
  *      {@link foldPartialSuccessBulkResult}. Failure records
  *      already carry `error: {code, message}` (with the

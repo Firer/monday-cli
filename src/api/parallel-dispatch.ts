@@ -35,11 +35,12 @@
  *      timing (e.g., asserting "no more than N promises ever
  *      in-flight at any tick") is cleaner at the helper's seam
  *      than against the action body's branched control flow.
- *   3. **Stub-then-IMPL cadence.** Pre-flight shipped the type
- *      surface + the stubbed body under `c8 ignore start/stop`;
- *      IMPL ships the runtime body (this commit) + the
- *      integration tests against `FixtureTransport` cassettes
- *      that exercise the parallel dispatch matrix.
+ *   3. **Stub-then-IMPL cadence.** Pre-flight (cluster
+ *      `8cfd96b..0ca9418`) shipped the type surface + the
+ *      stubbed body under `c8 ignore start/stop`; IMPL
+ *      (`8faf20e`) landed the runtime body + the integration
+ *      tests against `FixtureTransport` cassettes that exercise
+ *      the parallel dispatch matrix.
  *
  * **What stays at the caller layer.** Argv parse, column
  * resolution, items_page walk, confirmation gate, dry-run path,
@@ -63,10 +64,10 @@
  */
 
 import { MondayCliError } from '../utils/errors.js';
-import {
-  signalReason,
-  type PartialSuccessResult,
-  type DispatchOneTargetInputs,
+import { extractSignalReason } from '../utils/signal.js';
+import type {
+  PartialSuccessResult,
+  DispatchOneTargetInputs,
 } from './partial-success-mutation.js';
 
 /**
@@ -119,15 +120,18 @@ export const DEFAULT_CONCURRENCY = 1;
  *   2. **`internal_error` re-throw escape hatch** — if a per-
  *      target dispatch throws `MondayCliError` with `code ===
  *      'internal_error'`, the helper re-throws whole-call
- *      (aborts in-flight + propagates) so schema-drift surfaces
- *      as top-level `ok: false` (M14 round-2 F1 / round-3 F1
- *      precedent at `src/api/partial-success-mutation.ts:82`).
- *      Other in-flight calls' results are NOT salvaged — the
- *      contract is "whole-call failure on internal_error" so a
- *      partial `data.results[]` would be misleading. The pool
- *      sets an internal `aborted` flag so workers stop pulling
- *      new targets; Promise.all rejection surfaces the original
- *      error to the caller.
+ *      (aborts the pool/scheduler and propagates) so schema-
+ *      drift surfaces as top-level `ok: false` (M14 round-2 F1 /
+ *      round-3 F1 precedent at
+ *      `src/api/partial-success-mutation.ts`'s
+ *      `dispatchSequential`). Other in-flight calls' results
+ *      are NOT salvaged — the contract is "whole-call failure
+ *      on internal_error" so a partial `data.results[]` would
+ *      be misleading. The pool sets an internal `aborted` flag
+ *      so workers stop pulling new targets; in-flight dispatches
+ *      complete on their own in the background but their writes
+ *      never reach the caller because `Promise.all` rejection
+ *      surfaces the original error first.
  *   3. **Non-`MondayCliError` re-throw** — programmer-bug
  *      exceptions (TypeError, RangeError, etc.) propagate
  *      whole-call via the same path as the
@@ -146,8 +150,9 @@ export const DEFAULT_CONCURRENCY = 1;
  *   6. **AbortSignal threading.** The optional `signal`
  *      parameter is checked at every worker-loop iteration top.
  *      When `signal.aborted` becomes true, the worker re-throws
- *      `signal.reason` (via {@link signalReason}); the `aborted`
- *      flag stops other workers from scheduling NEW dispatches.
+ *      `signal.reason` (via `extractSignalReason` from
+ *      `src/utils/signal.ts`); the `aborted` flag stops other
+ *      workers from scheduling NEW dispatches.
  *      In-flight wire calls abort via the existing
  *      `MondayClient.signal` configured at construction time
  *      (the client threads its signal into every fetch) — the
@@ -196,7 +201,7 @@ export const dispatchParallel = async <TargetId extends string>(
       }
       if (signal?.aborted === true) {
         aborted = true;
-        throw signalReason(signal);
+        throw extractSignalReason(signal);
       }
       const i = cursor;
       cursor += 1;

@@ -20,6 +20,7 @@
  * reads `data.results` to determine outcomes.
  */
 import { MondayCliError } from '../utils/errors.js';
+import { extractSignalReason } from '../utils/signal.js';
 
 /** A per-target result inside `data.results: [...]`. */
 export interface PartialSuccessResult {
@@ -65,22 +66,6 @@ export interface DispatchOneTargetInputs<TargetId extends string> {
   readonly targetId: TargetId;
 }
 
-/**
- * Extracts the `signal.reason` as an `Error` for re-throw at
- * dispatcher abort boundaries. Mirrors `src/api/retry.ts:
- * signalAbortError` + `src/api/item-watch.ts:sleepWithSignal`'s
- * pattern (read `signal.reason`; if it's an `Error`, return it
- * directly; otherwise wrap a fresh `Error('aborted')`). Shared
- * between `dispatchSequential` (this module) and `dispatchParallel`
- * (`src/api/parallel-dispatch.ts`) so both routes surface the same
- * abort error shape — preserves the R-NEW-28 6-axis behavioural
- * equivalence at axis 6.
- */
-export const signalReason = (signal: AbortSignal): Error => {
-  const reason: unknown = signal.reason;
-  return reason instanceof Error ? reason : new Error('aborted');
-};
-
 export const dispatchSequential = async <TargetId extends string>(
   targets: readonly TargetId[],
   idField: string,
@@ -90,7 +75,7 @@ export const dispatchSequential = async <TargetId extends string>(
   const results: PartialSuccessResult[] = [];
   for (const targetId of targets) {
     if (signal?.aborted === true) {
-      throw signalReason(signal);
+      throw extractSignalReason(signal);
     }
     try {
       await dispatch({ targetId });

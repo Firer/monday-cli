@@ -32,9 +32,9 @@ import {
 } from '../../../src/api/parallel-dispatch.js';
 import {
   dispatchSequential,
-  signalReason,
   type DispatchOneTargetInputs,
 } from '../../../src/api/partial-success-mutation.js';
+import { extractSignalReason } from '../../../src/utils/signal.js';
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -309,18 +309,18 @@ describe('dispatchSequential — M30 optional signal threading', () => {
   });
 });
 
-describe('signalReason helper', () => {
+describe('extractSignalReason helper', () => {
   it('returns the signal.reason directly when it is an Error', () => {
     const controller = new AbortController();
     const cause = new UsageError('explicit reason');
     controller.abort(cause);
-    expect(signalReason(controller.signal)).toBe(cause);
+    expect(extractSignalReason(controller.signal)).toBe(cause);
   });
 
   it('wraps non-Error reasons in a fresh Error("aborted")', () => {
     const controller = new AbortController();
     controller.abort('a string reason'); // bare string, not Error
-    const wrapped = signalReason(controller.signal);
+    const wrapped = extractSignalReason(controller.signal);
     expect(wrapped).toBeInstanceOf(Error);
     expect(wrapped.message).toBe('aborted');
   });

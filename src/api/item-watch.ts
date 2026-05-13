@@ -80,6 +80,7 @@
 import { z } from 'zod';
 import { ApiError, UsageError } from '../utils/errors.js';
 import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { extractSignalReason } from '../utils/signal.js';
 import type { ErrorCode } from '../utils/errors.js';
 import type { MondayClient } from './client.js';
 import type { ItemId } from '../types/ids.js';
@@ -419,8 +420,7 @@ const sleepWithSignal = (ms: number, signal: AbortSignal): Promise<void> =>
     // checks `signal.aborted` after every await; production-only.
     /* c8 ignore start */
     if (signal.aborted) {
-      const reason: unknown = signal.reason;
-      reject(reason instanceof Error ? reason : new Error('aborted'));
+      reject(extractSignalReason(signal));
       return;
     }
     /* c8 ignore stop */
@@ -430,8 +430,7 @@ const sleepWithSignal = (ms: number, signal: AbortSignal): Promise<void> =>
     }, ms);
     const onAbort = (): void => {
       clearTimeout(timer);
-      const reason: unknown = signal.reason;
-      reject(reason instanceof Error ? reason : new Error('aborted'));
+      reject(extractSignalReason(signal));
     };
     signal.addEventListener('abort', onAbort, { once: true });
   });
