@@ -11,9 +11,31 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M28 pre-flight closed; M28 IMPL = release prep
-+ 0.3.0 tag.** M28 pre-flight rejected Decisions 10 +
-11 on empirical grounds — multi-level subitem creation
+**v0.3.0 ready for publish — pending user push
+authorization + `npm publish`.** M28 IMPL shipped
+end-to-end across 5 release-prep commits this session
+(`d9ad757` CHANGELOG + `e7459c2` envelope-snapshot
+refresh + `f2600fa` ToC audit + stale-`deferred_to`
+slip-to-v0.4 + `4fddc38` README v0.3 quickstart +
+`1a87087` version bump 0.2.0 → 0.3.0) + the annotated
+`v0.3.0` git tag pointing at `1a87087`. **Local-only;
+nothing pushed to `origin/main` yet** (7 commits pending
+push since `e73ef21` — `8aeebad` + `914d154` from the
+M28 pre-flight session + this session's 5). v0.3.0
+ships **no breaking changes vs v0.2.0** — every v0.3
+surface is additive across M19–M28.
+**Pre-publish action items for the user** (each waits
+on explicit authorization):
+1. `git push origin main v0.3.0` (commits + annotated
+   tag together).
+2. `npm publish` from the post-push tree (the
+   `prepublishOnly` hook runs typecheck + lint + unit +
+   integration + build before the publish fires).
+3. Draft the GitHub release notes by pasting the
+   v0.3.0 entry from `CHANGELOG.md`.
+
+**M28 pre-flight rejected Decisions 10 + 11** on
+empirical grounds — multi-level subitem creation
 deferred out of v0.3 scope. Empirical probe
 (`scripts/probe/m28-multi-level-subitem.ts` +
 `scripts/probe/m28-depth-triangulate.ts`, 2026-05-13,
@@ -33,10 +55,29 @@ subitems remain first-class** via the existing M9
 carve-in: `item create --parent <iid>`, `item subitems
 <iid>`, and all standard item verbs (`item get/update/
 set/clear/move/archive/delete/duplicate/history`)
-operate uniformly on subitems. **M28 ships
-release-prep only** at the next session: snapshot
-refresh, output-shapes.md ToC audit, README quickstart,
-CHANGELOG 0.3.0 entry, version bump.
+operate uniformly on subitems.
+
+**M28 IMPL audit finding — stale `deferred_to: "v0.3"`
+in two production surfaces, slipped to `v0.4`.** Two
+sites pointed at the version being released (would
+have told v0.3.0 agents to "wait for v0.3"): (a)
+`src/commands/item/create.ts` multi-level subitem
+rejection's `details.deferred_to` + matching
+integration test pin in
+`tests/integration/commands/item-create.test.ts`; (b)
+cross-board `item move` value-overrides doc note in
+`docs/cli-design.md` + `docs/output-shapes.md` (was
+v0.3-targeted at M11 close; no v0.3 milestone picked
+up the extension — Monday's `ColumnMappingInput`
+carries no value slot). Both flipped to `v0.4` at
+`f2600fa`; CHANGELOG 0.3.0 entry surfaces the
+`deferred_to` value change to agents that key off the
+slot. The `time_tracking` + `v0_2_writer_expansion`
+categories' `deferred_to: "v0.3"` references stay —
+both semantically correct (`time_tracking` verb pair
+landed at M20; `v0_2_writer_expansion` is
+documented-dead-code post-M19's
+`V0_2_WRITER_EXPANSION_TYPES = []`).
 **`monday auth login` deferred indefinitely.**
 `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` stay as
 `<UNREGISTERED_PENDING_OAUTH_APP>` placeholders in
@@ -255,37 +296,32 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M28 pre-flight close):**
-- Test count: **3225** across 130 files (+1 net at M28
-  pre-flight — one new integration test at
-  `tests/integration/commands/auth.test.ts` covering the
-  placeholder-guard branch when `__test_oauth_helper` is
-  unset + `OAUTH_CLIENT_ID` is still the placeholder).
-- Coverage: **99.08 / 95.92 / 99.29 / 99.31** (stmts / branches
+**Live numbers (v0.3.0 ready for publish):**
+- Test count: **3243** across 130 files (+18 net at M28 IMPL —
+  18 new envelope-shape snapshots covering account tags / item
+  time-track / auth login placeholder guard / monday status /
+  monday usage / board favorites / item history / item update
+  --continue-on-error / webhook / notification surfaces, all in
+  `tests/integration/envelope-snapshots.test.ts`).
+- Coverage: **99.08 / 95.97 / 99.29 / 99.31** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.47pp** (was 0.43pp at M27 pre-flight;
-  +0.04pp recovery — runtime bodies replaced previously-c8-
-  ignored stubs, contributing covered branches that net
-  positive against the IMPL-added denominator). Three deferred
-  file-level gaps still: `item/search.ts` 88.23%, `errors.ts`
-  ~95.37%, `dry-run.ts` 96.26% — same set as pre-M26a
-  (genuinely defensive or requires new cross-board
-  integration test). **v8 instrumentation glitch on
-  `dev-conventions.ts`** (M26b carry-over) did NOT spread to
-  the 6 new M27 modules — `coverage/lcov.info` shows full
-  FNF/FNH parity on `src/api/{webhooks,notifications}.ts` +
-  the 4 verb modules. Investigate at M28 release-prep only if
-  the glitch spreads.
-- ERROR_CODES count: **29** (unchanged at M27 IMPL — M27
-  routes webhook + notification runtime failures through the
-  existing `not_found` (target missing / `Project` invisible),
-  `usage_error` (unknown event-type / malformed URL / malformed
-  --config JSON / non-numeric --target ID), `unauthorized`
-  (token lacks webhook-management or notification scope),
-  `forbidden` (account permissions), `validation_failed`
-  (Monday-side rejection) codes).
-  Command count: **95** (unchanged from M27 pre-flight — IMPL
-  fills the 4 stub bodies; commands don't add/remove).
+  **Branches margin 0.52pp** (was 0.47pp at M28 pre-flight;
+  +0.05pp recovery — snapshot-refresh adds covered branches
+  net positive against denominator). Three deferred file-level
+  gaps still: `item/search.ts` 88.23%, `errors.ts` ~95.37%,
+  `dry-run.ts` 96.26% — deliberately not addressed at M28
+  (each requires either new cross-board integration tests or
+  defensive `c8 ignore` wraps; tackling them is bounded
+  follow-up work for v0.3.x / v0.4). **v8 instrumentation
+  glitch on `dev-conventions.ts`** unchanged at M28 — still
+  isolated, doesn't drag global percentages below floor.
+- ERROR_CODES count: **29** (unchanged at M28 IMPL — release
+  prep adds no new codes; the `oauth_unregistered` value lives
+  under `usage_error.details.reason`, not as a top-level code).
+  Command count: **95** (unchanged from M28 pre-flight —
+  release prep adds no verbs).
+- `package.json` version: **0.3.0** (bumped at `1a87087`).
+- `v0.3.0` annotated tag exists locally; **NOT pushed**.
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -308,40 +344,23 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **M28 IMPL — 0.3.0 release prep.** M28 pre-flight
-   closed this session: Decisions 10 + 11 rejected on
-   empirical grounds (multi-level subitems deferred out
-   of v0.3 — Monday's `sub_items_board` data model has
-   no `subtasks` column at API `2026-01`, so depth-2
-   has no home). M28 IMPL ships pure release-prep:
-   - Refresh the envelope-snapshot suite for v0.3
-     surfaces (~30+ new snapshots covering M19–M27 +
-     the M28 placeholder-guard branch).
-   - `docs/output-shapes.md` ToC audit (cross-check
-     against current command count + section headings).
-   - README quickstart updates (cover `monday auth`'s
-     placeholder-guard behaviour: "OAuth is deferred;
-     authenticate via `MONDAY_API_TOKEN`").
-   - CHANGELOG `0.3.0` entry — one paragraph per
-     milestone M19–M28; lead with the binding contract
-     surfaces (commands, error codes, envelope shape)
-     not the implementation details.
-   - Version bump to `0.3.0` in `package.json`.
-   - Optional clean-up of the three remaining branch-
-     coverage gaps (`item/search.ts` 88.23%,
-     `errors.ts` ~95.37%, `dry-run.ts` 96.26%) if
-     session budget allows.
-   - Final gate: `npm run typecheck && npm run lint &&
-     npm test`. Tag `v0.3.0`. Push to origin only with
-     explicit user confirmation.
-   **No new contract surface, no new commands, no new
-   ERROR_CODES.** Multi-level subitems re-evaluates in
-   v0.3.x or v0.4 contingent on Monday surfacing the
-   `subtasks` column on `sub_items_board` (re-run the
+1. **v0.3.0 publish** — externally-blocked on user
+   authorization for the three publish actions listed in the
+   Status block (`git push origin main v0.3.0` + `npm publish`
+   + GitHub release notes). Each waits on explicit "go". The
+   `prepublishOnly` hook is wired (typecheck + lint + unit +
+   integration + build) so the publish itself self-gates.
+2. **v0.4 planning kickoff** — once the v0.3.0 publish lands,
+   open `docs/v0.4-plan.md` from the §13 v0.4 roadmap items
+   (`monday item watch` polling cadence; `--concurrency` bulk
+   parallelism; asset upload `add_file_to_column`;
+   `doc list/get`; `team` create/manage; multi-level subitems
+   contingent on Monday surfacing `subtasks` on
+   `sub_items_board` — re-run
    `scripts/probe/m28-multi-level-subitem.ts` +
-   `m28-depth-triangulate.ts` probes to confirm before
-   reopening). OAuth login revisits if there's demand
-   beyond `MONDAY_API_TOKEN`.
+   `m28-depth-triangulate.ts` before reopening; OAuth
+   registration if user demand surfaces for the browser-based
+   path over `MONDAY_API_TOKEN`).
 2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
