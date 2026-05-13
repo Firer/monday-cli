@@ -11,6 +11,22 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
+**v0.4 planning kickoff landed.** `docs/v0.4-plan.md` opened with §1
+scope + §2 pre-flight inventory (what v0.4 inherits from M0–M28) +
+§3 opener + §3 M29 entry. **M29 = `monday item watch <iid>`** —
+polling-based event stream over the M24 `item-history-projection.ts`
+projector; closes the cli-design §14.4 open question on polling
+cadence + circuit-breaker shape. Picked as the v0.4 first milestone
+on three grounds: smallest v0.4 surface, pre-trodden ground (reuses
+M24's projector verbatim), no dependency on later v0.4 candidates
+(`--concurrency`, asset upload, `doc`, `team`, completion). Next
+session opens the M29 pre-flight contract diff (stub modules in
+`src/api/`, ERROR_CODES widening if D1's circuit-breaker decision
+needs a new code, cli-design §4.3 + §13 + §14.4 closure, empirical-
+probe scripts for polling-burn calibration, Codex pre-flight review)
+— **do NOT combine planning kickoff and pre-flight contract diff in
+the same session** per the standing one-session-per-shape discipline.
+
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
 (`d9ad757` CHANGELOG + `e7459c2` envelope-snapshot
@@ -350,25 +366,33 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **v0.4 planning kickoff** — v0.3.0 release fully complete
-   (push + tag + GitHub release + npm publish all landed).
-   Open `docs/v0.4-plan.md` from the §13 v0.4 roadmap items
-   (`monday item watch` polling cadence; `--concurrency` bulk
-   parallelism; asset upload `add_file_to_column`;
-   `doc list/get`; `team` create/manage; multi-level subitems
-   contingent on Monday surfacing `subtasks` on
-   `sub_items_board` — re-run
-   `scripts/probe/m28-multi-level-subitem.ts` +
-   `m28-depth-triangulate.ts` before reopening; OAuth
-   registration if user demand surfaces for the browser-based
-   path over `MONDAY_API_TOKEN`). Mirror v0.3-plan.md's
-   structure: §1 + §2 scope + §3 first-milestone entry with
-   Goal / Scope / Decisions / Empirical-probe-first / Pre-
-   flight contract diff / Exit criteria. **Do NOT start the
-   M29 pre-flight contract diff in the same session** — the
-   plan-doc skeleton + first-milestone §3 entry is one
-   session's worth on its own.
-3. **v8 instrumentation glitch on `dev-conventions.ts`.**
+1. **M29 pre-flight contract diff — `monday item watch <iid>`.**
+   The v0.4 planning kickoff opened `docs/v0.4-plan.md` with the
+   M29 entry naming five decisions (D1 polling cadence + circuit-
+   breaker shape; D2 `--once` vs `--max-events 1` semantics; D3
+   session-summary trailer schema; D4 multi-watcher concurrency
+   policy; D5 `--include` enum closure against M24's event-kind
+   taxonomy). Pre-flight session lands: (a) empirical probe
+   measuring Monday's complexity-budget burn per poll cadence —
+   `scripts/probe/m29-polling-burn.ts` against a known item with
+   a poll-every-N-seconds loop, pinned by the v0.3-M22/M23/M24/
+   M26a always-run-for-novel-API-surface convention; (b) stub
+   `src/api/item-watch.ts` module (polling-loop wrapper + circuit
+   breaker) under `c8 ignore` until M29 IMPL; (c) stub
+   `src/commands/item/watch.ts` command file wiring SIGINT
+   AbortController seam; (d) possible new ERROR_CODE
+   (`watch_circuit_broken`?) — closes at pre-flight per D1's
+   circuit-breaker decision (or reuses existing
+   `complexity_exceeded` / `rate_limited` / `concurrency_exceeded`
+   if no new code is needed); (e) cli-design §4.3 row +
+   §14.4 open-question closure (separate pre-M29 contract-change
+   PR with its own Codex review per CLAUDE.md workflow rules);
+   (f) Codex pre-flight review per `.claude/templates/codex-pre-
+   flight-review.md` (W1 redactor + W2 operation-name parity audit
+   points both apply). **Do NOT combine pre-flight with the M29
+   IMPL feat commits in the same session** — pre-flight + IMPL
+   are separate sessions per the v0.3-M19-onward cadence.
+2. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+
    integration tests exercising the new helpers. M27 IMPL
@@ -380,7 +404,7 @@ path over `MONDAY_API_TOKEN`.
    becomes systematic; currently the file-level lcov gap
    doesn't drag the global percentages below floor so it's
    cosmetic).
-4. **`monday usage` timezone semantics verification** — M22
+3. **`monday usage` timezone semantics verification** — M22
    shipped with UTC `YYYY-MM-DD` as the `today` key derived from
    `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
    captured an empty `by_day` list so the timezone pin remains
@@ -389,7 +413,7 @@ path over `MONDAY_API_TOKEN`.
    account with live usage activity. If Monday's runtime `day`
    field turns out to be account-local, amend cli-design §11.5.3
    + flip `formatTodayKey` in `src/commands/usage.ts`.
-5. **OAuth — deferred indefinitely.** No longer a
+4. **OAuth — deferred indefinitely.** No longer a
    pre-publish blocker. `OAUTH_CLIENT_ID` /
    `OAUTH_CLIENT_SECRET` placeholders + the M28 pre-flight
    placeholder guard in `auth/login.ts` together produce a
@@ -878,20 +902,29 @@ This document is for the **current live state + non-obvious
 discipline pointers**. For shipped milestone detail, read the
 plan-doc post-mortems.
 
-The three binding documents — read in this order before writing code:
+The binding documents — read in this order before writing code:
 
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list, every binding decision. Changes land via PRs that
    argue for the change, not by drift.
-2. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — active plan:
-   milestones M19–M28 with deliverables, exit criteria, decisions log,
-   per-milestone post-mortems land at milestone close.
-3. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped foundations
+2. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — active plan:
+   M29 (`item watch`) entered at planning kickoff; subsequent v0.4
+   milestones (`--concurrency` bulk parallelism, asset upload,
+   `doc list/get`, `team` writers, shell completion, release prep)
+   sequenced into §3 as their pre-flights run. Per-milestone
+   post-mortems land at milestone close.
+3. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped foundations
+   M19–M28 with per-milestone post-mortems (§11–§21) + the v0.3
+   R-class refactor backlog (§22, R-NEW-1 through R-NEW-43).
+   Reference for patterns v0.4 milestones build on (cross-board
+   reads, partial-success bulk, outbound writes, multi-profile auth,
+   Monday Dev convention).
+4. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped foundations
    M8–M18 with per-milestone post-mortems (M8/M9/M10/M11/M12 +
    M13–M18 + R-class refactor backlogs R20–R53). Reference for
-   patterns v0.3 milestones build on.
-4. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
+   patterns v0.3 milestones built on.
+5. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped foundations
    M0–M7 with M2.5 refactor pass and the M5a/M5b split. Reference for
    the foundational patterns every later milestone builds on.
 
