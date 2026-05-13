@@ -11,118 +11,146 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M30 pre-flight landed end-to-end; M30 IMPL is next.**
-Four-commit pre-flight cluster on top of the M29 close base:
-`8cfd96b` contract diff (`docs(m30-preflight)`: stub module
-`src/api/parallel-dispatch.ts` with `dispatchParallel` + the
-three `MIN_CONCURRENCY` / `MAX_CONCURRENCY` /
-`DEFAULT_CONCURRENCY` constants under `/* c8 ignore start/stop */`
-block-wraps; `concurrency` input slot threaded through
-`RunPartialSuccessBulkUpdateInputs`; per-target dispatch closure
-hoisted to a named `perTargetDispatch` local + shared between
-the sequential default and the parallel arm; routing branch in
-`partial-success-bulk.ts` selects `dispatchSequential` for
-`concurrency === undefined || concurrency === 1` and
-`dispatchParallel` for `concurrency > 1` — the parallel arm
-c8-ignored at pre-flight because the stub throws
-`internal_error` with `details.deferred_to: "v0.4-M30 IMPL"`;
-`item update` argv slot + `validateInputShape` combination-rule
-rejections for single-item and bulk-without-`--continue-on-
-error`; cli-design §4.3 row updated + §6.4 "Bulk per-item
-partial-success — Parallel dispatch" sub-paragraph appended +
-§9.3 deferred-block flipped; v0.4-plan §3 M30 entry + §8 D1–D5
-closures + §9 M30 preconditions checklist; output-shapes.md
-heading + ToC; 17 schema-level argv unit tests at the new
-`tests/unit/commands/item-update-argv.test.ts` + 4 combination-
-rule rejection integration tests appended to the existing
-`tests/integration/commands/item-update-bulk.test.ts`) + three
-Codex pre-flight review fix-ups (`be8b983` round-1: 0 P1 + 0 P2
-+ 3 P3 — v0.4-plan §1/§2 prose refresh against the closed M30
-scope, 6-site routing-shape sweep across module docstrings +
-output-shapes + the test cluster comment, `<sha>` placeholder
-filled in; `32d862d` round-2: 0 P1 + 0 P2 + 3 P3 — residual
-`dispatchConcurrent` reference in §1 swept to `dispatchParallel`,
-five "argv-parse time" combination-rule sites swept to
-"validateInputShape" / "before any network call" to match the
-actual two-layer parse + shape-validation discipline, stub-body
-comment corrected from "throws synchronously" to "returns a
-rejected Promise from a non-async body"; `0ca9418` round-3: 0
-P1 + 0 P2 + 1 P3 — cli-design §6.4 "R-NEW-28 6-axis" sentence
-listed the wrong audit axes, swept to match
-`dispatchParallel`'s actual six axes per-target error code +
-`internal_error` re-throw + non-`MondayCliError` re-throw +
-empty-input no-dispatch + input-order preservation +
-AbortSignal threading). 3-round prose convergence matches the
-v0.4-M29 IMPL cadence; pre-flight contract shape pinned
-correctly across all three rounds (no P1 / P2 surfaced — only
-P3 prose drift between cli-design + v0.4-plan + module
-docstrings).
+**v0.4-M30 IMPL landed end-to-end; next v0.4 milestone TBD.**
+Six-commit IMPL cluster on top of the M30 pre-flight base:
+`8faf20e` (`feat(m30): land --concurrency runtime body —
+bounded async-pool + AbortSignal threading`) — replaces the
+`dispatchParallel` stub with a runtime body, drops the
+`c8 ignore` on the parallel-route arm in
+`src/api/partial-success-bulk.ts`, threads `signal?:
+AbortSignal` on both dispatchers, lands 18 unit tests + 6
+integration tests; followed by five Codex impl-review fix-up
+commits (`dbcf67d` round-1: 0 P1 + 0 P2 + 3 P3 — `signalReason`
+lift to `src/utils/signal.ts:extractSignalReason` (R-NEW-55)
++ axis-2 JSDoc reword + pre-IMPL tense flip; `71ab6be`
+round-2: 0 P1 + 0 P2 + 1 P3 — lift-site JSDoc described the
+pre-lift state; `05c25bf` round-3: 0 P1 + 0 P2 + 2 P3 —
+4 `dispatchSequential`-only doc sites + 3 missing
+integration tests (N=8 smoke + `concurrency_exceeded` retry +
+SIGINT mid-dispatch); `58e9fd5` round-4: 0 P1 + 0 P2 + 3 P3
+— 6 MORE `dispatchSequential`-only sites + N=8 assertion
+strengthening + SIGINT stdout-empty assertion; `a05585b`
+round-5: 0 P1 + 0 P2 + 1 P3 — cli-design §6.4's contract-
+prose sweep to "selected dispatcher" framing). **5-round IMPL
+convergence matches the v0.3-M27 W8 cadence**, not the
+v0.3-M25 1-round cadence — driven by one prose-drift class
+("dispatchSequential-only" framing) with many small sites
+across the spec + module docs + internal comments + test
+assertions; each round caught a new cluster. Runtime body
+was clean from round 1; all rounds 1-5 returned 0 P1 + 0 P2.
 
 **M30 highlights.** Smallest non-trivial v0.4 surface — extends
-the v0.3-M25 partial-success-bulk path with one new argv flag.
+the v0.3-M25 partial-success-bulk path (`monday item update
+--where ... --continue-on-error`) with one new argv flag.
 Envelope shape **byte-equivalent** to M25 (`data.results[]`
 per-item records + `data.summary.{matched,applied,failed}_count`
 slot + `ok: true` universal-partial-success rule unchanged).
-**Three constraints pinned at pre-flight** (D1–D5):
+**Five constraints pinned at pre-flight + held at IMPL** (D1–D5):
 `--concurrency` ranges `[1, 32]` with default `1` (sequential,
-empirical probe at 2026-05-13 / API `2026-01` observed cap >
-100 in-flight for trivial reads, so `32` carries substantial
-headroom under any plausible plan-tier cap); REQUIRES
-`--continue-on-error` (rejected with `usage_error` on the
-fail-fast bulk path — no defined "abort N in-flight" semantic;
+byte-equivalent to M25); REQUIRES `--continue-on-error`
+(rejected with `usage_error` on the fail-fast bulk path;
 parallel fail-fast deferred indefinitely); rejected on the
-single-item shape at `validateInputShape` time. Implementation
-strategy pinned: bounded async-pool (not `Promise.all` on the
-full batch); per-target dispatch closure shared with the
-sequential path verbatim so the R-NEW-28 6-axis behavioral-
-equivalence audit is straightforward at impl-review. **No new
-ERROR_CODE** — `concurrency_exceeded` lives in the 29-code
-registry already; Monday's signal retries through the existing
-`src/api/retry.ts` layer per cli-design §2.5.
+single-item shape at `validateInputShape` time; bounded
+async-pool dispatch strategy (NOT `Promise.all` on the full
+batch); `concurrency_exceeded` inherits the existing
+`src/api/retry.ts` layer (no M30-specific retry logic).
+Bounded async-pool implementation: N workers pull targets
+from a shared cursor and assign results by input index (NEVER
+push) so the result array preserves input order; cooperate
+on an `aborted` flag for whole-call re-throw (`internal_error`
+mirrors M14 round-2 F1 escape hatch; non-`MondayCliError`
+mirrors axis 3; abort propagation mirrors axis 6). Optional
+`signal?: AbortSignal` parameter on BOTH dispatchers
+(`dispatchSequential` + `dispatchParallel`) — the dispatcher-
+level signal is the pool scheduler short-circuit; in-flight
+wire calls abort via the existing `MondayClient.signal`
+configured at construction time. **No new ERROR_CODE** —
+`concurrency_exceeded` lives in the 29-code registry already.
 
-**Live numbers (M30 pre-flight close):**
-- Test count: **3320 + 1 skipped** across 133 files (+22 net
-  vs 3298 + 1 skipped M29-close baseline; 17 new argv unit
-  tests + 4 new combination-rule integration tests + 1 net
-  from existing-file edits).
-- Coverage: **99.23 / 96.22 / 99.39 / 99.52** unchanged from
-  M29 close against the **95 / 95.45 / 95 / 95** floor.
-  Branches margin **0.77pp** unchanged — the c8 ignore
-  block-wraps on `dispatchParallel`'s stub body + the
-  partial-success-bulk parallel arm keep the new branches
-  out of the denominator at pre-flight; M30 IMPL adds them
-  back when the c8 ignore drops + integration tests cover
-  the parallel route.
+**Live numbers (M30 IMPL close):**
+- Test count: **3347 + 1 skipped** across **134** test files
+  (+27 net vs 3320 + 1 skipped M30-pre-flight baseline; 18
+  new unit tests at `tests/unit/api/parallel-dispatch.test.ts`
+  + 9 new integration tests appended to
+  `tests/integration/commands/item-update-bulk.test.ts`).
+- Coverage: **99.23 / 96.23 / 99.39 / 99.52** (stmts /
+  branches / fns / lines) against the **95 / 95.45 / 95 / 95**
+  floor. Branches margin **0.78pp** (+0.01pp vs M30 pre-flight
+  close's 0.77pp) — the c8 ignore drop on the parallel arm
+  added new branches to the denominator; integration tests
+  cover them. **v8 instrumentation glitch** documented for
+  `dev-conventions.ts` has spread to `parallel-dispatch.ts` +
+  `partial-success-bulk.ts` + `partial-success-mutation.ts`
+  (none appear in the coverage table despite full test
+  coverage); cosmetic, global percentages hold above floor.
 - ERROR_CODES count: **29** (unchanged — `concurrency_exceeded`
   pre-existing per M2 retry-layer work).
 - Command count: **96** (unchanged — `--concurrency` is a
   flag extension on `monday item update --where`, not a
   new verb).
-- `package.json` version: **0.3.0** (stays here through
-  every v0.4 milestone; bumps to `0.4.0` at v0.4
-  release-prep).
+- `package.json` version: **0.3.0** (stays through v0.4
+  milestones; bumps to `0.4.0` at v0.4 release-prep).
 
-**Next session — M30 IMPL.** Runtime body of `dispatchParallel`
-lands the bounded async-pool implementation per D4 closure
-(maintain at most N in-flight; result array preserves input
-order via per-call index; per-target dispatch closure shared
-with the sequential path verbatim; AbortSignal threading
-added as a new slot on both routes). Drop the c8 ignore on
-the parallel-route arm in `partial-success-bulk.ts`. Add
-integration tests via `FixtureTransport` cassettes covering
-input-order preservation, concurrent failure landing
-per-record, `concurrency_exceeded` retry under load, SIGINT
-graceful abort, N=2/4/8/16 dispatch variants. Expected
-findings cadence per the M25/M27 precedent: 1-2 Codex impl
-review rounds; the R-NEW-28 6-axis audit returns clean if
-the per-target dispatch closure stays byte-identical between
-routes. **R-NEW-45 watch-item** (`sleepWithSignal` race-
-window-guarded sleep helper, 2 consumers at M29 close) may
-fire its 3-consumer trigger at M30 IMPL if the bounded
-async-pool's slot-recycling waits on a cancellable timer
-between in-flight completions — lift inline with the IMPL
-feat per the v0.4-plan §22 entry's R-NEW-29-precedent
-guidance.
+**R-class state (post-M30 IMPL close):**
+
+- **R-NEW-55 shipped** (Codex round-1 P3-1 fix at `dbcf67d`):
+  `signalReason` lift to `src/utils/signal.ts:
+  extractSignalReason`. Three consumers post-lift —
+  `dispatchSequential` / `dispatchParallel` /
+  `sleepWithSignal`. `src/api/retry.ts:signalAbortError`
+  stays inline due to its deliberate `name = 'AbortError'`
+  rename for DOMException-style branching (lift-site JSDoc
+  carries the carve-out paragraph). v0.4-plan §22 R-NEW-55
+  entry has full detail.
+- **R-NEW-45 stays at 2 consumers.** M30's bounded async-pool
+  doesn't use a cancellable timer between worker completions
+  (workers idle on `Promise.all` resolution), so the 3rd-
+  consumer trigger didn't fire.
+- **R-NEW-28** held cleanly across all 5 IMPL Codex rounds.
+  R-NEW-52 watch-item fired its **2nd consumer** at round-3
+  P3-1 (4 sites in `partial-success-bulk.ts` that documented
+  only `dispatchSequential`'s behaviour); stays at 2
+  consumers, fires at 3rd if another bulk verb extension
+  lands.
+- **R-NEW-51 / R-NEW-53 / R-NEW-54** stay at 1 consumer each.
+
+Per-milestone narrative + Codex round detail + lessons learned
+live in `docs/v0.4-plan.md` §12 (M30 post-mortem). Do not
+duplicate here.
+
+**Next session — likely scope:**
+1. **v0.4-M31 candidate selection.** The user picks the next
+   milestone based on incoming usage signal. Candidates per
+   v0.4-plan §3 ordering: asset upload (multipart
+   `add_file_to_column`); `doc list/get` (workdocs query
+   stability); `team` writers (analogous to M14
+   `workspace add-users`); shell completion (bash/zsh
+   completion scripts); release-prep (CHANGELOG + version
+   bump + npm publish for v0.4.0). M31 pre-flight runs in
+   the session after the candidate is picked.
+2. **`monday usage` timezone semantics verification** —
+   carried over from v0.3 close. M22 shipped with UTC
+   `YYYY-MM-DD` as the `today` key derived from
+   `ctx.clock().toISOString().slice(0, 10)`. Re-probe
+   `scripts/probe/m22-usage-by-day.ts` against an account
+   with live usage activity. If Monday's runtime `day` field
+   is account-local, amend cli-design §11.5.3 + flip
+   `formatTodayKey` in `src/commands/usage.ts`.
+3. **v8 instrumentation glitch.** Now spread to 3 more
+   modules at M30 IMPL (`parallel-dispatch.ts` +
+   `partial-success-bulk.ts` + `partial-success-mutation.ts`
+   join `dev-conventions.ts`'s pre-existing case). Cosmetic
+   — global percentages hold above floor — but worth
+   investigating at v0.4 release-prep before the next tag.
+   Workaround if it becomes systematic: `coverage.include`
+   overrides in `vitest.config.ts`.
+4. **OAuth — deferred indefinitely.** Unchanged from v0.3
+   close. `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET`
+   placeholders + the `auth/login.ts` placeholder guard
+   produce a clean `usage_error.details.reason:
+   oauth_unregistered` for users invoking `monday auth
+   login`; revisit only if user feedback shows clear demand
+   for the browser-based OAuth path.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
@@ -462,102 +490,9 @@ v0.3.x or v0.4 may register a canonical `monday-cli`
 OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
-**Next session — likely scope:**
-1. **v0.4-M30 IMPL — `--concurrency` runtime body.** Land the
-   bounded async-pool implementation in
-   `src/api/parallel-dispatch.ts:dispatchParallel`: maintain at
-   most N in-flight dispatches at any moment (NOT `Promise.all`
-   on the full batch); recycle slots as earlier completions
-   land; result array preserves input order via per-call index
-   keyed off the matched-item-IDs sequence. Drop the c8 ignore
-   on the parallel-route arm in `partial-success-bulk.ts` once
-   integration tests cover the route. AbortSignal threading
-   lands as a new slot on BOTH routes (sequential +
-   parallel) — SIGINT during in-flight parallel dispatch aborts
-   cleanly via `ctx.signal`, mirroring the M22 status + M29
-   watch pattern. Integration tests via `FixtureTransport`
-   cassettes: input-order preservation under late-completing
-   N=1 + early-completing N=K matrices; concurrent failure
-   landing per-record in `data.results[]` (NOT abort-on-first);
-   `concurrency_exceeded` retry under load (existing
-   `src/api/retry.ts` layer applies); SIGINT graceful abort;
-   N=2/4/8/16/32 dispatch variants. R-NEW-28 6-axis behavioral-
-   equivalence audit returns clean if the hoisted
-   `perTargetDispatch` closure stays byte-identical between
-   routes. **R-NEW-45 watch-item** (`sleepWithSignal` race-
-   window-guarded sleep helper, 2 consumers at M29 close) may
-   fire its 3-consumer trigger if the bounded async-pool's
-   slot-recycling waits on a cancellable timer between
-   in-flight completions — lift inline with the IMPL feat per
-   v0.4-plan §22's R-NEW-29 precedent. Expected impl-review
-   cadence per M25 (1 round) / M27 (4 rounds with prose
-   convergence) / M29 (3 rounds) — anticipate 1-3 rounds.
-2. **v8 instrumentation glitch on `dev-conventions.ts`.**
-   Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
-   `coverage/lcov.info` despite 15+ unit tests + 50+
-   integration tests exercising the new helpers. M27 IMPL
-   did NOT spread the glitch — all 6 new M27 modules show
-   full FNF/FNH parity in `coverage/lcov.info`. The glitch
-   remains isolated to `dev-conventions.ts`; investigate at
-   M28 release-prep before 0.3.0 tag (the workaround is
-   `coverage.include` overrides in `vitest.config.ts` if it
-   becomes systematic; currently the file-level lcov gap
-   doesn't drag the global percentages below floor so it's
-   cosmetic).
-3. **`monday usage` timezone semantics verification** — M22
-   shipped with UTC `YYYY-MM-DD` as the `today` key derived from
-   `ctx.clock().toISOString().slice(0, 10)`. The pre-flight probe
-   captured an empty `by_day` list so the timezone pin remains
-   inferred from the sibling `last_updated`'s `ISO8601DateTime`
-   scalar. Re-probe `scripts/probe/m22-usage-by-day.ts` against an
-   account with live usage activity. If Monday's runtime `day`
-   field turns out to be account-local, amend cli-design §11.5.3
-   + flip `formatTodayKey` in `src/commands/usage.ts`.
-4. **OAuth — deferred indefinitely.** No longer a
-   pre-publish blocker. `OAUTH_CLIENT_ID` /
-   `OAUTH_CLIENT_SECRET` placeholders + the M28 pre-flight
-   placeholder guard in `auth/login.ts` together produce a
-   clean `usage_error` for users who invoke `monday auth
-   login` in v0.3.0, pointing at `MONDAY_API_TOKEN` instead.
-   Revisit only if v0.3.x / v0.4 user feedback shows clear
-   demand for the browser-based OAuth path over the API-token
-   flow. If reopened, register a Monday OAuth app at
-   https://developer.monday.com/apps with redirect URI exactly
-   `http://127.0.0.1:9876/callback`, drop the placeholder
-   guard, and swap the constants. Until then the M21
-   infrastructure stays dormant in source.
-
-**R-class state (post-M30 pre-flight close):**
-
-NEW candidates surfaced at M30 pre-flight (v0.4-plan §22
-R-NEW-51..R-NEW-54; all watch-items pending 2nd / 3rd
-consumer):
-
-- **R-NEW-51 (LOW)** — `perTargetDispatch` hoisted closure for
-  route-sharing (1 consumer at M30 pre-flight; canonical
-  mechanism for R-NEW-28 6-axis behavioral-equivalence claim).
-  Fires at 2nd parallel-route variant.
-- **R-NEW-52 (MEDIUM)** — R-NEW-28 6-axis audit canonical
-  source-of-truth drift (1 consumer at M30 pre-flight; caught
-  at Codex round 3 as cli-design §6.4 listed wrong axes).
-  Lift to a typed `BEHAVIORAL_EQUIVALENCE_AXES` constant in
-  `parallel-dispatch.ts` OR bake into Codex pre-flight review
-  template alongside W1 / W2. Higher priority than the other
-  M30 candidates because the drift caused a real round-3
-  finding.
-- **R-NEW-53 (LOW)** — `c8 ignore start/stop` inside an
-  if-else arm (1 consumer at M30 pre-flight; testing.md
-  fold-in candidate). Novel variant of the c8 ignore
-  block-wrap pattern. Fires at 2nd consumer.
-- **R-NEW-54 (LOW)** — Schema-side argv parse vs
-  `validateInputShape` combination-rule layering (1 consumer
-  at M30 pre-flight; documentation discipline pattern; Codex
-  round 2 caught five prose-drift sites). Fires at 3rd
-  prose-drift repetition.
-
 R-class entries shipped through v0.3-M27 + carried into v0.4
-(unchanged at M30 pre-flight — no shipped lifts at pre-flight;
-runtime body extensions land at M30 IMPL):
+(v0.4-M30 IMPL added R-NEW-55 — see "R-class state" above;
+historical entries below stay unchanged):
 
 - **R-NEW-35 — `_shared.ts:requireDevBoard` slot-check helper
   (10 consumers at M26b).** Per-noun
