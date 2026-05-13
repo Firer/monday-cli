@@ -47,29 +47,46 @@ Requires **Node.js ≥ 22**.
 ```bash
 # 1. Set your Monday API token (admin or member; guests can't mint one).
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
+#
+#    OAuth login (`monday auth login`) is registered but deferred in
+#    v0.3.0 — the verb surfaces a clear `usage_error.details.reason:
+#    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
-# 2. Smoke test
+# 2. Smoke test — confirm the token works.
 monday account whoami --json
 
-# 3. List a board's items (replace 12345 with your board ID)
+# 3. Is everything wired up? (v0.3 diagnostics cluster)
+monday status --json                    # 7-probe DNS/TCP/TLS/auth/cache matrix
+monday usage --json                     # remaining daily Monday API operations
+
+# 4. List a board's items (replace 12345 with your board ID)
 monday item list --board 12345 --json
 
-# 4. File a new task (v0.2)
+# 5. File a new task (v0.2)
 monday item create --board 12345 --name "Refactor login" \
   --set status=Backlog --set 'Due date'=+1w --json
 
-# 5. Find-or-create with idempotent matching (v0.2)
+# 6. Find-or-create with idempotent matching (v0.2)
 #    Re-running with the same args is safe — 0/1/2+ matches route to
-#    create / update / `ambiguous_match` (the 27th stable error code).
+#    create / update / `ambiguous_match` (one of the 29 stable error codes).
 monday item upsert --board 12345 --name "Refactor login" \
   --match-by name --set status='Working on it' --json
 
-# 6. Move a ticket forward
+# 7. Move a ticket forward, then comment on it
 monday item set 67890 status=Done --json
-
-# 7. Comment on it
 monday update create 67890 --body "Shipped in PR #1234" --json
+
+# 8. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
+#    First-time setup auto-detects boards by Monday's stock template names.
+monday dev discover --apply --json      # writes ~/.monday-cli/config.toml
+monday dev sprint current --json        # the active sprint
+monday dev task list --mine --json      # my open tasks
+
+# 9. Outbound writes (v0.3 — webhooks + notifications)
+monday webhook list 12345 --json
+monday notification send --user 7 --target 67890 \
+  --target-type item --text "PTAL" --json
 ```
 
 ## Usage
@@ -135,7 +152,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.2.0",
+    "cli_version": "0.3.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -235,13 +252,36 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.2.0 (published — first npm release as `monday-cli`):**
+**v0.3.0 (current — `monday-cli@0.3.0` on npm):**
+the v0.2 mutating core PLUS the Monday Dev convention layer
+(`monday dev` namespace — sprint / epic / release / task workflow
+shortcuts on top of standard board CRUD), multi-profile auth
+(`monday auth login/logout --profile <name>` + `~/.monday-cli/
+config.toml`), diagnostics (`monday status` + `monday usage`),
+cross-board `monday item search` + `monday board favorites`,
+per-item history (`monday item history <iid>`), partial-success
+bulk updates (`monday item update --where ... --continue-on-error`),
+outbound writes (`monday webhook list/create/delete` +
+`monday notification send`), and three new writable column types
+(`tags`, `board_relation`, `dependency`) closing the v0.2
+tentative-row carryover. **No breaking changes vs v0.2.0** — every
+v0.3 surface is additive. Built incrementally across M19–M28.
+See [CHANGELOG.md](./CHANGELOG.md) for the full per-milestone
+release notes.
+
+**OAuth deferral.** `monday auth login` is registered but the
+canonical Monday OAuth app is not registered in v0.3.0; the verb
+surfaces a clear `usage_error.details.reason: oauth_unregistered`
+pointing at `MONDAY_API_TOKEN`. Multi-profile config + per-profile
+credentials cache work fully against API tokens; OAuth registration
+revisits in v0.3.x / v0.4 contingent on user demand.
+
+**v0.2.0 (the previous release):**
 the v0.1 read-only core + safe-mutations surface PLUS the full
 mutation surface (item lifecycle, update mutations, workspace
 lifecycle, board lifecycle, board columns + groups). Built
 incrementally across M8–M18; one breaking change vs v0.1 (see
 [CHANGELOG.md](./CHANGELOG.md) for the full upgrade guide).
-`npm install -g monday-cli` pulls the published artifact.
 
 **v0.1.0 (git tag, foundation milestone — not published to npm
 under the `monday-cli` name):** read-only core (account, workspace,
@@ -373,79 +413,61 @@ row `tags`, `board_relation`, `dependency`.
   audit, README quickstart with `item create` + `item upsert`
   examples, this CHANGELOG, and the version bump to `0.2.0`.
 
-**v0.3 in progress.** **M19 closed** — `tags`, `board_relation`,
-`dependency` friendly translators (slipped from v0.2 tentative at
-M18 close per cli-design §13 + §5.3) graduated; `monday account
-tags` read verb shipped (closes the §6.5 `tag_not_found.details
-.hint` forward-reference). **M20 closed (documentation-only)**
-— `monday item time-track start <iid>` / `... stop <iid>` are
-registered for forward-compatibility but reject today with
-`usage_error`: an empirical probe (2026-05-10, against API version
-`2026-01`) confirmed Monday's public API does not currently
-support time-tracking column writes (`change_simple_column_value`
-+ `change_column_value` both reject; the mutation root has zero
-time-tracking-related mutations). When Monday ships API support,
-the runtime swap is one-sided in `src/api/time-tracking.ts` —
-agent scripts targeting the verbs are stable across the swap.
-**v0.3-M21 shipped** (Part 1: `5c1f7ac` + `81eec03` +
-`a4cb5b0`; Part 2: `1cd660a` + `3b5cb30` + `e21c166`;
-close-docs `086be70` + coverage push `7058754`):
-`monday auth login --profile <name>` + `monday auth logout
---profile <name>` runtime bodies, the `~/.monday-cli/credentials`
-mode-`0600` cache, the `~/.monday-cli/config.toml` TOML loader, the
-`--profile <name>` global flag's resolution wiring through
-`cli/program.ts`'s preAction hook, and the redaction-runtime
-extension that folds credentials-cache tokens into the secret-bag
-for the §7.4.3 emission-path leak test. **Pre-publish blocker
-(v0.3.0 release prep, after M28):** swap the `OAUTH_CLIENT_ID` /
-`OAUTH_CLIENT_SECRET` placeholders in `src/api/oauth.ts` with the
-registered Monday OAuth app's values (one-time external step at
-https://developer.monday.com/apps with redirect URI exactly
-`http://127.0.0.1:9876/callback`).
-**v0.3-M22 shipped** (`3a1b465`, preceded by `84c6d2b`
-redact narrowing): `monday status` runs the 7-probe
-matrix (DNS / TCP / TLS / auth / cache writability /
-redaction self-test / env-var pickup) per cli-design §11.5;
-`monday usage` reports the daily Monday API operation budget
-remaining from `platform_api.daily_*`. The empirical-probe
-finding pivoted the design at pre-flight — Monday tracks
-operations-per-day under `platform_api.daily_*`, NOT complexity
-points under a non-existent `account.complexity` — additive-only
-envelope per cli-design §11.5.3 Decision 8 closure.
-**v0.3-M23 shipped** (`1f09a25` implementation, preceded by
-`1fefdb1` pre-flight contract diff + `9b93f15` Codex round-1
-fixes + `fa27b60` Codex round-2 fixes + `3a2f1db` Decision 5
-close): cross-board `monday item search` + `monday board
-favorites` runtime bodies live. Two new src/api modules
-(`cross-board-search.ts` per-board fan-out walker,
-`board-favorites.ts` 2-stage favorites resolver), one new
-command (`monday board favorites`), and an extension to
-`monday item search` for the v0.3 cross-board path
-(`--workspace <wid>` / `--favorites` / `--max-boards <n>` flags
-with mutual-exclusion). Decision 5 pinned `--max-boards 25`
-default + hard cap 100, calibrated against wall-clock fan-out
-latency (NOT complexity-budget — empirical probe at 2026-05-11
-measured ~25-30 complexity points per board against a
-~999_950 per-call budget; latency at ~0.5-1.5s/N is the real
-constraint). `board favorites` is a 2-stage filter + hydrate
-against the polymorphic top-level `Query.favorites:
-[GraphqlHierarchyObjectItem!]` surface (Board | Folder |
-Dashboard | Workspace); the verb filters client-side to
-Board-typed entries + hydrates via `boards(ids:)` for the
-final row shape (`id`, `name`, `state`, `workspace_id`, `url`,
-`position`). Three load-bearing warnings on the cross-board
-path (`inaccessible_boards`, `column_not_found_on_board`,
-`cross_board_truncated` — v0.3 is single-call-only; no
-resumable cross-board cursor) + one on favorites
-(`board_favorites_stale`).
-**Deferred to later v0.3 milestones**: `item history` (M24),
-`item update --continue-on-error` partial-success (M25), `monday
-dev` workflow shortcuts (M26), `notification send` + `webhook list/
-create/delete` (M27), multi-level subitem creation (M28).
-**v0.4:** `monday item watch`, `--concurrency`, asset uploads.
+**What v0.3 added (M19–M28; full per-milestone narrative in
+[CHANGELOG.md](./CHANGELOG.md)):**
+
+- **M19** — `tags`, `board_relation`, `dependency` friendly
+  `--set` translators (closes the v0.2 tentative-row carryover);
+  `monday account tags` read verb closes the `tag_not_found.
+  details.hint` forward-reference.
+- **M20** — `monday item time-track start/stop <iid>` registered
+  for forward-compatibility (documentation-only; throw
+  `usage_error` today — empirical probe 2026-05-10 confirmed
+  Monday's API doesn't currently expose time-tracking writes).
+- **M21 + M28** — multi-profile auth via `~/.monday-cli/
+  config.toml` + `--profile <name>` global flag; per-profile
+  credentials cache at `~/.monday-cli/credentials` (mode 0600).
+  `monday auth login` is registered but the canonical OAuth app
+  is not registered in v0.3.0 — the verb surfaces `usage_error.
+  details.reason: oauth_unregistered` pointing at
+  `MONDAY_API_TOKEN`. Multi-profile config + per-profile token
+  caching work fully today.
+- **M22** — `monday status` (7-probe DNS/TCP/TLS/auth/cache/
+  redaction/env-var matrix per cli-design §11.5) + `monday usage`
+  (daily Monday API operation budget remaining from
+  `platform_api.daily_*`).
+- **M23** — Cross-board `monday item search` (omit `--board`;
+  scope via `--workspace` / `--favorites` / `--max-boards`) +
+  `monday board favorites` (the current user's starred boards).
+- **M24** — `monday item history <iid>` (two-source chronological
+  merge: `activity_logs` + `updates`; per-event typed projection
+  for `update_column_value`, synthesized `update_posted` /
+  `update_replied` from the updates source).
+- **M25** — `monday item update --where ... --continue-on-error`
+  attempts every matched item regardless of per-item failure;
+  emits a partial-success envelope with `data.summary.
+  failed_count` + per-item `data.results[]`. Orthogonal to
+  `--yes`.
+- **M26** — `monday dev` namespace (sprint / epic / release /
+  task workflow shortcuts on top of standard board CRUD). Three
+  setup verbs (`dev discover [--apply]` / `dev configure` /
+  `dev doctor`) + 10 workflow verbs. Per-profile board mapping
+  in `[profiles.<name>.dev]`.
+- **M27** — Outbound writes: `monday webhook list/create/delete`
+  (live-only; webhooks land on the user's own HTTPS endpoint —
+  the CLI never receives) + `monday notification send`
+  (single-recipient at v0.3).
+- **M28** — 0.3.0 release prep. Multi-level subitem creation
+  deferred out of v0.3 per Decision 11 (Monday's `sub_items_board`
+  carries no `subtasks` column at API `2026-01`).
+
+**v0.4:** `monday item watch`, `--concurrency` bulk parallelism,
+asset uploads, multi-level subitems if Monday's data model
+surfaces them.
+
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for the
-in-progress v0.3 milestones, and
+v0.3 milestone history, and
 [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for the v0.2 milestone
 history.
 
@@ -455,8 +477,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 
 - **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical CLI
   contract. **Start here** if you want to understand the full
-  surface, the JSON envelope, error codes, or the v0.1 vs v0.2
-  split.
+  surface, the JSON envelope, error codes, or the per-version
+  scope (§13).
 - [`docs/output-shapes.md`](./docs/output-shapes.md) — per-command
   output reference with concrete examples.
 - [`docs/examples.md`](./docs/examples.md) — worked agent sessions.
@@ -491,7 +513,8 @@ The full dev workflow + how to add a new command is in
 - **No `any`** (lint-enforced).
 - **Parse at every boundary** with zod.
 - **Mock at the network boundary, not internal modules.**
-- **Branch coverage 94%+ floor.**
+- **Branch coverage 95%+ floor** (v0.3 ratcheted from 94% — see
+  `vitest.config.ts`).
 - **Atomic commits, Conventional Commits.**
 
 ## Contributing
