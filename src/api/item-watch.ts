@@ -617,28 +617,17 @@ export const watchItem = async (
 ): Promise<WatchItemResult> => {
   const sessionStartMs = Date.now();
   const sessionStartIso = new Date(sessionStartMs).toISOString();
+  // Epoch floor sentinel reused for "give me the recent backlog"
+  // fetches (`--once` without `--since`, `--since` lookup). Monday's
+  // `activity_logs(from:, limit:)` returns most-recent-first up to
+  // `limit`; with an epoch `from:` the slice covers the entire
+  // recent window the caller asked for. The chronological sort
+  // inside `processRows` then re-orders for emission.
+  const EPOCH_FLOOR = '1970-01-01T00:00:00Z';
   const includeKinds =
     inputs.includeKinds === undefined
       ? undefined
       : new Set<HistoryEvent['kind']>(inputs.includeKinds);
-
-  // Initial poll-from watermark. `--since` looks up the event's
-  // created_at; absent → now (only events strictly after session
-  // start surface).
-  let watermark: string;
-  const seenEventIds = new Set<string>();
-  if (inputs.since !== undefined) {
-    const sinceRow = await resolveSinceWatermark({
-      client: inputs.client,
-      boardId: inputs.boardId,
-      itemId: inputs.itemId,
-      sinceEventId: inputs.since,
-    });
-    watermark = sinceRow.created_at;
-    seenEventIds.add(sinceRow.id);
-  } else {
-    watermark = sessionStartIso;
-  }
 
   const warnings: WatchSessionWarning[] = [];
   const unknownTracker = new Map<
@@ -653,6 +642,84 @@ export const watchItem = async (
   let lastSeenEventId: string | null = null;
   let circuitBrokenAt: string | null = null;
 
+  // Read `signal.aborted` via a function so TS narrowing on the
+  // top-of-loop `if (inputs.signal.aborted)` doesn't lock the type
+  // into `false` for subsequent post-await reads — the runtime value
+  // can flip between awaits when the thunk's own abort fires mid-
+  // call. Mirrors `src/api/retry.ts:withRetry`'s `isAborted` shape.
+  const isAborted = (): boolean => inputs.signal.aborted;
+
+  /**
+   * Builds the immutable result snapshot. Defined upfront so the
+   * pre-loop bootstrap (`resolveSinceWatermark`) can also exit via
+   * `signal` cleanly with a trailer (Codex impl review round-1 P1-1
+   * fix: aborts during in-flight wire calls must surface the
+   * `exit_reason: 'signal'` trailer rather than rethrowing past the
+   * action body's `stream.writeTrailer`).
+   */
+  const buildResult = (
+    exitReason: WatchExitReason,
+  ): WatchItemResult => {
+    const finalUnknownWarnings: UnknownEventKindWarning[] = Array.from(
+      unknownTracker.values(),
+    )
+      .sort((a, b) =>
+        /* c8 ignore next */
+        a.event < b.event ? -1 : a.event > b.event ? 1 : 0,
+      )
+      .map((entry) =>
+        buildUnknownEventKindWarning(entry.event, entry.entity, entry.count),
+      );
+    return {
+      events_emitted: eventsEmitted,
+      polls_made: pollsMade,
+      failed_polls: failedPolls,
+      watch_duration_seconds: (Date.now() - sessionStartMs) / 1000,
+      last_seen_event_id: lastSeenEventId,
+      circuit_broken_at: circuitBrokenAt,
+      exit_reason: exitReason,
+      warnings: [...warnings, ...finalUnknownWarnings],
+      source: 'live',
+    };
+  };
+
+  // Initial poll-from watermark + the optional `--since` boundary
+  // that excludes already-seen events. `--since`: look up the
+  // event's created_at; absent → now (only events strictly after
+  // session start surface in the polling loop; `--once` overrides
+  // with the epoch floor below to drain the recent backlog).
+  let watermark: string;
+  // `sinceBoundary` excludes events <= the boundary (Codex impl
+  // review round-1 P2-1 fix): without it, a `--since` resume across
+  // a same-timestamp tuple re-emits events the prior session already
+  // emitted. Compared via `compareBigIntStrings` (numeric, not lex).
+  let sinceBoundary: { readonly createdAt: string; readonly id: string } | undefined;
+  const seenEventIds = new Set<string>();
+  if (inputs.since !== undefined) {
+    try {
+      const sinceRow = await resolveSinceWatermark({
+        client: inputs.client,
+        boardId: inputs.boardId,
+        itemId: inputs.itemId,
+        sinceEventId: inputs.since,
+      });
+      sinceBoundary = { createdAt: sinceRow.created_at, id: sinceRow.id };
+      watermark = sinceRow.created_at;
+      seenEventIds.add(sinceRow.id);
+    } catch (err) {
+      // P1-1 fix scope: if SIGINT fired mid-lookup, emit a clean
+      // signal trailer instead of letting the transport's abort
+      // wrap propagate as `internal_error`. UsageError (unknown
+      // event-id) propagates unchanged.
+      if (isAborted() && !(err instanceof UsageError)) {
+        return buildResult('signal');
+      }
+      throw err;
+    }
+  } else {
+    watermark = sessionStartIso;
+  }
+
   /**
    * Per-tick processor: chronological sort, walker-side entity
    * filter, dedup via the Set, projection, `--include` filter, and
@@ -665,6 +732,19 @@ export const watchItem = async (
     const sorted = sortChronological(rows);
     for (const row of sorted) {
       if (seenEventIds.has(row.id)) continue;
+      // P2-1 fix: skip rows at-or-before the `--since` boundary
+      // (by created_at, with BigInt id tie-break). Without this,
+      // a resumed session re-emits events sharing a created_at
+      // tuple with the bootstrap event.
+      if (sinceBoundary !== undefined) {
+        if (row.created_at < sinceBoundary.createdAt) continue;
+        if (
+          row.created_at === sinceBoundary.createdAt &&
+          compareBigIntStrings(row.id, sinceBoundary.id) <= 0
+        ) {
+          continue;
+        }
+      }
       seenEventIds.add(row.id);
       // Always advance the wall-clock watermark — even for filtered
       // rows — so the next poll's `from:` doesn't re-fetch them.
@@ -713,58 +793,48 @@ export const watchItem = async (
     return undefined;
   };
 
-  /**
-   * Builds the immutable result snapshot. The unknown-event-kind
-   * warnings are sorted deterministically by event so re-walks
-   * against the same stream produce identical envelopes (mirrors
-   * M24's `fetchItemHistory` warning sort).
-   */
-  const buildResult = (
-    exitReason: WatchExitReason,
-  ): WatchItemResult => {
-    const finalUnknownWarnings: UnknownEventKindWarning[] = Array.from(
-      unknownTracker.values(),
-    )
-      .sort((a, b) =>
-        // `unknownTracker` keys on `${event}\x00${entity}`, so two
-        // distinct entries always have distinct events when entity
-        // is the same — the `0` tie-break branch is unreachable in
-        // practice. Kept for the comparator's contract symmetry.
-        /* c8 ignore next */
-        a.event < b.event ? -1 : a.event > b.event ? 1 : 0,
-      )
-      .map((entry) =>
-        buildUnknownEventKindWarning(entry.event, entry.entity, entry.count),
-      );
-    return {
-      events_emitted: eventsEmitted,
-      polls_made: pollsMade,
-      failed_polls: failedPolls,
-      watch_duration_seconds: (Date.now() - sessionStartMs) / 1000,
-      last_seen_event_id: lastSeenEventId,
-      circuit_broken_at: circuitBrokenAt,
-      exit_reason: exitReason,
-      warnings: [...warnings, ...finalUnknownWarnings],
-      source: 'live',
-    };
-  };
-
-  // --once short-circuit: one poll, drain backlog, exit. The poll
-  // limit is generous (DEFAULT_ONCE_BACKLOG_LIMIT default; bumped
-  // to 500 when --since is set so the resumption window survives).
+  // --once short-circuit: one poll, drain backlog, exit. P1-2 fix:
+  // without `--since`, the backlog drain pulls from the epoch floor
+  // (Monday returns the most-recent N events; chronological sort
+  // re-orders for emission), NOT from session start — the contract
+  // is "drain the recent N events", not "wait for new events". With
+  // `--since`, the `--since` row's created_at is the lower bound;
+  // limit 500 covers the resumption window.
   if (inputs.once === true) {
-    const rows = await fetchPoll({
-      client: inputs.client,
-      boardId: inputs.boardId,
-      itemId: inputs.itemId,
-      from: watermark,
-      limit:
-        inputs.since === undefined ? DEFAULT_ONCE_BACKLOG_LIMIT : 500,
-    });
-    pollsMade++;
-    const early = await processRows(rows);
-    return buildResult(early ?? 'once_complete');
+    try {
+      const rows = await fetchPoll({
+        client: inputs.client,
+        boardId: inputs.boardId,
+        itemId: inputs.itemId,
+        from: inputs.since === undefined ? EPOCH_FLOOR : watermark,
+        limit:
+          inputs.since === undefined ? DEFAULT_ONCE_BACKLOG_LIMIT : 500,
+      });
+      pollsMade++;
+      const early = await processRows(rows);
+      return buildResult(early ?? 'once_complete');
+    } catch (err) {
+      // P1-1 fix scope: SIGINT mid-once-poll → trailer with signal
+      // exit rather than rethrow.
+      if (isAborted()) {
+        return buildResult('signal');
+      }
+      throw err;
+    }
   }
+
+  // P2-2 fix: compute a deadline once so cadence/backoff sleeps can
+  // shrink to `min(intervalMs, remainingMs)` and don't overshoot
+  // `--max-duration`. Without the deadline-aware sleep, a
+  // `--max-duration 5` with default 30s cadence would exit at ~30s
+  // (full cadence then top-of-loop check), and a circuit-breaker
+  // backoff could overshoot by up to `MAX_BACKOFF_SECONDS` (300s).
+  const deadlineMs =
+    inputs.maxDurationSeconds === undefined
+      ? Number.POSITIVE_INFINITY
+      : sessionStartMs + inputs.maxDurationSeconds * 1000;
+  const remainingMs = (): number =>
+    Math.max(0, deadlineMs - Date.now());
 
   // Polling loop. Each iteration: signal check → ceiling check →
   // poll → process events → cadence wait. Early exits route through
@@ -777,15 +847,12 @@ export const watchItem = async (
     // and the next iteration. Hard to drive deterministically from
     // an integration test (the cadence catch wins almost always).
     /* c8 ignore start */
-    if (inputs.signal.aborted) {
+    if (isAborted()) {
       return buildResult('signal');
     }
     /* c8 ignore stop */
-    if (inputs.maxDurationSeconds !== undefined) {
-      const elapsed = (Date.now() - sessionStartMs) / 1000;
-      if (elapsed >= inputs.maxDurationSeconds) {
-        return buildResult('max_duration');
-      }
+    if (remainingMs() <= 0) {
+      return buildResult('max_duration');
     }
 
     try {
@@ -804,6 +871,13 @@ export const watchItem = async (
         return buildResult(early);
       }
     } catch (err) {
+      // P1-1 fix: SIGINT mid-poll surfaces as a non-circuit-breaker
+      // error from the transport's abort wrap. Detect via
+      // `isAborted()` and exit with `signal` trailer instead of
+      // rethrowing past the action body's `stream.writeTrailer`.
+      if (isAborted()) {
+        return buildResult('signal');
+      }
       if (!isCircuitBreakerError(err)) throw err;
       failedPolls++;
       consecutiveFailures++;
@@ -841,20 +915,36 @@ export const watchItem = async (
           },
         });
       }
-      // Backoff sleep; signal-driven graceful exit interrupts.
-      try {
-        await sleepWithSignal(backoffSeconds * 1000, inputs.signal);
-      } catch {
-        return buildResult('signal');
+      // Backoff sleep — capped at the `--max-duration` remaining
+      // window so the breaker can't overshoot the wall-clock
+      // ceiling. A 0ms sleep (`retry_in_seconds: 0` from Monday's
+      // hint) is fine — the loop top picks up immediately. Signal-
+      // driven graceful exit interrupts via the sleep's rejection.
+      const backoffMs = Math.min(backoffSeconds * 1000, remainingMs());
+      if (backoffMs > 0) {
+        try {
+          await sleepWithSignal(backoffMs, inputs.signal);
+        } catch {
+          return buildResult('signal');
+        }
       }
       continue;
     }
 
-    // Cadence wait between successful polls.
-    try {
-      await sleepWithSignal(inputs.intervalMs, inputs.signal);
-    } catch {
-      return buildResult('signal');
+    // Cadence wait between successful polls — capped at the
+    // `--max-duration` remaining window so the next iteration's
+    // ceiling-check exits with `max_duration` precisely rather than
+    // overshooting by up to a full interval. `intervalMs >= 1000`
+    // per the argv schema so the only way `cadenceMs` is 0 is when
+    // the deadline already elapsed; the top-of-loop check catches
+    // that on the next iteration.
+    const cadenceMs = Math.min(inputs.intervalMs, remainingMs());
+    if (cadenceMs > 0) {
+      try {
+        await sleepWithSignal(cadenceMs, inputs.signal);
+      } catch {
+        return buildResult('signal');
+      }
     }
   }
 };

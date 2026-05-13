@@ -1808,13 +1808,13 @@ trailer carrying per-source pagination state for resumption.
 M24 impl's action layer aggregates with the item-board lookup's
 cache state via `SourceAggregator`).
 
-### `item watch <iid>` (v0.4-M29 — pre-flight stub)
+### `item watch <iid>` (v0.4-M29)
 
 Polling-based event stream over the M24 `item-history-projection.ts`
-projector. **Pre-flight stub at the M29 contract diff;** runtime body
-lands at M29 IMPL. Pinned per cli-design §13 v0.4 entry + §14.4
-closure (`31713fb`) + the M29 pre-flight empirical probe
-(`scripts/probe/m29-polling-burn.ts`, 2026-05-13, API `2026-01`).
+projector. Runtime body landed at M29 IMPL (`7b83a3a`). Pinned per
+cli-design §13 v0.4 entry + §14.4 closure (`31713fb`) + the M29
+pre-flight empirical probe (`scripts/probe/m29-polling-burn.ts`,
+2026-05-13, API `2026-01`).
 
 **NDJSON-only output.** Unlike every other verb, `item watch` emits
 NDJSON regardless of `--json` / `--table` / `--output` globals.
@@ -1854,6 +1854,7 @@ Trailer-meta record (one per session, emitted on graceful exit):
     "source": "live",
     "cache_age_seconds": null,
     "retrieved_at": "2026-05-13T14:32:15Z",
+    "complexity": null,
     "has_more": true,
     "total_returned": 7,
     "events_emitted": 7,

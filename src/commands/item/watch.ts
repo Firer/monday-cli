@@ -216,7 +216,7 @@ export const itemWatchCommand: CommandModule<
 > = {
   name: 'item.watch',
   summary:
-    "Poll Monday for activity-log events on an item; stream NDJSON as they arrive (v0.4-M29 pre-flight stub)",
+    'Poll Monday for activity-log events on an item; stream NDJSON as they arrive',
   examples: [
     'monday item watch 1234567890',
     'monday item watch 1234567890 --interval 60000        # 60s cadence',
