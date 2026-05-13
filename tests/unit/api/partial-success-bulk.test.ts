@@ -247,7 +247,7 @@ describe('foldPartialSuccessBulkResult', () => {
     }
   });
 
-  it('throws internal_error when a failure row arrives without an error payload (dispatchSequential contract violation)', () => {
+  it('throws internal_error when a failure row arrives without an error payload (dispatcher contract violation)', () => {
     const row = { item_id: '5002', ok: false };
     expect(() => foldPartialSuccessBulkResult(row, undefined)).toThrow(
       /no error payload/,

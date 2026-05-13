@@ -3262,17 +3262,25 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout) as EnvelopeShape & {
       data: {
-        summary: { matched_count: number; applied_count: number; failed_count: number };
-        results: readonly { item_id: string; ok: boolean }[];
+        operation: string;
+        summary: { matched_count: number; applied_count: number; failed_count: number; board_id: string };
+        results: readonly { item_id: string; ok: boolean; item?: { id: string } }[];
       };
     };
     expect(env.ok).toBe(true);
-    expect(env.data.summary).toMatchObject({
+    expect(env.data.operation).toBe('item_update');
+    expect(env.data.summary).toEqual({
       matched_count: 8,
       applied_count: 8,
       failed_count: 0,
+      board_id: '111',
     });
+    expect(env.data.results).toHaveLength(8);
     expect(env.data.results.map((r) => r.item_id)).toEqual(ids);
+    for (const record of env.data.results) {
+      expect(record.ok).toBe(true);
+      expect(record.item?.id).toBe(record.item_id);
+    }
   });
 
   it('--concurrency 2 concurrency_exceeded retry: transient per-target CONCURRENCY_LIMIT_EXCEEDED retries via the existing retry layer (cli-design §6.4 D5 closure)', async () => {
@@ -3433,11 +3441,14 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       { signal: controller.signal },
     );
     expect(out.exitCode).toBe(130);
-    // SIGINT contract: no envelope on stderr (cli-design §3.1
-    // exit-code table). Stdout may or may not carry partial
-    // dispatch results — the runner's 130 short-circuit happens
-    // before envelope assembly, so neither stream should carry a
-    // success envelope.
+    // SIGINT contract: no envelope on either stream — the
+    // runner's 130 short-circuit happens before envelope
+    // assembly (`src/cli/run.ts:174,183`). Asserting BOTH
+    // streams stay empty catches a regression where a success
+    // envelope writes to stdout BEFORE the abort path takes
+    // over + then exit 130 returns — the exit code alone
+    // wouldn't distinguish that case.
     expect(out.stderr).toBe('');
+    expect(out.stdout).toBe('');
   });
 });

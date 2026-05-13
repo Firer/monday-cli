@@ -215,7 +215,9 @@ export type PartialSuccessBulkUpdateData = z.infer<
  * applies — a stale-cache `validation_failed` remaps to the
  * stable `column_archived` code agents key off (cli-design
  * §6.5). The wrapper's per-item dispatch callback fires
- * `foldAndRemap` BEFORE throwing into `dispatchSequential` so
+ * `foldAndRemap` BEFORE throwing into the selected dispatcher
+ * (`dispatchSequential` or `dispatchParallel` — both apply
+ * the same per-target error decoration) so
  * the per-record `error.code` in `data.results[]` matches the
  * shape the fail-fast path would have surfaced as the
  * top-level `error.code`. That requires the same context the
@@ -347,10 +349,11 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *      `SelectedMutation`. On a {@link MondayCliError} catch,
  *      run {@link foldAndRemap} with `resolverWarnings` +
  *      `remapColumnIds` + `env` + `noCache` + `resolutionSource`
- *      from the inputs BEFORE re-throwing into
- *      `dispatchSequential`. This makes the per-record
- *      `error.code` in `data.results[]` carry the SAME stable
- *      code (`column_archived` after a stale-cache
+ *      from the inputs BEFORE re-throwing into the selected
+ *      dispatcher (`dispatchSequential` or `dispatchParallel`).
+ *      This makes the per-record `error.code` in
+ *      `data.results[]` carry the SAME stable code
+ *      (`column_archived` after a stale-cache
  *      `validation_failed` remap) that the v0.1 fail-fast
  *      path would have surfaced at the top level — Codex
  *      round-1 P1-1 contract requirement (cli-design §6.5
@@ -374,26 +377,27 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
  *      null)` and emits the envelope.
  *
  * **`internal_error` re-throw escape hatch.** Per M14 round-2
- * F1 / round-3 F1, `dispatchSequential` re-throws
- * `internal_error` so schema-drift in the response surfaces
- * as whole-call (top-level `ok: false`) rather than per-record
- * — papering over `internal_error` would hide the malformed-
- * response signal agents need to know about. The M25 wrapper
- * inherits this behaviour by NOT wrapping the
- * `dispatchSequential` re-throw — `foldAndRemap` only ever
- * runs against {@link MondayCliError} instances, and it
- * NEVER converts a non-internal_error into internal_error,
- * so the re-throw path through dispatchSequential remains
- * the canonical schema-drift surface.
+ * F1 / round-3 F1, both dispatchers re-throw `internal_error`
+ * whole-call so schema-drift in the response surfaces as
+ * top-level `ok: false` rather than per-record — papering over
+ * `internal_error` would hide the malformed-response signal
+ * agents need to know about. The wrapper inherits this
+ * behaviour by NOT wrapping the dispatcher's re-throw —
+ * `foldAndRemap` only ever runs against {@link MondayCliError}
+ * instances, and it NEVER converts a non-internal_error into
+ * internal_error, so the re-throw path through the selected
+ * dispatcher remains the canonical schema-drift surface (axis
+ * 2 of the R-NEW-28 6-axis equivalence — identical between
+ * `dispatchSequential` and `dispatchParallel`).
  *
  * **Non-`MondayCliError` re-throw.** Programmer-bug exceptions
  * (TypeError, RangeError, etc.) raised by the executor or by
- * `foldAndRemap`'s refresh probe propagate through
- * `dispatchSequential`'s non-CliError re-throw branch unchanged,
- * surfacing as whole-call `internal_error` via the runner's
- * catch-all (mirrors M14's pattern at
- * `users-fan-out-mutation.ts` and the documented behaviour at
- * `partial-success-mutation.ts:93`).
+ * `foldAndRemap`'s refresh probe propagate through the selected
+ * dispatcher's non-CliError re-throw branch unchanged, surfacing
+ * as whole-call `internal_error` via the runner's catch-all
+ * (mirrors M14's pattern at `users-fan-out-mutation.ts` and the
+ * documented behaviour at `partial-success-mutation.ts` —
+ * R-NEW-28 axis 3, also identical across both routes).
  */
 export const runPartialSuccessBulkUpdate = async (
   inputs: RunPartialSuccessBulkUpdateInputs,
@@ -446,9 +450,9 @@ export const runPartialSuccessBulkUpdate = async (
         // even though the v0.1 path surfaces `column_archived`
         // for the same root cause (cli-design §6.5 stable-
         // code rule). foldAndRemap NEVER converts a non-
-        // internal_error into internal_error, so
-        // dispatchSequential's internal_error re-throw escape
-        // hatch (M14 round-2 F1) stays intact.
+        // internal_error into internal_error, so the selected
+        // dispatcher's internal_error re-throw escape hatch
+        // (M14 round-2 F1) stays intact across both routes.
         const remapped = await foldAndRemap({
           err,
           warnings: resolverWarnings,
@@ -499,7 +503,9 @@ export const runPartialSuccessBulkUpdate = async (
       // Side-map lookup requires the item_id string from the row;
       // foldPartialSuccessBulkResult also enforces the same
       // invariant + throws internal_error if the id-field is
-      // missing or non-string (dispatchSequential contract).
+      // missing or non-string (both dispatchers populate the
+      // id-field slot for every result row per the partial-
+      // success contract).
       const itemIdSlot = row.item_id;
       const projected =
         typeof itemIdSlot === 'string'
@@ -542,18 +548,19 @@ export const foldPartialSuccessBulkResult = (
   record: PartialSuccessResult,
   projectedItem: ProjectedItem | undefined,
 ): PartialSuccessBulkUpdateResult => {
-  // Dot-access: `dispatchSequential` builds the record with
-  // the dynamic id-field key (`'item_id'`) carrying the target
-  // ID. The dot-access narrows the unknown index-signature
-  // value to a string via the runtime guard below; the helper
-  // throws `internal_error` if the shape doesn't match (which
-  // would be a programmer bug — `dispatchSequential`'s contract
-  // is to populate the id-field slot for every result row).
+  // Dot-access: the selected dispatcher (`dispatchSequential` or
+  // `dispatchParallel`) builds the record with the dynamic
+  // id-field key (`'item_id'`) carrying the target ID. The
+  // dot-access narrows the unknown index-signature value to a
+  // string via the runtime guard below; the helper throws
+  // `internal_error` if the shape doesn't match (which would be
+  // a programmer bug — both dispatchers contract on populating
+  // the id-field slot for every result row).
   const itemIdSlot = record.item_id;
   if (typeof itemIdSlot !== 'string' || itemIdSlot.length === 0) {
     throw new ApiError(
       'internal_error',
-      'partial-success bulk result row is missing the `item_id` field — dispatchSequential contract violation.',
+      'partial-success bulk result row is missing the `item_id` field — dispatcher contract violation.',
       {
         details: {
           record_keys: Object.keys(record),
@@ -579,13 +586,13 @@ export const foldPartialSuccessBulkResult = (
       item: projectedItem,
     };
   }
-  // Failure path — `dispatchSequential` populates `error` on
-  // every non-`ok` row; the schema's `.optional()` declarations
-  // narrow defensively here.
+  // Failure path — both dispatchers populate `error` on every
+  // non-`ok` row (R-NEW-28 axis 1); the schema's `.optional()`
+  // declarations narrow defensively here.
   if (record.error === undefined) {
     throw new ApiError(
       'internal_error',
-      `partial-success bulk result row for item_id ${itemIdSlot} reported ok: false but no error payload was captured — dispatchSequential contract violation.`,
+      `partial-success bulk result row for item_id ${itemIdSlot} reported ok: false but no error payload was captured — dispatcher contract violation.`,
       {
         details: {
           item_id: itemIdSlot,
