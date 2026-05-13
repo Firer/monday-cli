@@ -11,34 +11,34 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3.0 ready for publish — pending user push
-authorization + `npm publish`.** M28 IMPL shipped
-end-to-end across 8 release-prep commits this session
+**v0.3.0 pushed + tagged + GitHub release live — `npm
+publish` still pending user npm credential login.** M28
+IMPL shipped end-to-end across 8 release-prep commits
 (`d9ad757` CHANGELOG + `e7459c2` envelope-snapshot
 refresh + `f2600fa` ToC audit + stale-`deferred_to`
 slip-to-v0.4 + `4fddc38` README v0.3 quickstart +
 `1a87087` version bump 0.2.0 → 0.3.0 + `59c8b58`
 close-docs sweep + `472ad1e` branch-coverage residual
-tests +0.43pp margin + the housekeeping commit
-refreshing Live numbers + CHANGELOG stats post-`472ad1e`)
-+ the annotated `v0.3.0` git tag moved forward to the
-housekeeping HEAD so the tagged tree carries the
-accurate post-coverage stats (tag is local-only until
-push). **Local-only; nothing pushed to `origin/main`
-yet** (10 commits pending push since `e73ef21` —
-`8aeebad` + `914d154` from the M28 pre-flight session
-+ this session's 8). v0.3.0 ships **no breaking
-changes vs v0.2.0** — every v0.3 surface is additive
-across M19–M28.
-**Pre-publish action items for the user** (each waits
-on explicit authorization):
-1. `git push origin main v0.3.0` (commits + annotated
-   tag together).
-2. `npm publish` from the post-push tree (the
-   `prepublishOnly` hook runs typecheck + lint + unit +
-   integration + build before the publish fires).
-3. Draft the GitHub release notes by pasting the
-   v0.3.0 entry from `CHANGELOG.md`.
+tests +0.43pp margin + `5e8c210` housekeeping refresh
+of post-coverage stats) + the annotated `v0.3.0` git
+tag pointing at `5e8c210`. All 10 commits + the tag
+**pushed to `origin/main`**; **GitHub release v0.3.0
+live** at
+https://github.com/Firer/monday-cli/releases/tag/v0.3.0
+with the full CHANGELOG body. v0.3.0 ships **no
+breaking changes vs v0.2.0** — every v0.3 surface is
+additive across M19–M28.
+**Remaining publish action** (waits on user npm
+credentials):
+1. `npm login` (browser-based) — `npm whoami` returned
+   401 at the session attempt; user opted to skip npm
+   publish this session and revisit with credentials
+   in place.
+2. `npm publish` from `main` — the `prepublishOnly`
+   hook runs typecheck + lint + unit + integration +
+   build before the publish fires. Published version
+   stays at `0.2.0` on the registry until this step
+   fires.
 
 **M28 pre-flight rejected Decisions 10 + 11** on
 empirical grounds — multi-level subitem creation
@@ -330,10 +330,13 @@ in the plan docs — **do not duplicate them here**:
   Command count: **95** (unchanged from M28 pre-flight —
   release prep adds no verbs).
 - `package.json` version: **0.3.0** (bumped at `1a87087`).
-- `v0.3.0` annotated tag exists locally pointing at the
-  housekeeping HEAD (moved forward from `1a87087` to capture
-  `472ad1e`'s coverage lift + the housekeeping stats refresh);
-  **NOT pushed**.
+- `v0.3.0` annotated tag points at `5e8c210` (moved forward
+  from `1a87087` to capture `472ad1e`'s coverage lift +
+  `5e8c210`'s housekeeping stats refresh); **pushed to
+  `origin/main`** + **GitHub release live** at
+  https://github.com/Firer/monday-cli/releases/tag/v0.3.0.
+- npm registry version: **0.2.0** (v0.3.0 publish pending user
+  `npm login` — see Status block).
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -356,13 +359,18 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **v0.3.0 publish** — externally-blocked on user
-   authorization for the three publish actions listed in the
-   Status block (`git push origin main v0.3.0` + `npm publish`
-   + GitHub release notes). Each waits on explicit "go". The
-   `prepublishOnly` hook is wired (typecheck + lint + unit +
-   integration + build) so the publish itself self-gates.
-2. **v0.4 planning kickoff** — once the v0.3.0 publish lands,
+1. **`npm publish` v0.3.0** — externally-blocked on user
+   npm credential login. Push + tag + GitHub release already
+   live (commits and the `v0.3.0` annotated tag are on
+   `origin/main`; the release page is up). User opted to
+   defer the npm publish step this session because
+   `npm whoami` returned 401. To proceed: `npm login`
+   (browser-based) then `npm publish` from `main`. The
+   `prepublishOnly` hook (typecheck + lint + unit +
+   integration + build) self-gates the publish.
+2. **v0.4 planning kickoff** — once the v0.3.0 npm publish
+   lands (or in parallel — the planning work doesn't depend
+   on the npm step),
    open `docs/v0.4-plan.md` from the §13 v0.4 roadmap items
    (`monday item watch` polling cadence; `--concurrency` bulk
    parallelism; asset upload `add_file_to_column`;
