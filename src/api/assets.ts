@@ -70,7 +70,10 @@
  * file size against a hardcoded ceiling; Monday's runtime rejection
  * (typically `FILE_SIZE_LIMIT_EXCEEDED` or a generic 413) is rewrapped
  * as `usage_error` with `details.reason: 'file_too_large'` +
- * `details.file_size_bytes` at IMPL.
+ * `details.file_size_bytes` (the local `fs.stat()` measurement
+ * captured at upload time — Monday's wire rejection may not surface
+ * a size field, but the CLI already has the local size from the
+ * read leg and threads it for a stable agent-keyed envelope).
  *
  * **Idempotency: NO.** Each successful upload mints a new Asset
  * with a new ID — re-running `item upload` with the same args

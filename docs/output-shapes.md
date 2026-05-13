@@ -3040,7 +3040,12 @@ No wire mutation fires on dry-run; `meta.source: "none"`.
 ```
 
 **File too large.** Monday's server-side rejection rewraps as
-`usage_error` with `details.reason: 'file_too_large'`:
+`usage_error` with `details.reason: 'file_too_large'`.
+`details.file_size_bytes` is the local `fs.stat()` measurement
+captured at upload time, NOT a Monday error-payload field —
+Monday's wire rejection may not surface a size, but the CLI
+already has the local size from the read leg and threads it
+into the details slot for a stable agent-keyed envelope:
 
 ```json
 {

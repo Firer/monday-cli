@@ -30,7 +30,12 @@
  *     directory; fires at IMPL via `fs.stat()` pre-check.
  *   - `'file_empty'` — zero-byte file; fires via `fs.stat()`.
  *   - `'file_too_large'` — Monday's server-side size-cap
- *     rejection rewrap; carries `details.file_size_bytes`.
+ *     rejection rewrap; carries `details.file_size_bytes`
+ *     from the local `fs.stat()` measurement at upload
+ *     time (NOT a Monday error-payload field — Monday's
+ *     wire rejection may not surface a size; the CLI
+ *     threads the locally-measured size into the details
+ *     slot for a stable agent-keyed envelope).
  * No CLI-side hardcoded size pre-check; Monday's per-file cap
  * is plan-tier-dependent and not exposed via the schema.
  *
