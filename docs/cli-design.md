@@ -1805,8 +1805,63 @@ monday item delete <iid> --yes [--dry-run]                                   v0.
                                           # `monday item create` would
                                           # delete the *new* item.
                                           # No `restore` — see §5.4
-monday item watch <iid> [--interval 30s] [--until-status <label>]            v0.4
-                                          # polls; emits NDJSON change events
+monday item watch <iid> [--interval <ms>] [--since <event-id>] [--once] [--max-events <n>] [--max-duration <seconds>] [--include <kind1>,<kind2>]   v0.4
+                                          # polls Monday's
+                                          # `boards(ids:){activity_logs(item_ids:,
+                                          # from:, limit:)}` surface on each tick,
+                                          # projects through M24's
+                                          # `item-history-projection.ts` projector,
+                                          # emits one NDJSON event record per new
+                                          # `activity_logs` entry plus a session-
+                                          # summary trailer on exit. `--interval`
+                                          # default 30000ms (30s) per §14.4 closure;
+                                          # range 1000ms–3600000ms (faster than 1s
+                                          # would generate Monday request-rate
+                                          # concerns; slower than 1h crosses the
+                                          # "no longer a watch" boundary — use
+                                          # `cron + item history` for hourly+
+                                          # cadences). `--since <event-id>` resumes
+                                          # from the last-seen-event-id reported in
+                                          # a prior session's trailer-meta (NOT a
+                                          # full state-machine resume; just an
+                                          # event-id filter against the M24
+                                          # projector). `--once` emits the current
+                                          # backlog from `--since` (or the most-
+                                          # recent N events if no `--since`) and
+                                          # exits without polling — distinct from
+                                          # `--max-events 1` which waits for the
+                                          # NEXT event. `--max-events <n>` /
+                                          # `--max-duration <seconds>` cap the
+                                          # session length; exit-0 with the
+                                          # session-summary trailer when either
+                                          # limit fires (NOT a failure envelope).
+                                          # `--include <kind1>,<kind2>` filters by
+                                          # the M24 event-kind enum (closed at 9
+                                          # kinds: update_column_value /
+                                          # create_column / create_group /
+                                          # update_board_name /
+                                          # update_board_nickname /
+                                          # board_workspace_id_changed /
+                                          # update_posted / update_replied /
+                                          # unknown — see `item history` row);
+                                          # applied at projection time, not poll
+                                          # time (Monday doesn't expose a server-
+                                          # side filter). Circuit-breaker per §14.4
+                                          # closure: reactive on Monday's wire
+                                          # errors (complexity_exceeded /
+                                          # concurrency_exceeded / rate_limited);
+                                          # trip after 5 consecutive failed polls
+                                          # → failure envelope carrying
+                                          # `circuit_broken_at` + `failed_polls`
+                                          # in trailer-meta. SIGINT graceful drain:
+                                          # in-flight poll completes or aborts
+                                          # cleanly, trailer-meta emits as a final
+                                          # NDJSON line, exit 130 per §7.
+                                          # Trailer-meta slots: `events_emitted` +
+                                          # `polls_made` + `watch_duration_seconds`
+                                          # + `last_seen_event_id` (for restart) +
+                                          # `failed_polls` + (on circuit-break)
+                                          # `circuit_broken_at`.
 monday item history <iid> [--since <iso>] [--until <iso>] [--activity-logs-page <n>] [--updates-page <n>] [--limit <n>] [--kinds <list>] [--stream]   v0.3
                                           # activity log: status / column / group /
                                           # board edits + comment thread, merged
@@ -6978,7 +7033,8 @@ scoped idempotent changes, and post comments narrating its work.**
 
 ### v0.4 (polish + nice-to-haves)
 
-- `item watch <iid>` (polling; see §14 for the cadence question)
+- `item watch <iid>` (polling at default 30s cadence; reactive circuit
+  breaker on Monday wire errors per §14.4 closure)
 - Shell completion (bash / zsh / fish) via commander
 - Bulk operations with `--concurrency` (probed against Monday's
   per-account concurrency cap)
@@ -7051,11 +7107,35 @@ So an agent reading the contract knows what's *not* there yet:
    even if the user renames the matched item. Cons: pollutes the
    board schema with a CLI-managed column. Default off; opt-in via
    `--write-tracking-column`.
-4. **Watch-via-polling cadence and circuit breaker (v0.4).** Polling
-   at 30s is fine for one watcher; if an agent spawns 50 in parallel
-   that's 100 req/min just from polling. Cap concurrent watches
-   per profile? Single-process backoff if Monday signals
-   `concurrency_exceeded`?
+4. **Watch-via-polling cadence and circuit breaker (v0.4).**
+   **Closed:** default cadence pinned at **30s** with
+   `--interval <ms>` override (range 1000ms–3600000ms);
+   circuit breaker is **reactive, not preemptive** (rely on
+   Monday's `complexity_exceeded` / `concurrency_exceeded` /
+   `rate_limited` wire responses; respect
+   `reset_in_x_seconds` for backoff with a 60s default cap
+   when absent; trip to `failure_envelope` after **5
+   consecutive failed polls** with each failure emitting a
+   `warning` record to the NDJSON stream first). No new
+   ERROR_CODE — `complexity_exceeded` /
+   `concurrency_exceeded` / `rate_limited` already in §6.5's
+   29-code registry cover the circuit-breaker exit; the
+   trailer-meta carries `circuit_broken_at` + `failed_polls`
+   so agents diagnose the trip mode. Multi-watcher policy:
+   each `monday item watch` invocation is independent (no
+   shared registry); aligns with §3.1 #5 ("agents do their
+   own parallelism"). Pinned at v0.4-M29 pre-flight empirical
+   probe (`scripts/probe/m29-polling-burn.ts`, 2026-05-13,
+   API `2026-01`): per-poll cost is stable at **10 complexity
+   points** for the `boards(ids:){ activity_logs(item_ids:,
+   from:, limit:) }` shape (no scaling with `limit:`); the
+   per-minute complexity budget is **1,000,000** with a 60s
+   reset window, so 30s cadence burns ~0.002% of the per-
+   minute budget — politeness against Monday's servers +
+   the documented >30s `activity_logs` propagation lag (see
+   §13 v0.3 entry on `item history`) are the binding
+   constraints, NOT budget. Closes v0.4-plan §3 M29
+   Decisions D1–D5.
 5. **Auth caching format (v0.3).** **Closed:** plain JSON at
    `~/.monday-cli/credentials` with mode `0600`; not
    `gh`/`aws`-style. File format pinned in §7.4 ahead of M21 with
