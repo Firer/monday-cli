@@ -11,58 +11,118 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M29 IMPL landed end-to-end; next v0.4 milestone TBD.**
-Four-commit IMPL cluster on top of the pre-flight base:
-`7b83a3a` IMPL feat (runtime body of `watchItem` polling loop +
-runtime body of the `monday item watch <iid>` command action +
-trailer-meta extension on `MetaInput`/`Meta`/`buildMeta` +
-`StreamingTrailerInputs` `session` bundle + 18 integration tests)
-+ three Codex impl review fix-ups (`8add15e` round-1: 2 P1 + 2 P2
-+ 1 P3 — signal-aware catches across the bootstrap / `--once` /
-polling-loop wire-call sites so SIGINT mid-poll emits the
-`exit_reason: 'signal'` trailer instead of rethrowing past
-`stream.writeTrailer`; `EPOCH_FLOOR` sentinel for `--once`
-without `--since` so the backlog drain actually pulls the
-most-recent N events; `sinceBoundary` tuple + skip predicate
-in `processRows` to dedup events sharing the bootstrap's
-created_at; `deadlineMs` + `remainingMs()` accessor capping
-cadence + backoff sleeps at `min(sleep, remainingMs())` so
-`--max-duration` doesn't overshoot; docs/help "pre-flight stub"
-wording dropped; `2a293fc` round-2: 0 P1 + 0 P2 + 2 P3 — test
-hardening via `match_variables` pinning on the `--once`
-regression cassettes + three remaining stale "pre-flight stub"
-references at module-level docstrings; `01dcb4c` round-3: 0 P1
-+ 0 P2 + 1 P3 — one final stale "once IMPL lands" forward-
-reference in `WATCH_POLL_QUERY`'s JSDoc). 3-round IMPL
-convergence matches the v0.3-M26a/M26b precedent for runtime
-surfaces with non-trivial behavioural shape. Pre-flight pinned
-5 decisions correctly (no cli-design §X amendments at IMPL);
-both round-1 P1s stemmed from stub implementations that were
-logically consistent but didn't pin the exact runtime
-semantics — captured as a v0.4 milestone lesson in §11
-post-mortem.
+**v0.4-M30 pre-flight landed end-to-end; M30 IMPL is next.**
+Four-commit pre-flight cluster on top of the M29 close base:
+`8cfd96b` contract diff (`docs(m30-preflight)`: stub module
+`src/api/parallel-dispatch.ts` with `dispatchParallel` + the
+three `MIN_CONCURRENCY` / `MAX_CONCURRENCY` /
+`DEFAULT_CONCURRENCY` constants under `/* c8 ignore start/stop */`
+block-wraps; `concurrency` input slot threaded through
+`RunPartialSuccessBulkUpdateInputs`; per-target dispatch closure
+hoisted to a named `perTargetDispatch` local + shared between
+the sequential default and the parallel arm; routing branch in
+`partial-success-bulk.ts` selects `dispatchSequential` for
+`concurrency === undefined || concurrency === 1` and
+`dispatchParallel` for `concurrency > 1` — the parallel arm
+c8-ignored at pre-flight because the stub throws
+`internal_error` with `details.deferred_to: "v0.4-M30 IMPL"`;
+`item update` argv slot + `validateInputShape` combination-rule
+rejections for single-item and bulk-without-`--continue-on-
+error`; cli-design §4.3 row updated + §6.4 "Bulk per-item
+partial-success — Parallel dispatch" sub-paragraph appended +
+§9.3 deferred-block flipped; v0.4-plan §3 M30 entry + §8 D1–D5
+closures + §9 M30 preconditions checklist; output-shapes.md
+heading + ToC; 17 schema-level argv unit tests at the new
+`tests/unit/commands/item-update-argv.test.ts` + 4 combination-
+rule rejection integration tests appended to the existing
+`tests/integration/commands/item-update-bulk.test.ts`) + three
+Codex pre-flight review fix-ups (`be8b983` round-1: 0 P1 + 0 P2
++ 3 P3 — v0.4-plan §1/§2 prose refresh against the closed M30
+scope, 6-site routing-shape sweep across module docstrings +
+output-shapes + the test cluster comment, `<sha>` placeholder
+filled in; `32d862d` round-2: 0 P1 + 0 P2 + 3 P3 — residual
+`dispatchConcurrent` reference in §1 swept to `dispatchParallel`,
+five "argv-parse time" combination-rule sites swept to
+"validateInputShape" / "before any network call" to match the
+actual two-layer parse + shape-validation discipline, stub-body
+comment corrected from "throws synchronously" to "returns a
+rejected Promise from a non-async body"; `0ca9418` round-3: 0
+P1 + 0 P2 + 1 P3 — cli-design §6.4 "R-NEW-28 6-axis" sentence
+listed the wrong audit axes, swept to match
+`dispatchParallel`'s actual six axes per-target error code +
+`internal_error` re-throw + non-`MondayCliError` re-throw +
+empty-input no-dispatch + input-order preservation +
+AbortSignal threading). 3-round prose convergence matches the
+v0.4-M29 IMPL cadence; pre-flight contract shape pinned
+correctly across all three rounds (no P1 / P2 surfaced — only
+P3 prose drift between cli-design + v0.4-plan + module
+docstrings).
 
-**Live numbers (M29 close):**
-- Test count: **3298 + 1 skipped** across 132 files (+23 net
-  vs 3275 pre-IMPL baseline).
-- Coverage: **99.23 / 96.22 / 99.39 / 99.52** against the
-  **95 / 95.45 / 95 / 95** floor. Branches margin **0.77pp**
-  (was 0.95pp pre-IMPL; -0.18pp from the polling-loop body —
-  within expectation).
-- ERROR_CODES count: **29** (unchanged per D1 closure).
-- Command count: **96** (registered at pre-flight; IMPL added
-  the runtime body, not a new verb).
-- `package.json` version: **0.3.0** (stays here through v0.4
-  milestones; bumps to `0.4.0` at v0.4 release-prep).
+**M30 highlights.** Smallest non-trivial v0.4 surface — extends
+the v0.3-M25 partial-success-bulk path with one new argv flag.
+Envelope shape **byte-equivalent** to M25 (`data.results[]`
+per-item records + `data.summary.{matched,applied,failed}_count`
+slot + `ok: true` universal-partial-success rule unchanged).
+**Three constraints pinned at pre-flight** (D1–D5):
+`--concurrency` ranges `[1, 32]` with default `1` (sequential,
+empirical probe at 2026-05-13 / API `2026-01` observed cap >
+100 in-flight for trivial reads, so `32` carries substantial
+headroom under any plausible plan-tier cap); REQUIRES
+`--continue-on-error` (rejected with `usage_error` on the
+fail-fast bulk path — no defined "abort N in-flight" semantic;
+parallel fail-fast deferred indefinitely); rejected on the
+single-item shape at `validateInputShape` time. Implementation
+strategy pinned: bounded async-pool (not `Promise.all` on the
+full batch); per-target dispatch closure shared with the
+sequential path verbatim so the R-NEW-28 6-axis behavioral-
+equivalence audit is straightforward at impl-review. **No new
+ERROR_CODE** — `concurrency_exceeded` lives in the 29-code
+registry already; Monday's signal retries through the existing
+`src/api/retry.ts` layer per cli-design §2.5.
 
-**Next session — v0.4 milestone TBD.** v0.4-plan §3 lists the
-candidate sequence: `--concurrency` parallel-dispatch for bulk
-verbs (matches the v0.3-M25 partial-success-bulk extension
-shape), asset upload (multipart wire), `doc list/get`, `team`
-writers, shell completion (bash/zsh), v0.4 release-prep. The
-natural follow-on per v0.4-plan §3 sequencing is `--concurrency`
-pre-flight, but the user picks which to ship first based on
-incoming usage signal post-v0.3.0 npm publish (2026-05-13).
+**Live numbers (M30 pre-flight close):**
+- Test count: **3320 + 1 skipped** across 133 files (+22 net
+  vs 3298 + 1 skipped M29-close baseline; 17 new argv unit
+  tests + 4 new combination-rule integration tests + 1 net
+  from existing-file edits).
+- Coverage: **99.23 / 96.22 / 99.39 / 99.52** unchanged from
+  M29 close against the **95 / 95.45 / 95 / 95** floor.
+  Branches margin **0.77pp** unchanged — the c8 ignore
+  block-wraps on `dispatchParallel`'s stub body + the
+  partial-success-bulk parallel arm keep the new branches
+  out of the denominator at pre-flight; M30 IMPL adds them
+  back when the c8 ignore drops + integration tests cover
+  the parallel route.
+- ERROR_CODES count: **29** (unchanged — `concurrency_exceeded`
+  pre-existing per M2 retry-layer work).
+- Command count: **96** (unchanged — `--concurrency` is a
+  flag extension on `monday item update --where`, not a
+  new verb).
+- `package.json` version: **0.3.0** (stays here through
+  every v0.4 milestone; bumps to `0.4.0` at v0.4
+  release-prep).
+
+**Next session — M30 IMPL.** Runtime body of `dispatchParallel`
+lands the bounded async-pool implementation per D4 closure
+(maintain at most N in-flight; result array preserves input
+order via per-call index; per-target dispatch closure shared
+with the sequential path verbatim; AbortSignal threading
+added as a new slot on both routes). Drop the c8 ignore on
+the parallel-route arm in `partial-success-bulk.ts`. Add
+integration tests via `FixtureTransport` cassettes covering
+input-order preservation, concurrent failure landing
+per-record, `concurrency_exceeded` retry under load, SIGINT
+graceful abort, N=2/4/8/16 dispatch variants. Expected
+findings cadence per the M25/M27 precedent: 1-2 Codex impl
+review rounds; the R-NEW-28 6-axis audit returns clean if
+the per-target dispatch closure stays byte-identical between
+routes. **R-NEW-45 watch-item** (`sleepWithSignal` race-
+window-guarded sleep helper, 2 consumers at M29 close) may
+fire its 3-consumer trigger at M30 IMPL if the bounded
+async-pool's slot-recycling waits on a cancellable timer
+between in-flight completions — lift inline with the IMPL
+feat per the v0.4-plan §22 entry's R-NEW-29-precedent
+guidance.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
@@ -403,18 +463,35 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **v0.4-M30 pre-flight — TBD which v0.4 candidate.** v0.4-plan
-   §3 lists the candidate sequence: `--concurrency` parallel-
-   dispatch (matches the v0.3-M25 partial-success-bulk extension
-   shape), asset upload (multipart wire), `doc list/get`, `team`
-   writers, shell completion, v0.4 release-prep. Natural follow-
-   on per §3 sequencing is `--concurrency` pre-flight; user
-   picks based on incoming usage signal post-v0.3.0 npm publish.
-   Pre-flight pattern (from v0.3-M21+) is: empirical probe for
-   novel API surface → contract-diff commit (stub modules + zod
-   schemas + cli-design extension + ERROR_CODES widening if any
-   + cross-doc count bumps + plan-doc decisions list) → 1–2 Codex
-   pre-flight rounds → IMPL session.
+1. **v0.4-M30 IMPL — `--concurrency` runtime body.** Land the
+   bounded async-pool implementation in
+   `src/api/parallel-dispatch.ts:dispatchParallel`: maintain at
+   most N in-flight dispatches at any moment (NOT `Promise.all`
+   on the full batch); recycle slots as earlier completions
+   land; result array preserves input order via per-call index
+   keyed off the matched-item-IDs sequence. Drop the c8 ignore
+   on the parallel-route arm in `partial-success-bulk.ts` once
+   integration tests cover the route. AbortSignal threading
+   lands as a new slot on BOTH routes (sequential +
+   parallel) — SIGINT during in-flight parallel dispatch aborts
+   cleanly via `ctx.signal`, mirroring the M22 status + M29
+   watch pattern. Integration tests via `FixtureTransport`
+   cassettes: input-order preservation under late-completing
+   N=1 + early-completing N=K matrices; concurrent failure
+   landing per-record in `data.results[]` (NOT abort-on-first);
+   `concurrency_exceeded` retry under load (existing
+   `src/api/retry.ts` layer applies); SIGINT graceful abort;
+   N=2/4/8/16/32 dispatch variants. R-NEW-28 6-axis behavioral-
+   equivalence audit returns clean if the hoisted
+   `perTargetDispatch` closure stays byte-identical between
+   routes. **R-NEW-45 watch-item** (`sleepWithSignal` race-
+   window-guarded sleep helper, 2 consumers at M29 close) may
+   fire its 3-consumer trigger if the bounded async-pool's
+   slot-recycling waits on a cancellable timer between
+   in-flight completions — lift inline with the IMPL feat per
+   v0.4-plan §22's R-NEW-29 precedent. Expected impl-review
+   cadence per M25 (1 round) / M27 (4 rounds with prose
+   convergence) / M29 (3 rounds) — anticipate 1-3 rounds.
 2. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+
