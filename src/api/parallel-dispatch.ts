@@ -25,7 +25,7 @@
  * `src/api/partial-success-bulk.ts`'s carve-out:
  *
  *   1. **Single-source-of-truth for the async-pool pattern.** The
- *      v0.4-M30 IMPL session lands the bounded-concurrency
+ *      v0.4-M30 IMPL landed the bounded-concurrency
  *      orchestration in one place; any future bulk verb that
  *      needs parallel dispatch (`item clear --where`, M13 `update
  *      clear-all`, M14 user-fan-out family) imports the same

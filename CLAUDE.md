@@ -102,6 +102,16 @@ configured at construction time. **No new ERROR_CODE** —
   rename for DOMException-style branching (lift-site JSDoc
   carries the carve-out paragraph). v0.4-plan §22 R-NEW-55
   entry has full detail.
+- **R-NEW-56 shipped (process discipline)** via the new
+  "Pre-IMPL cross-doc grep" workflow rule in this file's
+  Workflow rules section. M30 IMPL's 5-round prose-drift
+  convergence is the load-bearing lesson; future "flag
+  extends existing surface" milestones run a `grep -rn
+  '<existing-symbol>' src/ docs/ tests/` at IMPL kickoff to
+  enumerate every site needing the new framing BEFORE
+  running Codex round 1. Mitigation collapses 4-5 rounds to
+  1-2. **Not a code lift** — process discipline applied at
+  the IMPL session's kickoff.
 - **R-NEW-45 stays at 2 consumers.** M30's bounded async-pool
   doesn't use a cancellable timer between worker completions
   (workers idle on `Promise.all` resolution), so the 3rd-
@@ -109,10 +119,25 @@ configured at construction time. **No new ERROR_CODE** —
 - **R-NEW-28** held cleanly across all 5 IMPL Codex rounds.
   R-NEW-52 watch-item fired its **2nd consumer** at round-3
   P3-1 (4 sites in `partial-success-bulk.ts` that documented
-  only `dispatchSequential`'s behaviour); stays at 2
-  consumers, fires at 3rd if another bulk verb extension
-  lands.
+  only `dispatchSequential`'s behaviour) + round-4 P3-1 (6
+  MORE sites) + round-5 P3-1 (4 cli-design §6.4 contract-
+  prose paragraphs). The drift class caused **5 of 5** M30
+  IMPL Codex rounds to surface P3 findings under the same
+  umbrella. **Stays at 2 distinct consumers (M30 pre-flight +
+  M30 IMPL)**; fires at 3rd consumer (next opt-in-flag-
+  extending milestone with parallel-vs-sequential routing).
+  Mitigation pattern surfaces as **R-NEW-56's cross-doc grep**
+  — the upstream root cause is "IMPL author didn't enumerate
+  all sites before kicking off Codex".
 - **R-NEW-51 / R-NEW-53 / R-NEW-54** stay at 1 consumer each.
+- **R-NEW-57 (Bounded async-pool pattern lift) + R-NEW-58
+  (Lift-ahead-of-feat discipline for R-class 3rd-consumer
+  triggers)** — new watch-items surfaced at M30 IMPL close,
+  both at 1 consumer. R-NEW-57 fires at 2nd parallel-dispatch
+  surface (likely M31+ multi-target write verb with
+  `--concurrency`); R-NEW-58 fires at 2nd "3rd-consumer
+  crystallizes at IMPL kickoff" milestone. Full detail at
+  v0.4-plan §22.
 
 Per-milestone narrative + Codex round detail + lessons learned
 live in `docs/v0.4-plan.md` §12 (M30 post-mortem). Do not
@@ -1123,6 +1148,19 @@ v0.1-plan.md / v0.2-plan.md. **Don't restate them here.**
     review caught 10 bugs (token leak, broken SIGINT, schema/commander
     drift); skipping costs more than the Codex run. Ask before adding
     new AI collaborators.
+- **Pre-IMPL cross-doc grep for "flag extends existing surface"
+  milestones** (R-NEW-56, v0.4-M30 lesson). When the IMPL session
+  extends an existing helper/surface with a new mode (a new flag,
+  a new route, a new dispatcher), run a cross-doc grep at IMPL
+  kickoff: `grep -rn '<existing-symbol>' src/ docs/ tests/`. The
+  output enumerates every site that needs the "selected dispatcher" /
+  "both routes" / general-route framing in module docs, internal
+  comments, error messages, and test descriptions. Without this
+  step, the prose-drift surface fans out across 4-5 Codex review
+  rounds (M30 IMPL took 5 rounds to converge against one drift
+  class). Pair with a scan for R-class 3-consumer triggers that
+  crystallize at IMPL kickoff (R-NEW-58 lesson) — lift those
+  AHEAD of the feat commit, mirroring R-NEW-29's M25 cadence.
 - **Atomic, incremental commits.** One self-contained unit per commit:
   small enough to revert cleanly, large enough to stand alone. Never
   commit broken `main`.
