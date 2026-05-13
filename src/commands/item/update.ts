@@ -102,6 +102,10 @@ import {
   PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE,
   type PartialSuccessBulkUpdateData,
 } from '../../api/partial-success-bulk.js';
+import {
+  MIN_CONCURRENCY,
+  MAX_CONCURRENCY,
+} from '../../api/parallel-dispatch.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 export const itemUpdateOutputSchema = projectedItemSchema;
@@ -167,6 +171,27 @@ const inputSchema = z
     // `validateInputShape` rejects `--continue-on-error` on the
     // single-item path with a `usage_error`.
     continueOnError: z.boolean().optional(),
+    // v0.4-M30 pre-flight (cli-design §6.4 "Bulk per-item
+    // partial-success — Parallel dispatch" + §9.3). Opt-in to
+    // bounded parallel per-item dispatch under
+    // `--continue-on-error`. `undefined` or `1` preserves the
+    // M25 sequential path verbatim; `> 1` routes through
+    // {@link dispatchParallel} (stub at pre-flight, runtime at
+    // M30 IMPL). Range pinned at argv-parse-time to
+    // `[MIN_CONCURRENCY, MAX_CONCURRENCY]` (1..32) — under any
+    // plausible Monday per-account cap (cli-design §2.5).
+    //
+    // `validateInputShape` rejects `--concurrency` on the
+    // single-item path AND rejects `--concurrency` without
+    // `--continue-on-error` (the fail-fast bulk path doesn't
+    // have a defined "abort N in-flight" semantic at M30; that's
+    // explicitly deferred per v0.4-plan §8 D2 closure).
+    concurrency: z.coerce
+      .number()
+      .int('--concurrency must be an integer')
+      .min(MIN_CONCURRENCY, `--concurrency must be ≥ ${String(MIN_CONCURRENCY)}`)
+      .max(MAX_CONCURRENCY, `--concurrency must be ≤ ${String(MAX_CONCURRENCY)}`)
+      .optional(),
   })
   .strict()
   // At least one of --set / --set-raw / --name must be provided. An
@@ -229,12 +254,43 @@ const validateInputShape = (parsed: ParsedInput): DispatchShape => {
         { details: { item_id: parsed.itemId } },
       );
     }
+    if (parsed.concurrency !== undefined) {
+      throw new UsageError(
+        '--concurrency is only valid on the bulk partial-success path ' +
+          '(--where / --filter-json + --continue-on-error). Single-item ' +
+          'update has no per-item dispatch loop to parallelise.',
+        { details: { item_id: parsed.itemId } },
+      );
+    }
     /* c8 ignore next 4 — defensive: hasItemId === true means
        parsed.itemId is non-undefined; the type guard exists for TS. */
     if (parsed.itemId === undefined) {
       throw new UsageError('item update: itemId narrowing failed');
     }
     return { kind: 'single', itemId: parsed.itemId };
+  }
+  // v0.4-M30 D2 closure: `--concurrency` requires `--continue-on-error`.
+  // The fail-fast bulk path (cli-design §6.4 default + §6.5 "Bulk per-
+  // item failure") doesn't have a well-defined "abort N in-flight"
+  // semantic — the first per-item error aborts the loop today, and a
+  // parallel variant would need to decide which in-flight calls to
+  // cancel + how to report `details.applied_to` against a non-
+  // sequential dispatch order. That extension is deferred; M30 lands
+  // only the partial-success-bulk parallel path where the universal
+  // partial-success rule (cli-design §6.1) makes "let every in-flight
+  // dispatch complete and capture per-record outcomes" unambiguous.
+  if (parsed.concurrency !== undefined && parsed.continueOnError !== true) {
+    throw new UsageError(
+      '--concurrency requires --continue-on-error. The fail-fast bulk ' +
+        'path does not yet support parallel dispatch (deferred per ' +
+        'v0.4-plan M30 D2). Either drop --concurrency or add ' +
+        '--continue-on-error to opt in to the partial-success envelope.',
+      {
+        details: {
+          concurrency: parsed.concurrency,
+        },
+      },
+    );
   }
   return { kind: 'bulk' };
 };
@@ -254,6 +310,7 @@ export const itemUpdateCommand: CommandModule<
     'monday item update 12345 --set status=Done --dry-run --json',
     "monday item update 12345 --set-raw status='{\"label\":\"Done\"}'",
     "monday item update 12345 --set status=Done --set-raw tags_1='{\"tag_ids\":[1,2]}'",
+    'monday item update --board 67890 --where status=Backlog --set status=Working --continue-on-error --concurrency 8 --yes',
   ],
   idempotent: true,
   inputSchema,
@@ -297,6 +354,10 @@ export const itemUpdateCommand: CommandModule<
       .option(
         '--continue-on-error',
         'bulk only: attempt every matched item and emit a partial-success envelope with per-item {item_id, ok, error?} records (v0.3-M25)',
+      )
+      .option(
+        '--concurrency <n>',
+        `bulk + --continue-on-error only: fan out at most N (${String(MIN_CONCURRENCY)}..${String(MAX_CONCURRENCY)}) per-item dispatches in parallel; default 1 = sequential (v0.4-M30)`,
       )
       .addHelpText(
         'after',
@@ -896,6 +957,12 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       env: ctx.env,
       noCache: globalFlags.noCache,
       resolutionSource: remapSource,
+      // v0.4-M30 pre-flight: thread the argv `--concurrency` slot
+      // through. `undefined` (default) preserves the M25 sequential
+      // dispatch; `> 1` routes through dispatchParallel (stub at
+      // pre-flight, runtime at M30 IMPL). Argv parser pinned the
+      // value to [MIN_CONCURRENCY, MAX_CONCURRENCY] (1..32).
+      concurrency: parsed.concurrency,
     });
     // Per-item dispatch leg is always live — fold into the
     // aggregator. Mirrors the fail-fast path's terminal

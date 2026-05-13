@@ -58,7 +58,7 @@ no `data`); see the **Errors** section at the bottom.
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
 | [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29) |
-| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
+| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
@@ -2095,15 +2095,25 @@ column-resolution failures fail-fast before the items_page walk
 fires (no metadata round-trip wasted on a malformed JSON or a
 typo'd column token).
 
-### `item update --where ... --board <bid> --continue-on-error` (bulk, partial-success)
+### `item update --where ... --board <bid> --continue-on-error [--concurrency <n>]` (bulk, partial-success)
 
-Opt-in partial-success bulk variant (M25). Same matched-item walker
-+ confirmation gate as the fail-fast bulk path above; the `--continue-on-
-error` flag swaps the per-item dispatch loop from fail-fast to attempt-
-every-match. Per-item failures land per-record inside `data.results[]`;
-the top-level envelope is **always `ok: true`** when dispatch ran (per
-cli-design §6.1 universal partial-success rule applied uniformly across
-M13/M14/M15/M25 family).
+Opt-in partial-success bulk variant (M25; `--concurrency` extension at
+v0.4-M30). Same matched-item walker + confirmation gate as the fail-fast
+bulk path above; the `--continue-on-error` flag swaps the per-item dispatch
+loop from fail-fast to attempt-every-match. Per-item failures land per-
+record inside `data.results[]`; the top-level envelope is **always
+`ok: true`** when dispatch ran (per cli-design §6.1 universal partial-
+success rule applied uniformly across M13/M14/M15/M25 family).
+
+`--concurrency <n>` (v0.4-M30; range 1..32; default 1) opts into bounded
+parallel per-item dispatch. The envelope shape is **byte-equivalent** to
+the sequential path — same per-record `{item_id, ok, item|error}` shape,
+same `data.summary` slot, same `ok: true` universal-partial-success rule.
+The result array preserves **input order** (`results[i]` corresponds to
+`matchedItemIds[i]`) regardless of completion order. `--concurrency` is
+rejected with `usage_error` on the single-item shape and on the fail-fast
+bulk path (i.e., without `--continue-on-error`). Range out-of-bounds
+rejects at argv-parse with `usage_error`.
 
 ```json
 {

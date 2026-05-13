@@ -65,6 +65,18 @@
  * 3-consumer trigger: single-item + fail-fast bulk + M25
  * partial-success bulk).
  *
+ * **v0.4-M30 pre-flight extension.** Adds the `concurrency`
+ * input slot + the routing branch to {@link dispatchParallel}
+ * (new module `src/api/parallel-dispatch.ts` — stub body at
+ * pre-flight, runtime body at IMPL). When the caller passes
+ * `concurrency > 1`, the runtime fans out per-target dispatches
+ * via a bounded async-pool; absent or `concurrency === 1`
+ * preserves the M25 sequential path verbatim. The per-target
+ * dispatch closure is hoisted to a named local so both routes
+ * share the same `executeItemMutation` + `foldAndRemap` body —
+ * keeping the R-NEW-28 6-axis behavioral-equivalence audit
+ * straightforward at the impl-review pass.
+ *
  * **Per-item dispatch wiring.** Runtime body loops
  * {@link dispatchSequential} over `matchedItemIds` with
  * id-field `'item_id'`. The per-item dispatch callback fires
@@ -92,8 +104,10 @@ import { ApiError, MondayCliError } from '../utils/errors.js';
 import { projectedItemSchema, type ProjectedItem } from './item-projection.js';
 import {
   dispatchSequential,
+  type DispatchOneTargetInputs,
   type PartialSuccessResult,
 } from './partial-success-mutation.js';
+import { dispatchParallel } from './parallel-dispatch.js';
 import { executeItemMutation } from './item-mutation-execute.js';
 import { foldAndRemap } from './resolver-error-fold.js';
 import type { ResolverWarning } from './columns.js';
@@ -243,6 +257,19 @@ export interface RunPartialSuccessBulkUpdateInputs {
   readonly env: NodeJS.ProcessEnv;
   readonly noCache: boolean;
   readonly resolutionSource: 'live' | 'cache' | 'mixed';
+  /**
+   * v0.4-M30 `--concurrency <N>` argv slot (cli-design §9.3 +
+   * §6.4 "Bulk per-item partial-success — Parallel dispatch").
+   * `undefined` or `1` routes through `dispatchSequential`
+   * (byte-equivalent to the v0.3-M25 path); `> 1` routes
+   * through {@link dispatchParallel} (bounded async-pool).
+   * Action layer's argv parser pins the value to
+   * `[MIN_CONCURRENCY, MAX_CONCURRENCY]` (1..32) before reaching
+   * this helper. Pre-flight: the parallel route is c8-ignored
+   * because the dispatchParallel stub body throws; IMPL drops
+   * the ignore + the runtime body lands.
+   */
+  readonly concurrency: number | undefined;
 }
 
 /**
@@ -289,9 +316,13 @@ export const PARTIAL_SUCCESS_BULK_DISPATCH_SOURCE: EnvelopeSource = 'live';
 /**
  * Drives the per-item dispatch loop under `--continue-on-error`.
  *
- * Implementation (M25 impl `78889df` refactor + this commit):
+ * Implementation (M25 impl `78889df` refactor + this commit;
+ * extended at v0.4-M30 pre-flight with the `concurrency` routing
+ * branch):
  *
- *   1. Loop {@link dispatchSequential} over `matchedItemIds`
+ *   1. Loop {@link dispatchSequential} (default / M25 path) OR
+ *      {@link dispatchParallel} (v0.4-M30 `--concurrency > 1`
+ *      path; runtime body lands at IMPL) over `matchedItemIds`
  *      with id-field `'item_id'`.
  *   2. Per-item dispatch callback fires
  *      {@link executeItemMutation} against the resolved
@@ -357,57 +388,90 @@ export const runPartialSuccessBulkUpdate = async (
     env,
     noCache,
     resolutionSource,
+    concurrency,
   } = inputs;
 
   const projectedById = new Map<string, ProjectedItem>();
 
-  const dispatchResults = await dispatchSequential(
-    matchedItemIds,
-    'item_id',
-    async ({ targetId }) => {
-      try {
-        const result = await executeItemMutation(client, {
-          mutation,
-          itemId: targetId,
+  // Per-target dispatch closure shared between the sequential
+  // (v0.3-M25 default) and parallel (v0.4-M30 `--concurrency > 1`)
+  // routes. Both dispatch helpers contract on the same
+  // {@link DispatchOneTargetInputs}-shaped callback so the closure
+  // body is byte-equivalent across routes — only the OUTER call
+  // (dispatchSequential vs dispatchParallel) changes. This keeps the
+  // R-NEW-28 6-axis behavioral-equivalence audit straightforward:
+  // every per-target outcome (success projection capture; `MondayCliError`
+  // foldAndRemap + re-throw; non-CliError re-throw) is shared verbatim.
+  const perTargetDispatch = async (
+    { targetId }: DispatchOneTargetInputs<string>,
+  ): Promise<void> => {
+    try {
+      const result = await executeItemMutation(client, {
+        mutation,
+        itemId: targetId,
+        boardId,
+        createLabelsIfMissing,
+      });
+      projectedById.set(targetId, result.projected);
+    } catch (err: unknown) {
+      if (err instanceof MondayCliError) {
+        // Codex pre-flight round-1 P1-1: thread the remap
+        // context through so per-item failures inherit the
+        // SAME `validation_failed` → `column_archived`
+        // stale-cache remap the v0.1 fail-fast path applies.
+        // Without this, archived-column failures would
+        // surface as `validation_failed` in `data.results[]`
+        // even though the v0.1 path surfaces `column_archived`
+        // for the same root cause (cli-design §6.5 stable-
+        // code rule). foldAndRemap NEVER converts a non-
+        // internal_error into internal_error, so
+        // dispatchSequential's internal_error re-throw escape
+        // hatch (M14 round-2 F1) stays intact.
+        const remapped = await foldAndRemap({
+          err,
+          warnings: resolverWarnings,
+          client,
           boardId,
-          createLabelsIfMissing,
+          columnIds: remapColumnIds,
+          env,
+          noCache,
+          resolutionSource,
         });
-        projectedById.set(targetId, result.projected);
-      } catch (err: unknown) {
-        if (err instanceof MondayCliError) {
-          // Codex pre-flight round-1 P1-1: thread the remap
-          // context through so per-item failures inherit the
-          // SAME `validation_failed` → `column_archived`
-          // stale-cache remap the v0.1 fail-fast path applies.
-          // Without this, archived-column failures would
-          // surface as `validation_failed` in `data.results[]`
-          // even though the v0.1 path surfaces `column_archived`
-          // for the same root cause (cli-design §6.5 stable-
-          // code rule). foldAndRemap NEVER converts a non-
-          // internal_error into internal_error, so
-          // dispatchSequential's internal_error re-throw escape
-          // hatch (M14 round-2 F1) stays intact.
-          const remapped = await foldAndRemap({
-            err,
-            warnings: resolverWarnings,
-            client,
-            boardId,
-            columnIds: remapColumnIds,
-            env,
-            noCache,
-            resolutionSource,
-          });
-          throw remapped;
-        }
-        // Non-MondayCliError — programmer bug. Re-throw through
-        // dispatchSequential's non-CliError branch so the runner's
-        // catch-all surfaces it as internal_error (whole-call,
-        // not per-record). Mirrors users-fan-out-mutation.ts
-        // and is the documented dispatchSequential contract.
-        throw err;
+        throw remapped;
       }
-    },
-  );
+      // Non-MondayCliError — programmer bug. Re-throw through
+      // dispatchSequential / dispatchParallel's non-CliError branch
+      // so the runner's catch-all surfaces it as internal_error
+      // (whole-call, not per-record). Mirrors users-fan-out-mutation.ts
+      // and is the documented partial-success contract.
+      throw err;
+    }
+  };
+
+  // v0.4-M30 routing: `--concurrency <N>` with N > 1 routes through
+  // {@link dispatchParallel} (bounded async-pool, runtime body lands
+  // at M30 IMPL); absent / N === 1 routes through the unchanged
+  // {@link dispatchSequential} path. The branch is the only mutation
+  // to the M25 runtime body at pre-flight — the c8 ignore on the
+  // parallel arm drops at IMPL when integration tests start
+  // exercising the parallel route.
+  let dispatchResults: readonly PartialSuccessResult[];
+  if (concurrency !== undefined && concurrency > 1) {
+    /* c8 ignore start — M30 pre-flight: dispatchParallel runtime body lands at IMPL. */
+    dispatchResults = await dispatchParallel(
+      matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+      concurrency,
+    );
+    /* c8 ignore stop */
+  } else {
+    dispatchResults = await dispatchSequential(
+      matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+    );
+  }
 
   const results: PartialSuccessBulkUpdateResult[] = dispatchResults.map(
     (row) => {

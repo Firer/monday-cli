@@ -1911,6 +1911,108 @@ describe('monday item update bulk — --continue-on-error (M25 partial-success)'
     expect(env.error?.message).toMatch(/single-item/i);
   });
 
+  // v0.4-M30 pre-flight combination-rule rejections — both fire from
+  // validateInputShape before any network call. The stub
+  // dispatchParallel body's throw (deferred_to: "v0.4-M30 IMPL") is
+  // unreachable from the integration test surface until M30 IMPL
+  // lands the routing branch in production code; coverage of the
+  // parallel route's runtime behaviour is M30 IMPL's scope.
+
+  it('rejects --concurrency on the single-item shape at argv-parse time (M30)', async () => {
+    // `--concurrency` is only meaningful on the bulk partial-success
+    // path. validateInputShape rejects before any network call,
+    // mirroring the --continue-on-error single-item rejection above.
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '12345',
+        '--set',
+        'status=Done',
+        '--concurrency',
+        '4',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/concurrency.*single-item/i);
+  });
+
+  it('rejects --concurrency without --continue-on-error on the bulk shape at argv-parse time (M30)', async () => {
+    // v0.4-plan §8 D2 closure: --concurrency requires
+    // --continue-on-error. Fail-fast bulk parallel dispatch is
+    // explicitly deferred (no defined "abort N in-flight" semantic).
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--concurrency',
+        '4',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.message).toMatch(/concurrency.*continue-on-error/i);
+  });
+
+  it('rejects --concurrency 0 at parse-boundary (M30 range floor)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--continue-on-error',
+        '--concurrency',
+        '0',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  it('rejects --concurrency 33 at parse-boundary (M30 range ceiling)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--continue-on-error',
+        '--concurrency',
+        '33',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+  });
+
   it('without --yes (and without --dry-run) surfaces confirmation_required regardless of --continue-on-error (gate orthogonality)', async () => {
     // Confirmation gate is orthogonal to --continue-on-error; both
     // must be acknowledged for the live partial-success path to

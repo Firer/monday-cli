@@ -1656,7 +1656,7 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # single-item multi-column atomic update
                                           # at least one of --name / --set / --set-raw required
                                           # --set and --set-raw against the same <col> → usage_error
-monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25)
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
@@ -1670,6 +1670,16 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # `{item_id, ok, error?}` records. Always emits `ok: true`
                                           # at the top level (universal partial-success rule); the
                                           # agent reads `data.results[]` for per-item outcomes.
+                                          # --concurrency <n> (v0.4-M30): opt-in to bounded parallel
+                                          # per-item dispatch under --continue-on-error. Range 1..32;
+                                          # default 1 (sequential, identical to the M25 path). Requires
+                                          # --continue-on-error (rejected with `usage_error` otherwise —
+                                          # fail-fast bulk has no defined "abort N in-flight" semantic;
+                                          # v0.4-plan M30 D2). Envelope shape is byte-equivalent to
+                                          # M25 — same `data.results[]` per-item records, same
+                                          # `data.summary.{matched,applied,failed}_count` invariant.
+                                          # Monday's `concurrency_exceeded` retries via the existing
+                                          # retry layer (§2.5) — no new error code surfaces.
 monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
@@ -5145,6 +5155,73 @@ per-target failures. The fail-fast bulk path
 action body branches on `parsed.continueOnError` to choose
 between the two paths after the confirmation gate.
 
+**Parallel dispatch** (v0.4-M30 `--concurrency <n>`). M30 extends
+the partial-success bulk path with bounded parallel per-item
+dispatch via a new module `src/api/parallel-dispatch.ts`
+(`dispatchParallel` helper). When the caller passes
+`--concurrency <n>` with `n > 1`, the runtime fans out N
+per-item mutations concurrently — at most N in-flight at any
+moment — and captures per-item outcomes into `data.results[]`
+exactly the way the sequential M25 path does. The envelope shape
+is **byte-equivalent** to the M25 path: same per-record `{item_id,
+ok, item|error}` shape, same `data.summary.{matched_count,
+applied_count, failed_count, board_id}` slot, same `ok: true`
+universal-partial-success rule at the top level. The result
+array preserves **input order** (`results[i]` corresponds to
+`matchedItemIds[i]`) regardless of completion order — downstream
+consumers + table renderers don't observe per-call timing.
+
+Constraints (v0.4-plan M30 D1–D5):
+
+- **Range.** `--concurrency` accepts `[1, 32]`. `1` is a valid
+  no-op that routes through the sequential path verbatim; `> 1`
+  routes through the parallel helper. The `32` upper bound is
+  conservative under any plausible Monday per-account concurrency
+  cap (§2.5; empirical probe at v0.4-M30 pre-flight observed
+  100+ in-flight trivial reads without triggering
+  `concurrency_exceeded`). Out-of-range values reject at
+  argv-parse time with `usage_error`.
+- **Requires `--continue-on-error`.** `--concurrency` is rejected
+  with `usage_error` when `--continue-on-error` is absent — the
+  fail-fast bulk path doesn't have a defined "abort N in-flight"
+  semantic (which in-flight calls to cancel? how to report
+  `details.applied_to` against a non-sequential dispatch order?).
+  Parallel fail-fast is explicitly deferred (no v0.x milestone
+  scheduled). The universal partial-success rule makes "let every
+  in-flight dispatch complete and capture per-record outcomes"
+  unambiguous, so parallel only lands on the partial-success
+  surface.
+- **Rejected on single-item shape.** Single-item `monday item
+  update <iid>` has no per-item dispatch loop to parallelise;
+  `--concurrency` on a single-item invocation rejects at argv-
+  parse with `usage_error` (mirrors the `--continue-on-error`
+  single-item rejection).
+- **`concurrency_exceeded` handling.** When Monday returns
+  `concurrency_exceeded` to a per-item dispatch (HTTP 200 with
+  `errors[].extensions.code === 'CONCURRENCY_LIMIT_EXCEEDED'`),
+  the existing retry layer (`src/api/retry.ts`) applies
+  exponential backoff per §2.5 — no M30-specific logic.
+  Persistent `concurrency_exceeded` after retries lands per-
+  record in `data.results[]` like any other per-item failure
+  (cli-design §6.4 partial-success-bulk failure path; agents
+  key off `data.results[i].error.code === 'concurrency_exceeded'`
+  to rerun a narrowed filter).
+- **Behavioural-equivalence audit (R-NEW-28 6-axis).** Per-target
+  error code semantics + `internal_error` whole-call re-throw +
+  empty-input no-op + per-item resolver-warning fold + source
+  aggregation rules + pre-network argv validation all mirror the
+  M25 sequential path verbatim. The two routes differ only in
+  dispatch ordering; per-target dispatch closure is shared
+  between them at the wrapper layer.
+
+`--concurrency 1` (the default) preserves the M25 envelope
+byte-equivalence — agents who don't opt in continue to receive
+identical envelopes. The empirical probe at M30 pre-flight
+confirmed Monday's per-account cap exceeds 100 in-flight for
+trivial reads at API `2026-01`; the `32` ceiling on
+`--concurrency` leaves substantial headroom under any plausible
+plan-tier cap.
+
 ### 6.5 Error
 
 To stderr (and the *only* thing on stderr at non-debug verbosity):
@@ -6245,18 +6322,37 @@ change is reported and zero are applied, or the command failed
 during read-side resolution and `data` is null with a populated
 `error`.
 
-### 9.3 Concurrency (deferred to v0.4)
+### 9.3 Concurrency (v0.4-M30)
 
-In v0.1–v0.3 the CLI is single-process and makes **one outbound
+In v0.1–v0.3 the CLI was single-process and made **one outbound
 request at a time** per command. Sequential is correct under
 Monday's complexity budget; a hot bulk loop with a tight
 `--where` filter saturates a single connection just fine and avoids
 hitting the per-account concurrency cap mid-walk.
 
-`--concurrency <n>` for parallel bulk mutations is deferred to v0.4
-(see §13). When implemented, it will probe Monday's
-`concurrency_exceeded` signal on first use, back off on failure, and
-respect the per-account ceiling.
+**v0.4-M30 adds `--concurrency <n>`** for bounded parallel per-item
+dispatch on the partial-success bulk path (`monday item update
+--where ... --continue-on-error`). Range `[1, 32]`; default `1`
+(sequential — byte-equivalent to the v0.3-M25 path). The flag
+requires `--continue-on-error` (rejected on the fail-fast bulk
+path; parallel fail-fast has no defined "abort N in-flight"
+semantic and is explicitly deferred). Single-item invocations
+reject `--concurrency` at argv-parse time. Envelope shape
+unchanged from M25 — same `data.results[]` per-item records,
+same `data.summary.{matched,applied,failed}_count` slot.
+Monday's `concurrency_exceeded` signal retries via the existing
+retry layer (§2.5); persistent failure after retries lands
+per-record in `data.results[]` like any other per-item failure.
+
+Full contract surface lives at §6.4 "Bulk per-item partial-
+success — Parallel dispatch". The pre-flight stub module
+`src/api/parallel-dispatch.ts` carries the bounded async-pool
+runtime body at M30 IMPL.
+
+Other bulk verbs (`item clear --where`, M13 `update clear-all`,
+M14 `workspace add-users` / `remove-users`, M15 `board
+add-users`) stay sequential at v0.4-M30; later milestones extend
+`--concurrency` to those surfaces if user demand surfaces.
 
 ## 10. Bulk and pipelines
 
