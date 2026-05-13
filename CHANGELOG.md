@@ -200,6 +200,22 @@ The data shape is unchanged; the cross-board path adds per-board
   shipped at M19). The `--set-raw` escape hatch on these types
   continues to work byte-identically; agents using the friendly form
   pick it up automatically.
+- **Multi-level subitem creation slips to `deferred_to: "v0.4"`.**
+  M28 Decision 11 closure: Monday's `sub_items_board` carries no
+  `subtasks` column at API `2026-01`, so depth-2 subitems have no
+  data-model home. Agents that previously caught the v0.2.0
+  envelope's `deferred_to: "v0.3"` should update the comparison;
+  the `error.code: "usage_error"` + `details.hierarchy_type:
+  "multi_level"` keys are unchanged. Single-level subitems (`item
+  create --parent <iid>` against classic boards) continue to work
+  byte-identically.
+- **Cross-board `item move` value-overrides slip to v0.4.**
+  `--columns-mapping`'s string-to-string form is unchanged. The
+  richer `{id, value?}` form was originally v0.3-targeted at M11
+  close; no v0.3 milestone picked up the extension because
+  Monday's `ColumnMappingInput` carries no value slot. Agents
+  needing overrides continue to fire `monday item set <iid>
+  <target>=<value>` post-move.
 - **Stable error-code registry expanded from 27 to 29.** Existing
   codes' shapes are unchanged.
 - **`--profile <name>` is a new global flag.** Resolved through

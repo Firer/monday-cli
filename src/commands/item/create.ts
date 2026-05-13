@@ -580,15 +580,18 @@ const resolveCreateMode = async (
     if (parent.hierarchyType === 'multi_level') {
       throw new UsageError(
         `Parent item ${dispatch.parentItemId} lives on a multi-level ` +
-          `board (hierarchy_type "multi_level"); subitem creation on ` +
-          `multi-level boards is deferred to v0.3. Use a classic ` +
-          `board (hierarchy_type null/"classic") or wait for v0.3.`,
+          `board (hierarchy_type "multi_level"); multi-level subitem ` +
+          `creation is deferred. Use a classic board ` +
+          `(hierarchy_type null/"classic"). v0.3 M28 Decision 11 closure: ` +
+          `Monday's sub_items_board carries no subtasks column at API ` +
+          `2026-01, so depth-2 subitems have no data-model home — v0.4 ` +
+          `picks the feature up if Monday surfaces the capability.`,
         {
           details: {
             parent_item_id: dispatch.parentItemId,
             parent_board_id: parent.boardId,
             hierarchy_type: parent.hierarchyType,
-            deferred_to: 'v0.3',
+            deferred_to: 'v0.4',
           },
         },
       );

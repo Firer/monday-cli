@@ -1733,10 +1733,14 @@ monday item move <iid> --to-group <gid> [--to-board <bid>] [--columns-mapping <j
                                           # everything (Monday's permissive default)" opt-in.
                                           # Mapping value form: `{<src>: <target>}` (string-
                                           # to-string). The richer `{id, value?}` form for
-                                          # value-overrides is deferred to v0.3 (Monday's
-                                          # `ColumnMappingInput` carries no value slot;
+                                          # value-overrides is deferred to v0.4 (was
+                                          # originally v0.3-targeted at M11 close; no v0.3
+                                          # milestone picked up the extension — Monday's
+                                          # `ColumnMappingInput` carries no value slot, and
                                           # supporting it requires a non-atomic post-move
-                                          # `change_multiple_column_values`). Agents needing
+                                          # `change_multiple_column_values` with cross-leg
+                                          # partial-failure envelope shapes that have no
+                                          # precedent at v0.3 close). Agents needing
                                           # overrides fire `monday item set <iid>
                                           # <target>=<value>` post-move.
                                           # `--dry-run` previews the source-item snapshot +

@@ -1088,7 +1088,7 @@ describe('monday item create — subitem (live)', () => {
     expect(env.resolved_ids).toEqual({});
   });
 
-  it('multi_level board → usage_error with details.hierarchy_type + deferred_to: v0.3', async () => {
+  it('multi_level board → usage_error with details.hierarchy_type + deferred_to: v0.4 (M28 Decision 11 closure)', async () => {
     const out = await drive(
       ['item', 'create', '--parent', '12345', '--name', 'Subtask', '--json'],
       {
@@ -1117,7 +1117,7 @@ describe('monday item create — subitem (live)', () => {
     expect(details).toMatchObject({
       parent_item_id: '12345',
       hierarchy_type: 'multi_level',
-      deferred_to: 'v0.3',
+      deferred_to: 'v0.4',
     });
   });
 

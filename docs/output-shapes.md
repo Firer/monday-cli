@@ -57,14 +57,16 @@ no `data`); see the **Errors** section at the bottom.
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
-| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24 stub) |
-| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
+| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24) |
+| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
 | [schema](#schema) | (no verb) |
-| [diagnostics](#diagnostics) | status, usage |
-| [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block |
+| [diagnostics](#diagnostics) | status (M22), usage (M22), board favorites (M23), item search cross-board (M23) |
+| [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
+| [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
+| [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -2070,7 +2072,9 @@ present) derive the auto-generated subitems board from the parent's
 
 Multi-level boards (`hierarchy_type: "multi_level"`) are rejected
 pre-mutation with `usage_error` carrying `details.hierarchy_type` +
-`details.deferred_to: "v0.3"`. `--parent` is mutually exclusive with
+`details.deferred_to: "v0.4"` (M28 Decision 11 closure — Monday's
+`sub_items_board` carries no `subtasks` column at API `2026-01`).
+`--parent` is mutually exclusive with
 `--board`, `--group`, and `--position` / `--relative-to`. `--set` /
 `--set-raw` columns resolve against the **subitems board**, not the
 parent's board.
@@ -2483,12 +2487,13 @@ simple `{<source_col_id>: <target_col_id>}` form — string-to-string
 — mapping directly to Monday's `columns_mapping: [ColumnMappingInput!]`
 parameter where `ColumnMappingInput = { source: ID!, target?: ID }`.
 The richer `{id, value?}` form for cross-board value-overrides is
-deferred to v0.3 (Monday's wire shape carries no value slot;
-supporting it requires a non-atomic post-move
+deferred to v0.4 (was originally v0.3-targeted at M11 close; no v0.3
+milestone picked up the extension — Monday's wire shape carries no
+value slot, and supporting it requires a non-atomic post-move
 `change_multiple_column_values` mutation with cross-leg partial-
-failure envelope shapes that have no precedent). Agents needing
-overrides fire `monday item set <iid> <target>=<value>` post-move
-until v0.3 ships an atomic primitive.
+failure envelope shapes that have no precedent at v0.3 close).
+Agents needing overrides fire `monday item set <iid>
+<target>=<value>` post-move until v0.4 ships an atomic primitive.
 
 **Strict default per cli-design §8 decision 5.** Source columns
 with data whose IDs don't exist on target AND aren't bridged by
