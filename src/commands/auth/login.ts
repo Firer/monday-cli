@@ -37,6 +37,7 @@ import {
   OAUTH_CALLBACK_PATH,
   OAUTH_CLIENT_ID,
   OAUTH_CLIENT_SECRET,
+  OAUTH_UNREGISTERED_PLACEHOLDER,
   OAUTH_DEFAULT_REQUESTED_SCOPES,
   type OAuthListenerHandle,
 } from '../../api/oauth.js';
@@ -217,6 +218,31 @@ export const authLoginCommand: CommandModule<
         ].join('\n'),
       )
       .action(async () => {
+        // Production-only placeholder guard. When the shipped OAuth
+        // credentials are still the `<UNREGISTERED_PENDING_OAUTH_APP>`
+        // placeholders, the upstream `/oauth2/token` exchange would
+        // fail with a cryptic `oauth_failed.code_exchange_failed`.
+        // Surface a clear `usage_error` pointing at the API-token
+        // path instead. OAuth login is deferred to a future version
+        // per v0.3-plan §8 Decision 11 rejection. The test seam
+        // (`__test_oauth_helper`) bypasses this — integration tests
+        // stub `/oauth2/token` and don't depend on real credentials.
+        const helperPath = ctx.env[TEST_OAUTH_HELPER_ENV_VAR];
+        if (
+          OAUTH_CLIENT_ID === OAUTH_UNREGISTERED_PLACEHOLDER &&
+          (helperPath === undefined || helperPath.length === 0)
+        ) {
+          throw new UsageError(
+            '`monday auth login` is not available in this release; authenticate via the MONDAY_API_TOKEN env var instead. OAuth login is deferred to a future version.',
+            {
+              details: {
+                reason: 'oauth_unregistered',
+                hint: 'set MONDAY_API_TOKEN=<your-monday-api-token> (mint from Monday → Profile → Developers → My Access Tokens) and re-run any `monday` command without `monday auth login`',
+              },
+            },
+          );
+        }
+
         const flags = parseGlobalFlags(program.opts(), ctx.env);
         if (flags.profile === undefined || flags.profile.length === 0) {
           throw new UsageError(
@@ -233,7 +259,6 @@ export const authLoginCommand: CommandModule<
         const state = generateOAuthState();
 
         // Step 2: bind listener (or test seam).
-        const helperPath = ctx.env[TEST_OAUTH_HELPER_ENV_VAR];
         let listener: OAuthListenerHandle;
         if (helperPath !== undefined && helperPath.length > 0) {
           const fixture = await readTestOAuthFixture(helperPath);

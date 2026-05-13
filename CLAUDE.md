@@ -11,7 +11,48 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.3-M27 closed end-to-end; M28 unblocked.**
+**v0.3-M28 pre-flight closed; M28 IMPL = release prep
++ 0.3.0 tag.** M28 pre-flight rejected Decisions 10 +
+11 on empirical grounds — multi-level subitem creation
+deferred out of v0.3 scope. Empirical probe
+(`scripts/probe/m28-multi-level-subitem.ts` +
+`scripts/probe/m28-depth-triangulate.ts`, 2026-05-13,
+API `2026-01`) confirmed Monday's `sub_items_board`
+has no `subtasks` column at the pinned API version, so
+depth-2 nesting has no data-model home. Direct
+`create_item` on the `sub_items_board` returns
+`InvalidBoardIdException`: "Can't create an item on
+subitems board"; `create_subitem` against a subitem
+parent returns bare `USER_UNAUTHORIZED`. Independently
+confirmed in Monday's UI (UI also refuses to create a
+sub-sub-item). Pinned API `2026-01`
+(`@mondaydotcomorg/api@14.0.0`) doesn't expose the
+capability; v0.4 (or v0.3.x) picks it up if Monday's
+data model surfaces deeper nesting. **Single-level
+subitems remain first-class** via the existing M9
+carve-in: `item create --parent <iid>`, `item subitems
+<iid>`, and all standard item verbs (`item get/update/
+set/clear/move/archive/delete/duplicate/history`)
+operate uniformly on subitems. **M28 ships
+release-prep only** at the next session: snapshot
+refresh, output-shapes.md ToC audit, README quickstart,
+CHANGELOG 0.3.0 entry, version bump.
+**`monday auth login` deferred indefinitely.**
+`OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` stay as
+`<UNREGISTERED_PENDING_OAUTH_APP>` placeholders in
+v0.3.0. The M28 pre-flight commit adds a one-line
+placeholder guard at the top of `auth/login.ts`'s
+action that throws a clear `usage_error.details.
+reason: oauth_unregistered` pointing users at
+`MONDAY_API_TOKEN` instead of the cryptic upstream
+`oauth_failed.code_exchange_failed`. Full M21 OAuth
+source + test infrastructure stays as dormant infra
+(`monday auth login`-bound tests bypass the guard via
+the existing `__test_oauth_helper` test seam). v0.3.x
+or v0.4 revisits OAuth if there's clear user demand
+for browser-based login over the API-token path.
+
+**Prior milestone — v0.3-M27 closed end-to-end.**
 M27 IMPL shipped at `9cb6a74` (`feat(m27): runtime bodies for
 webhook list/create/delete + notification send`) + Codex impl
 review fix-ups across 4 rounds: round 1 `6f59a83` (0 P1 + 1 P2
@@ -214,15 +255,12 @@ in the plan docs — **do not duplicate them here**:
   R20–R53.
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
-**Live numbers (post-M27 IMPL close):**
-- Test count: **3217** across 129 files (+34 net at M27 IMPL
-  — 24 new integration tests at
-  `tests/integration/commands/webhook.test.ts` covering happy
-  paths + dry-run envelopes + confirmation gate ordering +
-  not_found / internal_error surfaces + LEAK_CANARY redaction
-  sanity; 10 new at `tests/integration/commands/notification.test.ts`
-  covering both target-types collapsing to wire `Project` +
-  dry-run envelope + argv validation).
+**Live numbers (post-M28 pre-flight close):**
+- Test count: **3225** across 130 files (+1 net at M28
+  pre-flight — one new integration test at
+  `tests/integration/commands/auth.test.ts` covering the
+  placeholder-guard branch when `__test_oauth_helper` is
+  unset + `OAUTH_CLIENT_ID` is still the placeholder).
 - Coverage: **99.08 / 95.92 / 99.29 / 99.31** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
   **Branches margin 0.47pp** (was 0.43pp at M27 pre-flight;
@@ -251,60 +289,59 @@ in the plan docs — **do not duplicate them here**:
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
-**Pre-publish blocker (carried to v0.3.0 release prep):**
-`OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` placeholders in
-`src/api/oauth.ts` ship as `<UNREGISTERED_PENDING_OAUTH_APP>`.
-One-time external step: register a Monday OAuth app at
-https://developer.monday.com/apps with redirect URI exactly
-`http://127.0.0.1:9876/callback`, then swap the constants. Until
-then production users hit `oauth_failed.code_exchange_failed`.
-Tests don't depend on the values (cassettes intercept
-`/oauth2/token`). Pinned in source per the public-OAuth-client
-convention.
+**No pre-publish blocker.** `OAUTH_CLIENT_ID` +
+`OAUTH_CLIENT_SECRET` stay as
+`<UNREGISTERED_PENDING_OAUTH_APP>` placeholders in v0.3.0;
+the M28 pre-flight commit added a one-line guard at the
+top of `auth/login.ts`'s action that throws
+`usage_error.details.reason: oauth_unregistered`
+(message: "`monday auth login` is not available in this
+release; authenticate via the MONDAY_API_TOKEN env var
+instead. OAuth login is deferred to a future version."),
+pointing users at `MONDAY_API_TOKEN` instead of the
+cryptic upstream `oauth_failed.code_exchange_failed`.
+Tests don't depend on the OAuth credential values
+(cassettes intercept `/oauth2/token`; the test seam
+`__test_oauth_helper` bypasses the placeholder guard).
+v0.3.x or v0.4 may register a canonical `monday-cli`
+OAuth app if there's demand for the browser-based login
+path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **M28 pre-flight — multi-level subitems + 0.3.0 release
-   prep.** M27 closed end-to-end at `64d94d7` (4 IMPL Codex
-   rounds, runtime converged at round 1). M28 is the v0.3
-   closing milestone — bundles multi-level subitem creation
-   + release prep into a single milestone per v0.3-plan §3.
-   **Pre-flight gates** (per v0.3-plan §9 "Before M28
-   starts"):
-   - **Decision 10 — subitem hierarchy depth limit.** Monday
-     allows arbitrary subitem nesting; the CLI surface needs
-     to pick a max depth (0 = item-only / 1 = items + 1
-     subitem level / N = arbitrary nesting). Empirical-probe
-     candidate before pre-flight.
-   - **Decision 11 — multi-level subitem creation as v0.3
-     scope.** Either lands via a cli-design §13 v0.3
-     amendment PR (extending the v0.3 contract) OR
-     resolves as "drop from M28; M28 ships polish + release
-     prep only". The amendment PR is the harder path —
-     budget for the discussion + Codex review of the
-     cli-design diff before any code ships.
-   - **0.3.0 release prep** — envelope-snapshot suite
-     refresh, README quickstart updates, CHANGELOG 0.3.0
-     entry, version bump in `package.json`. **OAUTH_CLIENT_ID
-     / OAUTH_CLIENT_SECRET swap** is the externally-blocked
-     pre-publish prerequisite (register a Monday OAuth app at
-     https://developer.monday.com/apps with redirect URI
-     `http://127.0.0.1:9876/callback`, then swap the
-     constants in `src/api/oauth.ts`). Until then production
-     users hit `oauth_failed.code_exchange_failed` on `monday
-     auth login`; tests don't depend on the values
-     (cassettes intercept `/oauth2/token`).
-   **R-NEW-40 watch-item fires if M28 adds a new write
-   verb** — the audit-point asks the reviewer to verify
-   `[--dry-run]` discipline on every NEW write verb's §4.3
-   row + output-shapes.md entry. M28 has at least one
-   write-verb candidate (`monday item create-subitem-tree
-   <bid> --tree <json>` or similar if Decision 11 lands), so
-   plan to enumerate R-NEW-40 explicitly at M28 pre-flight
-   round 1.
-   **R-NEW-41 watch-item fires if M28 surfaces another
-   asymmetric wire-type pair** — likely candidate is the
-   v0.4 `add_file_to_column` if M28 reaches that surface
-   (probably not in M28 scope, but watch).
+1. **M28 IMPL — 0.3.0 release prep.** M28 pre-flight
+   closed this session: Decisions 10 + 11 rejected on
+   empirical grounds (multi-level subitems deferred out
+   of v0.3 — Monday's `sub_items_board` data model has
+   no `subtasks` column at API `2026-01`, so depth-2
+   has no home). M28 IMPL ships pure release-prep:
+   - Refresh the envelope-snapshot suite for v0.3
+     surfaces (~30+ new snapshots covering M19–M27 +
+     the M28 placeholder-guard branch).
+   - `docs/output-shapes.md` ToC audit (cross-check
+     against current command count + section headings).
+   - README quickstart updates (cover `monday auth`'s
+     placeholder-guard behaviour: "OAuth is deferred;
+     authenticate via `MONDAY_API_TOKEN`").
+   - CHANGELOG `0.3.0` entry — one paragraph per
+     milestone M19–M28; lead with the binding contract
+     surfaces (commands, error codes, envelope shape)
+     not the implementation details.
+   - Version bump to `0.3.0` in `package.json`.
+   - Optional clean-up of the three remaining branch-
+     coverage gaps (`item/search.ts` 88.23%,
+     `errors.ts` ~95.37%, `dry-run.ts` 96.26%) if
+     session budget allows.
+   - Final gate: `npm run typecheck && npm run lint &&
+     npm test`. Tag `v0.3.0`. Push to origin only with
+     explicit user confirmation.
+   **No new contract surface, no new commands, no new
+   ERROR_CODES.** Multi-level subitems re-evaluates in
+   v0.3.x or v0.4 contingent on Monday surfacing the
+   `subtasks` column on `sub_items_board` (re-run the
+   `scripts/probe/m28-multi-level-subitem.ts` +
+   `m28-depth-triangulate.ts` probes to confirm before
+   reopening). OAuth login revisits if there's demand
+   beyond `MONDAY_API_TOKEN`.
 2. **Branches-margin deferred residuals.** Three files carry
    the remaining out-of-coverage residual: `item/search.ts`
    88.23% — needs a new cross-board integration test driving
@@ -340,11 +377,19 @@ convention.
    account with live usage activity. If Monday's runtime `day`
    field turns out to be account-local, amend cli-design §11.5.3
    + flip `formatTodayKey` in `src/commands/usage.ts`.
-5. **Pre-publish blocker still open** — OAUTH_CLIENT_ID /
-   OAUTH_CLIENT_SECRET constants in `src/api/oauth.ts` still ship
-   as `<UNREGISTERED_PENDING_OAUTH_APP>`. Externally-blocked on
-   registering a Monday OAuth app; tests don't depend on the
-   values. Tracked for v0.3.0 release prep (after M28).
+5. **OAuth — deferred indefinitely.** No longer a
+   pre-publish blocker. `OAUTH_CLIENT_ID` /
+   `OAUTH_CLIENT_SECRET` placeholders + the M28 pre-flight
+   placeholder guard in `auth/login.ts` together produce a
+   clean `usage_error` for users who invoke `monday auth
+   login` in v0.3.0, pointing at `MONDAY_API_TOKEN` instead.
+   Revisit only if v0.3.x / v0.4 user feedback shows clear
+   demand for the browser-based OAuth path over the API-token
+   flow. If reopened, register a Monday OAuth app at
+   https://developer.monday.com/apps with redirect URI exactly
+   `http://127.0.0.1:9876/callback`, drop the placeholder
+   guard, and swap the constants. Until then the M21
+   infrastructure stays dormant in source.
 
 **R-class state (post-M27 IMPL close):**
 - **R-NEW-35 — `_shared.ts:requireDevBoard` slot-check helper

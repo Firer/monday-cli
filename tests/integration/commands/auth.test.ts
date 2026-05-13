@@ -133,6 +133,39 @@ describe('monday auth login (integration, M21 implementation)', () => {
     await rm(env.home, { recursive: true, force: true });
   });
 
+  it('placeholder guard: surfaces usage_error when OAuth credentials are unregistered + no test seam', async () => {
+    // The shipped `OAUTH_CLIENT_ID` is the
+    // `<UNREGISTERED_PENDING_OAUTH_APP>` placeholder per
+    // v0.3-plan §8 Decision 11 rejection (OAuth deferred to a
+    // future version). When `__test_oauth_helper` is also unset,
+    // the action throws `usage_error` BEFORE any listener bind
+    // or wire call.
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'auth', 'login', '--profile', 'work', '--json'],
+      env: {
+        MONDAY_API_URL: 'https://api.monday.com/v2',
+        HOME: env.home,
+        // Intentionally NO __test_oauth_helper — exercises the
+        // production-mode guard.
+      },
+    });
+    const fetchStub = vi.fn();
+    vi.stubGlobal('fetch', fetchStub);
+    const result = await run(options);
+    expect(result.exitCode).toBe(1);
+    const envelope = parseEnvelope(captured.stderr());
+    expect(envelope.error?.code).toBe('usage_error');
+    expect(envelope.error?.message).toContain('not available in this release');
+    expect(
+      (envelope.error?.details as { reason?: string } | undefined)?.reason,
+    ).toBe('oauth_unregistered');
+    expect(
+      (envelope.error?.details as { hint?: string } | undefined)?.hint,
+    ).toContain('MONDAY_API_TOKEN');
+    // No socket bind, no /oauth2/token exchange.
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+
   it('happy path: writes a 0600 credentials file + emits success envelope without the token', async () => {
     await writeFixture(env.fixturePath, { code: 'fake-auth-code' });
     const fetchStub = buildOAuthFetchStub();

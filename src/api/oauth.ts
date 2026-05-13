@@ -82,6 +82,21 @@ export const OAUTH_CLIENT_ID = '<UNREGISTERED_PENDING_OAUTH_APP>';
 export const OAUTH_CLIENT_SECRET = '<UNREGISTERED_PENDING_OAUTH_APP>';
 
 /**
+ * Sentinel value the placeholder constants ship as until a Monday
+ * OAuth app is registered (see {@link OAUTH_CLIENT_ID} docstring).
+ * Exposed as a deliberately-widened `string` so consumers can compare
+ * `OAUTH_CLIENT_ID === OAUTH_UNREGISTERED_PLACEHOLDER` without
+ * triggering `@typescript-eslint/no-unnecessary-condition` on
+ * literal-vs-literal equality. v0.3-plan §8 Decision 11 rejected the
+ * v0.3 OAuth swap; the placeholder + guard in
+ * `src/commands/auth/login.ts` together surface a clear `usage_error`
+ * pointing users at `MONDAY_API_TOKEN` until a future version
+ * revisits the OAuth path.
+ */
+export const OAUTH_UNREGISTERED_PLACEHOLDER =
+  '<UNREGISTERED_PENDING_OAUTH_APP>' as string;
+
+/**
  * Documented Monday Apps OAuth scopes per Monday's published docs at
  * the M21 pre-flight probe (2026-05-10). Each entry is exposed
  * verbatim so the OAuth-app-registration step (M21 implementation
