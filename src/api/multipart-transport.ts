@@ -41,9 +41,12 @@
  *   - Makes the multipart-only invariants explicit in this module's
  *     type signature (`MultipartTransportRequest` carries a stream
  *     or buffer, not a query string).
- *   - Mirrors `cli-design.md` architecture §X (R-NEW-41 lift)'s
- *     wire-vs-CLI documentation convention — different wire shapes
- *     live in different modules, with a per-shape interface.
+ *   - Mirrors `docs/architecture.md` "Wire-vs-CLI semantics
+ *     documentation conventions" (R-NEW-41 lift, 3rd-consumer
+ *     trigger at v0.4-M31 pre-flight) — different wire shapes
+ *     live in different modules, with a per-shape interface;
+ *     the architecture section is the canonical cross-link
+ *     target for the asymmetry enumeration.
  *
  * **What this module owns.** A `MultipartTransport` interface
  * mirroring `Transport` (request → response, with `signal` /

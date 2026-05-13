@@ -2109,32 +2109,6 @@ monday update pin <uid> [--dry-run]                                          v0.
 monday update unpin <uid> [--dry-run]                                        v0.2
                                           # `unpin_from_top`. Idempotent.
 monday update clear-all <iid> --yes [--limit-pages <n>] [--dry-run]          v0.2
-
-# Asset upload — Update-scoped sibling of `item upload`. Same multipart
-# transport seam; no column-id (Updates carry attachments via
-# `Update.assets` directly).
-monday update upload <uid> <file>                                            v0.4
-                                          # attaches a local file to an
-                                          # Update (comment) via Monday's
-                                          # `add_file_to_update` multipart
-                                          # mutation. `<file>` same shape
-                                          # as `item upload` — local path
-                                          # only, no stdin at v0.4-M31. No
-                                          # column-type validation
-                                          # (Updates accept any file type
-                                          # Monday supports). Server-side
-                                          # validation handles size cap +
-                                          # filename + virus scan. Same
-                                          # `details.reason: 'file_too_
-                                          # large'` rewrap on size
-                                          # rejection. Idempotent: NO —
-                                          # re-running mints a new Asset.
-                                          # No cache invalidation
-                                          # (Updates aren't part of the
-                                          # §8 cache scope). Dry-run
-                                          # shape per §6.4 asset-upload
-                                          # variant; `meta.source:
-                                          # "none"`.
                                           # delete all updates on item.
                                           # Destructive: --yes mandatory for
                                           # live deletion. Live without --yes
@@ -2166,6 +2140,36 @@ monday update upload <uid> <file>                                            v0.
                                           # then cover the collected prefix only —
                                           # agents re-run after the prefix clears
                                           # (per-call idempotency holds).
+
+# Asset upload — Update-scoped sibling of `item upload`. Same multipart
+# transport seam; no column-id (Updates carry attachments via
+# `Update.assets` directly).
+monday update upload <uid> <file>                                            v0.4
+                                          # attaches a local file to an
+                                          # Update (comment) via Monday's
+                                          # `add_file_to_update` multipart
+                                          # mutation. `<file>` same shape
+                                          # as `item upload` — local path
+                                          # only, no stdin at v0.4-M31. No
+                                          # column-type validation
+                                          # (Updates accept any file type
+                                          # Monday supports). Server-side
+                                          # validation handles size cap +
+                                          # filename + virus scan. Local
+                                          # file failures route through
+                                          # `usage_error` with
+                                          # `details.reason` ∈
+                                          # {`file_not_readable`,
+                                          # `file_empty`, `file_too_large`}
+                                          # (server-side size rejection
+                                          # rewrap). Idempotent: NO —
+                                          # re-running mints a new Asset.
+                                          # No cache invalidation
+                                          # (Updates aren't part of the
+                                          # §8 cache scope). Dry-run
+                                          # shape per §6.4 asset-upload
+                                          # variant; `meta.source:
+                                          # "none"`.
 
 # === USER ===
 monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]   v0.1
@@ -5399,11 +5403,18 @@ board metadata projection). `update upload` does not invalidate
   rejection's hint — points at `monday item upload`). `doc`
   column upload is a future v0.4+ extension (separate mutation
   surface).
-- **File size — no CLI-side pre-check.** Monday's per-file size
-  cap is plan-tier-dependent and not exposed via the schema
-  (empirical probe — `Plan` + `Account` carry no file-quota
-  fields). Server-side rejection rewraps as `usage_error` with
-  `details.reason: 'file_too_large'` + `details.file_size_bytes`.
+- **Local file failures + size cap — discriminated by
+  `details.reason`.** Local file path failures rewrap as
+  `usage_error` with one of three `details.reason` values:
+  `'file_not_readable'` (ENOENT / EACCES / path is a directory),
+  `'file_empty'` (zero-byte file — Monday rejects), or
+  `'file_too_large'` (server-side size-cap rejection rewrap;
+  carries `details.file_size_bytes` so agents see Monday's
+  observed size). Monday's per-file size cap is plan-tier-
+  dependent and not exposed via the schema (empirical probe —
+  `Plan` + `Account` carry no file-quota fields), so the CLI
+  does NOT pre-check size against a hardcoded ceiling; the
+  rewrap fires only on Monday's runtime rejection at IMPL.
 - **File path — local file only.** Stdin (`<file>='-'`) is NOT
   supported in v0.4-M31. A future contract extension may add
   stdin once a `--filename <name>` companion flag is pinned.

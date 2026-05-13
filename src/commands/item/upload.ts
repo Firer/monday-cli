@@ -38,16 +38,29 @@
  * `monday item update --set-raw`); the rejection for `doc`-shaped
  * columns is deferred to a future v0.4+ doc-upload milestone.
  *
- * **File size handling — Monday rejects server-side.** Monday's
- * per-file size cap is plan-tier-dependent (typically 500 MB at
- * standard tiers, larger at enterprise) and NOT exposed via the
- * GraphQL schema (empirical probe `scripts/probe/m31-asset-
- * upload.ts` 2026-05-13 — `Plan` + `Account` carry no file-quota
- * fields). The CLI does NOT pre-check file size against a hard-
- * coded ceiling; Monday's runtime rejection
- * (`FILE_SIZE_LIMIT_EXCEEDED` or HTTP 413) is rewrapped as
- * `usage_error` with `details.reason: 'file_too_large'` +
- * `details.file_size_bytes` + `details.hint` at IMPL.
+ * **Local file failures + size handling — `details.reason`
+ * discrimination.** Three failure modes route through
+ * `usage_error` with a discriminated `details.reason` slot:
+ *
+ *   - `'file_not_readable'` — local path doesn't exist
+ *     (`ENOENT`), isn't readable (`EACCES`), or resolves to a
+ *     directory rather than a regular file. Fires at IMPL via
+ *     `fs.stat()` before any wire call.
+ *   - `'file_empty'` — file exists but is zero bytes. Monday
+ *     rejects empty uploads server-side; the CLI surfaces the
+ *     rejection with a clearer hint via `fs.stat()` pre-check
+ *     at IMPL.
+ *   - `'file_too_large'` — Monday's server-side size-cap
+ *     rejection rewrap (`FILE_SIZE_LIMIT_EXCEEDED` or HTTP
+ *     413). The CLI does NOT pre-check file size against a
+ *     hardcoded ceiling — Monday's per-file cap is plan-tier-
+ *     dependent (typically 500 MB at standard tiers, larger
+ *     at enterprise) and NOT exposed via the GraphQL schema
+ *     (empirical probe `scripts/probe/m31-asset-upload.ts`
+ *     2026-05-13 — `Plan` + `Account` carry no file-quota
+ *     fields). Rewrap carries `details.file_size_bytes`
+ *     (Monday's observed size from the wire response) +
+ *     `details.hint` pointing at the plan-tier dependency.
  *
  * **`--dry-run` shape** per cli-design §3.1 #6 + §6.4 asset-upload
  * variant. Strictly local-derived — no wire mutation fires. Planned
@@ -78,17 +91,13 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitDryRun, emitMutation } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { ItemIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import {
-  addFileToColumn,
   itemUploadOutputSchema,
   type ItemUploadOutput,
 } from '../../api/assets.js';
-import { createMultipartFetchTransport } from '../../api/multipart-transport.js';
-import { loadConfig } from '../../config/load.js';
+import { ApiError } from '../../utils/errors.js';
 
 const inputSchema = z
   .object({
@@ -99,6 +108,10 @@ const inputSchema = z
       .min(1, {
         message:
           '<file> must be a non-empty local file path; stdin (`-`) is not supported in v0.4-M31 (a future contract extension may add stdin support once a `--filename <name>` companion flag is pinned).',
+      })
+      .refine((p) => p !== '-', {
+        message:
+          '<file> cannot be `-` — stdin upload is not supported in v0.4-M31. Pass a local file path resolved relative to cwd. A future contract extension may add stdin support once a `--filename <name>` companion flag is pinned.',
       }),
   })
   .strict();
@@ -145,7 +158,7 @@ export const itemUploadCommand: CommandModule<
         ].join('\n'),
       )
       .action(
-        async (
+        (
           itemIdArg: unknown,
           fileArg: unknown,
           opts: { column: string },
@@ -155,83 +168,32 @@ export const itemUploadCommand: CommandModule<
             file: fileArg,
             column: opts.column,
           });
+          void ctx;
 
-          /* c8 ignore start — pre-flight stub: file read + multipart
-             dispatch + envelope emit land at v0.4-M31 IMPL; the stub
-             throws via the c8-ignored {@link addFileToColumn} call
-             below so this whole block is unreachable in tests. The
-             c8 ignore drops with the IMPL feat per the M30 pre-
-             flight cadence. */
-          const { client, globalFlags, apiVersion } = resolveClient(
-            ctx,
-            program.opts(),
-          );
-          void globalFlags;
-
-          // IMPL: read file path + stat + Blob; for the pre-flight
-          // stub we skip the local I/O so the block stays under
-          // c8 ignore.
-          const filename = parsed.file;
-          const fileSizeBytes = 0;
-          const file = new Blob([], { type: 'application/octet-stream' });
-
-          if (program.opts().dryRun === true) {
-            emitDryRun({
-              ctx,
-              programOpts: program.opts(),
-              plannedChanges: [
-                {
-                  operation: 'add_file_to_column',
-                  item_id: parsed.itemId,
-                  column_id: parsed.column,
-                  file_path: parsed.file,
-                  filename,
-                  file_size_bytes: fileSizeBytes,
-                },
-              ],
-              source: 'none',
-              cacheAgeSeconds: null,
-              warnings: [],
-              apiVersion,
-            });
-            return;
-          }
-
-          const config = loadConfig(ctx.env);
-          const multipart = createMultipartFetchTransport({
-            endpoint: config.apiUrl,
-            apiToken: config.apiToken,
-            apiVersion,
-            timeoutMs: config.requestTimeoutMs,
-          });
-
-          const result = await addFileToColumn({
-            client,
-            multipart,
-            itemId: parsed.itemId,
-            columnId: parsed.column,
-            file,
-            filename,
-          });
-
-          emitMutation({
-            ctx,
-            data: {
-              operation: 'add_file_to_column' as const,
-              item_id: parsed.itemId,
-              column_id: parsed.column,
-              filename,
-              file_size_bytes: fileSizeBytes,
-              asset: result.asset,
+          /* c8 ignore start — pre-flight stub: the runtime body
+             (file read + multipart dispatch + envelope emit, plus
+             the dry-run `fs.stat()`-backed planned-change shape per
+             D5) lands at v0.4-M31 IMPL. Surfacing `internal_error`
+             rather than a fake `ok: true` envelope keeps the stub
+             discipline honest — the partial runtime would otherwise
+             emit a bogus `file_size_bytes: 0` dry-run plan that
+             agents could mistake for the real D5 contract. The c8
+             block drops with the IMPL feat per the M30 pre-flight
+             cadence (and lets coverage stay below the block-wrap's
+             unreachable branches). */
+          throw new ApiError(
+            'internal_error',
+            '`monday item upload` action body is a pre-flight stub; runtime body lands at v0.4-M31 IMPL',
+            {
+              details: {
+                deferred_to: 'v0.4-M31 IMPL',
+                item_id: parsed.itemId,
+                column_id: parsed.column,
+                file_path: parsed.file,
+                hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub validates argv shape only. IMPL replaces this body with the real file-read + dry-run + multipart wire dispatch per cli-design §6.4 asset-upload sub-section.',
+              },
             },
-            schema: itemUploadCommand.outputSchema,
-            programOpts: program.opts(),
-            warnings: [],
-            source: result.source,
-            cacheAgeSeconds: result.cacheAgeSeconds,
-            complexity: result.complexity,
-            apiVersion,
-          });
+          );
           /* c8 ignore stop */
         },
       );

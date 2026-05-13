@@ -24,9 +24,15 @@
  * `item upload`'s `file`-only check. Server-side validation handles
  * the rest (size cap, filename sanity, virus scan).
  *
- * **File size handling — same as `item upload`.** No CLI-side
- * pre-check; Monday's runtime rejection rewraps as `usage_error`
- * with `details.reason: 'file_too_large'` at IMPL.
+ * **Local file failures + size handling — same `details.reason`
+ * discrimination as `item upload`.** Three values:
+ *   - `'file_not_readable'` — ENOENT / EACCES / path is a
+ *     directory; fires at IMPL via `fs.stat()` pre-check.
+ *   - `'file_empty'` — zero-byte file; fires via `fs.stat()`.
+ *   - `'file_too_large'` — Monday's server-side size-cap
+ *     rejection rewrap; carries `details.file_size_bytes`.
+ * No CLI-side hardcoded size pre-check; Monday's per-file cap
+ * is plan-tier-dependent and not exposed via the schema.
  *
  * **`--dry-run` shape** per §6.4 asset-upload variant — emits
  * `{operation: 'add_file_to_update', update_id, file_path,
@@ -46,17 +52,13 @@
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
-import { emitDryRun, emitMutation } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import {
-  addFileToUpdate,
   updateUploadOutputSchema,
   type UpdateUploadOutput,
 } from '../../api/assets.js';
-import { createMultipartFetchTransport } from '../../api/multipart-transport.js';
-import { loadConfig } from '../../config/load.js';
+import { ApiError } from '../../utils/errors.js';
 
 const inputSchema = z
   .object({
@@ -66,6 +68,10 @@ const inputSchema = z
       .min(1, {
         message:
           '<file> must be a non-empty local file path; stdin (`-`) is not supported in v0.4-M31 (a future contract extension may add stdin support once a `--filename <name>` companion flag is pinned).',
+      })
+      .refine((p) => p !== '-', {
+        message:
+          '<file> cannot be `-` — stdin upload is not supported in v0.4-M31. Pass a local file path resolved relative to cwd. A future contract extension may add stdin support once a `--filename <name>` companion flag is pinned.',
       }),
   })
   .strict();
@@ -108,7 +114,7 @@ export const updateUploadCommand: CommandModule<
         ].join('\n'),
       )
       .action(
-        async (
+        (
           updateIdArg: unknown,
           fileArg: unknown,
         ) => {
@@ -116,75 +122,28 @@ export const updateUploadCommand: CommandModule<
             updateId: updateIdArg,
             file: fileArg,
           });
+          void ctx;
 
-          /* c8 ignore start — pre-flight stub: file read + multipart
-             dispatch + envelope emit land at v0.4-M31 IMPL. The c8
-             ignore drops with the IMPL feat per the M30 pre-flight
-             cadence. */
-          const { client, globalFlags, apiVersion } = resolveClient(
-            ctx,
-            program.opts(),
-          );
-          void globalFlags;
-
-          const filename = parsed.file;
-          const fileSizeBytes = 0;
-          const file = new Blob([], { type: 'application/octet-stream' });
-
-          if (program.opts().dryRun === true) {
-            emitDryRun({
-              ctx,
-              programOpts: program.opts(),
-              plannedChanges: [
-                {
-                  operation: 'add_file_to_update',
-                  update_id: parsed.updateId,
-                  file_path: parsed.file,
-                  filename,
-                  file_size_bytes: fileSizeBytes,
-                },
-              ],
-              source: 'none',
-              cacheAgeSeconds: null,
-              warnings: [],
-              apiVersion,
-            });
-            return;
-          }
-
-          const config = loadConfig(ctx.env);
-          const multipart = createMultipartFetchTransport({
-            endpoint: config.apiUrl,
-            apiToken: config.apiToken,
-            apiVersion,
-            timeoutMs: config.requestTimeoutMs,
-          });
-
-          const result = await addFileToUpdate({
-            client,
-            multipart,
-            updateId: parsed.updateId,
-            file,
-            filename,
-          });
-
-          emitMutation({
-            ctx,
-            data: {
-              operation: 'add_file_to_update' as const,
-              update_id: parsed.updateId,
-              filename,
-              file_size_bytes: fileSizeBytes,
-              asset: result.asset,
+          /* c8 ignore start — pre-flight stub: the runtime body
+             (file read + multipart dispatch + envelope emit, plus
+             the dry-run `fs.stat()`-backed planned-change shape per
+             D5) lands at v0.4-M31 IMPL. Surfacing `internal_error`
+             keeps the stub discipline honest (no fake `ok: true`
+             dry-run envelope with bogus `file_size_bytes: 0`). The
+             c8 block drops with the IMPL feat per the M30 pre-
+             flight cadence. */
+          throw new ApiError(
+            'internal_error',
+            '`monday update upload` action body is a pre-flight stub; runtime body lands at v0.4-M31 IMPL',
+            {
+              details: {
+                deferred_to: 'v0.4-M31 IMPL',
+                update_id: parsed.updateId,
+                file_path: parsed.file,
+                hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub validates argv shape only. IMPL replaces this body with the real file-read + dry-run + multipart wire dispatch per cli-design §6.4 asset-upload sub-section.',
+              },
             },
-            schema: updateUploadCommand.outputSchema,
-            programOpts: program.opts(),
-            warnings: [],
-            source: result.source,
-            cacheAgeSeconds: result.cacheAgeSeconds,
-            complexity: result.complexity,
-            apiVersion,
-          });
+          );
           /* c8 ignore stop */
         },
       );

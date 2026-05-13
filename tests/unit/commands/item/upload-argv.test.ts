@@ -95,6 +95,36 @@ describe('itemUploadCommand.inputSchema (M31 asset-upload argv)', () => {
       ).toThrow(UsageError);
     });
 
+    it('rejects `-` (stdin sentinel) per D10 — stdin upload not supported at v0.4-M31', () => {
+      expect(() =>
+        parseArgv(itemUploadCommand.inputSchema, {
+          itemId: VALID_IID,
+          column: 'files',
+          file: '-',
+        }),
+      ).toThrow(UsageError);
+    });
+
+    it('surfaces the stdin-not-supported hint on file=`-`', () => {
+      try {
+        parseArgv(itemUploadCommand.inputSchema, {
+          itemId: VALID_IID,
+          column: 'files',
+          file: '-',
+        });
+        throw new Error('expected UsageError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(UsageError);
+        const ue = err as UsageError;
+        const issuesUnknown = (ue.details as { issues?: unknown }).issues;
+        expect(Array.isArray(issuesUnknown)).toBe(true);
+        const messages = (issuesUnknown as { message: string }[]).map(
+          (i) => i.message,
+        );
+        expect(messages.some((m) => m.includes('stdin'))).toBe(true);
+      }
+    });
+
     it('surfaces the stdin-not-supported hint on empty file path', () => {
       try {
         parseArgv(itemUploadCommand.inputSchema, {
