@@ -5210,12 +5210,15 @@ Constraints (v0.4-plan M30 D1–D5):
   (cli-design §6.4 partial-success-bulk failure path; agents
   key off `data.results[i].error.code === 'concurrency_exceeded'`
   to rerun a narrowed filter).
-- **Behavioural-equivalence audit (R-NEW-28 6-axis).** Per-target
-  error code semantics + `internal_error` whole-call re-throw +
-  empty-input no-op + per-item resolver-warning fold + source
-  aggregation rules + pre-network argv validation all mirror the
-  M25 sequential path verbatim. The two routes differ only in
-  dispatch ordering; per-target dispatch closure is shared
+- **Behavioural-equivalence audit (R-NEW-28 6-axis).** The six
+  axes — per-target error code semantics + `internal_error`
+  whole-call re-throw + non-`MondayCliError` whole-call re-throw
+  + empty-input no-dispatch + input-order preservation in
+  `data.results[]` + AbortSignal threading — all mirror the M25
+  sequential path verbatim (AbortSignal threading lands as a
+  new slot at M30 IMPL on both routes; pre-flight stubs neither
+  route takes the signal yet). The two routes differ only in
+  dispatch ordering; the per-target dispatch closure is shared
   between them at the wrapper layer.
 
 `--concurrency 1` (the default) preserves the M25 envelope
