@@ -56,9 +56,11 @@ import {
   MAX_WATCH_INTERVAL_MS,
   MIN_WATCH_INTERVAL_MS,
   watchItem,
-  type WatchItemResult,
 } from '../../api/item-watch.js';
-import type { HistoryEvent } from '../../api/item-history-projection.js';
+import {
+  historyEventSchema,
+  type HistoryEvent,
+} from '../../api/item-history-projection.js';
 
 /**
  * The `--include` flag accepts a comma-separated list of literal kind
@@ -197,7 +199,7 @@ const inputSchema = z
 
 export const itemWatchCommand: CommandModule<
   z.infer<typeof inputSchema>,
-  WatchItemResult
+  HistoryEvent
 > = {
   name: 'item.watch',
   summary:
@@ -213,29 +215,15 @@ export const itemWatchCommand: CommandModule<
   ],
   idempotent: true,
   inputSchema,
-  // Output schema mirrors {@link WatchItemResult} — but we declare it
-  // inline so commands/schema/index.ts can introspect it without
-  // re-importing from src/api. The shape matches `WatchItemResult`
-  // exactly; if M29 IMPL diverges, this is the source of truth for
-  // the agent-facing surface.
-  outputSchema: z
-    .object({
-      events_emitted: z.number().int().nonnegative(),
-      polls_made: z.number().int().nonnegative(),
-      failed_polls: z.number().int().nonnegative(),
-      watch_duration_seconds: z.number().nonnegative(),
-      last_seen_event_id: z.string().min(1).nullable(),
-      circuit_broken_at: z.string().min(1).nullable(),
-      exit_reason: z.enum([
-        'max_events',
-        'max_duration',
-        'once_complete',
-        'signal',
-        'circuit_broken',
-      ]),
-      source: z.literal('live'),
-    })
-    .strict(),
+  // Mirrors M24 `item history`: the output schema describes the
+  // per-event record shape an agent sees on the NDJSON stream — NOT
+  // the session-summary trailer (the trailer-meta shape is documented
+  // in output-shapes.md + cli-design §4.3, but a streaming verb has no
+  // buffered `data` payload). `monday schema item.watch` reflects
+  // the event-record shape so agents pin their per-line parsers
+  // against the same discriminated-union taxonomy `item history`
+  // uses.
+  outputSchema: historyEventSchema,
   attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun

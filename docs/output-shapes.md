@@ -1847,8 +1847,7 @@ Trailer-meta record (one per session, emitted on graceful exit):
 ```json
 {
   "_meta": {
-    "ok": true,
-    "schema_version": 1,
+    "schema_version": "1",
     "api_version": "2026-01",
     "cli_version": "0.4.0",
     "request_id": "...",
@@ -1863,7 +1862,8 @@ Trailer-meta record (one per session, emitted on graceful exit):
     "watch_duration_seconds": 360.5,
     "last_seen_event_id": "act-1042",
     "circuit_broken_at": null,
-    "exit_reason": "max_events"
+    "exit_reason": "max_events",
+    "warnings": []
   }
 }
 ```
@@ -1885,12 +1885,16 @@ trailer interpretation:
 
 **Circuit breaker (cli-design §14.4 closure).** Reactive on Monday
 wire errors (`complexity_exceeded` / `concurrency_exceeded` /
-`rate_limited`). Each failed poll emits a `warning` record to the
-NDJSON stream first (interleaved with event records); after 5
-consecutive failures (`CIRCUIT_BREAKER_CONSECUTIVE_FAILS`) the
-session trips with `exit_reason: 'circuit_broken'` + a failure
-envelope carrying the underlying Monday error code. The 29-stable-
-error-code registry stays at 29 — no new ERROR_CODE for M29.
+`rate_limited`). Per-failure `WatchSessionWarning` records (codes:
+`poll_failed`, `circuit_breaker_armed`, plus the M24 projector's
+`unknown_event_kind`) accumulate in-session and emit in the
+trailer-meta's `warnings[]` slot — NOT interleaved with event records
+(per cli-design §6.3's NDJSON contract: resource lines + final
+`_meta`; warnings live under `_meta.warnings`). After 5 consecutive
+failures (`CIRCUIT_BREAKER_CONSECUTIVE_FAILS`) the session trips with
+`exit_reason: 'circuit_broken'` + a failure envelope carrying the
+underlying Monday error code. The 29-stable-error-code registry stays
+at 29 — no new ERROR_CODE for M29.
 
 **Cadence (§14.4 closure).** Default 30s; range 1s–1h via
 `--interval <ms>`. Per the empirical probe each poll costs 10

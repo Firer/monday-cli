@@ -203,9 +203,13 @@ export type WatchExitReason =
  *     `startNdjsonStream`. Awaiting each call preserves backpressure
  *     when stdout is a slow consumer (e.g., piped through `jq` to a
  *     network sink).
- *   - `onWarning` — optional hook called per per-poll warning (e.g.,
- *     a circuit-breaker progression warning). The action body wires
- *     this to the NDJSON stream's warning channel.
+ *
+ * Warnings accumulate inside the polling loop and surface in
+ * {@link WatchItemResult}.warnings (NOT a per-warning hook) per
+ * cli-design §6.3's NDJSON contract: resource lines + final `_meta`;
+ * warnings live under `_meta.warnings`, NOT interleaved with event
+ * records. The action body folds them into the trailer-meta's
+ * `warnings[]` slot at session end.
  */
 export interface WatchItemInputs {
   readonly client: MondayClient;
@@ -219,7 +223,6 @@ export interface WatchItemInputs {
   readonly includeKinds?: readonly HistoryEvent['kind'][];
   readonly signal: AbortSignal;
   readonly onEvent: (event: HistoryEvent) => void | Promise<void>;
-  readonly onWarning?: (warning: WatchSessionWarning) => void | Promise<void>;
 }
 
 /**
@@ -287,6 +290,13 @@ export interface WatchItemResult {
   readonly last_seen_event_id: string | null;
   readonly circuit_broken_at: string | null;
   readonly exit_reason: WatchExitReason;
+  /**
+   * Session-accumulated warnings. The action body folds these into
+   * the trailer-meta's `warnings[]` slot per cli-design §6.3
+   * (resource lines + final `_meta` with warnings under
+   * `_meta.warnings`). NOT interleaved with event records.
+   */
+  readonly warnings: readonly WatchSessionWarning[];
   readonly source: 'live';
 }
 
@@ -378,7 +388,6 @@ export const watchItem = (
   void inputs.includeKinds;
   void inputs.signal;
   void inputs.onEvent;
-  void inputs.onWarning;
   return Promise.reject(
     new ApiError(
       'internal_error',

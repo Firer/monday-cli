@@ -1857,11 +1857,22 @@ monday item watch <iid> [--interval <ms>] [--since <event-id>] [--once] [--max-e
                                           # in-flight poll completes or aborts
                                           # cleanly, trailer-meta emits as a final
                                           # NDJSON line, exit 130 per §7.
-                                          # Trailer-meta slots: `events_emitted` +
+                                          # Trailer-meta carries seven M29-specific
+                                          # slots on top of the §6.3 standard
+                                          # streaming trailer: `events_emitted` +
                                           # `polls_made` + `watch_duration_seconds`
                                           # + `last_seen_event_id` (for restart) +
-                                          # `failed_polls` + (on circuit-break)
-                                          # `circuit_broken_at`.
+                                          # `failed_polls` + `circuit_broken_at`
+                                          # (null on clean exits; ISO timestamp on
+                                          # circuit-break) + `exit_reason` (the
+                                          # discriminator: max_events | max_duration
+                                          # | once_complete | signal | circuit_broken
+                                          # — agents key off this slot rather than
+                                          # interpreting `circuit_broken_at` alone).
+                                          # Per-failure warnings collect under
+                                          # `_meta.warnings` (NOT interleaved with
+                                          # event lines per §6.3); see §14.4 closure
+                                          # for the circuit-breaker progression.
 monday item history <iid> [--since <iso>] [--until <iso>] [--activity-logs-page <n>] [--updates-page <n>] [--limit <n>] [--kinds <list>] [--stream]   v0.3
                                           # activity log: status / column / group /
                                           # board edits + comment thread, merged
@@ -7114,19 +7125,31 @@ So an agent reading the contract knows what's *not* there yet:
    Monday's `complexity_exceeded` / `concurrency_exceeded` /
    `rate_limited` wire responses; respect
    `reset_in_x_seconds` for backoff with a 60s default cap
-   when absent; trip to `failure_envelope` after **5
-   consecutive failed polls** with each failure emitting a
-   `warning` record to the NDJSON stream first). No new
+   when absent and a **300s ceiling** on the per-failure
+   backoff; trip to `failure_envelope` after **5
+   consecutive failed polls**). Per-failure
+   `WatchSessionWarning` records accumulate in-session and
+   emit in the trailer's `_meta.warnings` slot per the §6.3
+   NDJSON contract (resource lines + final `_meta`;
+   warnings are NOT interleaved with event records). No new
    ERROR_CODE — `complexity_exceeded` /
    `concurrency_exceeded` / `rate_limited` already in §6.5's
    29-code registry cover the circuit-breaker exit; the
-   trailer-meta carries `circuit_broken_at` + `failed_polls`
-   so agents diagnose the trip mode. Multi-watcher policy:
-   each `monday item watch` invocation is independent (no
-   shared registry); aligns with §3.1 #5 ("agents do their
-   own parallelism"). Pinned at v0.4-M29 pre-flight empirical
-   probe (`scripts/probe/m29-polling-burn.ts`, 2026-05-13,
-   API `2026-01`): per-poll cost is stable at **10 complexity
+   trailer-meta's seven M29-specific slots
+   (`events_emitted` / `polls_made` / `failed_polls` /
+   `watch_duration_seconds` / `last_seen_event_id` /
+   `circuit_broken_at` / `exit_reason`) discriminate the
+   trip mode + drive restartability. **`--once` without
+   `--since` drains the most-recent 100 events** by default
+   (`DEFAULT_ONCE_BACKLOG_LIMIT`) so an agent invoking
+   `monday item watch <iid> --once` against a long-lived
+   item gets a bounded backlog without scrolling the entire
+   history. Multi-watcher policy: each `monday item watch`
+   invocation is independent (no shared registry); aligns
+   with §3.1 #5 ("agents do their own parallelism"). Pinned
+   at v0.4-M29 pre-flight empirical probe
+   (`scripts/probe/m29-polling-burn.ts`, 2026-05-13, API
+   `2026-01`): per-poll cost is stable at **10 complexity
    points** for the `boards(ids:){ activity_logs(item_ids:,
    from:, limit:) }` shape (no scaling with `limit:`); the
    per-minute complexity budget is **1,000,000** with a 60s
