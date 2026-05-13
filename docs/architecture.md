@@ -1762,3 +1762,122 @@ E2E tests that hit the real Monday API must be gated behind
 CI run never touches the network. Coverage thresholds live in
 `vitest.config.ts` (lines/functions/statements: 95, branches: 94 —
 ratchet upward as new code lands; never lower).
+
+## Wire-vs-CLI semantics documentation conventions
+
+> **Loaded at v0.4-M31 pre-flight** (R-NEW-41 lift, 3rd-consumer
+> trigger). v0.3-plan §22 R-NEW-41 entry pinned this section's
+> placement.
+
+The CLI surfaces a stable, agent-keyed envelope contract (§6
+in `cli-design.md`). Monday's wire surface evolves at its own
+cadence — and at API `2026-01` the wire surface carries three
+documented asymmetries where the CLI's argv shape OR transport
+shape diverges from a 1:1 mirror of Monday's wire. Each
+asymmetry needs documentation discipline so future agents
+(and future maintainers) understand WHY the divergence exists
+and where to look when the wire surface evolves.
+
+This section enumerates the three asymmetries known at v0.4-M31
+pre-flight, the per-asymmetry documentation cadence, and the
+expansion rule for future asymmetries.
+
+### The three asymmetries
+
+**1. `Webhook.config` JSON-input / String-output asymmetry**
+(v0.3-M27). Monday's `create_webhook` mutation accepts
+`config: JSON` (any valid JSON value); Monday's read-side
+`Webhook.config` returns `String` (the stored JSON-encoded
+text). The CLI's read-shape treats `config` as `string | null`;
+`webhook create` parses `--config <json>` once at the parse
+boundary and threads the resulting JS value to Monday's
+`JSON` scalar (sending the raw string would result in Monday
+seeing a JSON-string-of-a-string). Documented inline in
+`src/api/webhooks.ts`'s module docstring.
+
+**2. `NotificationTargetType` wire enum collapse** (v0.3-M27).
+Monday's `NotificationTargetType` wire enum has TWO values
+(`Post` / `Project`); `Project` covers both items and boards
+at the wire level. The CLI surfaces a TWO-value `--target-type
+item|board` argv that collapses to wire `Project`; the CLI
+preserves the item-vs-board distinction at the parse boundary
+for argv-validation discipline + envelope echo, but neither
+the CLI nor Monday cross-validates that the supplied `--target
+<id>` actually names the declared kind. Documented inline in
+`src/api/notifications.ts`'s module docstring + `cli-design.md`
+§4.3 notification row.
+
+**3. Multipart-vs-JSON transport asymmetry** (v0.4-M31).
+Monday's `add_file_to_column` + `add_file_to_update` mutations
+cross the wire via `multipart/form-data` per the standard
+GraphQL multipart-request specification (jaydenseric) — the
+operations + map + file parts wire envelope is incompatible
+with the JSON-only `client.request` seam's
+`body: JSON.stringify(...)` + `Content-Type: application/json`
+invariants. The CLI carries TWO sibling transports rather than
+one transport with a multipart branch:
+
+  - `src/api/transport.ts` — `Transport` interface + JSON body
+    + hard-coded `Content-Type: application/json`.
+  - `src/api/multipart-transport.ts` — `MultipartTransport`
+    interface + binary `file: Blob` slot + `filename` slot +
+    `Content-Type` set by `fetch` from FormData boundary.
+
+The two interfaces share the `Authorization` + `API-Version`
+header lockdown discipline + the timeout-aware combined-signal
+threading; they DIFFER on `Content-Type` ownership (JSON
+transport owns it; multipart transport delegates to `fetch`).
+Documented inline in `src/api/multipart-transport.ts`'s module
+docstring + `src/api/assets.ts`'s module docstring + cli-design
+§6.4 asset-upload sub-section.
+
+### Documentation cadence — inline + cross-link
+
+Each per-asymmetry inline prose lives in the relevant module
+docstring (one per asymmetry). The module docstring is the
+load-bearing source — it carries the empirical-probe finding
+(e.g., "introspected via `scripts/probe/m31-asset-upload.ts`
+2026-05-13, API `2026-01`") + the rationale for the CLI's
+chosen shape + the failure-mode mapping. The architecture.md
+section (this one) is the **canonical cross-link target**
+for any other prose that needs to reference the asymmetry:
+
+  - cli-design.md §X subsection — points HERE rather than
+    re-explaining the asymmetry.
+  - per-verb prose in cli-design.md §4.3 — points HERE.
+  - the v0.3-plan + v0.4-plan §22 R-class entries — point
+    HERE.
+  - per-asymmetry module docstrings — are the
+    source-of-truth; carry the empirical-probe finding +
+    rationale; point at THIS section for the cross-cutting
+    "why we document this pattern" discussion.
+
+The cadence is **inline-first**. An agent diagnosing a wire
+mismatch reads the module docstring first (it's the closest to
+the code path); the architecture section exists to explain
+WHY the documentation lives where it does and to flag the
+pattern for future maintainers seeing a 4th asymmetry.
+
+### Expansion rule — the 4th asymmetry
+
+When a 4th wire-vs-CLI asymmetry surfaces in a future milestone,
+the discipline is:
+
+  1. Document the asymmetry inline in the relevant
+     `src/api/<noun>.ts` module docstring (empirical-probe
+     finding + rationale + failure-mode mapping).
+  2. Extend THIS section's "The three asymmetries" enumeration
+     to four — same prose shape as the existing three.
+  3. Update the per-affected cli-design + plan-doc references
+     to point HERE.
+  4. File an R-NEW entry in the relevant plan doc's §22 if the
+     asymmetry has a code-shape implication (a new
+     transport/interface; a new wire-enum bridge), or skip the
+     R-class entry if it's purely a documentation lift.
+
+**Anti-pattern to avoid.** Re-explaining the asymmetry in
+every consumer's docstring + cli-design + plan-doc prose +
+test description. The M27 webhook + notification surfaces
+shipped with three+ inline copies of the per-asymmetry
+prose because no canonical cross-link target existed; the
+R-NEW-41 lift at M31 pre-flight closes that gap.

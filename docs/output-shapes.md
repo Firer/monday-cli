@@ -56,9 +56,9 @@ no `data`); see the **Errors** section at the bottom.
 | [workspace](#workspace) | list, get, folders, create (M14), update (M14), delete (M14), add-users (M14), remove-users (M14) |
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
-| [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
+| [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13), upload (v0.4-M31) |
 | [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29) |
-| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
+| [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20), upload (v0.4-M31) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
@@ -1573,6 +1573,70 @@ delete:
 
 `meta.source: "live"` because the page-walk fired real reads.
 
+### `update upload <uid> <file>` (v0.4-M31)
+
+Attach a local file to an Update (comment) via Monday's
+`add_file_to_update` multipart mutation. **First v0.4 verb
+crossing the wire via `multipart/form-data`** (along with the
+parallel `item upload`); see cli-design §6.4 asset-upload
+sub-section + `docs/architecture.md` "Wire-vs-CLI semantics"
+for the transport-asymmetry context.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "add_file_to_update",
+    "update_id": "987654321",
+    "filename": "screenshot.png",
+    "file_size_bytes": 41822,
+    "asset": {
+      "id": "555000111",
+      "name": "screenshot.png",
+      "url": "https://files.monday.com/.../screenshot.png",
+      "public_url": "https://share.monday.com/...",
+      "file_extension": "png",
+      "file_size": 41822,
+      "created_at": "2026-05-13T22:55:00Z",
+      "uploaded_by": { "id": "1", "name": "Alice" },
+      "original_geometry": "1920x1080",
+      "url_thumbnail": "https://files.monday.com/.../screenshot_thumb.png"
+    }
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+`file_size_bytes` is the CLI-measured size at upload time (from
+`fs.stat()`); `asset.file_size` is Monday's server-stored size.
+Usually identical but preserved separately for asymmetric-storage-
+encoding fidelity.
+
+`asset.original_geometry` + `asset.url_thumbnail` are image-only —
+non-image uploads carry `null` for both.
+
+**Dry-run**:
+
+```json
+{
+  "ok": true, "data": null,
+  "meta": { ..., "dry_run": true, "source": "none" },
+  "planned_changes": [
+    { "operation": "add_file_to_update",
+      "update_id": "987654321",
+      "file_path": "./screenshot.png",
+      "filename": "screenshot.png",
+      "file_size_bytes": 41822 }
+  ]
+}
+```
+
+No wire mutation fires on dry-run; `meta.source: "none"`.
+
+Idempotent: NO — re-running mints a new `Asset`. No cache
+invalidation (Updates aren't in §8 cache scope).
+
 ---
 
 ## item (reads)
@@ -2894,6 +2958,108 @@ state-discriminant flipped):
 - Other surfaces same as `start`.
 
 Future idempotency: NO per Decision 4.3.
+
+### `item upload <iid> --column <col> <file>` (v0.4-M31)
+
+Attach a local file to a `file`-typed column on an item via
+Monday's `add_file_to_column` multipart mutation. **First v0.4 verb
+crossing the wire via `multipart/form-data`** (along with the
+parallel `update upload`); see cli-design §6.4 asset-upload
+sub-section + `docs/architecture.md` "Wire-vs-CLI semantics" for
+the transport-asymmetry context.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "add_file_to_column",
+    "item_id": "12345",
+    "column_id": "files",
+    "filename": "screenshot.png",
+    "file_size_bytes": 41822,
+    "asset": {
+      "id": "555000111",
+      "name": "screenshot.png",
+      "url": "https://files.monday.com/.../screenshot.png",
+      "public_url": "https://share.monday.com/...",
+      "file_extension": "png",
+      "file_size": 41822,
+      "created_at": "2026-05-13T22:55:00Z",
+      "uploaded_by": { "id": "1", "name": "Alice" },
+      "original_geometry": "1920x1080",
+      "url_thumbnail": "https://files.monday.com/.../screenshot_thumb.png"
+    }
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+`file_size_bytes` is the CLI-measured size at upload time (from
+`fs.stat()`); `asset.file_size` is Monday's server-stored size.
+Usually identical but preserved separately for asymmetric-storage-
+encoding fidelity.
+
+`asset.original_geometry` + `asset.url_thumbnail` are image-only.
+
+**Dry-run**:
+
+```json
+{
+  "ok": true, "data": null,
+  "meta": { ..., "dry_run": true, "source": "none" },
+  "planned_changes": [
+    { "operation": "add_file_to_column",
+      "item_id": "12345",
+      "column_id": "files",
+      "file_path": "./screenshot.png",
+      "filename": "screenshot.png",
+      "file_size_bytes": 41822 }
+  ]
+}
+```
+
+No wire mutation fires on dry-run; `meta.source: "none"`.
+
+**Column-type validation.** Non-`file` columns passed to
+`--column` surface `unsupported_column_type` per cli-design §5.3:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "unsupported_column_type",
+    "message": "Column \"status_1\" has type \"status\", which Monday writes via change_column_value not add_file_to_column ...",
+    "details": {
+      "column_id": "status_1",
+      "type": "status",
+      "hint": "use `monday item set` / `monday item update --set` against this column; `monday item upload` only accepts file-typed columns."
+    }
+  }
+}
+```
+
+**File too large.** Monday's server-side rejection rewraps as
+`usage_error` with `details.reason: 'file_too_large'`:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "Monday rejected the upload — file exceeds the per-file size limit ...",
+    "details": {
+      "reason": "file_too_large",
+      "file_size_bytes": 524288000,
+      "hint": "Monday's per-file cap is plan-tier-dependent (typically 500 MB at standard tiers, larger at enterprise); contact Monday support to confirm your account's exact ceiling."
+    }
+  }
+}
+```
+
+Idempotent: NO — re-running mints a new `Asset`. Cache: successful
+upload invalidates the parent item's board metadata (single-leg
+per §8).
 
 ---
 

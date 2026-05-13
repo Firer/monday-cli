@@ -2003,6 +2003,54 @@ monday item time-track stop <iid> [--column <col>] [--board <bid>] [--dry-run]  
 monday item subitems <iid>                # list children                    v0.1
                                           # subitem creation = item create --parent <iid> (v0.2)
 
+# Asset upload — first v0.4 verb crossing the wire via multipart/form-data
+# rather than the JSON-only `client.request` seam. See §6.4 asset-upload
+# sub-section + `docs/architecture.md` "Wire-vs-CLI semantics" for the
+# transport-asymmetry context (R-NEW-41 3rd consumer fired at M31).
+monday item upload <iid> --column <col> <file>                                v0.4
+                                          # attaches a local file to a
+                                          # `file`-typed column on an item
+                                          # via Monday's `add_file_to_column`
+                                          # multipart mutation. `<file>` is
+                                          # a local file path resolved
+                                          # relative to cwd; stdin (`-`) is
+                                          # NOT supported in v0.4-M31 (a
+                                          # future contract extension may
+                                          # add stdin support once a
+                                          # `--filename <name>` companion
+                                          # flag is pinned). Column must
+                                          # resolve to `type === 'file'` at
+                                          # runtime — non-`file` columns
+                                          # surface `unsupported_column_type`
+                                          # per §5.3 writer-expansion
+                                          # roadmap, hint points at this
+                                          # verb. No CLI-side file-size
+                                          # pre-check; Monday's per-file
+                                          # cap is plan-tier-dependent and
+                                          # not exposed via the schema
+                                          # (empirical probe `scripts/probe/
+                                          # m31-asset-upload.ts` 2026-05-13).
+                                          # Server-side rejection (typically
+                                          # `FILE_SIZE_LIMIT_EXCEEDED` or
+                                          # HTTP 413) is rewrapped as
+                                          # `usage_error` with `details.
+                                          # reason: 'file_too_large'` +
+                                          # `details.file_size_bytes`.
+                                          # Idempotent: NO — each successful
+                                          # upload mints a new `Asset` with
+                                          # a new ID. Agents needing
+                                          # register-once dedupe on a
+                                          # `Item.assets` pre-read
+                                          # (read-side `monday item assets`
+                                          # verb deferred to v0.4.x per
+                                          # M31 Decision D6 closure).
+                                          # Cache invalidation: successful
+                                          # upload invalidates the parent
+                                          # item's board metadata cache
+                                          # (single-leg per §8). Dry-run
+                                          # shape per §6.4 asset-upload
+                                          # variant; `meta.source: "none"`.
+
 # === UPDATE (comments) ===
 monday update list <iid> [--with-replies]                                    v0.1 (--with-replies: v0.2)
                                           # **Default-shape change in v0.2** (M13):
@@ -2061,6 +2109,32 @@ monday update pin <uid> [--dry-run]                                          v0.
 monday update unpin <uid> [--dry-run]                                        v0.2
                                           # `unpin_from_top`. Idempotent.
 monday update clear-all <iid> --yes [--limit-pages <n>] [--dry-run]          v0.2
+
+# Asset upload — Update-scoped sibling of `item upload`. Same multipart
+# transport seam; no column-id (Updates carry attachments via
+# `Update.assets` directly).
+monday update upload <uid> <file>                                            v0.4
+                                          # attaches a local file to an
+                                          # Update (comment) via Monday's
+                                          # `add_file_to_update` multipart
+                                          # mutation. `<file>` same shape
+                                          # as `item upload` — local path
+                                          # only, no stdin at v0.4-M31. No
+                                          # column-type validation
+                                          # (Updates accept any file type
+                                          # Monday supports). Server-side
+                                          # validation handles size cap +
+                                          # filename + virus scan. Same
+                                          # `details.reason: 'file_too_
+                                          # large'` rewrap on size
+                                          # rejection. Idempotent: NO —
+                                          # re-running mints a new Asset.
+                                          # No cache invalidation
+                                          # (Updates aren't part of the
+                                          # §8 cache scope). Dry-run
+                                          # shape per §6.4 asset-upload
+                                          # variant; `meta.source:
+                                          # "none"`.
                                           # delete all updates on item.
                                           # Destructive: --yes mandatory for
                                           # live deletion. Live without --yes
@@ -2634,7 +2708,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | v0.4 | Pinned via `add_file_to_column` (§13 v0.4). |
+| `files` | v0.4 (M31 pre-flight; IMPL pending) | **NOT via `--set`** — files cross the wire as `multipart/form-data` (NOT `change_column_value`). The dedicated verbs `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` land in §4.3 at M31 pre-flight (stubs); runtime multipart dispatch lands at M31 IMPL. Non-`file` columns passed to `--column` surface `unsupported_column_type` with a hint pointing back at this row. |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -5241,6 +5315,104 @@ trivial reads at API `2026-01`; the `32` ceiling on
 `--concurrency` leaves substantial headroom under any plausible
 plan-tier cap.
 
+**Asset upload** (v0.4-M31 `monday item upload` + `monday update
+upload`). M31 lands the first v0.4 verbs crossing the wire via
+`multipart/form-data` rather than the JSON-only `client.request`
+seam — the envelope is structurally a single-resource mutation
+result but with a verb-specific `data` shape echoing the upload
+metadata + the wire `Asset` record. Two parallel envelope shapes:
+
+- **`item upload`** — `data: {operation: 'add_file_to_column',
+  item_id, column_id, filename, file_size_bytes, asset: {...}}`.
+  `asset` carries Monday's full 10-field `Asset` projection
+  (`id` / `name` / `url` / `public_url` / `file_extension` /
+  `file_size` / `created_at` / `uploaded_by` / `original_geometry`
+  / `url_thumbnail` — empirical probe `scripts/probe/m31-asset-
+  upload.ts` 2026-05-13, API `2026-01`). `file_size_bytes`
+  is the **CLI-measured size at upload time** (from `fs.stat()`);
+  `asset.file_size` is Monday's server-stored size. Usually
+  identical but preserved separately for asymmetric-storage-
+  encoding fidelity.
+- **`update upload`** — `data: {operation: 'add_file_to_update',
+  update_id, filename, file_size_bytes, asset: {...}}`. Same
+  `Asset` projection; no `column_id` (Updates carry attachments
+  directly via `Update.assets`).
+
+**Dry-run shape** — argv-derived, no wire mutation fires:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { "dry_run": true, "source": "none", ... },
+  "planned_changes": [
+    {
+      "operation": "add_file_to_column",
+      "item_id": "12345",
+      "column_id": "files",
+      "file_path": "./screenshot.png",
+      "filename": "screenshot.png",
+      "file_size_bytes": 41822
+    }
+  ],
+  "warnings": []
+}
+```
+
+`file_size_bytes` on the dry-run reads the file's local size via
+`fs.stat()` so an agent can confirm the planned upload fits any
+known plan-tier ceiling before issuing the live mutation. No file
+bytes are actually transmitted on a dry-run. The
+`update upload` dry-run variant carries `update_id` instead of
+`item_id` + `column_id`; otherwise structurally identical.
+
+**Wire transport.** Both verbs dispatch via a new
+`src/api/multipart-transport.ts` seam — a `MultipartTransport`
+interface mirroring the existing `Transport`'s shape but with a
+`FormData`-driven multipart body assembly (operations + map + file
+parts per the standard GraphQL multipart-request specification).
+Header lockdown carries over from `transport.ts` —
+`Authorization` + `API-Version` are transport-owned; `Content-
+Type` is set by `fetch` from the FormData boundary (different from
+the JSON transport's hard-coded `application/json`). See
+`docs/architecture.md` "Wire-vs-CLI semantics documentation
+conventions" for the asymmetry context (R-NEW-41 3rd consumer
+fired at M31 pre-flight).
+
+**Idempotency: NO.** Each successful upload mints a new `Asset`
+with a new ID — re-running both verbs uploads the file a second
+time. Agents needing register-once semantics dedupe on a
+pre-read of `Item.assets` / `Update.assets` (read-side asset
+verbs deferred to v0.4.x — see v0.4-plan §3 M31 Decision D6).
+
+**Cache invalidation.** `item upload` invalidates the parent
+item's board metadata cache on success (single-leg per §8 — the
+file column's `FileValue` ColumnValue is part of the cached
+board metadata projection). `update upload` does not invalidate
+(Updates aren't part of the §8 cache scope).
+
+**Constraints (v0.4-plan M31 D1–D11):**
+
+- **Column type — `file` only.** Non-`file` columns passed to
+  `--column` surface `unsupported_column_type` per §5.3 writer-
+  expansion roadmap (matches the existing `files_shaped`
+  rejection's hint — points at `monday item upload`). `doc`
+  column upload is a future v0.4+ extension (separate mutation
+  surface).
+- **File size — no CLI-side pre-check.** Monday's per-file size
+  cap is plan-tier-dependent and not exposed via the schema
+  (empirical probe — `Plan` + `Account` carry no file-quota
+  fields). Server-side rejection rewraps as `usage_error` with
+  `details.reason: 'file_too_large'` + `details.file_size_bytes`.
+- **File path — local file only.** Stdin (`<file>='-'`) is NOT
+  supported in v0.4-M31. A future contract extension may add
+  stdin once a `--filename <name>` companion flag is pinned.
+- **No new ERROR_CODE** — failures route through existing
+  `usage_error` (file path issues, oversize), `unsupported_
+  column_type` (non-`file` column), `not_found` (item/update/
+  column gone), `validation_failed` (Monday server-side reject),
+  `forbidden` / `unauthorized` (token scope).
+
 ### 6.5 Error
 
 To stderr (and the *only* thing on stderr at non-debug verbosity):
@@ -7174,6 +7346,23 @@ scoped idempotent changes, and post comments narrating its work.**
   their `--concurrency` extension to later v0.4 milestones if
   user demand surfaces**
 - Asset upload (`add_file_to_column`, `add_file_to_update`)
+  **— M31 pre-flight shipped; IMPL pending.** Two new verbs at §4.3:
+  `monday item upload <iid> --column <col> <file>` (file column only;
+  empirical probe `scripts/probe/m31-asset-upload.ts` 2026-05-13
+  pinned `add_file_to_column(column_id: String!, file: File!,
+  item_id: ID!) → Asset`) and `monday update upload <uid> <file>`
+  (`add_file_to_update(file: File!, update_id: ID!) → Asset`). First
+  v0.4 verb crossing the wire via `multipart/form-data` (NOT the
+  JSON-only `client.request` seam); new transport seam at
+  `src/api/multipart-transport.ts` mirrors `transport.ts`'s
+  `Transport` interface with FormData-driven body assembly. No new
+  ERROR_CODE (29 stays); existing `usage_error` /
+  `unsupported_column_type` / `not_found` / `validation_failed`
+  cover the failure modes via `details.reason` discrimination.
+  R-NEW-41 (asymmetric wire-vs-CLI semantics documentation pattern)
+  fires its 3rd consumer here — the load-bearing lift is the new
+  "Wire-vs-CLI semantics documentation conventions" section in
+  `docs/architecture.md` (R-NEW-41 ship).
 - `doc list/get` (read-only; full docs CRUD deferred further)
 - `team` create/manage
 
