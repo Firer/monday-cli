@@ -120,6 +120,86 @@ exports[`envelope snapshot — account > account whoami 1`] = `
 }
 `;
 
+exports[`envelope snapshot — account tags (M19) > account tags (empty directory) 1`] = `
+{
+  "data": {
+    "tags": [],
+    "total": 0,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — account tags (M19) > account tags (live, populated) 1`] = `
+{
+  "data": {
+    "tags": [
+      {
+        "id": "101",
+        "name": "launch",
+      },
+      {
+        "id": "202",
+        "name": "priority",
+      },
+    ],
+    "total": 2,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — auth login placeholder guard (M21 + M28) > auth login (placeholder-guard surface) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "hint": "set MONDAY_API_TOKEN=<your-monday-api-token> (mint from Monday → Profile → Developers → My Access Tokens) and re-run any \`monday\` command without \`monday auth login\`",
+      "reason": "oauth_unregistered",
+    },
+    "http_status": null,
+    "message": "\`monday auth login\` is not available in this release; authenticate via the MONDAY_API_TOKEN env var instead. OAuth login is deferred to a future version.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — board > board add-users (M15 — partial-success envelope) 1`] = `
 {
   "data": {
@@ -772,6 +852,61 @@ exports[`envelope snapshot — board > board update (M15) 1`] = `
 }
 `;
 
+exports[`envelope snapshot — board favorites (M23) > board favorites (empty — Stage 1 short-circuits) 1`] = `
+{
+  "data": [],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 0,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — board favorites (M23) > board favorites (happy two-stage: Stage 1 filter → Stage 2 hydrate) 1`] = `
+{
+  "data": [
+    {
+      "id": "100",
+      "name": "Tasks",
+      "position": 1,
+      "state": "active",
+      "url": "https://example.monday.com/boards/100",
+      "workspace_id": "5",
+    },
+    {
+      "id": "300",
+      "name": "Roadmap",
+      "position": 3,
+      "state": "active",
+      "url": "https://example.monday.com/boards/300",
+      "workspace_id": "5",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 2,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — cache > cache clear (empty cache) 1`] = `
 {
   "data": {
@@ -965,6 +1100,91 @@ exports[`envelope snapshot — error envelope > not_found on board get 1`] = `
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — item history (M24) > item history (happy — mixed activity + update events) 1`] = `
+{
+  "data": [
+    {
+      "actor_id": "7",
+      "after": {
+        "index": 1,
+        "label": "Done",
+      },
+      "before": {
+        "index": 0,
+        "label": "Working on it",
+      },
+      "column_id": "status",
+      "column_type": "status",
+      "created_at": "2026-04-29T11:00:00Z",
+      "id": "al-1",
+      "kind": "update_column_value",
+      "pulse_id": "12345",
+      "pulse_name": "Refactor login",
+      "textual_value": "Done",
+    },
+    {
+      "actor_id": "7",
+      "after": {
+        "body": "<p>Shipped in PR #1234</p>",
+        "reply_count": 0,
+        "text_body": "Shipped in PR #1234",
+      },
+      "before": null,
+      "created_at": "2026-04-29T12:00:00Z",
+      "id": "u-1",
+      "kind": "update_posted",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "has_more": false,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 2,
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item history (M24) > item history — usage_error on invalid --since 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "must be an ISO-8601 timestamp (e.g. 2026-05-11 or 2026-05-11T10:00:00Z)",
+          "path": "since",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: since: must be an ISO-8601 timestamp (e.g. 2026-05-11 or 2026-05-11T10:00:00Z)",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
   },
   "ok": false,
 }
@@ -2665,6 +2885,334 @@ exports[`envelope snapshot — item reads > item subitems 1`] = `
 }
 `;
 
+exports[`envelope snapshot — item time-track (M20, documentation-only) > item time-track start — usage_error (Monday API does not support time-tracking writes) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "board_id": "111",
+      "column_id": "",
+      "hint": "Monday's public GraphQL API does not currently expose a mutation for writing to time_tracking columns. Empirical probe (2026-05-10, API version 2026-01): change_simple_column_value rejects every candidate value with CorrectedValueException ("DurationColumn does not support simple column value writes"); change_column_value rejects every candidate JSON shape with InvalidColumnTypeException ("This column type is not supported yet in the API"); the mutation root has no time-tracking-related mutation. Use Monday's UI to start/stop time-tracking sessions until Monday ships API support — the verb is registered for forward-compatibility so agent scripts targeting \`monday item time-track start/stop\` are stable across the eventual swap.",
+      "item_id": "12345",
+    },
+    "http_status": null,
+    "message": "\`monday item time-track start\` is registered for forward-compatibility but cannot fire today — Monday's public API does not currently support writing to time_tracking columns.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — item time-track (M20, documentation-only) > item time-track stop — usage_error (Monday API does not support time-tracking writes) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "board_id": "111",
+      "column_id": "",
+      "hint": "Monday's public GraphQL API does not currently expose a mutation for writing to time_tracking columns. Empirical probe (2026-05-10, API version 2026-01): change_simple_column_value rejects every candidate value with CorrectedValueException ("DurationColumn does not support simple column value writes"); change_column_value rejects every candidate JSON shape with InvalidColumnTypeException ("This column type is not supported yet in the API"); the mutation root has no time-tracking-related mutation. Use Monday's UI to start/stop time-tracking sessions until Monday ships API support — the verb is registered for forward-compatibility so agent scripts targeting \`monday item time-track start/stop\` are stable across the eventual swap.",
+      "item_id": "12345",
+    },
+    "http_status": null,
+    "message": "\`monday item time-track stop\` is registered for forward-compatibility but cannot fire today — Monday's public API does not currently support writing to time_tracking columns.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — item update --continue-on-error (M25 partial-success bulk) > item update --where --continue-on-error (all-success branch) 1`] = `
+{
+  "data": {
+    "operation": "item_update",
+    "results": [
+      {
+        "item": {
+          "board_id": "111",
+          "columns": {
+            "date4": {
+              "date": "2026-05-01",
+              "id": "date4",
+              "text": "2026-05-01",
+              "time": null,
+              "title": "Due date",
+              "type": "date",
+              "value": {
+                "date": "2026-05-01",
+                "time": null,
+              },
+            },
+            "status_4": {
+              "id": "status_4",
+              "index": 1,
+              "label": "Done",
+              "text": "Done",
+              "title": "Status",
+              "type": "status",
+              "value": {
+                "index": 1,
+                "label": "Done",
+              },
+            },
+          },
+          "created_at": "2026-04-29T10:00:00Z",
+          "group_id": "topics",
+          "id": "5001",
+          "name": "Item 5001",
+          "parent_item_id": null,
+          "state": "active",
+          "updated_at": "2026-04-29T11:00:00Z",
+          "url": "https://example.monday.com/items/12345",
+        },
+        "item_id": "5001",
+        "ok": true,
+      },
+      {
+        "item": {
+          "board_id": "111",
+          "columns": {
+            "date4": {
+              "date": "2026-05-01",
+              "id": "date4",
+              "text": "2026-05-01",
+              "time": null,
+              "title": "Due date",
+              "type": "date",
+              "value": {
+                "date": "2026-05-01",
+                "time": null,
+              },
+            },
+            "status_4": {
+              "id": "status_4",
+              "index": 1,
+              "label": "Done",
+              "text": "Done",
+              "title": "Status",
+              "type": "status",
+              "value": {
+                "index": 1,
+                "label": "Done",
+              },
+            },
+          },
+          "created_at": "2026-04-29T10:00:00Z",
+          "group_id": "topics",
+          "id": "5002",
+          "name": "Item 5002",
+          "parent_item_id": null,
+          "state": "active",
+          "updated_at": "2026-04-29T11:00:00Z",
+          "url": "https://example.monday.com/items/12345",
+        },
+        "item_id": "5002",
+        "ok": true,
+      },
+    ],
+    "summary": {
+      "applied_count": 2,
+      "board_id": "111",
+      "failed_count": 0,
+      "matched_count": 2,
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": 0,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "mixed",
+  },
+  "ok": true,
+  "resolved_ids": {
+    "status": "status_4",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — monday status (M22 --no-probe) > monday status --no-probe (overall: ok) 1`] = `
+{
+  "data": {
+    "api_version": "2026-01",
+    "overall": "ok",
+    "probes": {
+      "auth": {
+        "kind": "skipped",
+        "probe": "auth",
+        "reason": "no_probe_flag",
+      },
+      "cache_writability": {
+        "details": {
+          "mode": "0700",
+          "path": "<tmpdir>/.monday-cli",
+        },
+        "elapsed_ms": 0,
+        "kind": "ok",
+        "probe": "cache_writability",
+      },
+      "dns": {
+        "kind": "skipped",
+        "probe": "dns",
+        "reason": "no_probe_flag",
+      },
+      "env_var_pickup": {
+        "details": {
+          "set": {
+            "MONDAY_API_TOKEN": true,
+            "MONDAY_API_URL": true,
+            "MONDAY_API_VERSION": false,
+            "MONDAY_OUTPUT": false,
+            "MONDAY_PROFILE": false,
+            "MONDAY_REQUEST_TIMEOUT_MS": false,
+          },
+        },
+        "elapsed_ms": 0,
+        "kind": "ok",
+        "probe": "env_var_pickup",
+      },
+      "redaction_self_test": {
+        "details": {
+          "fixture_count": 6,
+        },
+        "elapsed_ms": 0,
+        "kind": "ok",
+        "probe": "redaction_self_test",
+      },
+      "tcp": {
+        "kind": "skipped",
+        "probe": "tcp",
+        "reason": "no_probe_flag",
+      },
+      "tls": {
+        "kind": "skipped",
+        "probe": "tls",
+        "reason": "no_probe_flag",
+      },
+    },
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — monday usage (M22) > monday usage (live, within budget) 1`] = `
+{
+  "data": {
+    "daily_limit": {
+      "base": 100,
+      "total": 200,
+    },
+    "last_updated": "2026-04-30T09:55:00Z",
+    "usage_remaining_today": 158,
+    "usage_today": 42,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — notification (M27) > notification send (live, --target-type item) 1`] = `
+{
+  "data": {
+    "id": "n-1",
+    "target_id": "12345",
+    "target_type": "item",
+    "text": "Heads up on this one",
+    "user_id": "7",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — notification (M27) > notification send --dry-run (strictly argv-derived planned envelope) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "operation": "create_notification",
+      "target_id": "12345",
+      "target_type": "item",
+      "text": "Heads up on this one",
+      "user_id": "7",
+    },
+  ],
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — raw > raw inline query 1`] = `
 {
   "data": {
@@ -3839,6 +4387,118 @@ exports[`envelope snapshot — user > user me 1`] = `
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — webhook (M27) > webhook create (live mutation envelope) 1`] = `
+{
+  "data": {
+    "board_id": "12345678",
+    "config": null,
+    "event": "create_item",
+    "id": "88001",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — webhook (M27) > webhook create --dry-run (strictly argv-derived planned envelope) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "board_id": "12345678",
+      "config": null,
+      "event": "create_item",
+      "operation": "create_webhook",
+      "url": "https://example.com/hook",
+    },
+  ],
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — webhook (M27) > webhook delete (confirmation_required without --yes / --dry-run) 1`] = `
+{
+  "error": {
+    "code": "confirmation_required",
+    "details": {
+      "hint": "delete is destructive — Monday exposes no restore mutation for webhooks; re-creating after delete mints a fresh ID with a new URL subscription.",
+      "webhook_id": "88001",
+    },
+    "http_status": null,
+    "message": "monday webhook delete 88001 would delete the webhook. Re-run with --yes to confirm, or --dry-run to preview.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — webhook (M27) > webhook list (happy — two entries) 1`] = `
+{
+  "data": [
+    {
+      "board_id": "12345678",
+      "config": null,
+      "event": "create_item",
+      "id": "88001",
+    },
+    {
+      "board_id": "12345678",
+      "config": "{"columnId":"status"}",
+      "event": "change_status_column_value",
+      "id": "88002",
+    },
+  ],
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 2,
   },
   "ok": true,
   "warnings": [],

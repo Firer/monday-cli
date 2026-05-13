@@ -27,8 +27,16 @@
  * well under a second.
  */
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, mkdir, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { vi } from 'vitest';
+import { run } from '../../src/cli/run.js';
 import {
+  baseOptions,
   drive,
+  FIXTURE_API_URL,
+  LEAK_CANARY,
   parseEnvelope,
   useCachedIntegrationEnv,
 } from './helpers.js';
@@ -2444,5 +2452,591 @@ describe('envelope snapshot — error envelope', () => {
     }, { env: {} });
     expect(out.exitCode).toBe(3);
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
+
+// =============================================================
+// v0.3 — M19–M28 envelope-shape additions (M28 release prep).
+//
+// Dev namespace envelope shapes (M26a/b) + cross-board search
+// (M23) are NOT snapshotted here — their fixture infrastructure
+// (per-profile config.toml seeding for dev verbs; per-board
+// metadata cassettes for cross-board fan-out) lives in the
+// dedicated per-command suites at `tests/integration/commands/
+// dev.test.ts` + `m23-cross-board.test.ts` where the envelope-
+// shape contract is already pinned by per-test assertions. The
+// snapshot suite below targets the v0.3 surfaces whose
+// envelopes diverge structurally from v0.1/v0.2: tag reads,
+// time-track documentation-only placeholders, the OAuth
+// placeholder guard, the diagnostics cluster, board favorites,
+// per-item history events, the partial-success bulk envelope,
+// and the outbound writes (webhook + notification).
+// =============================================================
+
+const { drive: tagsDrive } = useCachedIntegrationEnv(
+  'monday-cli-snap-tags-',
+);
+
+describe('envelope snapshot — account tags (M19)', () => {
+  // Closes the §6.5 `tag_not_found.details.hint` forward reference
+  // by surfacing the discovery surface that the friendly tags
+  // translator depends on.
+  it('account tags (live, populated)', async () => {
+    const out = await tagsDrive(['account', 'tags', '--json'], {
+      interactions: [
+        {
+          operation_name: 'AccountTags',
+          response: {
+            data: {
+              account: {
+                tags: [
+                  { id: '101', name: 'launch' },
+                  { id: '202', name: 'priority' },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('account tags (empty directory)', async () => {
+    const out = await tagsDrive(['account', 'tags', '--json'], {
+      interactions: [
+        {
+          operation_name: 'AccountTags',
+          response: { data: { account: { tags: [] } } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — item time-track (M20, documentation-only)', () => {
+  // The two verbs are registered for forward-compatibility (agent
+  // scripts targeting `monday item time-track start/stop` are
+  // stable across the eventual Monday API support). Today they
+  // reject every invocation with `usage_error` carrying the
+  // empirical-probe context as the hint. The snapshot pins the
+  // documentation-only envelope shape so agents see a stable
+  // failure surface until the swap.
+  it('item time-track start — usage_error (Monday API does not support time-tracking writes)', async () => {
+    const out = await drive(
+      ['item', 'time-track', 'start', '12345', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('item time-track stop — usage_error (Monday API does not support time-tracking writes)', async () => {
+    const out = await drive(
+      ['item', 'time-track', 'stop', '12345', '--board', '111', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — auth login placeholder guard (M21 + M28)', () => {
+  // M28 pre-flight added a top-of-action guard that throws
+  // `usage_error.details.reason: oauth_unregistered` BEFORE any
+  // listener bind or wire call when the shipped OAuth credentials
+  // are still the `<UNREGISTERED_PENDING_OAUTH_APP>` placeholder
+  // AND `__test_oauth_helper` is unset. Test seam is intentionally
+  // omitted here so the production-mode guard branch fires.
+  it('auth login (placeholder-guard surface)', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'monday-cli-snap-auth-'));
+    try {
+      const { options, captured } = baseOptions({
+        argv: [
+          'node',
+          'monday',
+          'auth',
+          'login',
+          '--profile',
+          'work',
+          '--json',
+        ],
+        env: {
+          MONDAY_API_URL: FIXTURE_API_URL,
+          HOME: home,
+          // Intentionally NO __test_oauth_helper — drives the
+          // production-mode guard, the v0.3.0 deferral surface.
+        },
+      });
+      const fetchStub = vi.fn();
+      vi.stubGlobal('fetch', fetchStub);
+      try {
+        const result = await run(options);
+        expect(result.exitCode).toBe(1);
+        expect(parseEnvelope(captured.stderr())).toMatchSnapshot();
+        expect(fetchStub).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('envelope snapshot — monday status (M22 --no-probe)', () => {
+  // --no-probe suppresses DNS/TCP/TLS/auth so the network probes
+  // surface as `skipped:no_probe_flag` and the local probes
+  // (cache_writability / redaction_self_test / env_var_pickup)
+  // exercise their `ok` arm. Tests against a real tmp HOME so
+  // cache_writability lands against a mode-0700 ~/.monday-cli.
+  it('monday status --no-probe (overall: ok)', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'monday-cli-snap-status-'));
+    try {
+      const cacheDir = join(home, '.monday-cli');
+      await mkdir(cacheDir, { mode: 0o700 });
+      await chmod(cacheDir, 0o700);
+      const { options, captured } = baseOptions({
+        argv: ['node', 'monday', 'status', '--no-probe', '--json'],
+        env: {
+          MONDAY_API_TOKEN: LEAK_CANARY,
+          MONDAY_API_URL: FIXTURE_API_URL,
+          HOME: home,
+        },
+      });
+      const result = await run(options);
+      expect(result.exitCode).toBe(0);
+      // Each probe carries a wall-clock `elapsed_ms` slot — varies
+      // per run, so we replace with a stable sentinel before
+      // snapshotting (the shape pins the *presence* of the slot, not
+      // the literal value). tmpdir paths also collapse to <tmpdir>
+      // so the snapshot is portable across machines.
+      const raw = JSON.parse(captured.stdout()) as { data: { probes: Record<string, { elapsed_ms?: number }> } };
+      for (const probe of Object.values(raw.data.probes)) {
+        if (typeof probe.elapsed_ms === 'number') {
+          probe.elapsed_ms = 0;
+        }
+      }
+      expect(normalisePaths(raw, home)).toMatchSnapshot();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('envelope snapshot — monday usage (M22)', () => {
+  // Per cli-design §11.5.3: `platform_api.daily_limit { base, total }`
+  // + `platform_api.daily_analytics.by_day` summed for today's UTC
+  // YYYY-MM-DD key. usage_remaining_today clamps at zero when usage
+  // exceeds total.
+  it('monday usage (live, within budget)', async () => {
+    const out = await drive(['usage', '--json'], {
+      interactions: [
+        {
+          operation_name: 'MondayUsage',
+          response: {
+            data: {
+              platform_api: {
+                daily_limit: { base: 100, total: 200 },
+                daily_analytics: {
+                  by_day: [
+                    { day: '2026-04-30', usage: 42 },
+                  ],
+                  last_updated: '2026-04-30T09:55:00Z',
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — board favorites (M23)', () => {
+  // Two-stage filter+hydrate against `Query.favorites`
+  // (polymorphic — Board | Folder | Dashboard | Workspace). The
+  // verb filters Stage-1 to Board-typed entries + hydrates via
+  // `boards(ids:)` for the row shape. Sort order follows Monday's
+  // UI sidebar (Float `position`).
+  it('board favorites (empty — Stage 1 short-circuits)', async () => {
+    const out = await drive(['board', 'favorites', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardFavoritesStage1',
+          response: { data: { favorites: [] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('board favorites (happy two-stage: Stage 1 filter → Stage 2 hydrate)', async () => {
+    const out = await drive(['board', 'favorites', '--json'], {
+      interactions: [
+        {
+          operation_name: 'BoardFavoritesStage1',
+          response: {
+            data: {
+              favorites: [
+                { id: 'h1', object: { id: '100', type: 'Board' }, position: 1 },
+                { id: 'h2', object: { id: '200', type: 'Folder' }, position: 2 },
+                { id: 'h3', object: { id: '300', type: 'Board' }, position: 3 },
+              ],
+            },
+          },
+        },
+        {
+          operation_name: 'BoardFavoritesStage2',
+          response: {
+            data: {
+              boards: [
+                {
+                  id: '100',
+                  name: 'Tasks',
+                  state: 'active',
+                  workspace_id: '5',
+                  url: 'https://example.monday.com/boards/100',
+                },
+                {
+                  id: '300',
+                  name: 'Roadmap',
+                  state: 'active',
+                  workspace_id: '5',
+                  url: 'https://example.monday.com/boards/300',
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — item history (M24)', () => {
+  // Two-source chronological merge: `boards.activity_logs` +
+  // `items.updates`. Events sort by `created_at` ascending; ties
+  // break by lexicographic `id`. Variant taxonomy:
+  // `update_column_value` (item-scoped activity log),
+  // `update_posted` / `update_replied` (synthesized from
+  // `items.updates`). Board-scoped activity-log entries filtered
+  // out by `entity = 'pulse'`.
+  it('item history (happy — mixed activity + update events)', async () => {
+    const out = await drive(
+      ['item', 'history', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemBoardLookup',
+            response: {
+              data: { items: [{ id: '12345', board: { id: '111' } }] },
+            },
+          },
+          {
+            operation_name: 'ItemHistoryActivityLogs',
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    activity_logs: [
+                      {
+                        id: 'al-1',
+                        event: 'update_column_value',
+                        entity: 'pulse',
+                        user_id: '7',
+                        created_at: '2026-04-29T11:00:00Z',
+                        data: JSON.stringify({
+                          column_id: 'status',
+                          column_type: 'status',
+                          value: JSON.stringify({ label: 'Done', index: 1 }),
+                          previous_value: JSON.stringify({
+                            label: 'Working on it',
+                            index: 0,
+                          }),
+                          textual_value: 'Done',
+                          pulse_id: '12345',
+                          pulse_name: 'Refactor login',
+                        }),
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemHistoryUpdates',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    updates: [
+                      {
+                        id: 'u-1',
+                        body: '<p>Shipped in PR #1234</p>',
+                        text_body: 'Shipped in PR #1234',
+                        created_at: '2026-04-29T12:00:00Z',
+                        edited_at: '2026-04-29T12:00:00Z',
+                        creator_id: '7',
+                        replies: [],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item history — usage_error on invalid --since', async () => {
+    const out = await drive(
+      ['item', 'history', '12345', '--since', 'not-a-date', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — item update --continue-on-error (M25 partial-success bulk)', () => {
+  // cli-design §6.4 "Bulk per-item partial-success" — top-level
+  // ok: true whenever dispatch ran; per-item outcomes in
+  // data.results; data.summary.failed_count joins matched_count
+  // + applied_count (matched_count === applied_count +
+  // failed_count). resolved_ids echo unchanged.
+  it('item update --where --continue-on-error (all-success branch)', async () => {
+    const buildItem = (id: string): typeof sampleItem => ({
+      ...sampleItem,
+      id,
+      name: `Item ${id}`,
+    });
+    const out = await cachedDrive(
+      [
+        'item',
+        'update',
+        '--where',
+        'status=Backlog',
+        '--set',
+        'status=Done',
+        '--board',
+        '111',
+        '--yes',
+        '--continue-on-error',
+        '--json',
+      ],
+      {
+        interactions: [
+          boardMetadataInteraction,
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [
+                  {
+                    items_page: {
+                      cursor: null,
+                      items: [{ id: '5001' }, { id: '5002' }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5001') } },
+          },
+          {
+            operation_name: 'ItemUpdateRich',
+            response: { data: { change_column_value: buildItem('5002') } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — webhook (M27)', () => {
+  // M27 wraps `webhooks(board_id:)` + `create_webhook` +
+  // `delete_webhook`. Webhooks are live-only (outside cli-design
+  // §8 cache scope); the `webhook create` envelope echoes the
+  // wire `Webhook` projection; `webhook delete --dry-run` is
+  // strictly argv-derived (no pre-mutation read).
+  it('webhook list (happy — two entries)', async () => {
+    const out = await drive(
+      ['webhook', 'list', '12345678', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'Webhooks',
+            response: {
+              data: {
+                webhooks: [
+                  {
+                    id: '88001',
+                    board_id: '12345678',
+                    event: 'create_item',
+                    config: null,
+                  },
+                  {
+                    id: '88002',
+                    board_id: '12345678',
+                    event: 'change_status_column_value',
+                    config: '{"columnId":"status"}',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('webhook create (live mutation envelope)', async () => {
+    const out = await drive(
+      [
+        'webhook',
+        'create',
+        '12345678',
+        '--url',
+        'https://example.com/hook',
+        '--event',
+        'create_item',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'CreateWebhook',
+            response: {
+              data: {
+                create_webhook: {
+                  id: '88001',
+                  board_id: '12345678',
+                  event: 'create_item',
+                  config: null,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('webhook create --dry-run (strictly argv-derived planned envelope)', async () => {
+    const out = await drive(
+      [
+        'webhook',
+        'create',
+        '12345678',
+        '--url',
+        'https://example.com/hook',
+        '--event',
+        'create_item',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('webhook delete (confirmation_required without --yes / --dry-run)', async () => {
+    const out = await drive(
+      ['webhook', 'delete', '88001', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — notification (M27)', () => {
+  // `--target-type item|board` argv collapses to wire
+  // `NotificationTargetType.Project` at the fetcher boundary; the
+  // CLI-declared kind is echoed in the envelope but NOT verified
+  // against the underlying record (Monday only validates target
+  // visibility as a `Project`). `--dry-run` is strictly argv-
+  // derived.
+  it('notification send (live, --target-type item)', async () => {
+    const out = await drive(
+      [
+        'notification',
+        'send',
+        '--user',
+        '7',
+        '--target',
+        '12345',
+        '--target-type',
+        'item',
+        '--text',
+        'Heads up on this one',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'CreateNotification',
+            response: {
+              data: {
+                create_notification: {
+                  id: 'n-1',
+                  text: 'Heads up on this one',
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('notification send --dry-run (strictly argv-derived planned envelope)', async () => {
+    const out = await drive(
+      [
+        'notification',
+        'send',
+        '--user',
+        '7',
+        '--target',
+        '12345',
+        '--target-type',
+        'item',
+        '--text',
+        'Heads up on this one',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 });
