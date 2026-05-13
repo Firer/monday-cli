@@ -47,6 +47,28 @@ export interface MetaInput {
   readonly next_cursor?: string | null;
   readonly has_more?: boolean;
   readonly total_returned?: number;
+  /**
+   * v0.4-M29 streaming-trailer session counters per cli-design §14.4
+   * closure + output-shapes.md `item watch` entry. Flat under `_meta`
+   * (NOT nested) so agents read each slot directly. Set only by
+   * `monday item watch <iid>`; absent on every other surface.
+   */
+  readonly events_emitted?: number;
+  readonly polls_made?: number;
+  readonly failed_polls?: number;
+  readonly watch_duration_seconds?: number;
+  readonly last_seen_event_id?: string | null;
+  readonly circuit_broken_at?: string | null;
+  readonly exit_reason?: string;
+  /**
+   * §6.3 streaming-trailer warnings channel. NDJSON has no envelope-
+   * level `warnings[]` slot (warnings would otherwise interleave with
+   * resource lines and break the "trailer = stream-end sentinel"
+   * contract); the agreed home is `_meta.warnings`. Set by streaming
+   * verbs whose walker accumulates warnings (currently `item watch`'s
+   * `WatchSessionWarning[]` channel).
+   */
+  readonly warnings?: readonly Warning[];
   readonly columns?: Readonly<Record<string, ColumnHead>>;
 }
 
@@ -69,6 +91,14 @@ export interface Meta {
   readonly next_cursor?: string | null;
   readonly has_more?: boolean;
   readonly total_returned?: number;
+  readonly events_emitted?: number;
+  readonly polls_made?: number;
+  readonly failed_polls?: number;
+  readonly watch_duration_seconds?: number;
+  readonly last_seen_event_id?: string | null;
+  readonly circuit_broken_at?: string | null;
+  readonly exit_reason?: string;
+  readonly warnings?: readonly Warning[];
   readonly columns?: Readonly<Record<string, ColumnHead>>;
 }
 
@@ -152,6 +182,14 @@ export const buildMeta = (input: MetaInput): Meta => {
     next_cursor?: string | null;
     has_more?: boolean;
     total_returned?: number;
+    events_emitted?: number;
+    polls_made?: number;
+    failed_polls?: number;
+    watch_duration_seconds?: number;
+    last_seen_event_id?: string | null;
+    circuit_broken_at?: string | null;
+    exit_reason?: string;
+    warnings?: readonly Warning[];
     columns?: Readonly<Record<string, ColumnHead>>;
   } = {
     schema_version: CURRENT_SCHEMA_VERSION,
@@ -178,6 +216,32 @@ export const buildMeta = (input: MetaInput): Meta => {
   }
   if (input.total_returned !== undefined) {
     meta.total_returned = input.total_returned;
+  }
+  // v0.4-M29 streaming-trailer slots. Inserted between `total_returned`
+  // and `columns` to match the output-shapes.md `item watch` sample.
+  if (input.events_emitted !== undefined) {
+    meta.events_emitted = input.events_emitted;
+  }
+  if (input.polls_made !== undefined) {
+    meta.polls_made = input.polls_made;
+  }
+  if (input.failed_polls !== undefined) {
+    meta.failed_polls = input.failed_polls;
+  }
+  if (input.watch_duration_seconds !== undefined) {
+    meta.watch_duration_seconds = input.watch_duration_seconds;
+  }
+  if (input.last_seen_event_id !== undefined) {
+    meta.last_seen_event_id = input.last_seen_event_id;
+  }
+  if (input.circuit_broken_at !== undefined) {
+    meta.circuit_broken_at = input.circuit_broken_at;
+  }
+  if (input.exit_reason !== undefined) {
+    meta.exit_reason = input.exit_reason;
+  }
+  if (input.warnings !== undefined) {
+    meta.warnings = input.warnings;
   }
   if (input.columns !== undefined) {
     meta.columns = input.columns;

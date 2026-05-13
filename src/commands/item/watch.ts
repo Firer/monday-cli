@@ -52,18 +52,23 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { lookupItemBoard } from '../../api/item-board-lookup.js';
+import { SourceAggregator } from '../../api/source-aggregator.js';
 import {
   buildStreamingTrailerMeta,
   startNdjsonStream,
 } from '../../utils/output/ndjson.js';
 import { collectSecrets } from '../../cli/envelope-out.js';
+import { ApiError } from '../../utils/errors.js';
+import type { ErrorCode } from '../../utils/errors.js';
 import { ItemIdSchema } from '../../types/ids.js';
+import type { Warning } from '../../utils/output/envelope.js';
 import {
   CIRCUIT_BREAKER_CONSECUTIVE_FAILS,
   DEFAULT_WATCH_INTERVAL_MS,
   MAX_WATCH_INTERVAL_MS,
   MIN_WATCH_INTERVAL_MS,
   watchItem,
+  type WatchSessionWarning,
 } from '../../api/item-watch.js';
 import {
   historyEventSchema,
@@ -280,21 +285,23 @@ export const itemWatchCommand: CommandModule<
           '',
         ].join('\n'),
       )
-      /* c8 ignore start */
       .action(async (iid: string, rawOpts: unknown) => {
-        // Stub action body — argv parsing runs (the parse-boundary
-        // path is the contract surface), then the watchItem stub
-        // throws internal_error. Runtime body wires the NDJSON
-        // stream + watchItem call + trailer emit at M29 IMPL.
         const merged = { ...(rawOpts as Record<string, unknown>), iid };
         const parsed = parseArgv(itemWatchCommand.inputSchema, merged);
 
         const { client, apiVersion } = resolveClient(ctx, program.opts());
 
+        // Item-board lookup short-circuits a missing-item watch with
+        // `not_found` before the polling loop spins up. The lookup is
+        // a single wire call; SourceAggregator records it as `'live'`
+        // so the trailer's `meta.source` stays correct if a future
+        // cache layer lifts in here.
         const { boardId } = await lookupItemBoard({
           client,
           itemId: parsed.iid,
         });
+        const aggregator = new SourceAggregator();
+        aggregator.record('live', null);
 
         const stream = startNdjsonStream<HistoryEvent>({
           stream: ctx.stdout,
@@ -316,6 +323,14 @@ export const itemWatchCommand: CommandModule<
           onEvent: stream.onItem,
         });
 
+        aggregator.record(result.source, null);
+        const aggregated = aggregator.result('live');
+
+        // `WatchSessionWarning` already structurally satisfies the
+        // §6.1 `Warning` shape (code + message + details); the
+        // trailer slot accepts the superset directly.
+        const trailerWarnings: readonly Warning[] = result.warnings;
+
         stream.writeTrailer(
           buildStreamingTrailerMeta({
             ctx: {
@@ -324,16 +339,67 @@ export const itemWatchCommand: CommandModule<
               clock: ctx.clock,
             },
             apiVersion,
-            source: result.source,
-            cacheAgeSeconds: null,
+            source: aggregated.source,
+            cacheAgeSeconds: aggregated.cacheAgeSeconds,
             result: {
-              hasMore: result.exit_reason !== 'circuit_broken',
+              // `has_more` reflects "the source still has events past
+              // this session's exit point" — true for ceiling-driven
+              // exits (max_events / max_duration / signal) where the
+              // agent might re-invoke with --since; false for
+              // once_complete (the backlog was the whole window) and
+              // circuit_broken (the session failed, not the source
+              // running out).
+              hasMore:
+                result.exit_reason === 'max_events' ||
+                result.exit_reason === 'max_duration' ||
+                result.exit_reason === 'signal',
               totalReturned: result.events_emitted,
               complexity: null,
             },
+            session: {
+              eventsEmitted: result.events_emitted,
+              pollsMade: result.polls_made,
+              failedPolls: result.failed_polls,
+              watchDurationSeconds: result.watch_duration_seconds,
+              lastSeenEventId: result.last_seen_event_id,
+              circuitBrokenAt: result.circuit_broken_at,
+              exitReason: result.exit_reason,
+            },
+            warnings: trailerWarnings,
           }),
         );
+
+        // Circuit-broken exit surfaces as a §6.5 failure envelope on
+        // stderr AFTER the trailer emitted on stdout. The Monday code
+        // that tripped the breaker lives on the last `poll_failed`
+        // warning's `details.monday_code` slot (no other source: the
+        // ApiError thrown by `client.raw` was caught + converted to a
+        // warning inside `watchItem`).
+        if (result.exit_reason === 'circuit_broken') {
+          const lastPollFailed = [...result.warnings]
+            .reverse()
+            .find(
+              (w): w is Extract<WatchSessionWarning, { code: 'poll_failed' }> =>
+                w.code === 'poll_failed',
+            );
+          /* c8 ignore next 2 — defensive: circuit_broken always
+             trips off a poll_failed accumulation; the find always
+             succeeds in production. */
+          const mondayCode: ErrorCode =
+            (lastPollFailed?.details.monday_code as ErrorCode | undefined) ??
+            'complexity_exceeded';
+          throw new ApiError(
+            mondayCode,
+            `watch session tripped the circuit breaker after ${String(result.failed_polls)} failed polls (${String(CIRCUIT_BREAKER_CONSECUTIVE_FAILS)} consecutive)`,
+            {
+              details: {
+                failed_polls: result.failed_polls,
+                circuit_broken_at: result.circuit_broken_at,
+                events_emitted: result.events_emitted,
+              },
+            },
+          );
+        }
       });
-      /* c8 ignore stop */
   },
 };

@@ -73,12 +73,20 @@
  * variants are valid but the activity_logs source doesn't surface
  * comment events).
  */
-import { ApiError } from '../utils/errors.js';
+import { z } from 'zod';
+import { ApiError, UsageError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import type { ErrorCode } from '../utils/errors.js';
 import type { MondayClient } from './client.js';
 import type { ItemId } from '../types/ids.js';
-import type {
-  HistoryEvent,
-  UnknownEventKindWarning,
+import {
+  ITEM_SCOPED_ENTITY,
+  buildUnknownEventKindWarning,
+  projectActivityLogRow,
+  rawActivityLogRowSchema,
+  type HistoryEvent,
+  type RawActivityLogRow,
+  type UnknownEventKindWarning,
 } from './item-history-projection.js';
 
 /**
@@ -352,67 +360,501 @@ export const WATCH_POLL_QUERY = `
 `;
 
 /**
- * Polling-based event-stream walker. **STUB at M29 pre-flight; runtime
- * body lands at M29 IMPL.** Reuses M24's `projectActivityLogRow` for
- * per-event projection; the polling loop owns the cadence + circuit-
- * breaker + watermark state.
+ * Wire-codes that arm the circuit breaker per cli-design §14.4
+ * closure D1. These are Monday's rate-limit codes already in §6.5's
+ * 29-code registry; the breaker reuses them rather than introducing
+ * a new ERROR_CODE (count stays at 29). Non-matching wire errors
+ * (`not_found` from a deleted item mid-watch, `unauthorized` from a
+ * revoked token, `internal_error` from a parse boundary) propagate
+ * unchanged — they're not "Monday is asking us to slow down" signals.
+ */
+const CIRCUIT_BREAKER_CODES: readonly ErrorCode[] = [
+  'complexity_exceeded',
+  'concurrency_exceeded',
+  'rate_limited',
+];
+
+/**
+ * Wire-shape schema for the per-tick {@link WATCH_POLL_QUERY}
+ * response. Mirrors M24's `activityLogsResponseSchema` for the
+ * `boards.activity_logs` sub-tree; `.loose()` so forward-compat
+ * Monday surface extensions don't break the parse.
+ */
+const watchPollResponseSchema = z
+  .object({
+    boards: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            activity_logs: z.array(rawActivityLogRowSchema).nullable(),
+          })
+          .loose()
+          .nullable(),
+      )
+      .nullable(),
+  })
+  .loose();
+
+/**
+ * Promise that resolves after `ms` milliseconds OR rejects when the
+ * supplied {@link AbortSignal} fires. Mirrors `src/api/retry.ts`'s
+ * `defaultSleep` + the R-NEW-26 race-window guard: a sync
+ * `signal.aborted` check BEFORE listener registration handles the
+ * case where the abort fires synchronously between the caller's last
+ * `signal.aborted` check and our `addEventListener` call (Node's
+ * AbortSignal does NOT replay 'abort' for listeners attached after
+ * the event dispatched).
+ */
+const sleepWithSignal = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    // Defensive race-window guard (R-NEW-26): handles the narrow case
+    // where the abort fires synchronously between the caller's last
+    // `signal.aborted` check and our `addEventListener` registration.
+    // Not reachable from the integration tests since the runner
+    // checks `signal.aborted` after every await; production-only.
+    /* c8 ignore start */
+    if (signal.aborted) {
+      const reason: unknown = signal.reason;
+      reject(reason instanceof Error ? reason : new Error('aborted'));
+      return;
+    }
+    /* c8 ignore stop */
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      const reason: unknown = signal.reason;
+      reject(reason instanceof Error ? reason : new Error('aborted'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+/**
+ * Whether an error represents Monday signalling rate-limit /
+ * complexity-budget exhaustion (matched by ErrorCode rather than
+ * English message per `.claude/rules/security.md` + cli-design §6.5
+ * agent-keys-off-code discipline).
+ */
+const isCircuitBreakerError = (err: unknown): err is ApiError =>
+  err instanceof ApiError &&
+  (CIRCUIT_BREAKER_CODES as readonly string[]).includes(err.code);
+
+/**
+ * Computes the per-failure backoff in seconds. Monday's wire error
+ * may carry `retry_after_seconds` (mapped through `api/errors.ts`'s
+ * `extractRetryInSeconds`); when absent we default to
+ * {@link DEFAULT_BACKOFF_SECONDS}. Either way we clamp at
+ * {@link MAX_BACKOFF_SECONDS} so the loop doesn't sleep past the
+ * 5-min ceiling (cli-design §14.4 closure: "beyond 5min the session
+ * may as well exit + let an agent re-invoke later").
+ */
+const backoffSecondsFrom = (err: ApiError): number => {
+  const seconds = err.retryAfterSeconds ?? DEFAULT_BACKOFF_SECONDS;
+  return Math.min(seconds, MAX_BACKOFF_SECONDS);
+};
+
+/**
+ * Loads one page of `activity_logs` against the watch surface,
+ * filtered to the target item via the `iid` arg + the
+ * `from: <watermark>` ISO-timestamp pin. Reuses M24's wire shape
+ * (same `ACTIVITY_LOGS_QUERY` selection set, minus the per-page
+ * pagination args that watch doesn't paginate). Returns the raw
+ * rows so the caller can apply walker-side entity filter +
+ * projection + dedup.
+ */
+const fetchPoll = async (args: {
+  readonly client: MondayClient;
+  readonly boardId: string;
+  readonly itemId: ItemId;
+  readonly from: string;
+  readonly limit: number;
+}): Promise<readonly RawActivityLogRow[]> => {
+  const response = await args.client.raw<unknown>(
+    WATCH_POLL_QUERY,
+    {
+      bid: [args.boardId],
+      iid: [args.itemId],
+      from: args.from,
+      limit: args.limit,
+    },
+    { operationName: 'ItemWatchPoll' },
+  );
+  const parsed = unwrapOrThrow(
+    watchPollResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday `boards.activity_logs` watch-poll response',
+      details: { item_id: args.itemId, board_id: args.boardId },
+      hint: 'Monday may have amended the `boards(ids:) { activity_logs }` surface — re-probe via `scripts/probe/m29-polling-burn.ts` and amend cli-design §14.4 closure if so',
+    },
+  );
+  const rows: RawActivityLogRow[] = [];
+  for (const board of parsed.boards ?? []) {
+    if (board === null) continue;
+    rows.push(...(board.activity_logs ?? []));
+  }
+  return rows;
+};
+
+/**
+ * Looks up the `--since <event-id>` watermark by scanning a recent
+ * window of activity_logs for the matching id. Monday's GraphQL
+ * surface has no `activity_log(id:)` resolver; we fetch a generous
+ * recent slice and search client-side. If the id isn't in the
+ * window, throws `usage_error` so an agent passing a stale id sees
+ * a clear cause (not a silent no-op session).
+ */
+const resolveSinceWatermark = async (args: {
+  readonly client: MondayClient;
+  readonly boardId: string;
+  readonly itemId: ItemId;
+  readonly sinceEventId: string;
+}): Promise<RawActivityLogRow> => {
+  // Use a unix-epoch floor so we get the full recent backlog; the
+  // 500-row limit caps how far back resumption reaches in a single
+  // call (sufficient for "resume from a recent session" — the
+  // documented intent per cli-design §14.4 closure).
+  const rows = await fetchPoll({
+    client: args.client,
+    boardId: args.boardId,
+    itemId: args.itemId,
+    from: '1970-01-01T00:00:00Z',
+    limit: 500,
+  });
+  const match = rows.find((r) => r.id === args.sinceEventId);
+  if (match === undefined) {
+    throw new UsageError(
+      `--since event-id ${args.sinceEventId} not found in the recent activity-log window for item ${args.itemId}`,
+      {
+        details: {
+          item_id: args.itemId,
+          since_event_id: args.sinceEventId,
+          window_size: rows.length,
+          hint: 'Monday\'s activity_logs has no direct event-id resolver; the CLI scans the 500 most recent rows. Pass a more recent event-id, or omit --since to start the watch session from now.',
+        },
+      },
+    );
+  }
+  return match;
+};
+
+/**
+ * Sorts raw activity-log rows chronologically ascending so the polling
+ * loop emits in real-time order. Tie-breaks on `id` (numeric compare
+ * via BigInt — Monday's ids can exceed `Number.MAX_SAFE_INTEGER`).
+ */
+const sortChronological = (
+  rows: readonly RawActivityLogRow[],
+): RawActivityLogRow[] => {
+  const copy = [...rows];
+  copy.sort((a, b) => {
+    if (a.created_at !== b.created_at) {
+      return a.created_at < b.created_at ? -1 : 1;
+    }
+    return compareBigIntStrings(a.id, b.id);
+  });
+  return copy;
+};
+
+/**
+ * Numeric compare for Monday's id strings without loss of precision.
+ * Activity-log ids can be 13+ digits, exceeding the JS Number safe
+ * range; BigInt parsing avoids the lossy `Number(...)` shape.
+ * Lexicographic compare would mis-order ids of different lengths
+ * (`"9"` > `"10"` lex; `9n < 10n` numerically).
+ */
+const compareBigIntStrings = (a: string, b: string): number => {
+  try {
+    const ba = BigInt(a);
+    const bb = BigInt(b);
+    if (ba === bb) return 0;
+    return ba < bb ? -1 : 1;
+  } /* c8 ignore start */ catch {
+    // Defensive: non-numeric id shouldn't happen (Monday's wire
+    // schema is `String!` but always digits per the M24 probe);
+    // fall back to lex compare so we never throw out of a sort.
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+  } /* c8 ignore stop */
+};
+
+/**
+ * Polling-based event-stream walker. Reuses M24's
+ * `projectActivityLogRow` for per-event projection; the polling
+ * loop owns the cadence + circuit-breaker + watermark state.
  *
- * The runtime body (M29 IMPL):
- *
- *   1. Resolves the initial poll-from timestamp: from `inputs.since`
- *      (look up event-id → created_at) or from `Date.now()`.
- *   2. If `inputs.once === true`: one poll against the watermark,
- *      drain backlog through `onEvent`, exit with
- *      `exit_reason: 'once_complete'`.
- *   3. Otherwise enter the polling loop: each tick fires the
- *      `WATCH_POLL_QUERY`, filters newly-seen events (id > last-seen-
- *      event-id), projects via `projectActivityLogRow`, applies the
- *      `includeKinds` filter, emits via `onEvent`, advances the
- *      watermark.
- *   4. After each poll, awaits Promise.race([setTimeout(intervalMs),
- *      signal.aborted]). On signal: graceful drain + exit
+ *   1. Resolves the initial poll-from timestamp from `inputs.since`
+ *      (look up event-id → created_at) or from now.
+ *   2. If `inputs.once === true`: drains backlog through `onEvent`,
+ *      exits with `exit_reason: 'once_complete'`.
+ *   3. Otherwise enters the polling loop: each tick fires
+ *      `WATCH_POLL_QUERY`, filters newly-seen events (dedup Set +
+ *      walker-side `entity === 'pulse'`), projects via
+ *      `projectActivityLogRow`, applies the `includeKinds` filter,
+ *      emits via `onEvent`, advances the watermark.
+ *   4. After each poll awaits the cadence interval as a Promise
+ *      racing the {@link AbortSignal}. On signal: graceful exit
  *      `exit_reason: 'signal'`.
- *   5. On Monday wire errors (`complexity_exceeded` /
- *      `concurrency_exceeded` / `rate_limited`): APPEND a
- *      `poll_failed` warning to the in-flight `warnings` accumulator
- *      (folded into the trailer-meta's `_meta.warnings` at session
- *      end — NOT emitted as an interleaved NDJSON line per §6.3),
- *      backoff respecting `reset_in_x_seconds` (60s default cap;
- *      300s ceiling per `MAX_BACKOFF_SECONDS`), increment failed-poll
- *      counter. After {@link CIRCUIT_BREAKER_CONSECUTIVE_FAILS}
- *      consecutive failures trip with `exit_reason:
- *      'circuit_broken'`.
+ *   5. On Monday rate-limit wire errors (`complexity_exceeded` /
+ *      `concurrency_exceeded` / `rate_limited`): appends a
+ *      `poll_failed` warning to the in-flight accumulator (folded
+ *      into the trailer's `_meta.warnings[]` at session end — NOT
+ *      emitted as an interleaved NDJSON line per §6.3), backs off
+ *      `retry_after_seconds` (60s default cap; 300s ceiling per
+ *      {@link MAX_BACKOFF_SECONDS}), increments failed-poll counter.
+ *      After {@link CIRCUIT_BREAKER_CONSECUTIVE_FAILS} consecutive
+ *      failures trips with `exit_reason: 'circuit_broken'` and
+ *      `circuit_broken_at` set; the action body inspects the result
+ *      after the trailer emits and re-throws an `ApiError` so the
+ *      runner emits a §6.5 failure envelope on stderr.
  *   6. On `--max-events` / `--max-duration` ceiling reached: clean
  *      exit with the matching `exit_reason`.
  */
-/* c8 ignore start */
-export const watchItem = (
+export const watchItem = async (
   inputs: WatchItemInputs,
 ): Promise<WatchItemResult> => {
-  // Touch every input slot so the unused-import / unused-parameter
-  // linters don't fire against the stub. Real body at M29 IMPL.
-  void inputs.client;
-  void inputs.itemId;
-  void inputs.boardId;
-  void inputs.intervalMs;
-  void inputs.since;
-  void inputs.once;
-  void inputs.maxEvents;
-  void inputs.maxDurationSeconds;
-  void inputs.includeKinds;
-  void inputs.signal;
-  void inputs.onEvent;
-  return Promise.reject(
-    new ApiError(
-      'internal_error',
-      '`watchItem` stub — runtime body lands at v0.4-M29 IMPL',
-      {
+  const sessionStartMs = Date.now();
+  const sessionStartIso = new Date(sessionStartMs).toISOString();
+  const includeKinds =
+    inputs.includeKinds === undefined
+      ? undefined
+      : new Set<HistoryEvent['kind']>(inputs.includeKinds);
+
+  // Initial poll-from watermark. `--since` looks up the event's
+  // created_at; absent → now (only events strictly after session
+  // start surface).
+  let watermark: string;
+  const seenEventIds = new Set<string>();
+  if (inputs.since !== undefined) {
+    const sinceRow = await resolveSinceWatermark({
+      client: inputs.client,
+      boardId: inputs.boardId,
+      itemId: inputs.itemId,
+      sinceEventId: inputs.since,
+    });
+    watermark = sinceRow.created_at;
+    seenEventIds.add(sinceRow.id);
+  } else {
+    watermark = sessionStartIso;
+  }
+
+  const warnings: WatchSessionWarning[] = [];
+  const unknownTracker = new Map<
+    string,
+    { event: string; entity: string; count: number }
+  >();
+  let eventsEmitted = 0;
+  let pollsMade = 0;
+  let failedPolls = 0;
+  let consecutiveFailures = 0;
+  let armedFor: string | undefined; // monday_code that armed; cleared on success
+  let lastSeenEventId: string | null = null;
+  let circuitBrokenAt: string | null = null;
+
+  /**
+   * Per-tick processor: chronological sort, walker-side entity
+   * filter, dedup via the Set, projection, `--include` filter, and
+   * per-event emit via `onEvent`. Returns the early-exit reason when
+   * a ceiling fires mid-poll; otherwise undefined (continue looping).
+   */
+  const processRows = async (
+    rows: readonly RawActivityLogRow[],
+  ): Promise<WatchExitReason | undefined> => {
+    const sorted = sortChronological(rows);
+    for (const row of sorted) {
+      if (seenEventIds.has(row.id)) continue;
+      seenEventIds.add(row.id);
+      // Always advance the wall-clock watermark — even for filtered
+      // rows — so the next poll's `from:` doesn't re-fetch them.
+      if (row.created_at > watermark) {
+        watermark = row.created_at;
+      }
+      // Walker-side entity filter per M24 Decision 2 closure (single
+      // source of truth at the walker layer; projector does NOT
+      // re-filter). Drops board-scoped events that leak through the
+      // `iid` arg.
+      if (row.entity !== ITEM_SCOPED_ENTITY) continue;
+      const event = projectActivityLogRow({ row });
+      // Track unknown event kinds for warning aggregation; one
+      // warning per unique kind at session end (matches M24's
+      // unknownByKey shape so re-walks against the same stream
+      // produce identical envelopes).
+      if (event.kind === 'unknown') {
+        const key = `${event.event}\x00${event.entity}`;
+        const entry = unknownTracker.get(key);
+        if (entry === undefined) {
+          unknownTracker.set(key, {
+            event: event.event,
+            entity: event.entity,
+            count: 1,
+          });
+        } else {
+          entry.count++;
+        }
+      }
+      // `--include` filter applied AFTER projection so unknown-event-
+      // kind aggregation still surfaces (mirrors M24's filter
+      // semantics).
+      if (includeKinds !== undefined && !includeKinds.has(event.kind)) {
+        continue;
+      }
+      await inputs.onEvent(event);
+      eventsEmitted++;
+      lastSeenEventId = row.id;
+      if (
+        inputs.maxEvents !== undefined &&
+        eventsEmitted >= inputs.maxEvents
+      ) {
+        return 'max_events';
+      }
+    }
+    return undefined;
+  };
+
+  /**
+   * Builds the immutable result snapshot. The unknown-event-kind
+   * warnings are sorted deterministically by event so re-walks
+   * against the same stream produce identical envelopes (mirrors
+   * M24's `fetchItemHistory` warning sort).
+   */
+  const buildResult = (
+    exitReason: WatchExitReason,
+  ): WatchItemResult => {
+    const finalUnknownWarnings: UnknownEventKindWarning[] = Array.from(
+      unknownTracker.values(),
+    )
+      .sort((a, b) =>
+        // `unknownTracker` keys on `${event}\x00${entity}`, so two
+        // distinct entries always have distinct events when entity
+        // is the same — the `0` tie-break branch is unreachable in
+        // practice. Kept for the comparator's contract symmetry.
+        /* c8 ignore next */
+        a.event < b.event ? -1 : a.event > b.event ? 1 : 0,
+      )
+      .map((entry) =>
+        buildUnknownEventKindWarning(entry.event, entry.entity, entry.count),
+      );
+    return {
+      events_emitted: eventsEmitted,
+      polls_made: pollsMade,
+      failed_polls: failedPolls,
+      watch_duration_seconds: (Date.now() - sessionStartMs) / 1000,
+      last_seen_event_id: lastSeenEventId,
+      circuit_broken_at: circuitBrokenAt,
+      exit_reason: exitReason,
+      warnings: [...warnings, ...finalUnknownWarnings],
+      source: 'live',
+    };
+  };
+
+  // --once short-circuit: one poll, drain backlog, exit. The poll
+  // limit is generous (DEFAULT_ONCE_BACKLOG_LIMIT default; bumped
+  // to 500 when --since is set so the resumption window survives).
+  if (inputs.once === true) {
+    const rows = await fetchPoll({
+      client: inputs.client,
+      boardId: inputs.boardId,
+      itemId: inputs.itemId,
+      from: watermark,
+      limit:
+        inputs.since === undefined ? DEFAULT_ONCE_BACKLOG_LIMIT : 500,
+    });
+    pollsMade++;
+    const early = await processRows(rows);
+    return buildResult(early ?? 'once_complete');
+  }
+
+  // Polling loop. Each iteration: signal check → ceiling check →
+  // poll → process events → cadence wait. Early exits route through
+  // `buildResult` for uniform shape.
+  for (;;) {
+    // Defensive: in practice the cadence-wait below catches the
+    // abort signal and exits via the catch-and-return-signal branch;
+    // this top-of-loop check covers the narrow race where the
+    // cadence completed cleanly but the signal aborted between then
+    // and the next iteration. Hard to drive deterministically from
+    // an integration test (the cadence catch wins almost always).
+    /* c8 ignore start */
+    if (inputs.signal.aborted) {
+      return buildResult('signal');
+    }
+    /* c8 ignore stop */
+    if (inputs.maxDurationSeconds !== undefined) {
+      const elapsed = (Date.now() - sessionStartMs) / 1000;
+      if (elapsed >= inputs.maxDurationSeconds) {
+        return buildResult('max_duration');
+      }
+    }
+
+    try {
+      const rows = await fetchPoll({
+        client: inputs.client,
+        boardId: inputs.boardId,
+        itemId: inputs.itemId,
+        from: watermark,
+        limit: 100,
+      });
+      pollsMade++;
+      consecutiveFailures = 0;
+      armedFor = undefined;
+      const early = await processRows(rows);
+      if (early !== undefined) {
+        return buildResult(early);
+      }
+    } catch (err) {
+      if (!isCircuitBreakerError(err)) throw err;
+      failedPolls++;
+      consecutiveFailures++;
+      const backoffSeconds = backoffSecondsFrom(err);
+      warnings.push({
+        code: 'poll_failed',
+        message: `poll ${String(pollsMade + failedPolls)} failed with ${err.code} (${String(consecutiveFailures)}/${String(CIRCUIT_BREAKER_CONSECUTIVE_FAILS)} consecutive); backing off ${String(backoffSeconds)}s`,
         details: {
-          milestone: 'v0.4-M29',
-          deferred_to: 'v0.4-M29 IMPL',
+          consecutive_failures: consecutiveFailures,
+          monday_code: err.code,
+          backoff_seconds: backoffSeconds,
         },
-      },
-    ),
-  );
+      });
+      // Trip on the Nth consecutive failure — circuit_broken exit;
+      // the action body re-throws after the trailer emits so a §6.5
+      // failure envelope surfaces on stderr.
+      if (consecutiveFailures >= CIRCUIT_BREAKER_CONSECUTIVE_FAILS) {
+        circuitBrokenAt = new Date().toISOString();
+        return buildResult('circuit_broken');
+      }
+      // Arm at the N-1 boundary (once per arming window) — surfaces
+      // a single `circuit_breaker_armed` warning per arming so the
+      // accumulator stays bounded even on prolonged bursts.
+      if (
+        consecutiveFailures === CIRCUIT_BREAKER_CONSECUTIVE_FAILS - 1 &&
+        armedFor !== err.code
+      ) {
+        armedFor = err.code;
+        warnings.push({
+          code: 'circuit_breaker_armed',
+          message: `circuit breaker armed: one more ${err.code} failure trips the session`,
+          details: {
+            polls_until_trip: 1,
+            monday_code: err.code,
+          },
+        });
+      }
+      // Backoff sleep; signal-driven graceful exit interrupts.
+      try {
+        await sleepWithSignal(backoffSeconds * 1000, inputs.signal);
+      } catch {
+        return buildResult('signal');
+      }
+      continue;
+    }
+
+    // Cadence wait between successful polls.
+    try {
+      await sleepWithSignal(inputs.intervalMs, inputs.signal);
+    } catch {
+      return buildResult('signal');
+    }
+  }
 };
-/* c8 ignore stop */

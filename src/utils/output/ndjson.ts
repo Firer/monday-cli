@@ -200,6 +200,31 @@ export interface StreamingTrailerInputs {
   };
   /** Omit for non-column-bearing nouns; trailer drops `columns`. */
   readonly columns?: Readonly<Record<string, ColumnHead>>;
+  /**
+   * v0.4-M29 `monday item watch` session counters. Optional bundle —
+   * absent for every streaming verb except `item watch`. Lands flat
+   * under `_meta` (not nested under a sub-object) so agents read
+   * each slot directly per cli-design §6.3 + the `item watch` entry
+   * in output-shapes.md.
+   */
+  readonly session?: {
+    readonly eventsEmitted: number;
+    readonly pollsMade: number;
+    readonly failedPolls: number;
+    readonly watchDurationSeconds: number;
+    readonly lastSeenEventId: string | null;
+    readonly circuitBrokenAt: string | null;
+    readonly exitReason: string;
+  };
+  /**
+   * §6.3 streaming-trailer warnings channel. Folded into
+   * `_meta.warnings[]` per the NDJSON contract (resource lines +
+   * final `_meta`; warnings NOT interleaved with event records).
+   * Currently set by `item watch`'s `WatchSessionWarning[]`
+   * accumulator; previously omitted by every NDJSON consumer
+   * (the slot is additive — backwards-compatible).
+   */
+  readonly warnings?: readonly Warning[];
 }
 
 export const buildStreamingTrailerMeta = (
@@ -223,5 +248,17 @@ export const buildStreamingTrailerMeta = (
     ...(inputs.result.nextCursor === undefined
       ? {}
       : { next_cursor: inputs.result.nextCursor }),
+    ...(inputs.session === undefined
+      ? {}
+      : {
+          events_emitted: inputs.session.eventsEmitted,
+          polls_made: inputs.session.pollsMade,
+          failed_polls: inputs.session.failedPolls,
+          watch_duration_seconds: inputs.session.watchDurationSeconds,
+          last_seen_event_id: inputs.session.lastSeenEventId,
+          circuit_broken_at: inputs.session.circuitBrokenAt,
+          exit_reason: inputs.session.exitReason,
+        }),
+    ...(inputs.warnings === undefined ? {} : { warnings: inputs.warnings }),
     ...(inputs.columns === undefined ? {} : { columns: inputs.columns }),
   });
