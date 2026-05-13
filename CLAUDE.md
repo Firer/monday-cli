@@ -13,17 +13,23 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 **v0.3.0 ready for publish — pending user push
 authorization + `npm publish`.** M28 IMPL shipped
-end-to-end across 5 release-prep commits this session
+end-to-end across 8 release-prep commits this session
 (`d9ad757` CHANGELOG + `e7459c2` envelope-snapshot
 refresh + `f2600fa` ToC audit + stale-`deferred_to`
 slip-to-v0.4 + `4fddc38` README v0.3 quickstart +
-`1a87087` version bump 0.2.0 → 0.3.0) + the annotated
-`v0.3.0` git tag pointing at `1a87087`. **Local-only;
-nothing pushed to `origin/main` yet** (7 commits pending
-push since `e73ef21` — `8aeebad` + `914d154` from the
-M28 pre-flight session + this session's 5). v0.3.0
-ships **no breaking changes vs v0.2.0** — every v0.3
-surface is additive across M19–M28.
+`1a87087` version bump 0.2.0 → 0.3.0 + `59c8b58`
+close-docs sweep + `472ad1e` branch-coverage residual
+tests +0.43pp margin + the housekeeping commit
+refreshing Live numbers + CHANGELOG stats post-`472ad1e`)
++ the annotated `v0.3.0` git tag moved forward to the
+housekeeping HEAD so the tagged tree carries the
+accurate post-coverage stats (tag is local-only until
+push). **Local-only; nothing pushed to `origin/main`
+yet** (10 commits pending push since `e73ef21` —
+`8aeebad` + `914d154` from the M28 pre-flight session
++ this session's 8). v0.3.0 ships **no breaking
+changes vs v0.2.0** — every v0.3 surface is additive
+across M19–M28.
 **Pre-publish action items for the user** (each waits
 on explicit authorization):
 1. `git push origin main v0.3.0` (commits + annotated
@@ -297,31 +303,37 @@ in the plan docs — **do not duplicate them here**:
 - `docs/v0.1-plan.md` for M0–M7 + M2.5 refactor pass.
 
 **Live numbers (v0.3.0 ready for publish):**
-- Test count: **3243** across 130 files (+18 net at M28 IMPL —
-  18 new envelope-shape snapshots covering account tags / item
-  time-track / auth login placeholder guard / monday status /
-  monday usage / board favorites / item history / item update
-  --continue-on-error / webhook / notification surfaces, all in
-  `tests/integration/envelope-snapshots.test.ts`).
-- Coverage: **99.08 / 95.97 / 99.29 / 99.31** (stmts / branches
+- Test count: **3249** + 1 skipped across 130 files (+24 net
+  at M28 IMPL — 18 envelope-shape snapshots at `e7459c2`
+  covering account tags / item time-track / auth login
+  placeholder guard / monday status / monday usage / board
+  favorites / item history / item update --continue-on-error
+  / webhook / notification surfaces, plus 6 branch-coverage
+  residual tests at `472ad1e` closing the three deferred
+  file-level gaps).
+- Coverage: **99.26 / 96.40 / 99.37 / 99.51** (stmts / branches
   / fns / lines), at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.52pp** (was 0.47pp at M28 pre-flight;
-  +0.05pp recovery — snapshot-refresh adds covered branches
-  net positive against denominator). Three deferred file-level
-  gaps still: `item/search.ts` 88.23%, `errors.ts` ~95.37%,
-  `dry-run.ts` 96.26% — deliberately not addressed at M28
-  (each requires either new cross-board integration tests or
-  defensive `c8 ignore` wraps; tackling them is bounded
-  follow-up work for v0.3.x / v0.4). **v8 instrumentation
-  glitch on `dev-conventions.ts`** unchanged at M28 — still
-  isolated, doesn't drag global percentages below floor.
+  **Branches margin 0.95pp** (was 0.52pp pre-`472ad1e`;
+  +0.43pp recovery from closing the three deferred file-
+  level gaps — `item/search.ts` 88.23% → 100% stmts via
+  cross-board `--where Owner=me` + same-column-twice
+  integration tests; `errors.ts` 95.37% → 100% lines via
+  targeted unit tests on the three defensive branches;
+  `dry-run.ts` 96.26% → 100% branches via the
+  `env === undefined` spread defensive). **v8
+  instrumentation glitch on `dev-conventions.ts`**
+  unchanged — still isolated, doesn't drag global
+  percentages below floor.
 - ERROR_CODES count: **29** (unchanged at M28 IMPL — release
   prep adds no new codes; the `oauth_unregistered` value lives
   under `usage_error.details.reason`, not as a top-level code).
   Command count: **95** (unchanged from M28 pre-flight —
   release prep adds no verbs).
 - `package.json` version: **0.3.0** (bumped at `1a87087`).
-- `v0.3.0` annotated tag exists locally; **NOT pushed**.
+- `v0.3.0` annotated tag exists locally pointing at the
+  housekeeping HEAD (moved forward from `1a87087` to capture
+  `472ad1e`'s coverage lift + the housekeeping stats refresh);
+  **NOT pushed**.
 - Floor never lowered without an inline `vitest.config.ts`
   rationale comment.
 
@@ -361,20 +373,6 @@ path over `MONDAY_API_TOKEN`.
    `m28-depth-triangulate.ts` before reopening; OAuth
    registration if user demand surfaces for the browser-based
    path over `MONDAY_API_TOKEN`).
-2. **Branches-margin deferred residuals.** Three files carry
-   the remaining out-of-coverage residual: `item/search.ts`
-   88.23% — needs a new cross-board integration test driving
-   `--where Owner=me` to cover buildPerBoardPlan's me-
-   resolution helper (lines 546-549) + the same-column-twice
-   push branch (line 575); `errors.ts` 95.37% — defensive
-   lines (272 message fallback, 319 status<400, 365
-   path-present) — could be c8-ignored OR covered with
-   targeted unit tests; `dry-run.ts` 96.26% — defensive
-   `env === undefined ? {}` spreads. Each is a small bounded
-   follow-up if a future session needs more margin (margin
-   at 0.47pp post-M27-IMPL, comfortable surplus above floor
-   but worth investing during M28 release prep before 0.3.0
-   tag).
 3. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+

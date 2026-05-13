@@ -282,12 +282,16 @@ The data shape is unchanged; the cross-board path adds per-board
 
 ### Tests + quality gates
 
-- **3225+ unit/integration + E2E tests** at v0.3.0 (was 2280+38 ≈
-  2318 in v0.2.0). All green on Node 22 + 24.
-- **Coverage at 99.08 / 95.92 / 99.29 / 99.31** (statements /
+- **3249 unit/integration + E2E tests** at v0.3.0 (+1 skipped; was
+  2280+38 ≈ 2318 in v0.2.0). All green on Node 22 + 24.
+- **Coverage at 99.26 / 96.40 / 99.37 / 99.51** (statements /
   branches / functions / lines) against the floor 95 / 95.45 / 95
-  / 95. The branches floor was raised at M22 (94% → 95.45%) and held
-  through M28. Branches margin is 0.47pp at v0.3.0.
+  / 95. The branches floor was raised at M22 (94% → 95.45%) and
+  held through M28; the M28 close-out shipped six branch-coverage
+  residual tests closing the three deferred file-level gaps
+  (`item/search.ts` 88.23% → 100% stmts; `errors.ts` 95.37% → 100%
+  lines; `dry-run.ts` 96.26% → 100% branches). Branches margin is
+  0.95pp at v0.3.0.
 - **Envelope-snapshot suite refreshed** for v0.3 surfaces — every
   new v0.3 command + the partial-success / history / cross-board /
   dev / webhook / notification envelopes are pinned for byte-shape
