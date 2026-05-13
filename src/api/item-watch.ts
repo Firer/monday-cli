@@ -331,9 +331,9 @@ export interface WatchItemResult {
  * decisions (mirrors the M29 pre-flight probe shape).
  *
  * **R-NEW-37 W2 audit-point: operationName is `ItemWatchPoll`.**
- * Pinned literal here + threaded into the {@link watchItem} fetcher's
- * `client.raw(..., { operationName: 'ItemWatchPoll' })` call once IMPL
- * lands. Safely-by-construction per the M27 round-1 P2-1 precedent
+ * Pinned literal here + used by {@link fetchPoll}'s
+ * `client.raw(..., { operationName: 'ItemWatchPoll' })` call.
+ * Safely-by-construction per the M27 round-1 P2-1 precedent
  * (`6f59a83`): no caller-overridable operationName input slot on
  * {@link WatchItemInputs}.
  */
