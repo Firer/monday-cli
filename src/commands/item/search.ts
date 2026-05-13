@@ -534,6 +534,15 @@ const buildPerBoardPlan = async (
       );
       return undefined;
     }
+    // Defensive: resolveColumnsAcrossClauses throws either
+    // column_not_found (handled above) or `ambiguous_column` — the
+    // latter requires duplicate same-cased column titles within one
+    // board, which the cross-board action filters out at the
+    // BoardMetadata step (each board's resolution happens against
+    // its own metadata). Other ApiError codes here would indicate
+    // a contract bug in the resolver, not a recoverable path —
+    // re-throw so the action's error envelope surfaces it.
+    /* c8 ignore next */
     throw err;
   }
 

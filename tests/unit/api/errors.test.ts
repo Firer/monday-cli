@@ -99,6 +99,22 @@ describe('mapResponse', () => {
         message: 'something broke',
         expected: { code: 'validation_failed', retry: undefined, retryable: false },
       },
+      // Pre-200 status path (HTTP 200 + GraphQL errors[]): exercises
+      // `matchKnownGraphqlCode` arms that the dedicated HTTP-status
+      // tests at 423 / 404 / etc. don't reach (those map by status
+      // before GraphQL inspection runs).
+      {
+        name: 'InvalidBoardIdException via extensions code → not_found',
+        ext: { code: 'InvalidBoardIdException' },
+        message: 'unknown board',
+        expected: { code: 'not_found', retry: undefined, retryable: false },
+      },
+      {
+        name: 'INUSE via extensions code (HTTP 200) → resource_locked',
+        ext: { code: 'INUSE' },
+        message: 'item is locked',
+        expected: { code: 'resource_locked', retry: undefined, retryable: true },
+      },
     ] as const;
     for (const c of cases) {
       it(`maps ${c.name} → ${c.expected.code}`, () => {
@@ -122,6 +138,32 @@ describe('mapResponse', () => {
         expect(result.error.httpStatus).toBe(200);
       });
     }
+  });
+
+  it('threads GraphQL error.path[] into error.details.path when non-empty', () => {
+    // Monday's GraphQL errors carry a `path: (string|number)[]` slot
+    // pointing at the field that failed. The mapper folds non-empty
+    // paths into details so agents can route on the failed field.
+    // An empty / absent path is omitted (see the cases above — none
+    // of them carry a path).
+    const result = mapResponse({
+      status: 200,
+      headers: okHeaders(),
+      body: {
+        errors: [
+          {
+            message: 'field validation failed',
+            extensions: { code: 'BAD_USER_INPUT' },
+            path: ['create_item', 'column_values', 0],
+          },
+        ],
+      },
+    });
+    if (result.ok) throw new Error('expected error');
+    expect(result.error.code).toBe('validation_failed');
+    expect(result.error.details).toMatchObject({
+      path: ['create_item', 'column_values', 0],
+    });
   });
 
   it('extracts mondayCode + retry_after_seconds onto the error', () => {

@@ -286,6 +286,11 @@ export const planChanges = async (
     ...(inputs.relationResolution === undefined
       ? {}
       : { relationResolution: inputs.relationResolution }),
+    // Defensive: every production caller (set / update / upsert /
+    // bulk update) threads `env: ctx.env`. The interface declares
+    // env as optional so internal call sites in tests can omit it,
+    // but the runtime path always passes a defined env.
+    /* c8 ignore next */
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
   });
@@ -470,8 +475,13 @@ export const planClear = async (
     boardId: inputs.boardId,
     token: inputs.token,
     includeArchived: true,
+    // Defensive: planClear's production caller (item/clear.ts)
+    // threads both env + noCache from globalFlags. The optional
+    // arms are here for the type signature, never hit at runtime.
+    /* c8 ignore start */
     ...(inputs.env === undefined ? {} : { env: inputs.env }),
     ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+    /* c8 ignore stop */
   });
   warnings.push(...resolution.warnings);
 
@@ -1129,6 +1139,14 @@ const fetchItem = async (
   }
   return {
     item,
+    // Monday's wire `Item.board` is nullable per the SDK schema +
+    // rawItemSchema; the `?? null` fallback normalises an undefined
+    // optional-chain result to `null` so downstream `!== null` checks
+    // (lines 306 / 501) read consistently. In practice every observed
+    // item-read at v0.3 returns a board, so the fallback is
+    // defense-in-depth against schema drift rather than a runtime
+    // path; the consumers already gate on null.
+    /* c8 ignore next */
     boardId: item.board?.id ?? null,
     byColumnId,
   };

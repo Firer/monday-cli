@@ -991,3 +991,224 @@ describe('monday item search scoping-lever mutual exclusion', () => {
     ]);
   });
 });
+
+describe('monday item search cross-board — buildPerBoardPlan branch coverage', () => {
+  // The cross-board `=`-only operator restriction (item/search.ts
+  // line 502). v0.1's single-board path applies the same rule;
+  // cross-board re-asserts it inside buildPerBoardPlan per board
+  // since the action threads clauses through unchanged.
+  it('non-equals operator surfaces usage_error from the per-board plan walker', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'CrossBoardEnumerate',
+          match_variables: { workspaceIds: ['999'] },
+          response: {
+            data: { boards: [{ id: '100', name: 'Tasks' }] },
+          },
+        },
+      ],
+    };
+    const result = await driveM23(
+      [
+        'item',
+        'search',
+        '--workspace',
+        '999',
+        '--where',
+        'status~=Done',
+        '--json',
+      ],
+      cassette,
+    );
+    expect(result.exitCode).toBe(1);
+    const envelope = parseEnvelope(result.stderr);
+    if (envelope.ok) throw new Error('expected error envelope');
+    expect(envelope.error.code).toBe('usage_error');
+    expect(envelope.error.message).toMatch(/supports only the = operator/);
+  });
+
+  // me-resolution lazy cache (item/search.ts lines 546-549, 569).
+  // The cross-board path memoises whoami per build call so multiple
+  // `me` clauses across many boards only fire one whoami round-trip.
+  it('--where Owner=me resolves through Whoami once and threads the resolved ID per board', async () => {
+    const peopleColumn = { id: 'owner', title: 'Owner', type: 'people' };
+    const whoamiResponse = {
+      operation_name: 'Whoami' as const,
+      response: {
+        data: {
+          me: {
+            id: '777',
+            name: 'Alice',
+            email: 'alice@example.test',
+            account: { id: '99', name: 'Org', slug: 'org' },
+          },
+        },
+      },
+    };
+    const cassette: Cassette = {
+      // Wire order: CrossBoardEnumerate → for-each board
+      // (BoardMetadata → Whoami; cachedMe is scoped to one
+      // buildPerBoardPlan call so each board re-fires whoami) →
+      // for-each plan (CrossBoardSearch).
+      interactions: [
+        {
+          operation_name: 'CrossBoardEnumerate',
+          match_variables: { workspaceIds: ['999'] },
+          response: {
+            data: {
+              boards: [
+                { id: '100', name: 'Tasks' },
+                { id: '200', name: 'Sprint' },
+              ],
+            },
+          },
+        },
+        {
+          operation_name: 'BoardMetadata',
+          match_variables: { ids: ['100'] },
+          response: {
+            data: boardMetadataResponse('100', 'Tasks', [peopleColumn]),
+          },
+        },
+        whoamiResponse,
+        {
+          operation_name: 'BoardMetadata',
+          match_variables: { ids: ['200'] },
+          response: {
+            data: boardMetadataResponse('200', 'Sprint', [peopleColumn]),
+          },
+        },
+        whoamiResponse,
+        {
+          operation_name: 'CrossBoardSearch',
+          match_variables: { boardId: '100' },
+          response: {
+            data: {
+              boards: [
+                wireBoard('100', 'Tasks', [
+                  {
+                    id: 'i1',
+                    name: 'Mine on 100',
+                    state: 'active',
+                    column_values: [{ id: 'owner', text: '777' }],
+                  },
+                ]),
+              ],
+            },
+          },
+        },
+        {
+          operation_name: 'CrossBoardSearch',
+          match_variables: { boardId: '200' },
+          response: {
+            data: {
+              boards: [
+                wireBoard('200', 'Sprint', [
+                  {
+                    id: 'i2',
+                    name: 'Mine on 200',
+                    state: 'active',
+                    column_values: [{ id: 'owner', text: '777' }],
+                  },
+                ]),
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const result = await driveM23(
+      [
+        'item',
+        'search',
+        '--workspace',
+        '999',
+        '--where',
+        'Owner=me',
+        '--json',
+      ],
+      cassette,
+    );
+    expect(result.exitCode).toBe(0);
+    const envelope = parseEnvelope(result.stdout);
+    if (!envelope.ok) throw new Error('expected success envelope');
+    const data = envelope.data as readonly { id: string }[];
+    expect(data.map((i) => i.id)).toEqual(['i1', 'i2']);
+  });
+
+  // Same-column-twice clause grouping (item/search.ts line 575).
+  // Cross-board path collapses `--where status=Done --where status=Backlog`
+  // into one `compare_values: [Done, Backlog]` per-board rule
+  // (any_of semantics), same as v0.1's single-board path.
+  it('two --where clauses on the same column collapse into compare_values: [a, b] per-board', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'CrossBoardEnumerate',
+          match_variables: { workspaceIds: ['999'] },
+          response: {
+            data: { boards: [{ id: '100', name: 'Tasks' }] },
+          },
+        },
+        {
+          operation_name: 'BoardMetadata',
+          match_variables: { ids: ['100'] },
+          response: {
+            data: boardMetadataResponse('100', 'Tasks', [
+              { id: 'status', title: 'Status', type: 'status' },
+            ]),
+          },
+        },
+        {
+          // Match only on boardId — the wire variables include the
+          // collapsed rules (`{column_id: 'status', compare_values:
+          // ['Done','Backlog']}`) plus pagination + state filters
+          // the fixture doesn't model. The data assertion below
+          // pins the agent-facing contract (both items returned).
+          operation_name: 'CrossBoardSearch',
+          match_variables: { boardId: '100' },
+          response: {
+            data: {
+              boards: [
+                wireBoard('100', 'Tasks', [
+                  {
+                    id: 'i1',
+                    name: 'Done item',
+                    state: 'active',
+                    column_values: [{ id: 'status', text: 'Done' }],
+                  },
+                  {
+                    id: 'i2',
+                    name: 'Backlog item',
+                    state: 'active',
+                    column_values: [{ id: 'status', text: 'Backlog' }],
+                  },
+                ]),
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const result = await driveM23(
+      [
+        'item',
+        'search',
+        '--workspace',
+        '999',
+        '--where',
+        'status=Done',
+        '--where',
+        'status=Backlog',
+        '--json',
+      ],
+      cassette,
+    );
+    expect(result.exitCode).toBe(0);
+    const envelope = parseEnvelope(result.stdout);
+    if (!envelope.ok) throw new Error('expected success envelope');
+    const data = envelope.data as readonly { id: string }[];
+    expect(data.map((i) => i.id)).toEqual(['i1', 'i2']);
+  });
+});

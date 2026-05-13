@@ -98,6 +98,11 @@ const parseRetryAfterHeader = (
 const extractRetryInSeconds = (
   err: GraphQlError | undefined,
 ): number | undefined => {
+  // Defensive: every production caller in mapResponse() passes the
+  // first GraphQL error from a non-empty errors[] array — the
+  // `undefined` branch is here for the type signature, never hit at
+  // runtime.
+  /* c8 ignore next 3 */
   if (err === undefined) {
     return undefined;
   }
@@ -124,6 +129,9 @@ const extractRetryInSeconds = (
  * Returns undefined when the GraphQL error doesn't carry one.
  */
 const extractMondayCode = (err: GraphQlError | undefined): string | undefined => {
+  // Defensive: same as extractRetryInSeconds — production callers in
+  // mapResponse() always pass a defined GraphQL error.
+  /* c8 ignore next 3 */
   if (err === undefined) {
     return undefined;
   }
@@ -270,6 +278,13 @@ const messageForCode = (
   if (err !== undefined) {
     return err.message;
   }
+  // Defensive: mapResponse()'s only call site passes the first
+  // GraphQL error from a non-empty errors[] array. The
+  // `DEFAULT_MESSAGE_FOR_CODE` fallback is here for the type
+  // signature (function accepts `err: undefined`), never hit at
+  // runtime — the HTTP-status-only path constructs its message
+  // inline in mapResponse rather than routing through this helper.
+  /* c8 ignore next */
   return DEFAULT_MESSAGE_FOR_CODE[code] ?? 'Monday API error';
 };
 
@@ -316,6 +331,13 @@ const mapHttpStatus = (status: number): MondayCliError['code'] | undefined => {
   if (status === 429) return 'rate_limited';
   if (status >= 500 && status < 600) return 'network_error';
   if (status >= 400 && status < 500) return 'validation_failed';
+  // Defensive: mapResponse() only calls this helper inside an
+  // `input.status < 200 || input.status >= 300` block, so reachable
+  // statuses are 1xx / 3xx / 6xx+. Browsers and proxies don't
+  // return 1xx/3xx as error responses (3xx redirects get followed
+  // by fetch); 6xx+ is non-standard. The `network_error` fallback
+  // at the mapResponse call site catches the residual case.
+  /* c8 ignore next */
   return undefined;
 };
 
