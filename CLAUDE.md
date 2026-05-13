@@ -11,21 +11,59 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4 planning kickoff landed.** `docs/v0.4-plan.md` opened with §1
-scope + §2 pre-flight inventory (what v0.4 inherits from M0–M28) +
-§3 opener + §3 M29 entry. **M29 = `monday item watch <iid>`** —
-polling-based event stream over the M24 `item-history-projection.ts`
-projector; closes the cli-design §14.4 open question on polling
-cadence + circuit-breaker shape. Picked as the v0.4 first milestone
-on three grounds: smallest v0.4 surface, pre-trodden ground (reuses
-M24's projector verbatim), no dependency on later v0.4 candidates
-(`--concurrency`, asset upload, `doc`, `team`, completion). Next
-session opens the M29 pre-flight contract diff (stub modules in
-`src/api/`, ERROR_CODES widening if D1's circuit-breaker decision
-needs a new code, cli-design §4.3 + §13 + §14.4 closure, empirical-
-probe scripts for polling-burn calibration, Codex pre-flight review)
-— **do NOT combine planning kickoff and pre-flight contract diff in
-the same session** per the standing one-session-per-shape discipline.
+**v0.4-M29 pre-flight contract diff landed; IMPL is next.**
+Five-commit cluster: cli-design §14.4 closure at `31713fb`
+(open-question converted to closed-decision block; §4.3 row +
+§13 v0.4 entry updated with the pinned argv `--interval <ms>` /
+`--since <event-id>` / `--once` / `--max-events <n>` /
+`--max-duration <seconds>` / `--include <kind1>,<kind2>`);
+pre-flight contract diff at `5d775e2` (new `src/api/item-watch.ts`
++ `src/commands/item/watch.ts` stubs under c8 ignore block-wraps +
+`src/commands/index.ts` registration + 26 argv unit tests at
+`tests/unit/commands/item-watch-argv.test.ts` + output-shapes.md
+M29 entry + v0.4-plan §8 D1–D5 closures + §9 preconditions checklist
++ envelope snapshot refresh 95 → 96 commands); plus three Codex
+review fix-ups (`90456f9` round-1: 1 P1 + 3 P2 + 1 P3 — addressed the
+load-bearing NDJSON warning-interleave-vs-trailer contract violation
++ trailer-shape drift + stale clearance framing + missing
+constant pins + `outputSchema` correction to
+`historyEventSchema`; `21a0763` round-2: 1 P1' + 2 P2' + 1 P3'
+— follow-on doc-drift propagation across v0.4-plan + api/command
+stub docstrings + R-v0.4-1 risk register reframe;
+`b0a8769` round-3: 1 P1'' — final two stale-interleave docstring
+sites in `src/api/item-watch.ts`). All Codex rounds clean from
+round-4 perspective; per the M27 precedent (4 rounds to converge
+prose precision on W8 wire-semantics), 3 rounds + 3 fix-ups is the
+M29 convergence point. Five M29 decisions all closed at pre-flight
+per the empirical probe (`scripts/probe/m29-polling-burn.ts`,
+2026-05-13, API `2026-01`): D1 cadence default 30s + reactive
+circuit-breaker on existing `complexity_exceeded` /
+`concurrency_exceeded` / `rate_limited` codes (no new ERROR_CODE);
+D2 `--once` vs `--max-events 1` ship as DISTINCT shapes; D3
+trailer-meta carries seven M29-specific slots
+(`events_emitted` / `polls_made` / `failed_polls` /
+`watch_duration_seconds` / `last_seen_event_id` /
+`circuit_broken_at` / `exit_reason`) + standard `_meta.warnings[]`
+channel; D4 each invocation independent (no shared registry);
+D5 `--include` accepts M24's closed 9-kind enum verbatim.
+**ERROR_CODES count stays at 29; command count 95 → 96.**
+
+**Next session — M29 IMPL.** Land the runtime body of `watchItem`
+in `src/api/item-watch.ts` (polling loop + circuit breaker +
+watermark advance + signal-driven graceful drain via
+`ctx.signal`); land the runtime body of the command action in
+`src/commands/item/watch.ts` (NDJSON streaming via
+`startNdjsonStream` + trailer-meta emit with the seven M29-specific
+slots); integration tests covering every M29 clearance path (happy
+single-event, multi-event, `--once`, `--since`, `--max-events`,
+`--max-duration`, SIGINT graceful drain, circuit-breaker trip,
+per-kind `--include`). Codex impl review (1-2 rounds expected per
+the v0.3-M19-onward cadence). Close-docs sweep: §11 M29 post-
+mortem in `docs/v0.4-plan.md` + §9 IMPL preconditions tick +
+output-shapes.md envelope-snapshot refresh + this file's status
+flip. Test count delta target: 3275 → ~3320 (single new streaming
+verb typically lands ~30–50 tests per v0.3-M22's diagnostics-
+cluster cadence). Coverage floor 95 / 95.45 / 95 / 95 must hold.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
@@ -366,32 +404,48 @@ OAuth app if there's demand for the browser-based login
 path over `MONDAY_API_TOKEN`.
 
 **Next session — likely scope:**
-1. **M29 pre-flight contract diff — `monday item watch <iid>`.**
-   The v0.4 planning kickoff opened `docs/v0.4-plan.md` with the
-   M29 entry naming five decisions (D1 polling cadence + circuit-
-   breaker shape; D2 `--once` vs `--max-events 1` semantics; D3
-   session-summary trailer schema; D4 multi-watcher concurrency
-   policy; D5 `--include` enum closure against M24's event-kind
-   taxonomy). Pre-flight session lands: (a) empirical probe
-   measuring Monday's complexity-budget burn per poll cadence —
-   `scripts/probe/m29-polling-burn.ts` against a known item with
-   a poll-every-N-seconds loop, pinned by the v0.3-M22/M23/M24/
-   M26a always-run-for-novel-API-surface convention; (b) stub
-   `src/api/item-watch.ts` module (polling-loop wrapper + circuit
-   breaker) under `c8 ignore` until M29 IMPL; (c) stub
-   `src/commands/item/watch.ts` command file wiring SIGINT
-   AbortController seam; (d) possible new ERROR_CODE
-   (`watch_circuit_broken`?) — closes at pre-flight per D1's
-   circuit-breaker decision (or reuses existing
-   `complexity_exceeded` / `rate_limited` / `concurrency_exceeded`
-   if no new code is needed); (e) cli-design §4.3 row +
-   §14.4 open-question closure (separate pre-M29 contract-change
-   PR with its own Codex review per CLAUDE.md workflow rules);
-   (f) Codex pre-flight review per `.claude/templates/codex-pre-
-   flight-review.md` (W1 redactor + W2 operation-name parity audit
-   points both apply). **Do NOT combine pre-flight with the M29
-   IMPL feat commits in the same session** — pre-flight + IMPL
-   are separate sessions per the v0.3-M19-onward cadence.
+1. **M29 IMPL — `monday item watch <iid>` runtime body.** Pre-flight
+   contract diff landed at this session (cli-design §14.4 closure
+   `31713fb` + pre-flight diff `5d775e2` + Codex round-1
+   `90456f9` + round-2 `21a0763` + round-3 `b0a8769`). IMPL session
+   lands: (a) runtime body of `watchItem` in `src/api/item-watch.ts`
+   — drop the `c8 ignore` block-wrap, implement the polling loop:
+   resolve initial poll-from timestamp (from `inputs.since` event-id
+   lookup or `Date.now()`); `--once` short-circuit branch (drain
+   backlog from watermark through `onEvent`, exit
+   `once_complete`); the polling loop's per-tick `client.raw(
+   WATCH_POLL_QUERY, ..., { operationName: 'ItemWatchPoll' })` →
+   filter newly-seen events (id > last-seen-event-id) → project via
+   M24's `projectActivityLogRow` → apply `includeKinds` filter →
+   emit via `onEvent` → advance watermark; per-tick Promise.race
+   between cadence timer + `signal.aborted` for graceful drain;
+   reactive circuit breaker on Monday wire errors (respect
+   `reset_in_x_seconds` with 60s default + 300s ceiling per
+   `MAX_BACKOFF_SECONDS`; trip after 5 consecutive failures per
+   `CIRCUIT_BREAKER_CONSECUTIVE_FAILS`; APPEND
+   `WatchSessionWarning` to `WatchItemResult.warnings` per
+   failure); ceiling enforcement (`maxEvents` / `maxDurationSeconds`
+   → exit with matching `exit_reason`). (b) Runtime body of
+   `src/commands/item/watch.ts` action — drop the `c8 ignore`
+   block-wrap, implement the NDJSON stream wiring with trailer-meta
+   emit (seven M29-specific slots + standard §6.3 `_meta.warnings[]`
+   from `result.warnings`). (c) Integration tests at
+   `tests/integration/commands/item-watch.test.ts` covering every
+   M29 clearance path: happy single-event / multi-event /
+   `--once` (with + without `--since`) / `--since <event-id>`
+   resume / `--max-events <n>` ceiling / `--max-duration <seconds>`
+   ceiling / SIGINT graceful drain (verify valid NDJSON trailer +
+   exit 130) / circuit-breaker trip (5 consecutive
+   `complexity_exceeded` failures) / per-kind `--include` filter /
+   `--include update_posted` returns no events at v0.4 (forward-
+   compat). (d) Codex impl review per `.claude/templates/codex-pre-
+   flight-review.md` template (W1 redactor + W2 operation-name
+   parity remain applicable; the IMPL surface adds runtime-behaviour
+   audit points). Test count target: 3275 → ~3320 (+30-50 IMPL
+   tests). Coverage floor 95 / 95.45 / 95 / 95 must hold. Close-docs
+   sweep at IMPL close: §11 M29 post-mortem in
+   `docs/v0.4-plan.md` + §9 IMPL preconditions tick + output-
+   shapes.md envelope-snapshot refresh + this file's status flip.
 2. **v8 instrumentation glitch on `dev-conventions.ts`.**
    Post-M26b the file reports `FNF:0 LF:0 BRF:0` in
    `coverage/lcov.info` despite 15+ unit tests + 50+
