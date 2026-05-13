@@ -5047,10 +5047,12 @@ failure becomes the top-level `error`).
 `data.operation` is the literal **`"item_update"`** (mirrors
 M14's add-users / remove-users discriminator at
 `data.operation`). M25 follows the M15 partial-success family
-shape; `dispatchSequential` produces the per-item result rows,
-and the action layer assembles `data.operation` +
-`data.summary` alongside them. Agents switch on
-`data.operation` to confirm which verb produced the envelope.
+shape; the selected per-target dispatcher
+(`dispatchSequential` by default / `dispatchParallel` when
+`--concurrency > 1`) produces the per-item result rows, and
+the action layer assembles `data.operation` + `data.summary`
+alongside them. Agents switch on `data.operation` to confirm
+which verb produced the envelope.
 
 `resolved_ids` echoes the same token → column-ID mapping the
 v0.1 bulk success envelope carries (one `--set` token resolves
@@ -5072,19 +5074,21 @@ boundary as the M13 / M14 / M15 partial-success envelopes —
   resolution is whole-call, not per-item);
 - a per-item wire call surfaces an `internal_error`
   (response missing the expected mutation root key, malformed
-  payload, schema drift) — `dispatchSequential` re-throws
+  payload, schema drift) — the selected dispatcher
+  (`dispatchSequential` or `dispatchParallel`) re-throws
   these whole-call rather than papering over them as a
   per-record slot, since `internal_error` signals CLI bugs
   or Monday-side response drift that agents need to see
   directly (M14 round-2 F1 / round-3 F1 precedent at
-  `src/api/partial-success-mutation.ts:82`);
+  `src/api/partial-success-mutation.ts`; R-NEW-28 axis 2
+  guarantees the two routes share this escape hatch);
 - a programmer-bug exception (TypeError / RangeError / etc.)
   raised inside the per-item dispatch callback — non-
-  `MondayCliError` throws propagate through
-  `dispatchSequential`'s non-CliError branch unchanged,
-  surfacing as whole-call `internal_error` via the runner's
-  catch-all (mirrors `src/api/users-fan-out-mutation.ts`'s
-  resolver-fan-out treatment).
+  `MondayCliError` throws propagate through the selected
+  dispatcher's non-CliError branch unchanged, surfacing as
+  whole-call `internal_error` via the runner's catch-all
+  (mirrors `src/api/users-fan-out-mutation.ts`'s resolver-fan-
+  out treatment; R-NEW-28 axis 3).
 
 Recoverable per-item dispatch failures (every `MondayCliError`
 EXCEPT `internal_error` — `column_archived`,
@@ -5145,14 +5149,16 @@ treatment at `src/api/users-fan-out-mutation.ts`.
 
 **Implementation.** The partial-success-bulk path lives in
 `src/api/partial-success-bulk.ts` (new at v0.3-M25; thin wrapper
-around `dispatchSequential` from
-`src/api/partial-success-mutation.ts`). The wrapper accepts the
-pre-resolved `SelectedMutation` + the matched-item-ID list and
-fans out one wire call per item, capturing per-item failures
-into the result records exactly the way M14 / M15 capture
-per-target failures. The fail-fast bulk path
-(`src/commands/item/update.ts:runBulk`) is unchanged; the
-action body branches on `parsed.continueOnError` to choose
+around the selected dispatcher — `dispatchSequential` from
+`src/api/partial-success-mutation.ts` by default, or
+`dispatchParallel` from `src/api/parallel-dispatch.ts` when
+`--concurrency > 1` per the v0.4-M30 extension below). The
+wrapper accepts the pre-resolved `SelectedMutation` + the
+matched-item-ID list and fans out one wire call per item,
+capturing per-item failures into the result records exactly
+the way M14 / M15 capture per-target failures. The fail-fast
+bulk path (`src/commands/item/update.ts:runBulk`) is unchanged;
+the action body branches on `parsed.continueOnError` to choose
 between the two paths after the confirmation gate.
 
 **Parallel dispatch** (v0.4-M30 `--concurrency <n>`). M30 extends
