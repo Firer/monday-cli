@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [board](#board) | list, get, find, describe, columns, groups, subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13) |
-| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29 pre-flight stub) |
+| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29) |
 | [item (mutations)](#item-mutations) | set, clear (single + bulk), update (single + bulk + --continue-on-error M25), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |

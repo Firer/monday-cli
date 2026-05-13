@@ -1,8 +1,9 @@
 /**
  * `monday item watch <iid>` — polling-based event stream over the
- * v0.3-M24 `item-history-projection.ts` projector. **STUB at M29
- * pre-flight; runtime body lands at M29 IMPL.** Pinned per cli-design
- * §13 v0.4 entry + §14.4 closure (`31713fb`) + v0.4-plan §3 M29.
+ * v0.3-M24 `item-history-projection.ts` projector. Runtime body
+ * shipped at v0.4-M29 IMPL (`7b83a3a` + round-1 fix-ups). Pinned
+ * per cli-design §13 v0.4 entry + §14.4 closure (`31713fb`) +
+ * v0.4-plan §3 M29.
  *
  * **What this verb answers:** "wait for changes on this item + emit
  * them as they arrive". Single CLI invocation polls Monday's

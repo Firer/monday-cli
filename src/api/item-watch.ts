@@ -11,10 +11,14 @@
  * projection.ts` projector (reused verbatim), and emits one NDJSON
  * record per new event plus a session-summary trailer on exit.
  *
- * **Status: pre-flight stub.** Runtime body of {@link watchItem} ships
- * at M29 IMPL. The module surface (input + result types, projector
- * import, named-operation pin) is finalised here so the cli-design
- * §4.3 row + v0.4-plan §3 M29 deliverables list cite real signatures.
+ * **Status: M29 IMPL.** Runtime body of {@link watchItem} shipped
+ * at `7b83a3a` + Codex impl review round-1 fix-ups (signal-aware
+ * catches across the bootstrap / `--once` / polling-loop sites,
+ * epoch-floor backlog drain, since-boundary skip, deadline-aware
+ * cadence/backoff). The module surface (input + result types,
+ * projector import, named-operation pin) was finalised at the
+ * pre-flight contract diff so the cli-design §4.3 row + v0.4-plan
+ * §3 M29 deliverables list cite real signatures.
  *
  * **Pinned design clearances (v0.4-plan §3 M29 + cli-design §14.4
  * closure at `31713fb`).**

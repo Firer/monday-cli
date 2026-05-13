@@ -313,16 +313,28 @@ describe('monday item watch — --since <event-id>', () => {
         validItemBoardLookup,
         // First poll = the bootstrap lookup (limit:500 from epoch);
         // returns the --since event so the watermark resolves.
-        pollResponse([
-          { id: '500', created_at: '2026-05-13T09:00:00Z' },
-          { id: '501', created_at: '2026-05-13T09:30:00Z' },
-        ]),
-        // Second poll fires from the watermark (--once with --since
-        // uses limit:500); returns new event after the watermark.
-        pollResponse([
-          { id: '501', created_at: '2026-05-13T09:30:00Z' }, // dup — drops
-          { id: '502', created_at: '2026-05-13T10:00:00Z' }, // new
-        ]),
+        {
+          ...pollResponse([
+            { id: '500', created_at: '2026-05-13T09:00:00Z' },
+            { id: '501', created_at: '2026-05-13T09:30:00Z' },
+          ]),
+          match_variables: {
+            from: '1970-01-01T00:00:00Z',
+            limit: 500,
+          },
+        },
+        // Second poll fires from the watermark; --once with --since
+        // uses the resolved bootstrap created_at + limit:500.
+        {
+          ...pollResponse([
+            { id: '501', created_at: '2026-05-13T09:30:00Z' }, // dup — drops
+            { id: '502', created_at: '2026-05-13T10:00:00Z' }, // new
+          ]),
+          match_variables: {
+            from: '2026-05-13T09:30:00Z',
+            limit: 500,
+          },
+        },
       ],
     };
     const result = await drive(
@@ -920,23 +932,24 @@ describe('monday item watch — codex impl review round-1 regression coverage', 
   });
 
   it('P1-2: `--once` without `--since` drains the most-recent backlog (from epoch, not session start)', async () => {
-    // Cassette response is a single poll: the test's success
-    // criterion is that the request's `from:` arg is the epoch
-    // floor (catching the regression where it was session-start
-    // and the recent backlog was hidden).
+    // Pins the wire variables via `match_variables`: the cassette
+    // refuses to consume an `ItemWatchPoll` request whose `from`
+    // isn't the epoch floor (catching the regression where it was
+    // session-start and the recent backlog would be hidden).
     const cassette: Cassette = {
       interactions: [
         validItemBoardLookup,
-        // Cassette doesn't constrain `from:` directly via
-        // `match_variables` because the FixtureTransport doesn't
-        // expose a "verify on consume" hook for this slot; instead
-        // we read the captured request afterwards via the test
-        // helper.
-        pollResponse([
-          // Event predates session-start — would be excluded if
-          // `--once` used `from: sessionStartIso` (the bug).
-          { id: '9001', created_at: '2020-01-01T00:00:00Z' },
-        ]),
+        {
+          ...pollResponse([
+            // Event predates session-start — would be excluded if
+            // `--once` used `from: sessionStartIso` (the bug).
+            { id: '9001', created_at: '2020-01-01T00:00:00Z' },
+          ]),
+          match_variables: {
+            from: '1970-01-01T00:00:00Z',
+            limit: 100,
+          },
+        },
       ],
     };
     const result = await drive(
