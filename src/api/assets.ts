@@ -264,6 +264,25 @@ export interface AddFileToColumnInputs {
   readonly columnId: string;
   readonly file: Blob;
   readonly filename: string;
+  /**
+   * Caller-supplied AbortSignal threaded into the multipart wire
+   * dispatch via `MultipartTransportRequest.signal` at IMPL — abort
+   * propagation to the in-flight upload follows the standard
+   * `--timeout` / SIGINT plumbing the JSON transport uses (cli.md
+   * "Signal handling" + `src/api/transport.ts`'s `combineSignals`).
+   * The `client` is retained on the input even though dispatch
+   * bypasses `MondayClient.raw` — its `signal` is the default if no
+   * caller-supplied signal arrives, and IMPL may consult it for
+   * verbose/complexity instrumentation. Retry semantics are pinned
+   * at IMPL: multipart wire calls do NOT pass through
+   * `withRetry` automatically (multipart bodies aren't safely
+   * re-readable from a `Blob` stream; the IMPL session decides
+   * whether to lift retry to the multipart layer via buffering or
+   * to surface transient failures uniformly). The pre-flight
+   * stub does not exercise any of this — the runtime body wires
+   * the signal + retry strategy at IMPL.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface AddFileToColumnResult {
@@ -279,6 +298,12 @@ export interface AddFileToUpdateInputs {
   readonly updateId: string;
   readonly file: Blob;
   readonly filename: string;
+  /**
+   * Caller-supplied AbortSignal threaded into the multipart wire
+   * dispatch — same semantics as {@link AddFileToColumnInputs.signal}.
+   * Defaults to `client.signal` at IMPL if absent.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface AddFileToUpdateResult {
