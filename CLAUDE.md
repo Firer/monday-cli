@@ -527,7 +527,38 @@ path over `MONDAY_API_TOKEN`.
    guard, and swap the constants. Until then the M21
    infrastructure stays dormant in source.
 
-**R-class state (post-M27 IMPL close):**
+**R-class state (post-M30 pre-flight close):**
+
+NEW candidates surfaced at M30 pre-flight (v0.4-plan §22
+R-NEW-51..R-NEW-54; all watch-items pending 2nd / 3rd
+consumer):
+
+- **R-NEW-51 (LOW)** — `perTargetDispatch` hoisted closure for
+  route-sharing (1 consumer at M30 pre-flight; canonical
+  mechanism for R-NEW-28 6-axis behavioral-equivalence claim).
+  Fires at 2nd parallel-route variant.
+- **R-NEW-52 (MEDIUM)** — R-NEW-28 6-axis audit canonical
+  source-of-truth drift (1 consumer at M30 pre-flight; caught
+  at Codex round 3 as cli-design §6.4 listed wrong axes).
+  Lift to a typed `BEHAVIORAL_EQUIVALENCE_AXES` constant in
+  `parallel-dispatch.ts` OR bake into Codex pre-flight review
+  template alongside W1 / W2. Higher priority than the other
+  M30 candidates because the drift caused a real round-3
+  finding.
+- **R-NEW-53 (LOW)** — `c8 ignore start/stop` inside an
+  if-else arm (1 consumer at M30 pre-flight; testing.md
+  fold-in candidate). Novel variant of the c8 ignore
+  block-wrap pattern. Fires at 2nd consumer.
+- **R-NEW-54 (LOW)** — Schema-side argv parse vs
+  `validateInputShape` combination-rule layering (1 consumer
+  at M30 pre-flight; documentation discipline pattern; Codex
+  round 2 caught five prose-drift sites). Fires at 3rd
+  prose-drift repetition.
+
+R-class entries shipped through v0.3-M27 + carried into v0.4
+(unchanged at M30 pre-flight — no shipped lifts at pre-flight;
+runtime body extensions land at M30 IMPL):
+
 - **R-NEW-35 — `_shared.ts:requireDevBoard` slot-check helper
   (10 consumers at M26b).** Per-noun
   `mapping[slot] === undefined → throw dev_not_configured`

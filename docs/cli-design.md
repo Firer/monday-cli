@@ -7151,10 +7151,16 @@ scoped idempotent changes, and post comments narrating its work.**
 ### v0.4 (polish + nice-to-haves)
 
 - `item watch <iid>` (polling at default 30s cadence; reactive circuit
-  breaker on Monday wire errors per §14.4 closure)
+  breaker on Monday wire errors per §14.4 closure) **— M29 shipped**
 - Shell completion (bash / zsh / fish) via commander
 - Bulk operations with `--concurrency` (probed against Monday's
-  per-account concurrency cap)
+  per-account concurrency cap; empirical probe at 2026-05-13
+  observed cap > 100 in-flight for trivial reads, see §9.3)
+  **— M30 pre-flight shipped on `item update --where
+  --continue-on-error` only; IMPL pending; other bulk verbs
+  (item clear, board update, workspace add-users, etc.) defer
+  their `--concurrency` extension to later v0.4 milestones if
+  user demand surfaces**
 - Asset upload (`add_file_to_column`, `add_file_to_update`)
 - `doc list/get` (read-only; full docs CRUD deferred further)
 - `team` create/manage
