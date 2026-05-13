@@ -1842,8 +1842,9 @@ chosen shape + the failure-mode mapping. The architecture.md
 section (this one) is the **canonical cross-link target**
 for any other prose that needs to reference the asymmetry:
 
-  - cli-design.md §X subsection — points HERE rather than
-    re-explaining the asymmetry.
+  - the relevant cli-design.md subsection (e.g., §6.4
+    asset-upload sub-section, §4.3 verb-row prose) — points
+    HERE rather than re-explaining the asymmetry.
   - per-verb prose in cli-design.md §4.3 — points HERE.
   - the v0.3-plan + v0.4-plan §22 R-class entries — point
     HERE.
