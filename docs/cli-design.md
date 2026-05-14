@@ -94,7 +94,7 @@ Account
             │       └── Asset × N          (file attachments)
             └── Column         (column definition: id, type, settings)
 
-User, Team, Tag, Webhook, Doc, Notification — global, not nested under boards.
+User, Team, Tag, Webhook, Document, Notification — global, not nested under boards.
 ```
 
 ### 2.1 Query roots (read)

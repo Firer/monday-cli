@@ -28,9 +28,11 @@
  * unless hydrated), `created_at` (Date, nullable), `created_by`
  * (User, nullable — projected to the slim `{id, name}` shape for
  * envelope compactness), `doc_folder_id` (ID, nullable),
- * `doc_kind` (BoardKind!, nullable surface — values
- * `'public'|'private'|'share'` per the DocKind probe at API
- * `2026-01`), `name` (String!), `relative_url` (String, nullable),
+ * `doc_kind` (BoardKind!, returning `'public'`/`'private'`/
+ * `'share'` per the DocKind probe at API `2026-01` — non-null on
+ * the wire; the standalone `DocKind` enum exists but isn't
+ * returned by `Document.doc_kind`), `name` (String!),
+ * `relative_url` (String, nullable),
  * `settings` (JSON, nullable), `updated_at` (Date, nullable),
  * `url` (String, nullable absolute URL), `workspace` (Workspace,
  * nullable — projected to `{id, name}`), `workspace_id` (ID,
@@ -100,6 +102,28 @@ import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
+
+/**
+ * Schema for a required JSON-scalar slot — the key must be present
+ * on the parsed object, but the value can be any JSON shape Monday
+ * surfaces (object / array / string / number / boolean / null).
+ *
+ * Bare `z.unknown()` treats a missing key as "present with value
+ * `undefined`", so a wire response that omits `Document.settings`
+ * or `DocumentBlock.content` would still pass the strict schema —
+ * silently weakening the 13-field / 9-field contract. The
+ * `.refine` rejects `undefined` explicitly so a missing key
+ * surfaces as a typed parse error at the IMPL response-parse
+ * boundary (will fold into `internal_error` via `unwrapOrThrow`),
+ * matching every other field's "present-but-typed" semantics.
+ *
+ * Mirrors the M27 `Webhook.config: z.string().nullable()` pin
+ * (config is always present, value can be null) but for JSON-
+ * shaped slots whose payload shape varies per surface.
+ */
+const requiredJsonValueSchema = z.unknown().refine((v) => v !== undefined, {
+  message: 'required JSON value (may be null, but the key must be present)',
+});
 
 /**
  * Inclusive range for the `--limit` argv slot on `monday doc list`.
@@ -192,7 +216,7 @@ export const documentBlockSchema = z
   .object({
     id: z.string().min(1),
     type: z.string().nullable(),
-    content: z.unknown(),
+    content: requiredJsonValueSchema,
     position: z.number().nullable(),
     parent_block_id: z.string().nullable(),
     doc_id: z.string().nullable(),
@@ -229,7 +253,7 @@ export const documentSchema = z
     created_at: z.string().nullable(),
     created_by: docUserSchema.nullable(),
     updated_at: z.string().nullable(),
-    settings: z.unknown(),
+    settings: requiredJsonValueSchema,
   })
   .strict();
 

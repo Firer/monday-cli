@@ -139,15 +139,12 @@ export const docListCommand: CommandModule<
       .option(
         '--limit <n>',
         `Page size, range [${String(MIN_DOC_LIST_LIMIT)}, ${String(MAX_DOC_LIST_LIMIT)}]; default ${String(DEFAULT_DOC_LIST_LIMIT)}.`,
-        // Commander parses --limit as a string; coerce to number via
-        // the schema layer below (matches the global --retry / --timeout
-        // coercion shape).
-        (raw) => Number.parseInt(raw, 10),
+        parseStrictDecimal,
       )
       .option(
         '--page <n>',
         '1-based page number; default 1.',
-        (raw) => Number.parseInt(raw, 10),
+        parseStrictDecimal,
       )
       .addHelpText(
         'after',
@@ -218,6 +215,28 @@ export const docListCommand: CommandModule<
 };
 
 /**
+ * Strict decimal-integer parser for commander option-value coercion
+ * on `--limit` + `--page`. `Number.parseInt` would silently truncate
+ * `'25.5'` → `25` and `'25abc'` → `25`, bypassing the schema-layer
+ * `.int()` check (Codex round-1 P2-1). The strict variant returns
+ * `Number.NaN` for any input that isn't a decimal-integer string;
+ * the schema's `.int()` then rejects `NaN` and the user sees a
+ * `usage_error` with the per-flag bound-violation message.
+ *
+ * Leading-zero handling: a single `0` is accepted (range floor is
+ * enforced separately by the schema), but `'01'` / `'007'` are
+ * rejected because Monday's wire IDs and page numbers never carry
+ * leading zeros + the strict shape matches `DECIMAL_USER_ID_PATTERN`
+ * elsewhere in the codebase.
+ */
+const parseStrictDecimal = (raw: string): number => {
+  if (!/^(?:0|[1-9]\d*)$/u.test(raw)) {
+    return Number.NaN;
+  }
+  return Number.parseInt(raw, 10);
+};
+
+/**
  * Splits a comma-separated `--workspace` argv string into an array of
  * brand-validated WorkspaceId strings. Empty entries reject with
  * `usage_error`; non-numeric entries reject via the WorkspaceIdSchema
@@ -270,9 +289,10 @@ const parseWorkspaceListArg = (raw: string): readonly string[] => {
 
 /**
  * Internals exposed for unit-test access (argv parser pinning).
- * NOT a public API — the comma-split helper stays
+ * NOT a public API — the comma-split helper + decimal parser stay
  * production-internal.
  */
 export const _internals = {
   parseWorkspaceListArg,
+  parseStrictDecimal,
 } as const;

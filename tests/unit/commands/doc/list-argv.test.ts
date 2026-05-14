@@ -197,3 +197,59 @@ describe('_internals.parseWorkspaceListArg (--workspace comma-split)', () => {
     });
   });
 });
+
+describe('_internals.parseStrictDecimal (--limit / --page commander coercer)', () => {
+  describe('happy paths', () => {
+    it('parses a single-digit decimal', () => {
+      expect(_internals.parseStrictDecimal('1')).toBe(1);
+    });
+
+    it('parses a multi-digit decimal', () => {
+      expect(_internals.parseStrictDecimal('100')).toBe(100);
+    });
+
+    it('parses 0 (range floor enforced by schema)', () => {
+      expect(_internals.parseStrictDecimal('0')).toBe(0);
+    });
+  });
+
+  describe('rejections — return NaN so the schema layer rejects', () => {
+    it('rejects fractional input (Number.parseInt would silently truncate)', () => {
+      expect(_internals.parseStrictDecimal('25.5')).toBeNaN();
+    });
+
+    it('rejects trailing garbage (Number.parseInt would silently truncate)', () => {
+      expect(_internals.parseStrictDecimal('25abc')).toBeNaN();
+    });
+
+    it('rejects leading garbage', () => {
+      expect(_internals.parseStrictDecimal('abc25')).toBeNaN();
+    });
+
+    it('rejects negative input', () => {
+      expect(_internals.parseStrictDecimal('-1')).toBeNaN();
+    });
+
+    it('rejects hex input', () => {
+      expect(_internals.parseStrictDecimal('0x2a')).toBeNaN();
+    });
+
+    it('rejects scientific notation', () => {
+      expect(_internals.parseStrictDecimal('1e3')).toBeNaN();
+    });
+
+    it('rejects whitespace', () => {
+      expect(_internals.parseStrictDecimal('25 ')).toBeNaN();
+      expect(_internals.parseStrictDecimal(' 25')).toBeNaN();
+    });
+
+    it('rejects empty string', () => {
+      expect(_internals.parseStrictDecimal('')).toBeNaN();
+    });
+
+    it('rejects leading zeros (Monday IDs + page numbers never carry leading zeros)', () => {
+      expect(_internals.parseStrictDecimal('01')).toBeNaN();
+      expect(_internals.parseStrictDecimal('007')).toBeNaN();
+    });
+  });
+});
