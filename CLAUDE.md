@@ -107,7 +107,7 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   + npm publish pending user authorization**, mirroring the
   v0.3-M28 cadence). v0.3.0's tag remains live at `5e8c210`.
 
-**R-class state (post-v0.4 release-prep close):**
+**R-class state (post-v0.4 release-prep close + refactor-audit):**
 
 - **One new R-class candidate filed at v0.4 release-prep close
   — R-NEW-82** (release-prep `deferred_to: '<currently-
@@ -118,6 +118,21 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   cluster — likely v0.5.0 — that catches >= 1 stale
   `deferred_to` site OR explicitly returns "no stale deferrals
   found"). Full entry at v0.4-plan §22 R-NEW-82.
+- **One new R-class lift candidate filed at the post-release-
+  prep refactor-audit — R-NEW-83** (NDJSON-trailer parsing
+  helper for test files; 6 consumers across `tests/integration/
+  commands/{item-list,item-search,item-history,m23-cross-board,
+  item-watch}.test.ts` + `tests/integration/envelope-snapshots.
+  test.ts`; HIGH priority LIFT CANDIDATE — past the standard
+  3-consumer threshold by 3 sites; mirrors R-NEW-14/15/16's
+  "missed earlier triggers, mass-migrate when surfaced"
+  cadence). Lift target: `tests/integration/helpers.ts:
+  parseNdjsonStream(stdout): { records, trailer }` with
+  optional `normaliseTrailerField?` callback for the
+  snapshot-normalisation site (mirrors R-NEW-21's opts
+  shape). Ready to lift whenever the user wants a focused
+  housekeeping session. Full entry at v0.4-plan §22
+  R-NEW-83.
 
 **R-class state (post-M33 IMPL close — unchanged):**
 

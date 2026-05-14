@@ -7691,7 +7691,49 @@ scoped idempotent changes, and post comments narrating its work.**
   `add_content_to_doc_from_markdown` / `create_doc_block` /
   `update_doc_block` / `delete_doc_block`) — each substantial
   enough to warrant its own milestone.
-- `team` create/manage
+- `team` create/manage **— deferred to v0.5 at the post-v0.4-M33
+  candidate-selection session** (R-NEW-75 framework graduation
+  session). Picked release-prep over `team` writers on three
+  grounds: (a) the v0.4 shipped surface already exceeded v0.3's
+  so 0.4.0 had earned a tag; (b) team writers fit cleanly with
+  the v0.5 doc-CRUD-mutation backlog (9 doc mutations Monday
+  exposes) for a "team + docs CRUD" v0.5 frame; (c) release-prep
+  shipped in a single session vs 3-4 sessions for team writers
+  (empirical probe + pre-flight + IMPL + close-docs). v0.5
+  kickoff opens with the bundled team-writers + doc-CRUD-mutation
+  backlog.
+
+### v0.5 (next — team writers + workdocs CRUD mutations)
+
+- `team` create / update / delete / add-users / remove-users
+  (Monday's `create_team` + `update_team` + `delete_team` +
+  `add_users_to_team` + `remove_users_from_team` mutations).
+  Deferred from v0.4-M34 at the post-v0.4-M33 candidate-selection
+  session (see above).
+- Workdocs CRUD mutations — 9 surfaces (`create_doc` /
+  `update_doc_name` / `delete_doc` / `duplicate_doc` /
+  `import_doc_from_html` / `add_content_to_doc_from_markdown` /
+  `create_doc_block` / `update_doc_block` / `delete_doc_block`).
+  Deferred from v0.4-M32 D8 closure — each mutation has enough
+  surface area to warrant its own milestone cluster; v0.5 likely
+  sequences them across 2-3 milestone clusters.
+- Files-shaped friendly `--set` translator + `--set-raw` form —
+  the `monday item upload` verb shipped at v0.4-M31 covers the
+  multipart wire path; the inline `--set` / `--set-raw` form
+  for file columns slipped at v0.4 release-prep (would need a
+  separate dispatch from the translator boundary into the
+  multipart wire).
+- Cross-board `item move` value-overrides — slipped from v0.4
+  release-prep; Monday's `ColumnMappingInput` carries no value
+  slot at API `2026-01`, so the richer `{id, value?}` form
+  requires a non-atomic post-move `change_multiple_column_values`
+  with cross-leg partial-failure envelope shapes.
+- Cross-board search resumable cursor — slipped from v0.4
+  release-prep; per-board cursor-lifetime under aggregation
+  remains the load-bearing design issue.
+- Multi-level subitem creation — slipped from v0.4 release-prep;
+  conditional on Monday's data model surfacing `subtasks` on
+  `sub_items_board` at API `2026-01`+.
 
 ### Explicitly deferred from v0.1's stable contract
 
