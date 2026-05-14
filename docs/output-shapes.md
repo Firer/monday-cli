@@ -4115,15 +4115,16 @@ only (cli-design §8 cache scope excludes workdocs — content-
 heavy + frequently human-edited; stale-cache risk outweighs
 cache-hit value).
 
-**Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire query
-documents land at v0.4-M32 pre-flight (`scripts/probe/m32-docs.ts`
-2026-05-14 pinned `Query.docs(workspace_ids: [ID], order_by:
-DocsOrderBy, limit: Int, page: Int) → [Document]` + the 14-field
-`Document` shape + the 2-value `DocsOrderBy` closed enum
-(`created_at` / `used_at`)). Runtime body lands at v0.4-M32 IMPL
-— the pre-flight action body throws `internal_error` post-parse
-so a premature invocation surfaces a clear "not yet implemented"
-signal.
+**Status: v0.4-M32 IMPL landed end-to-end.** Argv parsing + schema
++ wire query documents shipped at v0.4-M32 pre-flight
+(`scripts/probe/m32-docs.ts` 2026-05-14 pinned
+`Query.docs(workspace_ids: [ID], order_by: DocsOrderBy, limit: Int,
+page: Int) → [Document]` + the 14-field `Document` shape + the
+2-value `DocsOrderBy` closed enum (`created_at` / `used_at`)). The
+runtime body landed at IMPL via {@link listDocuments} — single
+`client.raw` round-trip with `operationName: 'ListDocs'` pinned at
+the fetcher boundary, response-parse via `unwrapOrThrow`, schema
+drift surfaces `internal_error` with `details.issues`.
 
 Envelope `data` carries the wrapped record (NOT a bare array)
 because page/limit pagination surfaces pagination context inline
@@ -4134,7 +4135,7 @@ surface a total count, so "exactly `limit` rows returned" is the
 only signal that a follow-up page may exist; agents that need
 exhaustive listing loop until `has_more: false`.
 
-**Live success envelope (planned shape — IMPL pending):**
+**Live success envelope:**
 
 ```json
 {
@@ -4178,11 +4179,17 @@ the fetcher extracts index 0. An empty wire result (Monday's
 shape for "doc doesn't exist" OR "doc not visible to token")
 surfaces `not_found` with `details.doc_id` — Monday's wire
 collapses the two cases into the same shape so the CLI can't
-distinguish them (no `forbidden` rewrap; D8 closure).
+distinguish them (no `forbidden` rewrap; D8 closure). A `null`
+`docs` root surfaces `internal_error` with a drift hint (Monday's
+documented shape is `[Document]`, possibly empty, never null —
+null indicates wire-shape regression worth surfacing loudly per
+the M32 IMPL round-1 P2-1 closure).
 
-**Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire query
-document land at v0.4-M32 pre-flight. Runtime body lands at
-v0.4-M32 IMPL.
+**Status: v0.4-M32 IMPL landed end-to-end.** Argv parsing + schema
++ wire query document shipped at v0.4-M32 pre-flight; the runtime
+body landed at IMPL via {@link getDocument} — single `client.raw`
+round-trip with `operationName: 'GetDoc'` pinned at the fetcher
+boundary.
 
 Envelope `data: <Document with blocks>` — direct unwrap matching
 the read-one-verb convention (`board get` returns
@@ -4193,7 +4200,7 @@ block-content `content` is a JSON payload opaque to the CLI
 (Monday's wire is the source of truth for the per-block-type
 shape).
 
-**Live success envelope (planned shape — IMPL pending):**
+**Live success envelope:**
 
 ```json
 {

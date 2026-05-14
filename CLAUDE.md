@@ -11,7 +11,7 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M32 pre-flight landed; M32 IMPL is next.**
+**v0.4-M32 IMPL landed end-to-end; next v0.4 milestone TBD.**
 Doc list/get (`monday doc list [--workspace <wid>,...]
 [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]` +
 `monday doc get <did>`) — first v0.4 verbs against Monday's
@@ -65,88 +65,100 @@ unique to multipart upload); recommendation at v0.4-plan §13 to
 extend R-v0.4-W2 with that axis ahead of the next "new transport
 seam" milestone.
 
-**M32 pre-flight highlights.** Two new read verbs + one fetcher
-module (`src/api/documents.ts` with stub `listDocuments` +
-`getDocument` fetchers, c8-ignore-block-wrapped) + one new ID
-brand (`DocIdSchema` in `src/types/ids.ts`) + cli-design §4.3
-DOC section expanded with multi-line entries pinning the wire
-surface + cli-design §13 v0.4 entry flipped to "M32 pre-flight
-shipped; IMPL pending" with full closure context. **R-NEW-41
-stays at 3 consumers** — the BoardKind reuse for
-`Document.doc_kind` is wire-side type-name aliasing (same enum
-across `Board.kind` + `Document.doc_kind`, identical 3-value
-vocabulary), NOT a wire-vs-CLI semantic asymmetry. **R-NEW-43
-stays at 1 consumer** — the v0.5 deferral list of 9 doc-
-mutation surfaces (`create_doc` / `delete_doc` /
-`duplicate_doc` / `update_doc_name` / `import_doc_from_html` /
-`add_content_to_doc_from_markdown` / `create_doc_block` /
-`update_doc_block` / `delete_doc_block`) lives in prose, not as
-gated command stubs with placeholder guards. **Codex
-pre-flight review converged in 4 rounds** across the cluster
-`05c5988..a889eac` — initial contract diff at
+**M32 IMPL highlights.** Two runtime fetcher bodies shipped at
+`src/api/documents.ts` — `listDocuments` (single `Query.docs(...)`
+round-trip with `operationName: 'ListDocs'`, response-parse via
+wrapping `listDocsResponseSchema` `.loose()` + `unwrapOrThrow`,
+null root → `internal_error` with drift hint) + `getDocument`
+(single `Query.docs(ids:)` round-trip with `operationName:
+'GetDoc'`, empty-array → `not_found` per D8, null root →
+`internal_error` per round-1 P2-1 closure, multi-element →
+defensive `internal_error`). Two runtime action bodies shipped
+at `src/commands/doc/list.ts` + `src/commands/doc/get.ts` —
+`resolveClient` + fetcher + `emitSuccess` (`kind: 'single'` for
+the wrapped-record envelope on doc list — `emit.ts` has no
+`'record'` kind, so `'single'` is correct mirroring the M22
+`monday usage` cadence; direct-unwrap for doc get). All four
+stub bodies' `c8 ignore start/stop` block-wraps dropped; single
+defensive `/* c8 ignore next 6 */` preserved on the
+`document === undefined` sparse-array guard (zod's
+`noUncheckedIndexedAccess` widening, not a production branch).
+**Codex IMPL review converged in 3 rounds** across the cluster
+`2ca8b97..cc31f76` — feat `2ca8b97` + round 1 `b8aa70d` (0 P1 +
+1 P2 + 1 P3: null-vs-empty branch split + docstring drift) +
+round 2 `cc31f76` (0 P1 + 0 P2 + 1 P3: two remaining prose
+sites the round-1 fix introduced) + round 3 ratification (0 P1
++ 0 P2 + 0 P3). Within the M22 / M27 read-surface precedent
+(1-3 rounds). Cumulative IMPL findings: **0 P1 + 1 P2 + 2 P3
+across the 2 fix-up rounds**.
+
+**M32 pre-flight highlights (carried for context).** Two new
+read verbs + one fetcher module + one new ID brand
+(`DocIdSchema` in `src/types/ids.ts`) + cli-design §4.3 DOC
+section expanded with multi-line entries pinning the wire
+surface. **Codex pre-flight review converged in 4 rounds**
+across the cluster `05c5988..a889eac` — initial contract diff at
 `05c5988` + round 1 `a875add` (0 P1 + 2 P2 + 2 P3: strict
 decimal parser + `requiredJsonValueSchema` + 2 prose drifts)
 + round 2 `823fccc` (0 P1 + 1 P2 + 2 P3: pagination-invariant
 `.superRefine` + 2 prose drifts) + round 3 `880d9fb` (0 P1 +
 1 P2 + 1 P3: `.superRefine` early-return guard + close-docs
-deferral) + round 4 ratification (0 P1 + 0 P2 + 0 P3). One
-round above the M30 / M27 / M22 read-surface precedent;
-three rounds below the M31 7-round outlier (driven by its
-new-transport-seam class M32 doesn't have). Cumulative
+deferral) + round 4 ratification. Cumulative pre-flight
 findings: **0 P1 + 4 P2 + 5 P3 across the 3 fix-up rounds**.
 
-**Live numbers (M32 pre-flight close):**
-- Test count: **3554 + 1 skipped** across **144** test files
-  (+84 net vs 3470 + 1 skipped M31 IMPL close baseline:
-  initial diff +37 — 26 argv unit tests for `doc list` + 11
-  argv unit tests for `doc get`; round-1 fix +41 — 12
-  parseStrictDecimal regressions + 29 documents schema unit
-  tests; round-2 fix +4 pagination-invariant tests; round-3
-  fix +2 superRefine-guard tests; integration tests deferred
-  to M32 IMPL).
-- Coverage: **99.20 / 96.03 / 99.16 / 99.48** (stmts /
+**Live numbers (M32 IMPL close):**
+- Test count: **3578 + 1 skipped** across **146** test files
+  (+24 net vs 3554 + 1 skipped M32 pre-flight close baseline:
+  15 doc list integration tests + 9 doc get integration tests;
+  round-1 fix flipped a test's expected error code without
+  changing count; round-2 fix touched a test-file header
+  comment without changing count).
+- Coverage: **99.25 / 96.30 / 99.33 / 99.53** (stmts /
   branches / fns / lines) at the **95 / 95.45 / 95 / 95**
-  floor. **Branches margin 0.58pp** (was 0.80pp at M31 IMPL
-  close; -0.22pp from new c8-ignored stub-fetcher branches +
-  new `.superRefine` branches partially compensated by the
-  new argv + schema test surface — well within margin
-  tolerance).
+  floor. **Branches margin 0.85pp** (was 0.58pp at M32 pre-flight
+  close; +0.27pp recovery from runtime-body branches covered by
+  integration tests vs stub c8-ignore drops; ALL metrics improved
+  vs pre-flight close — first v0.4 milestone where every metric
+  improved at IMPL).
 - ERROR_CODES count: **29** (unchanged per D8 closure).
-- Command count: **98 → 100** (+2 new verbs).
+- Command count: **100** (unchanged — IMPL adds no verbs).
 - `package.json` version: **0.3.0** (stays through v0.4
   milestones; bumps to `0.4.0` at v0.4 release-prep).
 
-**R-class state (post-M32 pre-flight close):**
+**R-class state (post-M32 IMPL close):**
 
+- **No R-class movement at M32 IMPL.** The 3-round IMPL cluster's
+  findings (1 P2 + 2 P3) were a runtime correctness issue
+  (null-vs-empty branch split) + prose drift fix-ups — none
+  constitute a refactor pattern. The four post-M32-pre-flight
+  candidates (R-NEW-68/69/70/71) all stay at their pre-IMPL
+  consumer counts; the R-NEW-58 2-consumer scan at IMPL kickoff
+  returned NEGATIVE (no lift fired ahead of the feat).
+- **R-NEW-56 (cross-doc grep at IMPL kickoff) ratified for the
+  3rd consecutive IMPL milestone.** Discipline now 3rd-time
+  validated and stable (M30 → forced, M31 → vindicated, M32 →
+  ratified). M32 IMPL's lesson at v0.4-plan §14: re-run the
+  grep AFTER every Codex round that flips a contract (round-1
+  fix introduced new prose drift that round-2 caught — the
+  per-round-fix grep would have collapsed rounds 1+2).
+- **R-NEW-58 (lift-ahead-of-feat) ratified via NEGATIVE
+  evidence at M32 IMPL.** M31 IMPL ratified via positive case
+  (`sniffContentType` 2-consumer lift). M32 IMPL ratified the
+  inverse: the 2-consumer scan ran clean, no lift fired. The
+  discipline correctly identifies BOTH positive and negative
+  cases — "scan at IMPL kickoff and lift when the trigger is
+  real", not "always lift at 2".
 - **R-NEW-41 stays at 3 consumers post-M32.** The
   `BoardKind`-for-`Document.doc_kind` reuse is wire-side
-  type-name aliasing (same enum across `Board.kind` +
-  `Document.doc_kind`, identical `public`/`private`/`share`
-  vocabulary). NOT a wire-vs-CLI semantic asymmetry — the CLI
-  surfaces the same string values the wire returns; no
-  projection drift. Documented inline in
-  `src/api/documents.ts`'s module docstring as wire-side
-  context; no extension of the `docs/architecture.md`
-  "Wire-vs-CLI semantics documentation conventions" section.
-  4th consumer trigger fires only when CLI's surface +
-  Monday's wire surface DIVERGE in shape.
+  type-name aliasing, NOT a wire-vs-CLI semantic asymmetry.
 - **R-NEW-43 stays at 1 consumer post-M32.** The v0.5 deferral
-  list of 9 doc-mutation surfaces (`create_doc` / `delete_doc`
-  / `duplicate_doc` / `update_doc_name` /
-  `import_doc_from_html` / `add_content_to_doc_from_markdown`
-  / `create_doc_block` / `update_doc_block` /
-  `delete_doc_block`) lives in §13 v0.4 entry prose, NOT as
-  gated command stubs with placeholder guards — agents read
-  the deferral context from the CLI verb tree's absence rather
-  than from a `usage_error.details.reason:
-  doc_mutation_deferred` shape. Fires at 2nd consumer if a
-  future v0.4.x / v0.5 verb is gated on external registration
-  (e.g., a webhook-delivery verifier needing an HMAC secret).
+  list of 9 doc-mutation surfaces lives in §13 v0.4 entry prose.
 - **R-NEW-31 stays at 1 consumer post-M32.** No per-status
   detail union surfaces — `doc list` + `doc get` envelopes
   carry flat shapes without status discrimination.
 
-**Four new R-class candidates filed at M32 pre-flight** (full
+**Four R-class candidates filed at M32 pre-flight + carried
+forward at IMPL (all stay at pre-IMPL counts)** (full
 entries at v0.4-plan §22):
 
 - **R-NEW-68 — `parseStrictDecimal` strict-decimal-integer
@@ -289,25 +301,15 @@ live in `docs/v0.4-plan.md` §3 M32 entry + §9 M32 preconditions
 + §3 M31 entry + §13 M31 post-mortem + §22 R-v0.4-W2 entry. Do
 not duplicate here.
 
-**Next session — M32 IMPL.**
-1. **M32 IMPL — runtime bodies for `doc list/get`.** Swap the
-   c8-ignored stub fetchers in `src/api/documents.ts` for real
-   `client.raw` round-trips with `operationName: 'ListDocs'` /
-   `'GetDoc'`; swap the c8-ignored action bodies in
-   `src/commands/doc/list.ts` + `src/commands/doc/get.ts` for
-   live dispatch + envelope emit. Empty-list `doc get` →
-   `not_found` per D8. Drop the `c8 ignore start/stop`
-   block-wraps as integration tests cover the wire shape.
-   Land integration tests at
-   `tests/integration/commands/doc-list.test.ts` +
-   `doc-get.test.ts` cassette-backed via `FixtureTransport`.
-2. **Apply IMPL kickoff disciplines (R-NEW-56 + R-NEW-58)
-   ratified at M31 IMPL**: cross-doc grep at IMPL kickoff to
-   enumerate every prose site needing the stub→runtime flip
-   BEFORE running Codex round 1 + scan for R-class 2-consumer
-   triggers that crystallize at IMPL kickoff (lift AHEAD of the
-   feat commit when coverage at IMPL would otherwise fail the
-   floor).
+**Next session — next v0.4 milestone TBD.** M32 IMPL closed the
+v0.4 doc surface end-to-end (read-only; full doc CRUD deferred to
+v0.5 per D8 closure). Candidate selection for the next v0.4
+milestone happens at the next session kickoff from the remaining
+v0.4 backlog per `cli-design.md §13 v0.4` entry — team writers,
+shell completion, release-prep, or other read/write surfaces the
+backlog identifies. Carry forward both IMPL kickoff disciplines
+(R-NEW-56 cross-doc grep + R-NEW-58 2-consumer scan) — both now
+3rd-time / 2nd-time validated post-M32 IMPL.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
