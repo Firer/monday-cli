@@ -20,7 +20,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative as relativePath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run } from '../../../src/cli/run.js';
 import { fixedRequestIdGenerator } from '../../../src/utils/request-id.js';
@@ -252,6 +252,12 @@ describe('monday item upload (integration, M31 IMPL)', () => {
   });
 
   it('--dry-run emits the planned-change envelope without firing wire calls', async () => {
+    // Pass the file path as an argv-relative form so the regression
+    // test catches a revert from `parsed.file` to `filePath` (round-3
+    // P3-1 fix — pre-fix the test fed an absolute path that
+    // happened to be both `parsed.file` and the resolved
+    // absolute, masking the contract).
+    const argvFile = relativePath(process.cwd(), filePath);
     const out = await driveUpload({
       argv: [
         'item',
@@ -259,7 +265,7 @@ describe('monday item upload (integration, M31 IMPL)', () => {
         '12345',
         '--column',
         'files',
-        filePath,
+        argvFile,
         '--dry-run',
         '--json',
       ],
@@ -284,16 +290,16 @@ describe('monday item upload (integration, M31 IMPL)', () => {
       operation: 'add_file_to_column',
       item_id: '12345',
       column_id: 'files',
-      // file_path is the argv-derived path verbatim — preserves the
-      // agent's invocation surface per cli-design §6.4 sample
-      // (round-2 P3-2 fix). `filePath` here is the absolute path the
-      // test built, so the dry-run echoes the absolute form; an
-      // agent invoking with `./screenshot.png` would see that
-      // verbatim.
-      file_path: filePath,
+      // file_path is the argv-derived RELATIVE path verbatim, NOT the
+      // resolved absolute. cli-design §6.4 + output-shapes sample
+      // `"./screenshot.png"` — round-2 P3-2 + round-3 P3-1.
+      file_path: argvFile,
       filename: 'screenshot.png',
       file_size_bytes: 12,
     });
+    // The argv path WAS relative — pin it so a revert to absolute
+    // wouldn't pass.
+    expect(argvFile).not.toBe(filePath);
   });
 
   it('rejects a missing file path with usage_error file_not_readable BEFORE any wire call', async () => {

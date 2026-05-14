@@ -11,7 +11,7 @@
  */
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative as relativePath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run } from '../../../src/cli/run.js';
 import { fixedRequestIdGenerator } from '../../../src/utils/request-id.js';
@@ -184,8 +184,12 @@ describe('monday update upload (integration, M31 IMPL)', () => {
   });
 
   it('--dry-run emits the planned-change envelope with update_id (no column_id)', async () => {
+    // Use a relative argv path so a revert to absolute-path emission
+    // would fail the assertion (round-3 P3-1 fix mirrors the
+    // item-upload dry-run test).
+    const argvFile = relativePath(process.cwd(), filePath);
     const out = await driveUpload({
-      argv: ['update', 'upload', '987654321', filePath, '--dry-run', '--json'],
+      argv: ['update', 'upload', '987654321', argvFile, '--dry-run', '--json'],
       multipartCassette: [],
       xdgRoot,
     });
@@ -206,12 +210,14 @@ describe('monday update upload (integration, M31 IMPL)', () => {
       operation: 'add_file_to_update',
       update_id: '987654321',
       // file_path is argv-derived per cli-design §6.4 (round-2 P3-2
-      // mirror with item upload).
-      file_path: filePath,
+      // mirror with item upload + round-3 P3-1 relative-path
+      // pinning).
+      file_path: argvFile,
       filename: 'screenshot.png',
       file_size_bytes: 12,
     });
     expect(env.planned_changes[0]).not.toHaveProperty('column_id');
+    expect(argvFile).not.toBe(filePath);
   });
 
   it('rejects a missing file path with usage_error file_not_readable BEFORE any wire call', async () => {

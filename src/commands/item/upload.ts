@@ -302,7 +302,12 @@ export const itemUploadCommand: CommandModule<
           // cache invalidation on the right board after a successful
           // upload (D6 single-leg per §8). `lookupItemBoard` throws
           // `not_found` on a missing item or null-board, so a bad
-          // <iid> surfaces a typed envelope before any file I/O.
+          // <iid> surfaces a typed envelope before file BYTES are
+          // loaded — the local `fs.stat()` + `fs.access()` pre-check
+          // above already ran (round-3 P3-2 prose precision; ordering
+          // stays "argv parse → local file pre-check → wire lookup →
+          // column resolution → file bytes → multipart dispatch →
+          // cache invalidation → emit").
           const { boardId } = await lookupItemBoard({
             client,
             itemId: parsed.itemId,
