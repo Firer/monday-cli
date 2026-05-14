@@ -212,7 +212,9 @@ export const updateUploadCommand: CommandModule<
             // wire mutation; no file bytes loaded. `update upload`
             // dry-run carries `update_id` instead of `item_id` +
             // `column_id`; otherwise structurally identical to the
-            // `item upload` dry-run shape.
+            // `item upload` dry-run shape. `file_path` is the
+            // argv-derived path per cli-design §6.4 sample (round-2
+            // P3-2 fix; mirrors `item upload`).
             emitDryRun({
               ctx,
               programOpts: program.opts(),
@@ -220,7 +222,7 @@ export const updateUploadCommand: CommandModule<
                 {
                   operation: 'add_file_to_update',
                   update_id: parsed.updateId,
-                  file_path: filePath,
+                  file_path: parsed.file,
                   filename,
                   file_size_bytes: fileSizeBytes,
                 },

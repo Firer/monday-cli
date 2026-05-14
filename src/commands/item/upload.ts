@@ -266,6 +266,17 @@ export const itemUploadCommand: CommandModule<
             // column_id, file_path, filename, file_size_bytes}` from
             // the local stat; no wire mutation fires; no file bytes
             // loaded into memory. `meta.source: 'none'`.
+            //
+            // `file_path` is the **argv-derived** path the agent
+            // passed (relative or absolute), preserving the
+            // invocation surface — matches cli-design §6.4 +
+            // output-shapes which sample `./screenshot.png` (round-2
+            // P3-2 fix). Agents that need an absolute path can
+            // resolve from cwd + `file_path` themselves; the
+            // resolved absolute path lives in `details.file_path`
+            // on `usage_error.details.reason: 'file_not_readable'` /
+            // `'file_empty'` rejections (where the absolute is
+            // useful for diagnosing path resolution mismatches).
             emitDryRun({
               ctx,
               programOpts: program.opts(),
@@ -274,7 +285,7 @@ export const itemUploadCommand: CommandModule<
                   operation: 'add_file_to_column',
                   item_id: parsed.itemId,
                   column_id: parsed.column,
-                  file_path: filePath,
+                  file_path: parsed.file,
                   filename,
                   file_size_bytes: fileSizeBytes,
                 },

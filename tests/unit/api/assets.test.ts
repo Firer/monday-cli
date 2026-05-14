@@ -644,6 +644,38 @@ describe('addFileToUpdate', () => {
     ).rejects.toMatchObject({ code: 'internal_error' });
   });
 
+  it('file_too_large rewrap (HTTP 413 non-JSON body) short-circuits the retry loop (round-2 P3-1 parity)', async () => {
+    // Mirrors the addFileToColumn round-1 P2-1 test — both fetchers
+    // own independent retry-thunk rewrap blocks so each needs its
+    // own regression coverage.
+    let calls = 0;
+    const transport: MultipartTransport = {
+      request: () => {
+        calls++;
+        return Promise.resolve({
+          status: 413,
+          headers: { 'content-type': 'text/html' },
+          body: '<html>oops</html>',
+        });
+      },
+    };
+    await expect(
+      addFileToUpdate({
+        client: FAKE_CLIENT,
+        multipart: transport,
+        updateId: '987654321',
+        file: sampleBlob(new Uint8Array(789)),
+        filename: 'big.png',
+        signal: new AbortController().signal,
+        retries: 3,
+      }),
+    ).rejects.toMatchObject({
+      code: 'usage_error',
+      details: { reason: 'file_too_large', file_size_bytes: 789 },
+    });
+    expect(calls).toBe(1);
+  });
+
   it('FILE_SIZE_LIMIT_EXCEEDED → file_too_large rewrap (with local file size)', async () => {
     const { transport } = stubTransport([
       {

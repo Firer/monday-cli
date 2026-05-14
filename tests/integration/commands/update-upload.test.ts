@@ -205,6 +205,9 @@ describe('monday update upload (integration, M31 IMPL)', () => {
     expect(env.planned_changes[0]).toMatchObject({
       operation: 'add_file_to_update',
       update_id: '987654321',
+      // file_path is argv-derived per cli-design §6.4 (round-2 P3-2
+      // mirror with item upload).
+      file_path: filePath,
       filename: 'screenshot.png',
       file_size_bytes: 12,
     });

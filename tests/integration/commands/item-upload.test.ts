@@ -284,6 +284,13 @@ describe('monday item upload (integration, M31 IMPL)', () => {
       operation: 'add_file_to_column',
       item_id: '12345',
       column_id: 'files',
+      // file_path is the argv-derived path verbatim — preserves the
+      // agent's invocation surface per cli-design §6.4 sample
+      // (round-2 P3-2 fix). `filePath` here is the absolute path the
+      // test built, so the dry-run echoes the absolute form; an
+      // agent invoking with `./screenshot.png` would see that
+      // verbatim.
+      file_path: filePath,
       filename: 'screenshot.png',
       file_size_bytes: 12,
     });
