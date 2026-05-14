@@ -11,117 +11,128 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M31 IMPL landed end-to-end; next v0.4 milestone TBD.**
-Asset upload (`monday item upload <iid> --column <col> <file>` +
-`monday update upload <uid> <file>`) — first v0.4 verbs crossing
-the wire via `multipart/form-data` instead of the JSON-only
-`client.request` seam. Pre-flight ran 7 Codex rounds across the
-8-commit cluster `6b4c91e..ada29d1` (driven by two distinct
-surface classes — prose drift in rounds 2-5 + substantive
-contract gaps unique to "introduces NEW transport seam" in rounds
-6-7); IMPL converged in 3 Codex rounds across the 4-commit
-cluster `18c5386..4582dd7`. **IMPL feat at `18c5386`**: real
-`createMultipartFetchTransport` body (FormData-driven body
-assembly + `fetch` dispatch + `AbortSignal.any` signal
-combination + JSON parse + fetch-error mapping mirroring
-`transport.ts`) + real `addFileToColumn` + `addFileToUpdate`
-fetcher bodies (`multipart.request(...)` + `mapResponse` +
-`assertResponseFieldPresent` + `unwrapOrThrow(assetSchema...)` +
-`withRetry(...)` per cli-design §2.5) + real action bodies for
-both verbs (`fs.stat` + `fs.access(R_OK)` pre-check + dry-run
-branch + `lookupItemBoard` + `resolveColumnWithRefresh` +
-column-type validation + `fs.readFile` → `Blob` with sniffed
-content-type + dispatch + cache invalidation per D6) + lifted
-`sniffContentType` to `src/utils/mime.ts` (R-NEW-NEW 2-consumer
-trigger crystallized at IMPL coverage check; integration tests
-only exercised one extension row) + extended `RunOptions` /
-`RunContext` / `ResolvedClient` with optional `multipartTransport`
-/ `multipart` slots mirroring the JSON `transport` shape +
-`MultipartFixtureTransport` test seam at
-`tests/fixtures/multipart-load.ts` mirroring the JSON
-`FixtureTransport`. **IMPL Codex rounds**: round 1 `f0952ea`
-(0 P1 + **2 P2** + 1 P3) — both P2 substantive runtime fixes:
-P2-1 lifted `file_too_large` rewrap INSIDE the retry thunk in
-both fetchers so the resulting `usage_error` (non-retryable)
-short-circuits `withRetry` immediately (pre-fix shape leaked HTTP
-413 with non-JSON body as retryable `network_error` → loop
-re-uploaded the same oversized file `--retry` times before the
-outer rewrap fired); P2-2 added `fs.access(filePath, R_OK)` to
-both action bodies' pre-check (fs.stat alone confirms type/size
-but NOT R_OK; an unreadable file would otherwise fail mid-upload
-AFTER wire calls); P3-1 widened the message-fallback substring
-match to bare `'file size'` per the documented contract. Round 2
-`6e06f90` (0 P1 + 0 P2 + 2 P3) — P3-1 added the parallel
-addFileToUpdate retry-short-circuit unit test (round-1 P2-1 fix
-applied to both fetchers but the regression test only covered
-addFileToColumn); P3-2 switched the dry-run `file_path` from
-resolved absolute to argv-derived (matches cli-design §6.4 +
-output-shapes sample `./screenshot.png`). Round 3 `4582dd7` (0 P1
-+ 0 P2 + 2 P3) — P3-1 strengthened the dry-run regression tests
-to use `relative(process.cwd(), filePath)` so a revert from
-`parsed.file` to `resolvePath(...)` would actually fail; P3-2
-rewrote a stale "before any file I/O" ordering comment to
-"before file BYTES are loaded". **3-round IMPL convergence sits
-between the M27 IMPL 4-round + M30 IMPL 5-round precedents**;
-the pre-flight 7-round outlier was driven by the new transport
-seam class + does NOT predict the IMPL count (pre-flight rounds
-catch contract surface, IMPL rounds catch runtime + test +
-prose). New R-class watch-item **R-v0.4-W2** (pre-pre-flight
-"new transport seam" interface-mirror checklist) fired its 1st
-IMPL-side validation at M31 IMPL P2-1 (the "non-retryable
-rewrap placement" axis is a new invariant unique to multipart
-upload); recommendation at v0.4-plan §13 to extend R-v0.4-W2
-with that axis ahead of the next "new transport seam" milestone.
+**v0.4-M32 pre-flight landed; M32 IMPL is next.**
+Doc list/get (`monday doc list [--workspace <wid>,...]
+[--order-by <created_at|used_at>] [--limit <n>] [--page <n>]` +
+`monday doc get <did>`) — first v0.4 verbs against Monday's
+`Query.docs(...)` surface; read-only at v0.4 with full workdocs
+CRUD (9 mutation surfaces on the wire) deferred to v0.5 (each
+mutation has enough surface area to warrant its own milestone
+cluster). No new transport seam (read uses the JSON
+`client.raw` path verbatim — same shape M22 `monday usage` +
+M27 `webhook list` use); no destructive gate (pure read); no
+new ERROR_CODE (29 stays per D8 closure). **Empirical probe**
+(`scripts/probe/m32-docs.ts` + `m32-docs-2.ts`, 2026-05-14, API
+`2026-01`) pinned `Query.docs(workspace_ids: [ID], order_by:
+DocsOrderBy, limit: Int, page: Int) → [Document]` ahead of the
+contract diff. **Eleven D-closures pinned at pre-flight** (D1–
+D11): D1 two dedicated read verbs; D2 wire type is `Document`
+not `Doc` (the standalone `DocKind` enum exists but
+`Document.doc_kind` returns `BoardKind!` reusing the same
+`public`/`private`/`share` values — wire-side type aliasing,
+no CLI projection asymmetry); D3 page/limit pagination
+(`MIN_DOC_LIST_LIMIT=1`, `MAX_DOC_LIST_LIMIT=100`,
+`DEFAULT_DOC_LIST_LIMIT=25`) — no cursor on Monday's workdocs
+surface; D4 `--workspace` comma-separated WorkspaceId filter
+maps to wire `workspace_ids: [ID]`, best-effort (Monday silently
+drops inaccessible IDs, no resolver warning); D5 `--order-by`
+closed 2-value enum (`created_at`/`used_at`, both `desc`
+server-side); D6 `blocks` slot in `doc get` only (list-row
+projection skips the rich-text payload); D7 live-only — no
+cache (mirrors `monday usage`/`status`/`webhook list`); D8 no
+new ERROR_CODE; D9 `doc list` wrapped record envelope
+`{documents, page, limit, returned_count, has_more}` (has_more
+heuristic = `returned_count === limit`; no total-count on
+wire), `doc get` direct unwrap `data: <Document with blocks>`;
+D10 operationNames pinned literally (`ListDocs` / `GetDoc`; NOT
+caller-overridable per R-NEW-37 W2); D11 `DocId` numeric-string
+brand added to `src/types/ids.ts` (9th brand).
 
-**M31 highlights.** Two new write verbs + one new transport seam
-+ one fetcher module + R-NEW-41 (asymmetric wire-vs-CLI
-semantics documentation pattern) 3rd-consumer trigger fired
-(new `docs/architecture.md` "Wire-vs-CLI semantics documentation
-conventions" section enumerates the three documented asymmetries:
-M27 webhook.config JSON/String + M27 NotificationTargetType
-collapse + M31 multipart-vs-JSON transport). **Eleven D-closures
-pinned at pre-flight + held under 7 Codex rounds** (D1–D11): D1
-two dedicated verbs (NOT `--set` extension); D2 file column only;
-D3 local file failures + size-cap rewrap via three
-`details.reason` values (`'file_not_readable'` / `'file_empty'` /
-`'file_too_large'`) — `details.file_size_bytes` is the local
-`fs.stat()` measurement at upload time (NOT a Monday error-
-payload field); D4 sibling module `src/api/multipart-transport.ts`
-(NOT extension of `transport.ts`); D5 dry-run via `fs.stat()`-
-backed planned-change envelope; D6 `item upload` invalidates
-parent board cache (single-leg per §8), `update upload` doesn't
-invalidate (Updates not in §8 cache scope); D7 no new ERROR_CODE
-(29 stays); D8 NOT idempotent; D9 `data.asset: {10-field
-Asset}` + echoed inputs; D10 local file path only (stdin `-`
-NOT supported); D11 operationNames pinned literally
-(`AddFileToColumn` / `AddFileToUpdate`; NOT caller-overridable
-per R-NEW-37 W2). **Signal + retry pinned at round 7**:
-`AddFileToColumnInputs.signal: AbortSignal` (REQUIRED) +
-`AddFileToColumnInputs.retries: number` (threaded through to
-`withRetry(...)` around multipart dispatch at IMPL); same shape
-on `AddFileToUpdateInputs`; same shape on
-`MultipartTransportRequest.signal: AbortSignal` (REQUIRED).
+**Prior milestone — v0.4-M31 IMPL closed end-to-end.** Asset
+upload (`monday item upload` + `monday update upload`) shipped
+the first v0.4 multipart transport extension across the
+pre-flight cluster `6b4c91e..ada29d1` (7 Codex rounds — driven
+by two distinct surface classes including the new-transport-seam
+substantive gaps at rounds 6-7) + IMPL cluster
+`18c5386..4582dd7` (3 Codex rounds — runtime body at `18c5386`,
+P2 substantive fixes at `f0952ea` round 1, prose precision at
+`6e06f90`/`4582dd7` rounds 2-3). Full per-milestone narrative
+at `docs/v0.4-plan.md` §3 M31 + §13 post-mortem.
+R-v0.4-W2 (pre-pre-flight "new transport seam" interface-mirror
+checklist) fired its 1st IMPL-side validation at M31 IMPL P2-1
+(the "non-retryable rewrap placement" axis is a new invariant
+unique to multipart upload); recommendation at v0.4-plan §13 to
+extend R-v0.4-W2 with that axis ahead of the next "new transport
+seam" milestone.
 
-**Live numbers (M31 IMPL close):**
-- Test count: **3470 + 1 skipped** across **141** test files
-  (+103 net vs 3367 + 1 skipped M31-pre-flight close baseline:
-  30 unit assets + 22 unit multipart-transport + 24 unit mime +
-  14 integration item-upload + 11 integration update-upload + 2
-  round-1 R_OK pre-check integration tests + 1 round-1
-  retry-short-circuit unit test for addFileToColumn + 1 round-2
-  retry-short-circuit unit test for addFileToUpdate parity).
-- Coverage: **99.25 / 96.25 / 99.4 / 99.53** (stmts / branches /
-  fns / lines) at the **95 / 95.45 / 95 / 95** floor. **Branches
-  margin 0.80pp** (was 0.83pp at M31 pre-flight close; -0.03pp
-  from new c8-ignore-drop branches partially compensated by the
-  new test surface — well within the margin tolerance).
-- ERROR_CODES count: **29** (unchanged per D7 closure).
-- Command count: **98** (unchanged from M31 pre-flight; no new
-  verbs at IMPL — both upload verbs landed at pre-flight stubs).
+**M32 pre-flight highlights.** Two new read verbs + one fetcher
+module (`src/api/documents.ts` with stub `listDocuments` +
+`getDocument` fetchers, c8-ignore-block-wrapped) + one new ID
+brand (`DocIdSchema` in `src/types/ids.ts`) + cli-design §4.3
+DOC section expanded with multi-line entries pinning the wire
+surface + cli-design §13 v0.4 entry flipped to "M32 pre-flight
+shipped; IMPL pending" with full closure context. **R-NEW-41
+stays at 3 consumers** — the BoardKind reuse for
+`Document.doc_kind` is wire-side type-name aliasing (same enum
+across `Board.kind` + `Document.doc_kind`, identical 3-value
+vocabulary), NOT a wire-vs-CLI semantic asymmetry. **R-NEW-43
+stays at 1 consumer** — the v0.5 deferral list of 9 doc-
+mutation surfaces (`create_doc` / `delete_doc` /
+`duplicate_doc` / `update_doc_name` / `import_doc_from_html` /
+`add_content_to_doc_from_markdown` / `create_doc_block` /
+`update_doc_block` / `delete_doc_block`) lives in prose, not as
+gated command stubs with placeholder guards.
+
+**Live numbers (M32 pre-flight close):**
+- Test count: **3507 + 1 skipped** across **143** test files
+  (+37 net vs 3470 + 1 skipped M31 IMPL close baseline: 26
+  argv unit tests for `doc list` covering schema-level
+  rejections + the `parseWorkspaceListArg` comma-split helper,
+  11 argv unit tests for `doc get`; integration tests deferred
+  to M32 IMPL).
+- Coverage: **99.18 / 96.02 / 98.99 / 99.45** (stmts / branches
+  / fns / lines) at the **95 / 95.45 / 95 / 95** floor.
+  **Branches margin 0.57pp** (was 0.80pp at M31 IMPL close;
+  -0.23pp from new c8-ignored stub-fetcher branches partially
+  compensated by the new argv test surface — well within
+  margin tolerance).
+- ERROR_CODES count: **29** (unchanged per D8 closure).
+- Command count: **98 → 100** (+2 new verbs).
 - `package.json` version: **0.3.0** (stays through v0.4
   milestones; bumps to `0.4.0` at v0.4 release-prep).
 
-**R-class state (post-M31 IMPL close):**
+**R-class state (post-M32 pre-flight close):**
+
+- **R-NEW-41 stays at 3 consumers post-M32.** The
+  `BoardKind`-for-`Document.doc_kind` reuse is wire-side
+  type-name aliasing (same enum across `Board.kind` +
+  `Document.doc_kind`, identical `public`/`private`/`share`
+  vocabulary). NOT a wire-vs-CLI semantic asymmetry — the CLI
+  surfaces the same string values the wire returns; no
+  projection drift. Documented inline in
+  `src/api/documents.ts`'s module docstring as wire-side
+  context; no extension of the `docs/architecture.md`
+  "Wire-vs-CLI semantics documentation conventions" section.
+  4th consumer trigger fires only when CLI's surface +
+  Monday's wire surface DIVERGE in shape.
+- **R-NEW-43 stays at 1 consumer post-M32.** The v0.5 deferral
+  list of 9 doc-mutation surfaces (`create_doc` / `delete_doc`
+  / `duplicate_doc` / `update_doc_name` /
+  `import_doc_from_html` / `add_content_to_doc_from_markdown`
+  / `create_doc_block` / `update_doc_block` /
+  `delete_doc_block`) lives in §13 v0.4 entry prose, NOT as
+  gated command stubs with placeholder guards — agents read
+  the deferral context from the CLI verb tree's absence rather
+  than from a `usage_error.details.reason:
+  doc_mutation_deferred` shape. Fires at 2nd consumer if a
+  future v0.4.x / v0.5 verb is gated on external registration
+  (e.g., a webhook-delivery verifier needing an HMAC secret).
+- **R-NEW-31 stays at 1 consumer post-M32.** No per-status
+  detail union surfaces — `doc list` + `doc get` envelopes
+  carry flat shapes without status discrimination.
+
+**R-class state (post-M31 IMPL close — carried forward for
+historical context):**
 
 - **R-NEW-41 shipped** (3rd consumer trigger fired at M31
   pre-flight + ratified at M31 IMPL). Wire-vs-CLI semantics
@@ -214,18 +225,22 @@ on `AddFileToUpdateInputs`; same shape on
   session counters, or epoch sentinels).
 
 Per-milestone narrative + Codex round detail + lessons learned
-live in `docs/v0.4-plan.md` §3 M31 entry + §13 M31 post-mortem +
-§22 R-v0.4-W2 entry. Do not duplicate here.
+live in `docs/v0.4-plan.md` §3 M32 entry + §9 M32 preconditions
++ §3 M31 entry + §13 M31 post-mortem + §22 R-v0.4-W2 entry. Do
+not duplicate here.
 
-**Next session — likely scope:**
-1. **v0.4-M32 candidate selection.** Per v0.4-plan §3 ordering:
-   `doc list/get` (workdocs); `team` writers (team create / update
-   / list); shell completion (bash / zsh / fish completion
-   generation per cli-design §3.5); release-prep (CHANGELOG +
-   version bump 0.3.0 → 0.4.0 + envelope-snapshot refresh + npm
-   publish). Pick the next milestone via the same empirical-
-   probe-then-pre-flight cadence that v0.3 + v0.4 milestones have
-   used end-to-end.
+**Next session — M32 IMPL.**
+1. **M32 IMPL — runtime bodies for `doc list/get`.** Swap the
+   c8-ignored stub fetchers in `src/api/documents.ts` for real
+   `client.raw` round-trips with `operationName: 'ListDocs'` /
+   `'GetDoc'`; swap the c8-ignored action bodies in
+   `src/commands/doc/list.ts` + `src/commands/doc/get.ts` for
+   live dispatch + envelope emit. Empty-list `doc get` →
+   `not_found` per D8. Drop the `c8 ignore start/stop`
+   block-wraps as integration tests cover the wire shape.
+   Land integration tests at
+   `tests/integration/commands/doc-list.test.ts` +
+   `doc-get.test.ts` cassette-backed via `FixtureTransport`.
 2. **Apply IMPL kickoff disciplines (R-NEW-56 + R-NEW-58)
    ratified at M31 IMPL**: cross-doc grep at IMPL kickoff to
    enumerate every prose site needing the stub→runtime flip

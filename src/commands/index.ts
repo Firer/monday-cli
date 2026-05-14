@@ -201,6 +201,16 @@ import { notificationSendCommand } from './notification/send.js';
 // conventions" section).
 import { itemUploadCommand } from './item/upload.js';
 import { updateUploadCommand } from './update/upload.js';
+// M32 (v0.4) — workdocs read surface (`doc list` / `doc get`).
+// Read-only at v0.4 per cli-design §13 v0.4 entry; full docs CRUD
+// deferred to v0.5. Pre-flight stubs at this commit (argv schema +
+// wire query documents only); runtime bodies + integration tests
+// land at M32 IMPL. Empirical probe at `scripts/probe/m32-docs.ts`
+// (2026-05-14, API `2026-01`) pinned `Query.docs(...)` signature +
+// the 14-field `Document` projection + the 9-field `DocumentBlock`
+// shape + the `DocsOrderBy` 2-value enum.
+import { docListCommand } from './doc/list.js';
+import { docGetCommand } from './doc/get.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -305,6 +315,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     notificationSendCommand,
     itemUploadCommand,
     updateUploadCommand,
+    docListCommand,
+    docGetCommand,
     rawCommand,
     boardDoctorCommand,
   ];

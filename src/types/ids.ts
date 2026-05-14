@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 /**
- * Branded zod schemas for the eight ID kinds Monday surfaces (M27
- * added `WebhookId` alongside the seven v0.1 brands). Brands make
+ * Branded zod schemas for the nine ID kinds Monday surfaces (M32
+ * adds `DocId` alongside the eight v0.1+M27 brands). Brands make
  * `BoardId`/`ItemId`/etc. nominally distinct at the type level even
  * though they're all numeric strings on the wire — passing a
  * `BoardId` where an `ItemId` is wanted becomes a compile error,
@@ -50,6 +50,13 @@ export const UserIdSchema = numericIdSchema.brand<'UserId'>();
 export const WorkspaceIdSchema = numericIdSchema.brand<'WorkspaceId'>();
 export const UpdateIdSchema = numericIdSchema.brand<'UpdateId'>();
 export const WebhookIdSchema = numericIdSchema.brand<'WebhookId'>();
+// M32 (v0.4) — workdocs read surface (`monday doc list/get`). Monday's
+// `Document.id` is `ID!` on the wire (numeric on every observed
+// account at API `2026-01`; empirical probe at `scripts/probe/m32-
+// docs.ts` 2026-05-14). Brand keeps `DocId` distinct from
+// `BoardId`/`ItemId`/etc. so the type system catches an `--workspace
+// <did>` slip at compile time.
+export const DocIdSchema = numericIdSchema.brand<'DocId'>();
 
 // Column and group IDs are stable lower-snake-case slugs ("status_4",
 // "topics") — not numeric. Validate as non-empty strings only.
@@ -64,3 +71,4 @@ export type UserId = z.infer<typeof UserIdSchema>;
 export type WorkspaceId = z.infer<typeof WorkspaceIdSchema>;
 export type UpdateId = z.infer<typeof UpdateIdSchema>;
 export type WebhookId = z.infer<typeof WebhookIdSchema>;
+export type DocId = z.infer<typeof DocIdSchema>;

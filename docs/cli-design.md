@@ -2197,8 +2197,99 @@ monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run] 
 monday webhook delete <wid> --yes [--dry-run]                                v0.3
 
 # === DOC (read-only in v0.4) ===
-monday doc list [--workspace <wid>]                                          v0.4
+# Workdocs read surface. v0.4-M32 ships the list + get verbs; full
+# docs CRUD (`create` / `update` / `delete` / `duplicate` /
+# `import_from_html` / `add_content_from_markdown` + per-block
+# verbs) defers to v0.5 — Monday's wire surfaces 9 doc-mutation
+# operations (empirical probe `scripts/probe/m32-docs.ts`
+# 2026-05-14) but each carries enough surface area to warrant its
+# own dedicated milestone cluster rather than a bundled
+# "doc CRUD" sweep.
+monday doc list [--workspace <wid>,...] [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]   v0.4
+                                          # `Query.docs(workspace_ids: [ID],
+                                          # order_by: DocsOrderBy, limit: Int,
+                                          # page: Int) → [Document]`. Pinned at
+                                          # M32 pre-flight via empirical probe
+                                          # (2026-05-14, API `2026-01`) —
+                                          # `Query.docs` returns `[Document]`
+                                          # (NOT `[Doc]` — the wire type is
+                                          # `Document` per the probe; the CLI
+                                          # verb namespace is `doc` per §4.1).
+                                          # `--workspace` is comma-separated
+                                          # numeric workspace IDs (e.g. "12345,
+                                          # 67890"); brand-validated per
+                                          # entry at the boundary. Inaccessible
+                                          # workspace IDs surface as empty
+                                          # filter results (Monday's wire
+                                          # silently drops unknown IDs — no
+                                          # resolver warning fires for
+                                          # inaccessibility because the wire
+                                          # doesn't distinguish "no docs in
+                                          # workspace X" from "X not
+                                          # accessible"). `--order-by` is the
+                                          # closed 2-value enum `created_at` /
+                                          # `used_at` (per the `DocsOrderBy`
+                                          # introspection); default
+                                          # `created_at`; both sort `desc`
+                                          # server-side (no ASC variant on
+                                          # Monday's wire). `--limit` is the
+                                          # page size, range `[1, 100]`,
+                                          # default `25` (matches Monday's
+                                          # wire-side default); ceiling pins
+                                          # worst-case payload size for
+                                          # doc-heavy accounts. `--page` is
+                                          # 1-based, default `1`. Page/limit
+                                          # pagination — Monday's workdocs
+                                          # surface has no cursor. Envelope
+                                          # carries `data: { documents:
+                                          # [Document], page, limit,
+                                          # returned_count, has_more }`;
+                                          # `has_more` is the `returned_count
+                                          # === limit` heuristic (Monday
+                                          # doesn't surface a total count).
+                                          # List-row projection ships the
+                                          # 13-field base Document WITHOUT the
+                                          # `blocks` selection — `blocks`
+                                          # belongs to `doc get` (rich-text
+                                          # bodies in a list would multiply
+                                          # payload across the page). Live-
+                                          # only (no cache per §8 cache
+                                          # scope); `meta.source: "live"`.
+                                          # Idempotent: yes (pure read).
 monday doc get <did>                                                         v0.4
+                                          # `Query.docs(ids: [<did>]) →
+                                          # [Document]` with the per-doc
+                                          # `blocks` selection hydrated.
+                                          # Returns at most one Document; the
+                                          # fetcher extracts index 0. Empty
+                                          # wire result (Monday's shape for
+                                          # "doc doesn't exist" OR "doc not
+                                          # visible to token") surfaces
+                                          # `not_found` with `details.doc_id`
+                                          # — Monday collapses the two cases
+                                          # into the same wire shape so the
+                                          # CLI can't distinguish them (no
+                                          # `forbidden` rewrap). Envelope
+                                          # `data: <Document with blocks>` —
+                                          # direct unwrap matching the read-
+                                          # one-verb convention (`board get`,
+                                          # `user get`). The Document's own
+                                          # `id` field is the echoed input;
+                                          # no separate `doc_id` echo slot.
+                                          # `data.blocks: [DocumentBlock]`
+                                          # carries Monday's 9-field block
+                                          # projection — `id` / `type` /
+                                          # `content` (JSON, opaque to the
+                                          # CLI) / `position` / `parent_block_
+                                          # id` / `doc_id` / `created_at` /
+                                          # `created_by {id, name}` /
+                                          # `updated_at`. Block-content
+                                          # schema validity is NOT cross-
+                                          # checked by the CLI; Monday's wire
+                                          # is the source of truth for the
+                                          # per-block-type payload shape.
+                                          # Live-only (no cache); `meta.source:
+                                          # "live"`. Idempotent: yes.
 
 # === NOTIFICATION ===
 monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]   v0.3
@@ -7407,7 +7498,34 @@ scoped idempotent changes, and post comments narrating its work.**
   fired its 3rd consumer here — the load-bearing lift is the new
   "Wire-vs-CLI semantics documentation conventions" section in
   `docs/architecture.md` (R-NEW-41 shipped).
-- `doc list/get` (read-only; full docs CRUD deferred further)
+- `doc list/get` (read-only workdocs; full docs CRUD deferred to
+  v0.5) **— M32 pre-flight shipped; IMPL pending**. Two new verbs
+  at §4.3: `monday doc list [--workspace <wid>,...] [--order-by
+  <created_at|used_at>] [--limit <n>] [--page <n>]` and `monday
+  doc get <did>`. Empirical probe `scripts/probe/m32-docs.ts`
+  (2026-05-14, API `2026-01`) pinned `Query.docs(workspace_ids:
+  [ID], order_by: DocsOrderBy, limit: Int, page: Int) →
+  [Document]`; the wire object is named `Document` (NOT `Doc` —
+  the standalone `DocKind` enum exists but `Document.doc_kind`
+  returns `BoardKind!` reusing the same `public`/`private`/
+  `share` values used for boards); 14 fields including
+  `blocks: [DocumentBlock]` (9-field block projection); `DocsOrderBy`
+  closed 2-value enum (`created_at` / `used_at`, both `desc`).
+  Page/limit pagination (no cursor on Monday's workdocs surface);
+  CLI ceilings `--limit` at 100 (Monday's wire default is 25, no
+  documented hard cap). Read-only — no cache (workdocs are
+  content-heavy + frequently human-edited; mirrors `monday usage`
+  / `monday status` / `webhook list` live-only cadence). No new
+  ERROR_CODE (29 stays); failures route through existing
+  `not_found` (non-existent or inaccessible doc), `usage_error`
+  (argv parse rejection), `validation_failed` (Monday-side
+  reject), `forbidden`/`unauthorized` (scope). Future v0.5 picks
+  up the 9 doc-mutation surfaces Monday's wire exposes
+  (`create_doc` / `update_doc_name` / `delete_doc` /
+  `duplicate_doc` / `import_doc_from_html` /
+  `add_content_to_doc_from_markdown` / `create_doc_block` /
+  `update_doc_block` / `delete_doc_block`) — each substantial
+  enough to warrant its own milestone.
 - `team` create/manage
 
 ### Explicitly deferred from v0.1's stable contract

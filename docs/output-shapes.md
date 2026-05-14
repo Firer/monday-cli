@@ -67,6 +67,7 @@ no `data`); see the **Errors** section at the bottom.
 | [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
 | [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
 | [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
+| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32) |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -4101,6 +4102,136 @@ preview the planned send before committing. Canonical
   "warnings": []
 }
 ```
+
+### `monday doc list [--workspace <wid>,...] [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]` (v0.4-M32)
+
+List workdocs visible to the token via Monday's `Query.docs(...)`
+(operationName `ListDocs`). Page/limit pagination — Monday's
+workdocs surface has no `items_page`-style cursor. The list-row
+projection ships every base Document field EXCEPT `blocks` (per
+D6 closure — rich-text bodies belong to `doc get`; including
+them in a list would multiply payload across the page). Live-
+only (cli-design §8 cache scope excludes workdocs — content-
+heavy + frequently human-edited; stale-cache risk outweighs
+cache-hit value).
+
+**Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire query
+documents land at v0.4-M32 pre-flight (`scripts/probe/m32-docs.ts`
+2026-05-14 pinned `Query.docs(workspace_ids: [ID], order_by:
+DocsOrderBy, limit: Int, page: Int) → [Document]` + the 14-field
+`Document` shape + the 2-value `DocsOrderBy` closed enum
+(`created_at` / `used_at`)). Runtime body lands at v0.4-M32 IMPL
+— the pre-flight action body throws `internal_error` post-parse
+so a premature invocation surfaces a clear "not yet implemented"
+signal.
+
+Envelope `data` carries the wrapped record (NOT a bare array)
+because page/limit pagination surfaces pagination context inline
+rather than via `meta.cursor` (which is reserved for
+`items_page`-style cursor surfaces per §6.1). `has_more` is the
+`returned_count === limit` heuristic — Monday's wire doesn't
+surface a total count, so "exactly `limit` rows returned" is the
+only signal that a follow-up page may exist; agents that need
+exhaustive listing loop until `has_more: false`.
+
+**Live success envelope (planned shape — IMPL pending):**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "documents": [
+      {
+        "id": "12345678",
+        "object_id": "98765",
+        "name": "Q4 launch plan",
+        "doc_kind": "private",
+        "url": "https://example.monday.com/docs/12345678",
+        "relative_url": "/docs/12345678",
+        "workspace_id": "5555",
+        "workspace": { "id": "5555", "name": "Marketing" },
+        "doc_folder_id": null,
+        "created_at": "2026-04-12T10:32:11Z",
+        "created_by": { "id": "1", "name": "Alice" },
+        "updated_at": "2026-05-01T14:22:09Z",
+        "settings": null
+      }
+    ],
+    "page": 1,
+    "limit": 25,
+    "returned_count": 1,
+    "has_more": false
+  },
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+Idempotent: yes (pure read).
+
+### `monday doc get <did>` (v0.4-M32)
+
+Read a single workdoc by ID, including its rich-text block body,
+via Monday's `Query.docs(ids: [<did>])` (operationName `GetDoc`).
+Monday returns `[Document]` (array even for a single-id query);
+the fetcher extracts index 0. An empty wire result (Monday's
+shape for "doc doesn't exist" OR "doc not visible to token")
+surfaces `not_found` with `details.doc_id` — Monday's wire
+collapses the two cases into the same shape so the CLI can't
+distinguish them (no `forbidden` rewrap; D8 closure).
+
+**Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire query
+document land at v0.4-M32 pre-flight. Runtime body lands at
+v0.4-M32 IMPL.
+
+Envelope `data: <Document with blocks>` — direct unwrap matching
+the read-one-verb convention (`board get` returns
+`data: <Board>`, `user get` returns `data: <User>`). The
+Document's own `id` field is the echoed input. `data.blocks:
+[DocumentBlock]` carries Monday's 9-field block projection;
+block-content `content` is a JSON payload opaque to the CLI
+(Monday's wire is the source of truth for the per-block-type
+shape).
+
+**Live success envelope (planned shape — IMPL pending):**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "12345678",
+    "object_id": "98765",
+    "name": "Q4 launch plan",
+    "doc_kind": "private",
+    "url": "https://example.monday.com/docs/12345678",
+    "relative_url": "/docs/12345678",
+    "workspace_id": "5555",
+    "workspace": { "id": "5555", "name": "Marketing" },
+    "doc_folder_id": null,
+    "created_at": "2026-04-12T10:32:11Z",
+    "created_by": { "id": "1", "name": "Alice" },
+    "updated_at": "2026-05-01T14:22:09Z",
+    "settings": null,
+    "blocks": [
+      {
+        "id": "block-1",
+        "type": "heading",
+        "content": { "level": 1, "text": "Launch milestones" },
+        "position": 1.0,
+        "parent_block_id": null,
+        "doc_id": "12345678",
+        "created_at": "2026-04-12T10:32:11Z",
+        "created_by": { "id": "1", "name": "Alice" },
+        "updated_at": "2026-04-12T10:32:11Z"
+      }
+    ]
+  },
+  "meta": { /* §6.1 — source: "live", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+Idempotent: yes (pure read).
 
 ---
 
