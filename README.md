@@ -49,41 +49,71 @@ Requires **Node.js ≥ 22**.
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
 #
 #    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.3.0 — the verb surfaces a clear `usage_error.details.reason:
+#    v0.4.0 — the verb surfaces a clear `usage_error.details.reason:
 #    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
 # 2. Smoke test — confirm the token works.
 monday account whoami --json
 
-# 3. Is everything wired up? (v0.3 diagnostics cluster)
-monday status --json                    # 7-probe DNS/TCP/TLS/auth/cache matrix
-monday usage --json                     # remaining daily Monday API operations
+# 3. Install shell completion (v0.4-M33 — bash / zsh / fish).
+#    The default mode emits raw script bytes on stdout (so the redirect
+#    works); `--json` opts INTO the §6 envelope.
+monday completion bash >> ~/.bashrc        # or .zshrc / config.fish
 
-# 4. List a board's items (replace 12345 with your board ID)
+# 4. Is everything wired up? (v0.3 diagnostics cluster)
+monday status --json                       # 7-probe DNS/TCP/TLS/auth/cache matrix
+monday usage --json                        # remaining daily Monday API operations
+
+# 5. List a board's items (replace 12345 with your board ID)
 monday item list --board 12345 --json
 
-# 5. File a new task (v0.2)
+# 6. File a new task (v0.2)
 monday item create --board 12345 --name "Refactor login" \
   --set status=Backlog --set 'Due date'=+1w --json
 
-# 6. Find-or-create with idempotent matching (v0.2)
-#    Re-running with the same args is safe — 0/1/2+ matches route to
-#    create / update / `ambiguous_match` (one of the 29 stable error codes).
+# 7. Long-poll for activity on an item (v0.4-M29 — NDJSON stream).
+#    Per-event NDJSON record + a `{"_meta": {...}}` trailer carrying
+#    the session counters. Use `--once` to drain backlog without
+#    polling further; SIGINT (Ctrl-C) drains gracefully and exits 130.
+monday item watch 67890 --once             # or --max-events 50 --max-duration 1h
+
+# 8. Upload a file to a column or update (v0.4-M31 — multipart wire).
+#    `add_file_to_column` for item columns; `add_file_to_update` for
+#    comment attachments. Both surface `--dry-run` for an envelope
+#    preview without the multipart round-trip.
+monday item upload 67890 --column 'Attachments' ./screenshot.png --json
+monday update upload <update-id> ./diagram.png --json
+
+# 9. Parallel partial-success bulk updates (v0.4-M30).
+#    `--concurrency <N>` (range 1..32) opts into parallel dispatch on
+#    the M25 partial-success path. Envelope is byte-equivalent to the
+#    sequential `--concurrency 1` default; input order is preserved
+#    in `data.results[]` regardless of completion order.
+monday item update --where status=Backlog --set status='Working on it' \
+  --board 12345 --yes --continue-on-error --concurrency 4 --json
+
+# 10. Browse the workdocs surface (v0.4-M32 — read-only at v0.4).
+monday doc list --workspace 5 --order-by used_at --limit 10 --json
+monday doc get 88001 --json                # full Document with blocks
+
+# 11. Find-or-create with idempotent matching (v0.2)
+#     Re-running with the same args is safe — 0/1/2+ matches route to
+#     create / update / `ambiguous_match` (one of the 29 stable error codes).
 monday item upsert --board 12345 --name "Refactor login" \
   --match-by name --set status='Working on it' --json
 
-# 7. Move a ticket forward, then comment on it
+# 12. Move a ticket forward, then comment on it
 monday item set 67890 status=Done --json
 monday update create 67890 --body "Shipped in PR #1234" --json
 
-# 8. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
-#    First-time setup auto-detects boards by Monday's stock template names.
-monday dev discover --apply --json      # writes ~/.monday-cli/config.toml
-monday dev sprint current --json        # the active sprint
-monday dev task list --mine --json      # my open tasks
+# 13. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
+#     First-time setup auto-detects boards by Monday's stock template names.
+monday dev discover --apply --json         # writes ~/.monday-cli/config.toml
+monday dev sprint current --json           # the active sprint
+monday dev task list --mine --json         # my open tasks
 
-# 9. Outbound writes (v0.3 — webhooks + notifications)
+# 14. Outbound writes (v0.3 — webhooks + notifications)
 monday webhook list 12345 --json
 monday notification send --user 7 --target 67890 \
   --target-type item --text "PTAL" --json
@@ -152,7 +182,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.3.0",
+    "cli_version": "0.4.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -252,7 +282,27 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.3.0 (current — `monday-cli@0.3.0` on npm):**
+**v0.4.0 (current — `monday-cli@0.4.0` on npm):**
+the v0.3 surface PLUS long-poll item activity streaming
+(`monday item watch <iid>` — NDJSON), parallel bulk dispatch
+(`monday item update --where ... --concurrency <N>`), asset uploads
+(`monday item upload` / `monday update upload` — multipart wire),
+Monday workdocs reads (`monday doc list` / `monday doc get` — full
+workdocs CRUD mutation surface deferred to v0.5), and shell
+completion (`monday completion bash|zsh|fish`). **No breaking
+changes vs v0.3.0** — every v0.4 surface is additive. Built
+incrementally across M29–M33. See [CHANGELOG.md](./CHANGELOG.md)
+for the full per-milestone release notes.
+
+**OAuth deferral (unchanged from v0.3.0).** `monday auth login` is
+registered but the canonical Monday OAuth app is not registered in
+v0.4.0; the verb surfaces a clear `usage_error.details.reason:
+oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
+config + per-profile credentials cache work fully against API
+tokens; OAuth registration revisits in v0.4.x / v0.5 contingent on
+user demand.
+
+**v0.3.0 (the previous release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -266,17 +316,8 @@ outbound writes (`monday webhook list/create/delete` +
 (`tags`, `board_relation`, `dependency`) closing the v0.2
 tentative-row carryover. **No breaking changes vs v0.2.0** — every
 v0.3 surface is additive. Built incrementally across M19–M28.
-See [CHANGELOG.md](./CHANGELOG.md) for the full per-milestone
-release notes.
 
-**OAuth deferral.** `monday auth login` is registered but the
-canonical Monday OAuth app is not registered in v0.3.0; the verb
-surfaces a clear `usage_error.details.reason: oauth_unregistered`
-pointing at `MONDAY_API_TOKEN`. Multi-profile config + per-profile
-credentials cache work fully against API tokens; OAuth registration
-revisits in v0.3.x / v0.4 contingent on user demand.
-
-**v0.2.0 (the previous release):**
+**v0.2.0 (the prior release):**
 the v0.1 read-only core + safe-mutations surface PLUS the full
 mutation surface (item lifecycle, update mutations, workspace
 lifecycle, board lifecycle, board columns + groups). Built
@@ -461,19 +502,66 @@ row `tags`, `board_relation`, `dependency`.
   deferred out of v0.3 per Decision 11 (Monday's `sub_items_board`
   carries no `subtasks` column at API `2026-01`).
 
-**v0.4 (in progress on `main`):** `monday item watch` (M29 shipped),
-`--concurrency` bulk parallelism (M30 shipped), asset uploads
-(`monday item upload` / `monday update upload`; **M31 pre-flight
-landed, IMPL pending**), plus `doc list/get`, `team` writers,
-shell completion, and 0.4.0 release prep sequenced after M31 IMPL.
-Multi-level subitems remain conditional on Monday's data model
-surfacing them.
+**What v0.4 added (M29–M33; full per-milestone narrative in
+[CHANGELOG.md](./CHANGELOG.md)):**
+
+- **M29** — `monday item watch <iid>` long-polls `boards.activity_
+  logs(item_ids:)` for per-item event streaming. NDJSON output:
+  one event record per emitted activity-log row + a trailing
+  `{"_meta": {...}}` record carrying the seven session counters
+  (`events_emitted` / `polls_made` / `failed_polls` /
+  `last_seen_event_id` / `circuit_broken_at` / `exit_reason` /
+  `watch_duration_seconds`). `--once` drains backlog and exits
+  without polling further; `--max-events` / `--max-duration`
+  ceilings exit cleanly; SIGINT drains gracefully + exits 130.
+  Circuit-breaker trips after 5 consecutive `complexity_exceeded`
+  polls.
+- **M30** — `monday item update --where ... --concurrency <N>`
+  (range 1..32; default 1) opts into bounded parallel dispatch on
+  the M25 partial-success path. Envelope is byte-equivalent to the
+  sequential default; input order is preserved in `data.results[]`
+  regardless of completion order. `--concurrency 1` routes through
+  `dispatchSequential`; `> 1` routes through `dispatchParallel`.
+- **M31** — `monday item upload <iid> --column <col> <file>` +
+  `monday update upload <update-id> <file>` ship the first multipart
+  wire surface (`add_file_to_column` / `add_file_to_update`). Both
+  surface `--dry-run` for a planned-change envelope preview without
+  the multipart round-trip. Uploads are non-idempotent (each
+  successful call mints a fresh `Asset` ID); cache invalidation
+  fires single-leg on success. Read-side `item assets` / `update
+  assets` verbs deferred to v0.4.x per M31 Decision D6.
+- **M32** — `monday doc list [--workspace <wid>,...] [--order-by
+  <created_at|used_at>] [--limit <n>] [--page <n>]` + `monday doc
+  get <did>` ship read-only access to Monday's workdocs surface
+  (`Query.docs(...)`). Page/limit pagination (no cursor on this
+  Monday surface). The full workdocs CRUD mutation surface (9
+  mutations: `create_doc` / `update_doc_name` / `delete_doc` /
+  `duplicate_doc` / `import_doc_from_html` / `add_content_to_doc_
+  from_markdown` / `create_doc_block` / `update_doc_block` /
+  `delete_doc_block`) is deferred to v0.5.
+- **M33** — `monday completion <bash|zsh|fish>` ships shell
+  completion script generation. The default mode emits raw script
+  bytes on stdout regardless of TTY/pipe context (so `monday
+  completion bash >> ~/.bashrc` works as a sourceable file —
+  cli-design §3.1 #2 raw-bytes carve-out); `--json` opts INTO the
+  §6 envelope with `data: { shell, script }`. Hand-rolled per-shell
+  templates (commander 14.0.3 ships no built-in completion
+  machinery, verified by empirical probe at M33 pre-flight).
+
+**v0.5 (next):** `team` writers (deferred from v0.4-M34 at the
+post-v0.4-M33 candidate-selection session), Monday workdocs CRUD
+mutation surface (9 mutations deferred at v0.4-M32 D8 closure),
+multi-level subitems remain conditional on Monday's data model
+surfacing them, cross-board `item move` value-overrides (slipped
+from v0.4 at v0.4 release-prep — Monday's `ColumnMappingInput`
+carries no value slot), and resumable cross-board cursor pagination
+(slipped from v0.4 — per-board cursor-lifetime under aggregation
+needs design work).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
-full roadmap, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for the
-v0.3 milestone history, and
-[`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for the v0.2 milestone
-history.
+full roadmap, [`docs/v0.4-plan.md`](./docs/v0.4-plan.md) for the
+v0.4 milestone history, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md)
+for v0.3, and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for v0.2.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 
@@ -517,7 +605,9 @@ The full dev workflow + how to add a new command is in
 - **No `any`** (lint-enforced).
 - **Parse at every boundary** with zod.
 - **Mock at the network boundary, not internal modules.**
-- **Branch coverage 95%+ floor** (v0.3 ratcheted from 94% — see
+- **Branch coverage 95.45% floor** for branches; 95% floor for
+  statements / functions / lines (v0.3-M22 ratcheted branches
+  from 94% via an OAuth coverage-push session — see
   `vitest.config.ts`).
 - **Atomic commits, Conventional Commits.**
 
