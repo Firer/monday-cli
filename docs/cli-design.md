@@ -7594,7 +7594,10 @@ scoped idempotent changes, and post comments narrating its work.**
 - `item watch <iid>` (polling at default 30s cadence; reactive circuit
   breaker on Monday wire errors per §14.4 closure) **— M29 shipped**
 - Shell completion (bash / zsh / fish) via hand-rolled templates
-  **— M33 pre-flight in progress (this commit)**. Empirical probe at
+  **— M33 pre-flight landed end-to-end (cluster `c619425..affbf70`,
+  3 rounds; cumulative findings 0 P1 + 3 P2 + 4 P3 across 2 fix-up
+  rounds within the M22 / M27 / M32 read-surface precedent)**.
+  Empirical probe at
   pre-flight (`grep -rn 'completion\|complete' node_modules/commander/
   lib/ node_modules/commander/typings/` 2026-05-14, commander 14.0.3)
   returned zero hits — commander ships NO built-in completion

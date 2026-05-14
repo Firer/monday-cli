@@ -11,7 +11,160 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M32 IMPL landed end-to-end; M33 = shell completion picked, pre-flight pending.**
+**v0.4-M33 pre-flight landed end-to-end; IMPL pending.**
+Shell completion (`monday completion <bash|zsh|fish>`) — first
+non-envelope stdout surface in the CLI (cli-design §3.1 #2
+raw-bytes carve-out). Empirical commander-capability check at
+pre-flight (`grep -rn 'completion\|complete' node_modules/
+commander/lib/ node_modules/commander/typings/` 2026-05-14,
+commander 14.0.3) returned ZERO hits — commander ships NO
+built-in completion machinery, so the verb hand-rolls per-shell
+templates (D1 closure; no runtime dep added per the cli-design
+§1 "minimum deps" principle). **Pre-flight cluster
+`c619425..affbf70` (3 commits: feat `c619425` + 2 Codex round
+fix-ups + round-3 ratification with 0 P1 + 0 P2 + 0 P3).
+Cumulative findings: 0 P1 + 3 P2 + 4 P3 across the 2 fix-up
+rounds** — within the M22 / M27 / M32 read-surface precedent
+for a CLI-internal milestone. Codex round 1 `687a0c6` (0 P1 +
+2 P2 + 2 P3: details.shell→details.issues[] across 3 sites +
+--text/--ndjson→--output table|text|ndjson across 6 sites +
+shellSchema export + monday schema completion caveat in
+output-shapes.md); round 2 `affbf70` (0 P1 + 1 P2 + 2 P3: 3rd
+round of contract-prose tightening — `details.issues[].code:
+'invalid_value'` removed (parseArgv's SummarisedIssue carries
+no Zod code field) + IMPL test-plan bullet `--output table`
+gap + last residual "via commander" prose at v0.4-plan §3
+opening); round 3 ratified convergence.
+
+**M33 pre-flight highlights.** Single new top-level verb
+`monday completion <bash|zsh|fish>` (NOT under a noun
+namespace; meta-CLI like `monday raw` / `monday status` /
+`monday usage` / `monday schema`). Closed 3-value enum
+positional (`bash` / `zsh` / `fish`); unknown values reject at
+the parse boundary with `usage_error.details.issues[]` carrying
+`{path: 'shell', message}` per `parseArgv`'s `SummarisedIssue`
+shape (NO `details.shell` slot; NO Zod `code` field). **Three
+output modes** (cli-design §3.1 #2 raw-bytes carve-out):
+default emits raw script bytes on stdout regardless of TTY/
+pipe context (the install flow `monday completion bash >>
+~/.bashrc` relies on this); `--json` / `--output json` /
+`MONDAY_OUTPUT=json` opts INTO the standard §6 envelope with
+`data: { shell, script }`; `--table` / `--output table` /
+`--output text` / `--output ndjson` reject as `usage_error`
+(only `--json` and `--table` are global shorthand flags per
+§4.4; text and ndjson are accessible only via `--output
+<fmt>`). No wire surface (CLI-internal; no Monday API call;
+no auth requirement; no cache); `meta.source: "none"` on the
+`--json` envelope path. No `--dry-run` (not a mutation); no
+GraphQL operation (R-NEW-37 W2 audit returns "nothing
+flagged"). ERROR_CODES count stays at 29 per D4 closure.
+
+**Live numbers (M33 pre-flight close):**
+- Test count: **3591 + 1 skipped** across **147** test files
+  (+13 net vs 3578 + 1 skipped M32 IMPL close baseline: 13
+  argv unit tests at `tests/unit/commands/completion-argv.
+  test.ts` covering 3 happy paths + 6 schema-level rejections
+  + 4 command-module metadata pins).
+- Coverage: **99.24 / 96.30 / 99.25 / 99.51** (stmts /
+  branches / fns / lines) at the **95 / 95.45 / 95 / 95**
+  floor. **Branches margin 0.85pp** (unchanged from M32 IMPL
+  close — the c8-ignored stub action body contributes
+  branches identically to the M31 / M32 pre-flight cadence;
+  the new verb's argv branches all covered by the unit-test
+  suite).
+- ERROR_CODES count: **29** (unchanged per D4 closure).
+- Command count: **100 → 101** (+1 new verb).
+- `package.json` version: **0.3.0** (stays through every v0.4
+  feature milestone; bumps to `0.4.0` at v0.4 release-prep,
+  the LAST v0.4 milestone).
+- Envelope-snapshot refreshed to reflect the new command_count
+  (101).
+
+**R-class state (post-M33 pre-flight close):**
+
+- **No R-class movement at M33 pre-flight.** No new lifts
+  fired; no new R-class candidates surfaced from the 2-round
+  Codex cluster. The three v0.3 R-class watch-items that
+  could have fired all stayed at their pre-M33 consumer
+  counts: R-NEW-31 (discriminated-union per-status detail
+  schema) stays at 1 consumer; R-NEW-41 (asymmetric wire-vs-
+  CLI semantics documentation) stays at 3 consumers (the
+  verb has NO wire surface — the asymmetry class doesn't
+  apply); R-NEW-43 (deferred-feature surface pattern) stays
+  at 1 consumer (the pre-flight stub uses the established
+  c8-ignored throw, NOT OAuth-style placeholder guards).
+  R-NEW-NEW (M33-specific candidates) — none surfaced; the
+  contract diff stays narrow to a single new verb with no
+  novel shape class.
+- **R-NEW-72 (cross-doc grep after every contract-flipping
+  Codex fix-up — R-NEW-56 extension) ratified for its 1st
+  full validation at M33 pre-flight.** Filed at the post-M32
+  IMPL close as a watch-item (1 supporting instance from M32
+  IMPL round 2); M33 pre-flight is the 1st pre-flight cluster
+  to apply the discipline. Round 1 introduced new prose drift
+  (`code: 'invalid_value'` claim that round 2 caught); the
+  per-round-fix grep at the end of round 1 would have caught
+  it ahead of round 2 — but the grep ran AFTER each fix-up
+  commit, which is the documented R-NEW-72 cadence. The
+  discipline correctly enumerated remaining drift sites at
+  each grep; round 3 ratified convergence. **Status: 2nd
+  supporting instance — graduates to a permanent CLAUDE.md
+  "Workflow rules" addition at the next ratification (likely
+  M33 IMPL or v0.5 kickoff).** Full entry stays at
+  v0.4-plan §22 R-NEW-72.
+- **R-NEW-75 (candidate-selection session shape) stays at 1
+  supporting instance** — M33 pre-flight is NOT a candidate-
+  selection session, so the 2nd-consumer trigger doesn't fire
+  here. Likely fires at v0.5 kickoff against the 9-surface
+  doc-CRUD-mutation backlog M32 D8 closure deferred.
+- **Three M32-IMPL R-NEW candidates (R-NEW-72 / R-NEW-73 /
+  R-NEW-74) all stay at their pre-M33 consumer counts** —
+  R-NEW-72 incremented to 2 supporting instances per the note
+  above; R-NEW-73 (`assertNonNullArrayPayload` helper) stays
+  at 3 consumers (M33 has no fetcher response-parse
+  boundary); R-NEW-74 (`kind: 'record'` for wrapped-record
+  emit) stays at 2 consumers (M33's `--json` envelope is a
+  flat 2-field record, NOT a wrapped paginated record).
+- **Four post-M32-pre-flight R-NEW candidates (R-NEW-68 /
+  R-NEW-69 / R-NEW-70 / R-NEW-71) all stay at their pre-M33
+  consumer counts** — no numeric-flag parsing (R-NEW-68), no
+  required-JSON-shape slots (R-NEW-69), no comma-separated
+  brand lists (R-NEW-70), no pagination-invariant superRefine
+  (R-NEW-71) surfaced in M33.
+
+Per-milestone narrative + Codex round detail + lessons learned
+live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions.
+Do not duplicate here.
+
+**Next session — v0.4-M33 IMPL: shell completion runtime body.**
+Per-shell hand-rolled script templates land at IMPL — three new
+template strings (one per shell flavour) inside the action body,
+each enumerating `program.commands` + per-command options + global
+flags at emit time so completions stay in sync with the registry.
+Three runtime modes wired at IMPL: default raw-bytes
+(`ctx.stdout.write(script)` — no envelope, no `emitSuccess`); the
+`--json` envelope path (`emitSuccess({ data: { shell, script },
+schema: completionOutputSchema, source: 'none' })`); the
+`--table` / `--output table` / `--output text` / `--output ndjson`
+rejection path (`throw new UsageError(...)`). Integration tests
+cover the three output modes + invalid-shell-flavour parse
+boundary + missing positional. Expected cadence: 1-2 Codex IMPL
+rounds (lower bound of the M22 / M27 / M32 read-surface
+precedent). Carry forward both IMPL kickoff disciplines (R-NEW-56
+cross-doc grep + R-NEW-58 2-consumer scan) — the R-NEW-56 grep
+at M33 IMPL will likely return clean (no new helper / fetcher /
+envelope means no "selected dispatcher" prose surface to drift);
+the R-NEW-58 2-consumer scan against R-NEW-68/69/70/71/72/73/74
+will likely return NEGATIVE (M33 IMPL has no fetcher response
+boundary, no JSON-shape slots, no comma-separated brand lists,
+no wrapped paginated records, no numeric-flag parsing — none of
+the open watch-items are likely to crystallize at the 2nd
+consumer). After M33 IMPL closes, remaining v0.4 backlog is team
+writers (needs probe + pre-flight pair, 2-3 sessions) then v0.4
+release-prep (1 session, mirrors v0.3-M28's `d9ad757..5e8c210`
+cluster).
+
+**Prior milestone — v0.4-M32 IMPL landed end-to-end.**
 Doc list/get (`monday doc list [--workspace <wid>,...]
 [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]` +
 `monday doc get <did>`) — first v0.4 verbs against Monday's
@@ -368,29 +521,6 @@ Per-milestone narrative + Codex round detail + lessons learned
 live in `docs/v0.4-plan.md` §3 M32 entry + §9 M32 preconditions
 + §3 M31 entry + §13 M31 post-mortem + §22 R-v0.4-W2 entry. Do
 not duplicate here.
-
-**Next session — v0.4-M33 pre-flight: shell completion**
-(bash / zsh / fish via commander). Candidate picked at the
-post-M32 IMPL housekeeping session from the cli-design §13
-v0.4 backlog; chosen over team writers (which needs a
-dedicated empirical-probe session ahead of pre-flight to pin
-Monday's team-mutation wire vocabulary at API `2026-01`) and
-v0.4 release-prep (which conventionally lands LAST after the
-remaining v0.4 feature surface ships, mirroring M28's
-post-M19–M27 cadence). M33 introduces no new wire surface
-(CLI-internal milestone), no new transport seam, no
-destructive verbs, and no novel ERROR_CODE — commander ships
-shell-completion support out of the box. Expected cadence:
-1-2 Codex pre-flight rounds + 1-2 IMPL rounds (lower bound
-of the M22 / M27 / M32 read-surface precedent — there's
-no wire shape to drift). Carry forward both IMPL kickoff
-disciplines (R-NEW-56 cross-doc grep + R-NEW-58 2-consumer
-scan) — both now 3rd-time / 2nd-time validated post-M32 IMPL
-— but note that the R-NEW-56 grep at M33 IMPL will likely
-return clean (no new helper / fetcher / envelope means no
-"selected dispatcher" prose surface to drift). After M33,
-remaining v0.4 backlog is team writers (probe + pre-flight)
-then v0.4 release-prep.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits

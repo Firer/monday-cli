@@ -4257,9 +4257,11 @@ monday completion zsh  >> ~/.zshrc
 monday completion fish >  ~/.config/fish/completions/monday.fish
 ```
 
-**Status: v0.4-M33 pre-flight in progress.** Argv parsing + commander
-wiring + the `--json` envelope schema ship at pre-flight; the per-
-shell hand-rolled script templates land at M33 IMPL. Empirical probe
+**Status: v0.4-M33 pre-flight landed end-to-end (cluster
+`c619425..affbf70`, 3 Codex rounds; IMPL pending).** Argv parsing
++ commander wiring + the `--json` envelope schema ship at pre-
+flight; the per-shell hand-rolled script templates land at M33
+IMPL. Empirical probe
 at pre-flight (`grep -rn 'completion\|complete' node_modules/
 commander/lib/ node_modules/commander/typings/` 2026-05-14, commander
 14.0.3) confirmed commander ships NO built-in completion machinery —
