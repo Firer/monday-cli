@@ -18,7 +18,12 @@
  *   - **Get variant** — `Query.docs(ids: [ID!]) → [Document]` with
  *     the per-doc `blocks` selection hydrated. Returns at most one
  *     Document (single-id list). The CLI extracts the singleton
- *     index 0 — null/empty array surfaces `not_found`. The
+ *     index 0; an empty array surfaces `not_found` (D8 — Monday's
+ *     wire collapses doesn't-exist + not-accessible into the same
+ *     shape), while a null `docs` root surfaces `internal_error`
+ *     with a drift hint (Monday's documented shape is `[Document]`,
+ *     possibly empty, never null — null indicates wire-shape
+ *     regression worth surfacing loudly). The
  *     `Document.blocks: [DocumentBlock]` selection adds significant
  *     payload, which is why `doc list` ships WITHOUT `blocks` and
  *     `doc get` is the per-doc body-hydrating path.

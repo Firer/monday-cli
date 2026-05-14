@@ -6,7 +6,8 @@
  * (§9 IMPL preconditions + IMPL watch-items):
  *   - happy path with `blocks` hydrated
  *   - empty `docs: []` → `not_found` with `details.doc_id` (D8 closure)
- *   - null `docs` root → `not_found`
+ *   - null `docs` root → `internal_error` with drift hint (wire-shape
+ *     regression — distinct from the D8 empty-array not_found case)
  *   - multi-element response → defensive `internal_error`
  *   - schema drift → `internal_error`
  *   - W4: live source + cache_age_seconds null per D7 closure
