@@ -35,19 +35,24 @@
  * standard install flow above pipes to a file and an envelope wrap
  * would defeat the purpose. Three modes:
  *
- *   - **Default (no `--json` / no `--output`)**: raw script bytes.
+ *   - **Default (no `--json` / no `--output` / no `MONDAY_OUTPUT`)**:
+ *     raw script bytes. Sticky `MONDAY_OUTPUT` is load-bearing in
+ *     the carve-out — a non-empty env value opts the caller into
+ *     the same dispatch path the `--output <fmt>` flag would
+ *     (envelope when `MONDAY_OUTPUT=json`, rejection for
+ *     `table` / `text` / `ndjson`).
  *   - **`--json` / `--output json` / `MONDAY_OUTPUT=json`**: standard
  *     §6 envelope with `data: { shell, script }`. Useful for agent
  *     introspection (e.g., `monday completion bash --json | jq -r
  *     '.data.script'` extracts the same bytes the default mode
  *     prints).
  *   - **`--table` / `--output table` / `--output text` / `--output
- *     ndjson`**: rejected as `usage_error` (no sensible non-JSON
- *     envelope view of a multi-line script blob). The `--text` and
- *     `--ndjson` shorthand flags don't exist on this CLI (only
- *     `--json` and `--table` are global shorthands per cli-design
- *     §4.4); text / ndjson are accessible only via `--output
- *     <fmt>`.
+ *     ndjson` / `MONDAY_OUTPUT=<non-json>`**: rejected as
+ *     `usage_error` (no sensible non-JSON envelope view of a multi-
+ *     line script blob). The `--text` and `--ndjson` shorthand
+ *     flags don't exist on this CLI (only `--json` and `--table`
+ *     are global shorthands per cli-design §4.4); text / ndjson
+ *     are accessible only via `--output <fmt>`.
  *
  * **`shell` argv (Decision 4).** Single positional, required. Closed
  * 3-value enum `bash` / `zsh` / `fish` validated at the parse
@@ -197,22 +202,39 @@ const buildCompletionTree = (program: Command): CompletionNode => {
 interface FlatPath {
   readonly path: readonly string[];
   readonly children: readonly string[];
+  /**
+   * Merged option list (locals + program-root globals). Used by the
+   * bash + zsh templates where every depth's flag suggestions are
+   * self-contained ("at `monday item get <TAB>`, suggest `--json`
+   * even though `--json` lives on the root commander instance, not
+   * on `get`").
+   */
   readonly options: readonly string[];
+  /**
+   * Node-scoped option list ONLY (no globals folded in). Used by
+   * the fish template, which registers globals via `complete -c
+   * monday -l <name>` at the root and per-depth local flags via
+   * `complete -c monday -n '__fish_seen_subcommand_from ...'
+   * -l <name>`. Without the local-vs-merged split, fish would
+   * either duplicate every global flag at every depth (loud + ugly
+   * tab-completion suggestions) or drop every per-verb local flag
+   * (e.g. `doc list --workspace`, `dev sprint list --state`). The
+   * dedicated `localOptions` slot keeps fish's per-depth emit
+   * precise without forcing bash/zsh to lose merged globals.
+   */
+  readonly localOptions: readonly string[];
 }
 
 const flattenPaths = (root: CompletionNode): readonly FlatPath[] => {
   const globalOptions = root.options;
   const acc: FlatPath[] = [];
   const recur = (node: CompletionNode, path: readonly string[]): void => {
-    // Merge node-scoped options with the program-root globals so
-    // every depth's flag list is self-contained (`monday item get
-    // --json` works because the global `--json` lives on the root
-    // commander instance, not the `get` sub-command).
     const merged = new Set<string>([...globalOptions, ...node.options]);
     acc.push({
       path,
       children: node.children.map((c) => c.name).sort(),
       options: [...merged].sort(),
+      localOptions: [...node.options].sort(),
     });
     for (const child of node.children) {
       recur(child, [...path, child.name]);
@@ -391,16 +413,27 @@ const buildFishScript = (paths: readonly FlatPath[]): string => {
       );
     }
     // Emit one `complete -c monday -n '<cond>' -l <flag>` per option
-    // long-form. Skip emitting global flags at every depth — fish
-    // accepts global completes once at the root.
-    if (depth === 0) {
-      for (const flag of entry.options) {
-        // Strip the leading `--` from the long form for fish's -l.
-        // Commander's long-form always starts with `--`; the `: flag`
-        // arm is defensive against a hypothetical bare-name input.
-        /* c8 ignore next */
-        const long = flag.startsWith('--') ? flag.slice(2) : flag;
+    // long-form. The fish completion model is per-condition: globals
+    // register at the root (no `-n` predicate so they apply
+    // everywhere); per-verb locals register at their specific depth
+    // with the matching `__fish_seen_subcommand_from ...` predicate
+    // so the suggestion only fires inside the right command scope.
+    // Without the per-depth local-flag emission, fish would lose
+    // every verb-specific flag (e.g. `doc list --workspace`,
+    // `dev sprint list --state`) — Codex IMPL round-1 P2-1 catch.
+    const flagsToEmit = depth === 0 ? entry.options : entry.localOptions;
+    for (const flag of flagsToEmit) {
+      // Strip the leading `--` from the long form for fish's -l.
+      // Commander's long-form always starts with `--`; the `: flag`
+      // arm is defensive against a hypothetical bare-name input.
+      /* c8 ignore next */
+      const long = flag.startsWith('--') ? flag.slice(2) : flag;
+      if (depth === 0) {
         lines.push(`complete -c monday -l ${shSingleQuote(long)}`);
+      } else {
+        lines.push(
+          `complete -c monday -n ${shSingleQuote(cond)} -l ${shSingleQuote(long)}`,
+        );
       }
     }
   }

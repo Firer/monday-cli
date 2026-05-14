@@ -274,6 +274,51 @@ describe('monday completion — script content sanity', () => {
     expect(script).toContain('__fish_use_subcommand');
   });
 
+  it('fish script emits per-verb local options at the matching subcommand depth (Codex IMPL round-1 P2-1)', async () => {
+    // Without the per-depth local-flag emission, fish completion
+    // suggestions lose verb-specific flags (`doc list --workspace`,
+    // `dev sprint list --state`, `item list --filter` etc). Pin two
+    // representative checks:
+    //
+    //   - 2-level: `doc list --workspace`
+    //   - 3-level: `dev sprint list --state`
+    //
+    // Each assertion verifies the script registers the long-form
+    // flag with the matching `__fish_seen_subcommand_from ...`
+    // predicate chain. The exact predicate ordering doesn't matter
+    // (fish accepts the conditions in any order) so we assert the
+    // long-form `-l <name>` byte sequence + the deepest subcommand
+    // name's `__fish_seen_subcommand_from` appearing on the same
+    // emission line.
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'completion', 'fish'],
+    });
+    await run(options);
+    const lines = captured.stdout().split('\n');
+
+    // 2-level: doc list --workspace. The condition predicate is
+    // emitted as a single single-quoted argument to fish's `-n`,
+    // so the per-token names appear without inner quotes:
+    //   complete -c monday -n '__fish_seen_subcommand_from doc; and __fish_seen_subcommand_from list' -l 'workspace'
+    const docListWorkspace = lines.find(
+      (l) =>
+        l.includes('__fish_seen_subcommand_from doc') &&
+        l.includes('__fish_seen_subcommand_from list') &&
+        l.includes("-l 'workspace'"),
+    );
+    expect(docListWorkspace).toBeDefined();
+
+    // 3-level: dev sprint list --state.
+    const devSprintListState = lines.find(
+      (l) =>
+        l.includes('__fish_seen_subcommand_from dev') &&
+        l.includes('__fish_seen_subcommand_from sprint') &&
+        l.includes('__fish_seen_subcommand_from list') &&
+        l.includes("-l 'state'"),
+    );
+    expect(devSprintListState).toBeDefined();
+  });
+
   it('every shell script enumerates every registered top-level noun-or-verb name', async () => {
     // Registry-sync invariant: each script must mention each
     // top-level command's name verbatim so completions stay current
