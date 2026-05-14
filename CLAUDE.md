@@ -11,20 +11,29 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4.0 ready for publish — pending user push authorization +
-npm publish.** The v0.4 release-prep cluster (this session)
-mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim across 6
-commits: `c193f21` envelope-snapshot refresh (+11 snapshots for
-M29-M33 surfaces) + `eb9e7a9` ToC audit + slip stale `deferred_to:
-"v0.4"` slots to `"v0.5"` (3 production sites + matching test +
-doc prose; mirrors M28's `f2600fa` v0.3-deferral slip) + `f9eef68`
-README v0.4 quickstart + scope refresh + `861a734` version bump
-0.3.0 → 0.4.0 in `package.json` + `package-lock.json` + `b1739bf`
-CHANGELOG `[0.4.0]` entry + this close-docs sweep commit. Annotated
-`v0.4.0` git tag created locally pointing at this cluster's HEAD;
-push to `origin/main`, `gh release create`, and `npm publish`
-pending user authorization (mirroring v0.3-M28's wait-for-
-authorization cadence).
+**v0.4.0 published — release complete.** The v0.4 release-prep
+cluster mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim
+across 6 commits: `c193f21` envelope-snapshot refresh (+11
+snapshots for M29-M33 surfaces) + `eb9e7a9` ToC audit + slip
+stale `deferred_to: "v0.4"` slots to `"v0.5"` (3 production
+sites + matching test + doc prose; mirrors M28's `f2600fa`
+v0.3-deferral slip) + `f9eef68` README v0.4 quickstart + scope
+refresh + `861a734` version bump 0.3.0 → 0.4.0 in `package.json`
++ `package-lock.json` + `b1739bf` CHANGELOG `[0.4.0]` entry +
+`b8e4cd0` close-docs sweep. **Pushed to `origin/main`** +
+**GitHub release live** at
+https://github.com/Firer/monday-cli/releases/tag/v0.4.0 with
+the full CHANGELOG body + **npm publish landed
+2026-05-14T22:46:28Z** (`monday-cli@0.4.0`, `latest` dist-tag).
+The post-release-prep refactor-audit commit `70d0cba` filed
+R-NEW-83 (NDJSON-trailer parsing helper; HIGH priority lift
+candidate at 6 consumers) + swept the team-CRUD slip-to-v0.5
+drift across `cli-design.md` §13 + `v0.4-plan.md` §1 (the M34
+team-writers deferral happened at the post-M33 candidate-
+selection session before release-prep, but the planning-scope
+sites weren't swept until this audit). v0.4.0 ships **no
+breaking changes vs v0.3.0** — every v0.4 surface is additive
+across M29–M33.
 
 **No code-surface change in the release-prep cluster** — only docs,
 tests, envelope-snapshot regen, and the version bump. ERROR_CODES
