@@ -346,15 +346,28 @@ live in `docs/v0.4-plan.md` §3 M32 entry + §9 M32 preconditions
 + §3 M31 entry + §13 M31 post-mortem + §22 R-v0.4-W2 entry. Do
 not duplicate here.
 
-**Next session — next v0.4 milestone TBD.** M32 IMPL closed the
-v0.4 doc surface end-to-end (read-only; full doc CRUD deferred to
-v0.5 per D8 closure). Candidate selection for the next v0.4
-milestone happens at the next session kickoff from the remaining
-v0.4 backlog per `cli-design.md §13 v0.4` entry — team writers,
-shell completion, release-prep, or other read/write surfaces the
-backlog identifies. Carry forward both IMPL kickoff disciplines
-(R-NEW-56 cross-doc grep + R-NEW-58 2-consumer scan) — both now
-3rd-time / 2nd-time validated post-M32 IMPL.
+**Next session — v0.4-M33 pre-flight: shell completion**
+(bash / zsh / fish via commander). Candidate picked at the
+post-M32 IMPL housekeeping session from the cli-design §13
+v0.4 backlog; chosen over team writers (which needs a
+dedicated empirical-probe session ahead of pre-flight to pin
+Monday's team-mutation wire vocabulary at API `2026-01`) and
+v0.4 release-prep (which conventionally lands LAST after the
+remaining v0.4 feature surface ships, mirroring M28's
+post-M19–M27 cadence). M33 introduces no new wire surface
+(CLI-internal milestone), no new transport seam, no
+destructive verbs, and no novel ERROR_CODE — commander ships
+shell-completion support out of the box. Expected cadence:
+1-2 Codex pre-flight rounds + 1-2 IMPL rounds (lower bound
+of the M22 / M27 / M32 read-surface precedent — there's
+no wire shape to drift). Carry forward both IMPL kickoff
+disciplines (R-NEW-56 cross-doc grep + R-NEW-58 2-consumer
+scan) — both now 3rd-time / 2nd-time validated post-M32 IMPL
+— but note that the R-NEW-56 grep at M33 IMPL will likely
+return clean (no new helper / fetcher / envelope means no
+"selected dispatcher" prose surface to drift). After M33,
+remaining v0.4 backlog is team writers (probe + pre-flight)
+then v0.4 release-prep.
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
