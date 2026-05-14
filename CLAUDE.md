@@ -82,10 +82,14 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
 
 **R-class state (post-M33 pre-flight close):**
 
-- **No R-class movement at M33 pre-flight.** No new lifts
-  fired; no new R-class candidates surfaced from the 2-round
-  Codex cluster. The three v0.3 R-class watch-items that
-  could have fired all stayed at their pre-M33 consumer
+- **No code-lift R-class movement at M33 pre-flight — but
+  three new R-class candidates surfaced (R-NEW-76 / R-NEW-77
+  / R-NEW-78; full entries at v0.4-plan §22).** The 2-round
+  Codex cluster's findings (3 P2 + 4 P3) were all
+  documentation-precision fixes; the R-class candidates that
+  surfaced are watch-items / process-discipline entries, not
+  immediate code lifts. The three v0.3 R-class watch-items
+  that could have fired all stayed at their pre-M33 consumer
   counts: R-NEW-31 (discriminated-union per-status detail
   schema) stays at 1 consumer; R-NEW-41 (asymmetric wire-vs-
   CLI semantics documentation) stays at 3 consumers (the
@@ -93,9 +97,6 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   apply); R-NEW-43 (deferred-feature surface pattern) stays
   at 1 consumer (the pre-flight stub uses the established
   c8-ignored throw, NOT OAuth-style placeholder guards).
-  R-NEW-NEW (M33-specific candidates) — none surfaced; the
-  contract diff stays narrow to a single new verb with no
-  novel shape class.
 - **R-NEW-72 (cross-doc grep after every contract-flipping
   Codex fix-up — R-NEW-56 extension) ratified for its 1st
   full validation at M33 pre-flight.** Filed at the post-M32
@@ -132,9 +133,66 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   brand lists (R-NEW-70), no pagination-invariant superRefine
   (R-NEW-71) surfaced in M33.
 
+**Three new R-class candidates filed at M33 pre-flight** (full
+entries at v0.4-plan §22):
+
+- **R-NEW-76 — Pre-flight stub argv-before-deferred-feature-
+  throw discipline** (5 forcing supporting instances + 1
+  retroactive; LOW priority watch-item; graduates to a
+  permanent CLAUDE.md "Workflow rules" entry at the 6th
+  forcing supporting instance). Surfaced retroactively at M33
+  pre-flight after the cadence became visible across 5
+  consecutive post-M31-lesson pre-flight stubs (M31a / M31b /
+  M32a / M32b / M33). Pattern: pre-flight stub action body
+  runs `parseArgv` (or `inputSchema.parse`) BEFORE the `c8
+  ignore start` block-wrap so invalid argv surfaces
+  `usage_error` from the parse boundary, NOT `internal_error`
+  from the c8-ignored stub throw. The M31 pre-flight round-1
+  P2-2 was the surfacing event; M31a / M31b / M32a / M32b /
+  M33 are the forcing supporting instances post-lesson. Cross-
+  references R-NEW-43 (deferred-feature surface pattern — a
+  distinct pattern for permanently-unavailable features behind
+  OAuth-style placeholder guards).
+- **R-NEW-77 — CLI-internal milestone empirical-probe-slot
+  equivalent (framework / SDK capability check)** (1
+  supporting instance; LOW priority watch-item, process
+  discipline). Surfaced at M33 pre-flight D1 closure as the
+  CLI-internal analogue of the standard "empirical-probe step
+  in pre-flight" discipline. Pattern: for CLI-internal
+  milestones with no Monday wire surface, the pre-flight runs
+  a `grep -rn <feature> node_modules/<dep>/lib/ typings/
+  Readme.md` capability check at the SDK-pinned version
+  against any framework / SDK / tool the cli-design §13
+  backlog entry names ("via commander" / "via Node's child_
+  process" / etc.). The check REPLACES the standard
+  Monday-API empirical-probe step; the pre-flight
+  preconditions §9 tick-list reflects the substitution
+  explicitly. M33 ran the check against commander 14.0.3
+  and got ZERO hits, flipping the §13 v0.4 backlog entry
+  from "via commander" to "via hand-rolled per-shell
+  templates" before any pre-flight contract claim could
+  drift. Fires at 2nd CLI-internal milestone (likely v0.5).
+- **R-NEW-78 — Codex template W{N} audit-point for output-
+  format-flag enumeration correctness** (1 supporting
+  instance; LOW priority watch-item, template-stable
+  candidate; NOT a code lift). Surfaced at M33 pre-flight
+  round-1 P2-2 — the contract diff described `--text` /
+  `--ndjson` as standalone shorthand flags but the cli-
+  design §4.4 inventory ships ONLY `--json` and `--table` as
+  shorthands; `text` and `ndjson` are accessible only via
+  the long-form `--output <fmt>` value. Fires at 2nd
+  consumer (any future verb claiming to reject output
+  formats at the parse boundary) + folds the audit-point
+  into `.claude/templates/codex-pre-flight-review.md`
+  alongside W1 / W2. Cross-references R-NEW-25 (Codex
+  template "findings up front" directive; shipped) +
+  R-NEW-17 (W1 redactor-pattern audit; shipped) +
+  R-NEW-37 (W2 GraphQL operation-name parity; shipped) —
+  template-extension cadence.
+
 Per-milestone narrative + Codex round detail + lessons learned
-live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions.
-Do not duplicate here.
+live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
++ §22 R-NEW-76/77/78 entries. Do not duplicate here.
 
 **Next session — v0.4-M33 IMPL: shell completion runtime body.**
 Per-shell hand-rolled script templates land at IMPL — three new
