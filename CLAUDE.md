@@ -81,21 +81,36 @@ mutation surfaces (`create_doc` / `delete_doc` /
 `duplicate_doc` / `update_doc_name` / `import_doc_from_html` /
 `add_content_to_doc_from_markdown` / `create_doc_block` /
 `update_doc_block` / `delete_doc_block`) lives in prose, not as
-gated command stubs with placeholder guards.
+gated command stubs with placeholder guards. **Codex
+pre-flight review converged in 4 rounds** across the cluster
+`05c5988..<close-docs sha>` — initial contract diff at
+`05c5988` + round 1 `a875add` (0 P1 + 2 P2 + 2 P3: strict
+decimal parser + `requiredJsonValueSchema` + 2 prose drifts)
++ round 2 `823fccc` (0 P1 + 1 P2 + 2 P3: pagination-invariant
+`.superRefine` + 2 prose drifts) + round 3 `880d9fb` (0 P1 +
+1 P2 + 1 P3: `.superRefine` early-return guard + close-docs
+deferral) + round 4 ratification (0 P1 + 0 P2 + 0 P3). One
+round above the M30 / M27 / M22 read-surface precedent;
+three rounds below the M31 7-round outlier (driven by its
+new-transport-seam class M32 doesn't have). Cumulative
+findings: **0 P1 + 4 P2 + 5 P3 across the 3 fix-up rounds**.
 
 **Live numbers (M32 pre-flight close):**
-- Test count: **3507 + 1 skipped** across **143** test files
-  (+37 net vs 3470 + 1 skipped M31 IMPL close baseline: 26
-  argv unit tests for `doc list` covering schema-level
-  rejections + the `parseWorkspaceListArg` comma-split helper,
-  11 argv unit tests for `doc get`; integration tests deferred
+- Test count: **3554 + 1 skipped** across **144** test files
+  (+84 net vs 3470 + 1 skipped M31 IMPL close baseline:
+  initial diff +37 — 26 argv unit tests for `doc list` + 11
+  argv unit tests for `doc get`; round-1 fix +41 — 12
+  parseStrictDecimal regressions + 29 documents schema unit
+  tests; round-2 fix +4 pagination-invariant tests; round-3
+  fix +2 superRefine-guard tests; integration tests deferred
   to M32 IMPL).
-- Coverage: **99.18 / 96.02 / 98.99 / 99.45** (stmts / branches
-  / fns / lines) at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.57pp** (was 0.80pp at M31 IMPL close;
-  -0.23pp from new c8-ignored stub-fetcher branches partially
-  compensated by the new argv test surface — well within
-  margin tolerance).
+- Coverage: **99.20 / 96.03 / 99.16 / 99.48** (stmts /
+  branches / fns / lines) at the **95 / 95.45 / 95 / 95**
+  floor. **Branches margin 0.58pp** (was 0.80pp at M31 IMPL
+  close; -0.22pp from new c8-ignored stub-fetcher branches +
+  new `.superRefine` branches partially compensated by the
+  new argv + schema test surface — well within margin
+  tolerance).
 - ERROR_CODES count: **29** (unchanged per D8 closure).
 - Command count: **98 → 100** (+2 new verbs).
 - `package.json` version: **0.3.0** (stays through v0.4
