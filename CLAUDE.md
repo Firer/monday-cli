@@ -112,11 +112,13 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   verbs).
 - `package.json` version: **0.4.0** (bumped at `861a734`).
 - `v0.4.0` annotated tag points at the cluster's final commit
-  (created locally; **pushed to `origin/main` + GitHub release
-  + npm publish pending user authorization**, mirroring the
-  v0.3-M28 cadence). v0.3.0's tag remains live at `5e8c210`.
+  (`b8e4cd0`); **pushed to `origin/main`** + **GitHub release
+  live** at https://github.com/Firer/monday-cli/releases/tag/v0.4.0.
+  v0.3.0's tag remains live at `5e8c210`.
+- npm registry version: **0.4.0** (`latest` dist-tag,
+  published 2026-05-14T22:46:28Z).
 
-**R-class state (post-v0.4 release-prep close + refactor-audit):**
+**R-class state (post-v0.4 release-prep close + R-NEW-83 lift + post-lift refactor-audit):**
 
 - **One new R-class candidate filed at v0.4 release-prep close
   — R-NEW-82** (release-prep `deferred_to: '<currently-
@@ -159,6 +161,17 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   15/16's "missed earlier triggers, mass-migrate when
   surfaced" cadence at the v0.3 audit. Full entry at
   v0.4-plan §22 R-NEW-83.
+- **One new R-class candidate filed at the post-R-NEW-83-lift
+  refactor-audit — R-NEW-84** (skip Codex review on
+  mechanical / process-only / test-side housekeeping clusters
+  where no production `src/**/*.ts` code changes; 3 supporting
+  instances — v0.3-M28 release-prep + v0.4 release-prep +
+  v0.4 R-NEW-83 lift; MEDIUM priority watch-item — process
+  discipline, NOT a code lift; graduates to a permanent
+  CLAUDE.md "Workflow rules" carve-out under the existing
+  Two-AI review rule at the 4th confirming instance — likely
+  v0.5.x patch-release prep or another test-side R-class
+  lift). Full entry at v0.4-plan §22 R-NEW-84.
 
 **R-class state (post-M33 IMPL close — unchanged):**
 
@@ -294,8 +307,7 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — v0.5 kickoff (externally-blocked on user
-authorization for v0.4.0 push + publish first).** v0.5 opens
+**Next session — v0.5 kickoff.** v0.5 opens
 with the team writers + Monday workdocs CRUD mutation backlog
 together — 10 wire surfaces (team mutations + 9 doc mutations
 Monday exposes). Team writers deferred from v0.4-M34 at the
@@ -312,15 +324,16 @@ API `2026-01` before the pre-flight contract diff). Estimated
 pre-flight + IMPL + close-docs); doc CRUD likely another 4-5
 sessions across 2-3 milestone clusters.
 
-**v0.4 release-prep close (this session).** Mirrored v0.3-M28's
+**v0.4 release-prep close (prior session).** Mirrored v0.3-M28's
 release-prep cadence verbatim: 6 commits (envelope-snapshot
 refresh + ToC audit / deferral slip + README + version bump +
-CHANGELOG + this close-docs sweep) + annotated `v0.4.0` git
-tag created locally (push + GitHub release + npm publish
-pending user authorization). **R-NEW-75 graduated at the
-candidate-selection session that picked this release-prep over
-M34 team writers** — the 5-dimension scoping framework applied
-cleanly (release-prep returning zero on 4 of 5 axes IS the
+CHANGELOG + close-docs sweep) + annotated `v0.4.0` git tag
+landed; **pushed to `origin/main`** + GitHub release live +
+**npm publish landed 2026-05-14T22:46:28Z**. **R-NEW-75
+graduated at the candidate-selection session that picked this
+release-prep over M34 team writers** — the 5-dimension scoping
+framework applied cleanly (release-prep returning zero on 4 of
+5 axes IS the
 signal that it's process-only, not a sign the dimensions are
 wrong); promoted to a permanent CLAUDE.md "Workflow rules"
 entry below.
