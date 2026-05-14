@@ -2719,7 +2719,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | v0.4 (M31 pre-flight; IMPL pending) | **NOT via `--set`** — files cross the wire as `multipart/form-data` (NOT `change_column_value`). The dedicated verbs `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` land in §4.3 at M31 pre-flight (stubs); runtime multipart dispatch lands at M31 IMPL. Non-`file` columns passed to `--column` surface `unsupported_column_type` with a hint pointing back at this row. |
+| `files` | **v0.4** (shipped — M31) | **NOT via `--set`** — files cross the wire as `multipart/form-data` (NOT `change_column_value`). Use the dedicated verbs `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (§4.3). Non-`file` columns passed to `--column` surface `unsupported_column_type` with a hint pointing back at this row. |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -7379,29 +7379,34 @@ scoped idempotent changes, and post comments narrating its work.**
 - Bulk operations with `--concurrency` (probed against Monday's
   per-account concurrency cap; empirical probe at 2026-05-13
   observed cap > 100 in-flight for trivial reads, see §9.3)
-  **— M30 pre-flight shipped on `item update --where
-  --continue-on-error` only; IMPL pending; other bulk verbs
+  **— M30 shipped end-to-end on `item update --where
+  --continue-on-error`** (pre-flight + IMPL clusters closed;
+  `MIN_CONCURRENCY = 1` / `MAX_CONCURRENCY = 32` /
+  `DEFAULT_CONCURRENCY = 1` per §9.3; envelope byte-equivalent
+  to M25 sequential under `--concurrency 1`). Other bulk verbs
   (item clear, board update, workspace add-users, etc.) defer
   their `--concurrency` extension to later v0.4 milestones if
-  user demand surfaces**
+  user demand surfaces.
 - Asset upload (`add_file_to_column`, `add_file_to_update`)
-  **— M31 pre-flight shipped; IMPL pending.** Two new verbs at §4.3:
+  **— M31 shipped end-to-end** (pre-flight + IMPL clusters
+  closed). Two new verbs at §4.3:
   `monday item upload <iid> --column <col> <file>` (file column only;
   empirical probe `scripts/probe/m31-asset-upload.ts` 2026-05-13
   pinned `add_file_to_column(column_id: String!, file: File!,
   item_id: ID!) → Asset`) and `monday update upload <uid> <file>`
   (`add_file_to_update(file: File!, update_id: ID!) → Asset`). First
-  v0.4 verb crossing the wire via `multipart/form-data` (NOT the
+  v0.4 verbs crossing the wire via `multipart/form-data` (NOT the
   JSON-only `client.request` seam); new transport seam at
   `src/api/multipart-transport.ts` mirrors `transport.ts`'s
   `Transport` interface with FormData-driven body assembly. No new
   ERROR_CODE (29 stays); existing `usage_error` /
   `unsupported_column_type` / `not_found` / `validation_failed`
-  cover the failure modes via `details.reason` discrimination.
+  cover the failure modes via `details.reason` discrimination
+  (`'file_not_readable'` / `'file_empty'` / `'file_too_large'`).
   R-NEW-41 (asymmetric wire-vs-CLI semantics documentation pattern)
-  fires its 3rd consumer here — the load-bearing lift is the new
+  fired its 3rd consumer here — the load-bearing lift is the new
   "Wire-vs-CLI semantics documentation conventions" section in
-  `docs/architecture.md` (R-NEW-41 ship).
+  `docs/architecture.md` (R-NEW-41 shipped).
 - `doc list/get` (read-only; full docs CRUD deferred further)
 - `team` create/manage
 

@@ -1623,7 +1623,11 @@ export const bundleColumnValues = (
  *     `add_file_to_column` (multipart upload) rather than
  *     `change_column_value`, so neither friendly translator nor
  *     `--set-raw` can reach the wire surface. Carry
- *     `deferred_to: "v0.4"`; hint flags the multipart-upload nature.
+ *     `deferred_to: "v0.4"`; hint points at `monday item upload`
+ *     (shipped v0.4-M31; multipart wire). The `deferred_to` field
+ *     value stays `"v0.4"` to keep the agent-facing key stable for
+ *     v0.3.x users on npm — the actual verb landed at v0.4-M31
+ *     development; v0.4.0 is the eventual npm release.
  *   - **`time_tracking`** — verb-shaped extension (start/stop, not
  *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
  *     hint points at the upcoming verb surface.
@@ -1719,13 +1723,16 @@ const UNSUPPORTED_TABLE: Readonly<
       `via add_file_to_column (multipart upload) rather than ` +
       `change_column_value. The friendly --set translator can't ` +
       `reach this surface; --set-raw <col>=<json> can't either. ` +
-      `Asset upload is pinned to v0.4 per cli-design.md §13.`,
+      `Use \`monday item upload <iid> --column <col> <file>\` ` +
+      `(v0.4-M31, multipart wire) for file columns.`,
     details: () => ({
       deferred_to: 'v0.4',
       hint:
-        'asset upload is a v0.4 deferral; the underlying mutation ' +
-        '(add_file_to_column) requires multipart wire shape that ' +
-        'the column-value path does not model.',
+        'use `monday item upload <iid> --column <col> <file>` ' +
+        '(shipped v0.4-M31, multipart wire) — the friendly ' +
+        '--set translator + --set-raw both target ' +
+        'change_column_value-shaped types and can\'t reach the ' +
+        'multipart wire.',
     }),
   },
   time_tracking: {

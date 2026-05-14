@@ -171,10 +171,10 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     });
   });
 
-  it('file → files_shaped with the v0.4 add_file_to_column hint', () => {
+  it('file → files_shaped with the shipped `monday item upload` hint (v0.4-M31)', () => {
     expect(categorizeNoncanonicalColumnType('file')).toEqual({
       category: 'files_shaped',
-      suggestedWritePath: 'add_file_to_column (deferred to v0.4)',
+      suggestedWritePath: 'monday item upload (v0.4-M31, multipart)',
     });
   });
 

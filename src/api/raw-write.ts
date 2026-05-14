@@ -174,7 +174,11 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *   - **`files`-shaped** → `unsupported_column_type` with
  *     `deferred_to: "v0.4"`. Monday writes via `add_file_to_column`
  *     (multipart upload), not `change_column_value`; the raw
- *     payload can't reach the right wire surface.
+ *     payload can't reach the right wire surface. Hint points at
+ *     `monday item upload` (shipped v0.4-M31; multipart wire).
+ *     The `deferred_to` field value stays `"v0.4"` to keep the
+ *     agent-facing key stable for v0.3.x users on npm — v0.4.0
+ *     is the eventual npm release that includes this verb.
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the
@@ -228,18 +232,20 @@ export const translateRawColumnValue = (
         `writes via add_file_to_column (multipart upload) rather than ` +
         `change_column_value. --set-raw goes through change_column_value ` +
         `/ change_multiple_column_values, so a raw payload can't reach ` +
-        `the right wire surface for this type. Asset upload is pinned ` +
-        `to v0.4 per cli-design §13.`,
+        `the right wire surface for this type. Use ` +
+        `\`monday item upload <iid> --column <col> <file>\` ` +
+        `(v0.4-M31, multipart wire) instead.`,
       {
         details: {
           column_id: column.id,
           type: column.type,
           deferred_to: 'v0.4',
           hint:
-            'file upload uses Monday\'s add_file_to_column mutation ' +
-            '(multipart). The CLI does not expose that wire path in ' +
-            'v0.2; v0.4 will add a dedicated --file flag. --set-raw ' +
-            'rejects this type at column-resolution time.',
+            'use `monday item upload <iid> --column <col> <file>` ' +
+            '(shipped v0.4-M31; multipart wire). --set-raw rejects ' +
+            'this type at column-resolution time because the ' +
+            'underlying wire shape is incompatible with ' +
+            '`change_column_value`.',
         },
       },
     );

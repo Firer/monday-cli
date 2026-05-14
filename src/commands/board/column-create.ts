@@ -33,8 +33,9 @@
  *     the v0.2 escape hatch, accepts wire-shape correctness).
  *   - `read_only_forever` → no write path (the column exists only
  *     for read-side display / mirror sources).
- *   - `files_shaped` → `add_file_to_column` deferred to v0.4
- *     (asset upload).
+ *   - `files_shaped` → `monday item upload` (v0.4-M31, multipart
+ *     wire) for the agent-facing write path; `add_file_to_column`
+ *     for the underlying Monday mutation.
  * The command STILL PROCEEDS in all cases — Monday accepts non-
  * writable types and agents may legitimately want them. The
  * categorisation lives in `api/column-types.ts` so the warning
@@ -466,10 +467,12 @@ const buildNoncanonicalMessage = (
     case 'files_shaped':
       return (
         `Column type "${columnType}" was created successfully but the ` +
-        `write path is \`add_file_to_column\` (multipart upload), ` +
-        `pinned to v0.4 (asset upload). The column exists, but ` +
-        `\`--set\` and \`--set-raw\` against it surface ` +
-        `unsupported_column_type until v0.4 lands.`
+        `write path is \`add_file_to_column\` (multipart upload). ` +
+        `Use \`monday item upload <iid> --column <col> <file>\` ` +
+        `(v0.4-M31, multipart wire) to attach files; \`--set\` and ` +
+        `\`--set-raw\` against this column surface ` +
+        `unsupported_column_type since neither reaches the multipart ` +
+        `wire shape.`
       );
   }
 };

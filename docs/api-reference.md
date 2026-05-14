@@ -307,8 +307,11 @@ Other types (`creation_log`, `mirror`, `formula`, `auto_number`,
 `unsupported_column_type` from the friendly path. The M8
 `--set-raw <col>=<json>` escape hatch accepts the wire JSON
 verbatim; it's gated against read-only-forever and files-shaped
-types (`add_file_to_column` is a separate multipart mutation
-deferred to v0.4).
+types. For file columns, use the dedicated
+`monday item upload <iid> --column <col> <file>` verb (v0.4-M31,
+multipart wire) — the underlying Monday mutation is
+`add_file_to_column`, a separate multipart endpoint that
+neither the friendly translator nor `--set-raw` can reach.
 
 > The `person` column type is deprecated in Monday's schema — use
 > `people` (plural) for both single-assignee and multi-assignee
@@ -403,6 +406,14 @@ The API wrapper in `src/api/` should:
 
 ## File uploads
 
-`add_file_to_column` and `add_file_to_update` use `multipart/form-data`.
-The SDK's `request()` accepts `File`/`Blob` instances directly — see the
-upstream README for the canonical pattern.
+`add_file_to_column` and `add_file_to_update` use `multipart/form-data`
+(GraphQL multipart-request specification — jaydenseric). The CLI ships
+its own multipart transport at `src/api/multipart-transport.ts`
+(separate from the JSON-only `Transport` in `transport.ts`); the
+spec-compliant `operations` + `map` + file parts live there.
+Agent-facing verbs:
+
+- `monday item upload <iid> --column <col> <file>` (v0.4-M31; file
+  column only).
+- `monday update upload <uid> <file>` (v0.4-M31; attaches to
+  Updates).

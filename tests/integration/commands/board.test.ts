@@ -3183,7 +3183,7 @@ describe('monday board column-create (integration, M16)', () => {
     expect(env.warnings[0]?.details?.suggested_write_path).toBeNull();
   });
 
-  it('live: --type file emits noncanonical_column_type warning with files_shaped category + v0.4 hint', async () => {
+  it('live: --type file emits noncanonical_column_type warning with files_shaped category + `monday item upload` hint (v0.4-M31)', async () => {
     const out = await drive(
       ['board', 'column-create', '12345', '--type', 'file', '--title', 'Attachments', '--json'],
       {
@@ -3211,7 +3211,14 @@ describe('monday board column-create (integration, M16)', () => {
       }[];
     };
     expect(env.warnings[0]?.details?.category).toBe('files_shaped');
-    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/add_file_to_column/);
+    // Post-M31 IMPL: hint flipped from `add_file_to_column (deferred to
+    // v0.4)` to `monday item upload (v0.4-M31, multipart)` since the
+    // verb is now shipped and a verb name is more useful than a wire
+    // mutation name for agents.
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
+      /monday item upload/,
+    );
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.4-M31/);
   });
 
   it('live: omits description/defaults from the wire when those flags are absent', async () => {

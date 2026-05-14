@@ -81,8 +81,11 @@
  *
  * **Cache invalidation.** Successful upload changes the file
  * column's `FileValue` ColumnValue → cached board metadata for that
- * board stale; IMPL fires `invalidateBoard(boardId)` after success
- * per the §8 single-leg invalidation pattern.
+ * board stale; the action body fires `invalidateBoard(boardId, env)`
+ * after success per the §8 single-leg invalidation pattern (BEFORE
+ * `emitMutation` so a cache-unlink failure surfaces through the
+ * runner's catch-all rather than double-emitting after a success
+ * envelope already hit stdout).
  *
  * **Side effects.** None at IMPL — `add_file_to_column` does not
  * post an update or trigger automations beyond Monday's own

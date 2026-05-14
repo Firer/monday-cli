@@ -315,7 +315,13 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     }
   });
 
-  it('hint on files-shaped error mentions add_file_to_column (the right wire surface)', () => {
+  it('hint on files-shaped error points at `monday item upload` (v0.4-M31 verb)', () => {
+    // Updated post-M31 IMPL: the hint now points at the shipped
+    // verb name (`monday item upload`) instead of the underlying
+    // wire mutation (`add_file_to_column`). The error MESSAGE
+    // still names the wire mutation for the curious agent + still
+    // carries `details.deferred_to: 'v0.4'` for v0.3.x users on
+    // npm reading the contract for "what changes in v0.4".
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -324,9 +330,13 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       );
     } catch (e) {
       const err = e as ApiError;
-      expect((err.details as { hint: string }).hint).toMatch(
-        /add_file_to_column/u,
-      );
+      const hint = (err.details as { hint: string }).hint;
+      expect(hint).toMatch(/monday item upload/u);
+      expect(hint).toMatch(/v0\.4-M31/u);
+      // Error MESSAGE still names the wire surface so an agent
+      // grepping logs sees both the verb name + the underlying
+      // mutation name.
+      expect(err.message).toMatch(/add_file_to_column/u);
     }
   });
 });

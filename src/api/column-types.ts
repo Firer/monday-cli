@@ -312,8 +312,10 @@ export const getColumnRoadmapCategory = (
  *     path` is `null` (agents can't write at all; the column
  *     exists for read-side display / mirror sources only).
  *   - `'files_shaped'`: Monday writes the type via `add_file_to_
- *     column` (multipart upload), pinned to v0.4 (asset upload).
- *     Currently `file` only.
+ *     column` (multipart upload). `monday item upload <iid> --column
+ *     <col> <file>` shipped at v0.4-M31 as the agent-facing verb;
+ *     `suggested_write_path` carries that pointer. Currently
+ *     `file` only.
  *
  * Returns `null` for canonical types (membership in `WRITABLE_COLUMN_
  * TYPES`) — `column-create` skips emitting the warning when the type
@@ -333,9 +335,9 @@ export interface NoncanonicalColumnTypeDetails {
   /**
    * The path agents should use to write to the column post-creation,
    * matching cli-design §5.3 escape-hatch contract — `--set-raw
-   * <col>=<json>` for raw-writable types, `add_file_to_column
-   * (deferred to v0.4)` for files-shaped types, `null` for read-
-   * only-forever types (no write path exists).
+   * <col>=<json>` for raw-writable types, `monday item upload`
+   * (v0.4-M31, multipart) for files-shaped types, `null` for
+   * read-only-forever types (no write path exists).
    */
   readonly suggestedWritePath: string | null;
 }
@@ -350,7 +352,7 @@ export const categorizeNoncanonicalColumnType = (
   if (isFilesShapedType(type)) {
     return {
       category: 'files_shaped',
-      suggestedWritePath: 'add_file_to_column (deferred to v0.4)',
+      suggestedWritePath: 'monday item upload (v0.4-M31, multipart)',
     };
   }
   return {

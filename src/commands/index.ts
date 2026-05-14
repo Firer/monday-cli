@@ -193,11 +193,12 @@ import { webhookDeleteCommand } from './webhook/delete.js';
 import { notificationSendCommand } from './notification/send.js';
 // M31 (v0.4) — asset upload (`item upload` / `update upload`). Two
 // new write verbs crossing the wire via multipart/form-data (NOT
-// the JSON-only `client.request` seam). Pre-flight stubs at this
-// commit (cli-design §4.3 + §6.4 asset-upload sub-section + §13
-// v0.4 entry; v0.4-plan §3 M31). Runtime bodies + multipart wire
-// dispatch + integration tests land at M31 IMPL. First v0.4
-// transport extension; fires R-NEW-41 3rd consumer.
+// the JSON-only `client.request` seam). Shipped end-to-end at
+// v0.4-M31 (cli-design §4.3 + §6.4 asset-upload sub-section + §13
+// v0.4 entry; v0.4-plan §3 M31 + §13 post-mortem). First v0.4
+// transport extension; fired R-NEW-41 3rd consumer
+// (`docs/architecture.md` "Wire-vs-CLI semantics documentation
+// conventions" section).
 import { itemUploadCommand } from './item/upload.js';
 import { updateUploadCommand } from './update/upload.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
