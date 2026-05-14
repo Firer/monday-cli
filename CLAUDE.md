@@ -115,12 +115,19 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   shipped — added to "Workflow rules" section below; full
   entry stays at v0.4-plan §22 R-NEW-72 marked "shipped at
   M33 IMPL close".**
-- **R-NEW-75 (candidate-selection session shape) stays at 1
-  supporting instance** — M33 IMPL is NOT a candidate-
-  selection session, so the 2nd-consumer trigger doesn't fire
-  here. Likely fires at the post-M33-IMPL candidate-selection
-  session OR v0.5 kickoff against the 9-surface doc-CRUD-
-  mutation backlog M32 D8 closure deferred.
+- **R-NEW-75 (candidate-selection session shape) GRADUATED to
+  permanent CLAUDE.md "Workflow rules" entry at the post-M33
+  IMPL candidate-selection session.** 2nd consumer fired at
+  this session (release-prep vs M34 team writers); the
+  5-dimension scoping framework (wire-shape novelty /
+  transport seam / destructive gate / R-class triggers / Codex
+  round estimate) applied verbatim, recommending release-prep
+  on neutral trade-offs. Release-prep returning zero on 4 of 5
+  axes IS the signal that it's process-only, not framework
+  drift — no 6th axis needed. **Status: shipped — added to
+  "Workflow rules" section below; full entry stays at
+  v0.4-plan §22 R-NEW-75 marked "shipped at post-M33 IMPL
+  candidate-selection session".**
 - **Three M32-IMPL R-NEW candidates (R-NEW-73 / R-NEW-74) all
   stay at their pre-M33 consumer counts.** R-NEW-73
   (`assertNonNullArrayPayload` helper) stays at 3 consumers;
@@ -211,23 +218,29 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — candidate-selection between v0.4-M34 (team
-writers) and v0.4 release-prep.** Two remaining v0.4 backlog
-candidates after M33 IMPL closes: (a) team writers — needs an
-empirical-probe session FIRST to pin Monday's team-mutation wire
-vocabulary at API `2026-01`, then a pre-flight + IMPL pair (3-4
-sessions total); (b) v0.4 release-prep — single session
-mirroring v0.3-M28's `d9ad757..5e8c210` cluster (CHANGELOG +
-envelope-snapshot refresh + version bump + README quickstart +
-close-docs sweep). The next session triggers R-NEW-75
-(candidate-selection session shape) as its 2nd consumer; if the
-session uses the same 5-dimension scoping framework verbatim,
-R-NEW-75 graduates to a permanent CLAUDE.md "Workflow rules"
-entry. Author's choice: defer team writers to v0.5 + ship v0.4
-release-prep next (the v0.4 surface as it stands is already
-larger than v0.3's), OR ship team writers if the v0.4 release
-should include the remaining cli-design §13 v0.4 backlog
-surface.
+**Next session — v0.4 release-prep.** Picked at the post-M33
+IMPL candidate-selection session over M34 team writers on three
+grounds: (a) the v0.4 surface as it stands (M29 watch / M30
+concurrency / M31 asset upload / M32 doc list+get / M33
+completion) is already larger than v0.3's shipped surface, so
+0.4.0 has earned a tag; (b) ships in a single session (mirroring
+v0.3-M28's `d9ad757..5e8c210` 8-commit cluster) vs 3-4 sessions
+for team writers (empirical probe + pre-flight + IMPL +
+close-docs); (c) deferring team writers to v0.5 lets v0.5 open
+with the team + doc-CRUD-mutation backlog together (10 wire
+surfaces — team mutations + 9 doc mutations Monday exposes),
+which is a cleaner v0.5 frame than "leftover v0.4 item + doc
+CRUD". Session scope mirrors v0.3-M28 verbatim: CHANGELOG `0.4.0`
+entry + envelope-snapshot refresh covering M29–M33 surfaces +
+version bump 0.3.0 → 0.4.0 in `package.json` + README quickstart
++ close-docs sweep + annotated `v0.4.0` git tag (push + GitHub
+release + npm publish pending user authorization mirroring v0.3.0
+cadence). Team writers slip to v0.5 alongside the deferred
+doc-CRUD-mutation backlog. **R-NEW-75 graduated at this session**
+— the 5-dimension scoping framework applied cleanly (release-prep
+returning zero on 4 of 5 axes IS the signal that it's
+process-only, not a sign the dimensions are wrong); promoted to a
+permanent CLAUDE.md "Workflow rules" entry below.
 
 **Prior milestone — v0.4-M32 IMPL landed end-to-end.**
 Doc list/get (`monday doc list [--workspace <wid>,...]
@@ -1586,6 +1599,32 @@ v0.1-plan.md / v0.2-plan.md. **Don't restate them here.**
   applied for the first time) + M33 IMPL (graduated). Sister rule
   to R-NEW-56: kickoff grep covers pre-flight → runtime transition
   prose; post-fix-up grep covers round-N fix → round-N+1 prose.
+- **Candidate-selection session when ≥2 backlog candidates remain
+  with non-obvious priority** (R-NEW-75, post-v0.4-M33 IMPL
+  graduation). When a feature-cluster closes and 2+ candidates
+  remain on the `cli-design.md §13 v<release>` backlog, run a
+  dedicated pre-pre-flight session before any pre-flight contract
+  diff: (1) confirm clean state (`git status` + `git log --oneline
+  -12` + `npm test --reporter=dot 2>&1 | tail -4`); (2) read each
+  remaining backlog entry; (3) scope each candidate against five
+  dimensions — **wire-shape novelty** (does it need an empirical
+  probe?), **transport seam** (does R-v0.4-W2 fire?), **destructive
+  gate** (does it ship `--yes`-requiring verbs?), **R-class
+  triggers** (does it crystallize a known 2-/3-consumer R-class
+  candidate per R-NEW-58?), **Codex round estimate** (per the M22
+  / M27 / M30 / M31 / M32 read-surface precedent — median 3 IMPL
+  rounds); (4) recommend ONE candidate with **neutral trade-offs
+  presented** — don't pick silently; (5) `AskUserQuestion` for the
+  binding decision (single round-trip); (6) annotate `CLAUDE.md`
+  "Next session" block + commit
+  `docs(<m-n>-prep): annotate Next session block — M<N> = <candidate>`
+  + push. Process-only candidates (release-prep, polish clusters)
+  legitimately return zero across 4-5 axes — that IS the signal,
+  not a sign the framework is wrong. Skip the dedicated session
+  only when one candidate is obvious enough to inline in a regular
+  pre-flight kickoff. Two ratifying instances: post-v0.4-M32 IMPL
+  session `169b2bc` (surfaced) + post-v0.4-M33 IMPL session
+  (graduated; release-prep picked over team writers).
 - **Atomic, incremental commits.** One self-contained unit per commit:
   small enough to revert cleanly, large enough to stand alone. Never
   commit broken `main`.
