@@ -319,6 +319,31 @@ linked items. Two consequences:
    etc.) explicitly pass `--json` (alias for `--output json`) — one
    flag, totally unambiguous, no auto-detect surprises. `MONDAY_OUTPUT`
    env var pins the default per-environment for sticky agent contexts.
+
+   **Raw-bytes carve-out (v0.4-M33).** A narrow class of verbs emits
+   content where the bytes themselves ARE the agent- / human-meaningful
+   payload — destined for `eval`, `source`, or direct write to a
+   file consumed by another tool. `monday completion <bash|zsh|fish>`
+   is the canonical case: the standard install flow is
+   `monday completion bash >> ~/.bashrc`, a pipe context where
+   wrapping the bytes in a §6 envelope would defeat the purpose. For
+   this class:
+
+   - Default behaviour (no `--json` / no `--output` / no `MONDAY_OUTPUT`):
+     RAW bytes on stdout with NO envelope, regardless of TTY / pipe
+     context.
+   - `--json` / `--output json` / `MONDAY_OUTPUT=json`: explicitly
+     opts INTO the standard §6 envelope, wrapping the bytes as a
+     string field under `data`. Useful for agent introspection.
+   - `--table` / `--text` / `--ndjson`: rejected as `usage_error`
+     ("output format not applicable to <verb>") — there is no
+     sensible non-JSON envelope rendering of an opaque byte blob.
+
+   The verb's `--help` and the §4.3 entry MUST make the carve-out
+   explicit. This is the only documented exception to rule #2.
+   New verbs MUST NOT extend this carve-out without an explicit
+   contract amendment (it weakens the §3.1 #2 invariant agents key
+   off of).
 3. **Single canonical JSON schema per command.** The JSON shape of
    `monday item get`'s output doesn't change based on flags. `--minimal`
    may omit non-essential fields (like column titles), `--include-updates`
@@ -2332,6 +2357,77 @@ monday auth logout --profile <name>       # delete the named profile's        v0
 monday raw <query> [--vars <json>] [--allow-mutation] [--operation-name <n>] v0.1
 monday raw --query-file <path> [--vars-file <path>] [--allow-mutation]       v0.1
                                                     [--operation-name <n>]
+
+# === COMPLETION (shell-completion script emitter; see §3.1 #2
+#                 raw-bytes carve-out) ===
+# Hand-rolled per-shell templates (commander 14.0.3 ships no built-in
+# completion machinery — empirical probe at M33 pre-flight:
+# `grep -rn 'completion\|complete' node_modules/commander/lib/
+# node_modules/commander/typings/` returned zero hits). No runtime
+# dep added; the templates enumerate `program.commands` + per-command
+# options at emit time so completions stay in sync with the registry.
+monday completion <bash|zsh|fish>                                            v0.4
+                                          # Emit a shell-completion
+                                          # script for the named shell
+                                          # flavour. Single positional
+                                          # against a CLOSED 3-value
+                                          # enum (`bash` / `zsh` /
+                                          # `fish`); unknown values
+                                          # reject at the parse
+                                          # boundary with `usage_error.
+                                          # details.shell` carrying the
+                                          # offending input. Standard
+                                          # install flow:
+                                          #
+                                          #   monday completion bash \
+                                          #     >> ~/.bashrc
+                                          #   monday completion zsh \
+                                          #     >> ~/.zshrc
+                                          #   monday completion fish \
+                                          #     > ~/.config/fish/\
+                                          #       completions/monday.fish
+                                          #
+                                          # Output discipline (§3.1 #2
+                                          # raw-bytes carve-out):
+                                          #
+                                          # - **Default** (no `--json`
+                                          #   / no `--output`): RAW
+                                          #   script bytes on stdout,
+                                          #   NO envelope, regardless
+                                          #   of TTY / pipe context.
+                                          # - **`--json` / `--output
+                                          #   json` / `MONDAY_OUTPUT=
+                                          #   json`**: standard §6
+                                          #   envelope with `data: {
+                                          #   shell, script }`. Useful
+                                          #   for agent introspection
+                                          #   (e.g., `monday completion
+                                          #   bash --json | jq -r '.data
+                                          #   .script'`).
+                                          # - **`--table` / `--text` /
+                                          #   `--ndjson`**: rejected as
+                                          #   `usage_error` (no sensible
+                                          #   non-JSON envelope view of
+                                          #   a multi-line script blob).
+                                          #
+                                          # No wire surface — verb is
+                                          # CLI-internal (no Monday API
+                                          # call, no auth requirement,
+                                          # no cache). `meta.source:
+                                          # "none"` on the `--json`
+                                          # envelope path. No `--dry-
+                                          # run` (not a mutation). No
+                                          # GraphQL operation (R-NEW-37
+                                          # W2 audit returns "nothing
+                                          # flagged" at M33). Adding a
+                                          # 4th shell flavour (e.g.
+                                          # `powershell`, `nushell`) is
+                                          # a SemVer-minor expansion at
+                                          # the contract + a matching
+                                          # hand-rolled template in
+                                          # `src/commands/completion.ts`.
+                                          # Idempotent: yes (deterministic
+                                          # per shell flavour).
 
 # === SCHEMA ===
 monday schema                             # full CLI schema as JSON Schema   v0.1
@@ -7476,7 +7572,25 @@ scoped idempotent changes, and post comments narrating its work.**
 
 - `item watch <iid>` (polling at default 30s cadence; reactive circuit
   breaker on Monday wire errors per §14.4 closure) **— M29 shipped**
-- Shell completion (bash / zsh / fish) via commander
+- Shell completion (bash / zsh / fish) via hand-rolled templates
+  **— M33 pre-flight in progress (this commit)**. Empirical probe at
+  pre-flight (`grep -rn 'completion\|complete' node_modules/commander/
+  lib/ node_modules/commander/typings/` 2026-05-14, commander 14.0.3)
+  returned zero hits — commander ships NO built-in completion
+  machinery, so the verb hand-rolls per-shell templates (Decision 1
+  closure; no runtime dep added per the cli-design §1 "minimum deps"
+  principle). New top-level verb at §4.3 COMPLETION section: `monday
+  completion <bash|zsh|fish>` (closed 3-value enum positional). First
+  non-envelope stdout surface in the CLI — §3.1 #2 raw-bytes carve-out
+  documents the discipline. ERROR_CODES count stays at 29 (failures
+  route through existing `usage_error` for invalid shell flavour +
+  inapplicable `--table`/`--text`/`--ndjson` format flags). No new
+  transport seam (CLI-internal verb), no destructive gate, no
+  GraphQL operation. Pre-flight stub at this commit ships the real
+  argv parse boundary + the `--json` envelope schema + commander
+  wiring; the action body is c8-ignored and throws `internal_error`
+  with `details.deferred_to: 'v0.4-M33 IMPL'`. Per-shell hand-rolled
+  script templates land at M33 IMPL.
 - Bulk operations with `--concurrency` (probed against Monday's
   per-account concurrency cap; empirical probe at 2026-05-13
   observed cap > 100 in-flight for trivial reads, see §9.3)

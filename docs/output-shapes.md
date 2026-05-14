@@ -68,6 +68,7 @@ no `data`); see the **Errors** section at the bottom.
 | [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
 | [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
 | [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32) |
+| [completion](#monday-completion-bashzshfish-v04-m33) | completion (v0.4-M33) |
 | [Errors](#errors) | error envelope shape |
 
 ---
@@ -4239,6 +4240,71 @@ shape).
 ```
 
 Idempotent: yes (pure read).
+
+---
+
+## completion
+
+### `monday completion <bash|zsh|fish>` (v0.4-M33)
+
+Emit a shell-completion script for the named shell flavour. **First
+non-envelope stdout surface in the CLI** — see cli-design §3.1 #2
+raw-bytes carve-out for the discipline. Standard install flow:
+
+```bash
+monday completion bash >> ~/.bashrc
+monday completion zsh  >> ~/.zshrc
+monday completion fish >  ~/.config/fish/completions/monday.fish
+```
+
+**Status: v0.4-M33 pre-flight in progress.** Argv parsing + commander
+wiring + the `--json` envelope schema ship at pre-flight; the per-
+shell hand-rolled script templates land at M33 IMPL. Empirical probe
+at pre-flight (`grep -rn 'completion\|complete' node_modules/
+commander/lib/ node_modules/commander/typings/` 2026-05-14, commander
+14.0.3) confirmed commander ships NO built-in completion machinery —
+the templates are hand-rolled (Decision 1 closure; no runtime dep
+added).
+
+**Three output modes:**
+
+- **Default (no `--json` / no `--output`)**: RAW script bytes on
+  stdout, NO envelope, regardless of TTY / pipe context. The standard
+  install flow above relies on this — wrapping in a §6 envelope
+  would defeat `>> ~/.bashrc`.
+- **`--json` / `--output json` / `MONDAY_OUTPUT=json`**: standard §6
+  envelope with `data: { shell, script }`. Agents introspect via
+  `jq -r '.data.script'`.
+- **`--table` / `--text` / `--ndjson`**: rejected as `usage_error`
+  ("output format not applicable to monday completion") — no sensible
+  non-JSON envelope view of a multi-line script blob.
+
+**No wire surface.** CLI-internal verb (no Monday API call, no auth
+requirement, no cache). The `--json` envelope's `meta.source` is
+always `"none"`.
+
+**`--json` envelope shape (M33 pre-flight pinned):**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "shell": "bash",
+    "script": "# monday-cli bash completion\n_monday_completion() { ... }\ncomplete -F _monday_completion monday\n"
+  },
+  "meta": { /* §6.1 — source: "none", cache_age_seconds: null */ },
+  "warnings": []
+}
+```
+
+The `script` field is the EXACT same byte sequence the default mode
+prints to stdout. Per-shell script content lands at M33 IMPL; the
+contract pins the SHAPE (one script per closed-enum flavour, opaque
+string payload) but not the content.
+
+Idempotent: yes (deterministic per shell flavour). Adding a 4th
+shell flavour (`powershell`, `nushell`, etc.) is a SemVer-minor
+expansion at the contract + a matching hand-rolled template.
 
 ---
 

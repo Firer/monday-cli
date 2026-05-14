@@ -211,6 +211,19 @@ import { updateUploadCommand } from './update/upload.js';
 // shape + the `DocsOrderBy` 2-value enum.
 import { docListCommand } from './doc/list.js';
 import { docGetCommand } from './doc/get.js';
+// M33 (v0.4) — `monday completion <bash|zsh|fish>`. Shell-completion
+// script emitter; first non-envelope stdout surface in the CLI
+// (cli-design §3.1 raw-bytes carve-out). Empirical-probe finding at
+// M33 pre-flight (`grep -rn 'completion\|complete' node_modules/
+// commander/lib/ node_modules/commander/typings/` 2026-05-14, commander
+// 14.0.3) returned zero hits — commander has no built-in completion
+// machinery, so the verb hand-rolls per-shell templates (no runtime
+// dep added). Pre-flight stub at this commit (argv schema + commander
+// wiring + `--json` envelope schema ship as the real shipped surface;
+// action body is c8-ignored and throws `internal_error` with
+// `details.deferred_to: 'v0.4-M33 IMPL'`). Per-shell script templates
+// land at M33 IMPL.
+import { completionCommand } from './completion.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
 import { boardDoctorCommand } from './board/doctor.js';
@@ -317,6 +330,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateUploadCommand,
     docListCommand,
     docGetCommand,
+    completionCommand,
     rawCommand,
     boardDoctorCommand,
   ];
