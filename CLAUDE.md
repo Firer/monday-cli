@@ -307,22 +307,35 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — v0.5 kickoff.** v0.5 opens
-with the team writers + Monday workdocs CRUD mutation backlog
-together — 10 wire surfaces (team mutations + 9 doc mutations
-Monday exposes). Team writers deferred from v0.4-M34 at the
-post-v0.4-M33 candidate-selection session because the v0.4
-shipped surface had already grown beyond v0.3's, and bundling
-team writers with the v0.5 doc-CRUD-mutation backlog is a
-cleaner frame than "leftover v0.4 item + doc CRUD"
-(rationale at v0.4-plan §22 R-NEW-75 entry). Empirical-probe-
-first session shape per the v0.4 cadence (probe Monday's
-`create_team` / `update_team` / `delete_team` / `add_users_to_
-team` / `remove_users_from_team` + workdocs CRUD mutations at
-API `2026-01` before the pre-flight contract diff). Estimated
-3-4 sessions through team writers alone (empirical probe +
-pre-flight + IMPL + close-docs); doc CRUD likely another 4-5
-sessions across 2-3 milestone clusters.
+**Next session — v0.5-M34 team-writers pre-flight contract
+diff.** The v0.5 kickoff empirical probe session landed at
+2026-05-15: 4 probe rounds against API `2026-01` pinned the
+wire shape for team writers + 9 doc-mutation surfaces (full
+findings at `docs/v0.5-plan.md` §3 kickoff entry + §8 D1-D13
++ §22 R-v0.5-NEW-1/2/3 entries). Load-bearing surprises:
+**no `update_team` mutation exists** (drop the verb + the
+`--description` flag the v0.4 cli-design row pencilled);
+**6 tangential team-shaped mutations beyond the 4 core**
+(`assign_team_owners` / `remove_team_owners` /
+`add_teams_to_board` / `delete_teams_from_board` /
+`add_teams_to_workspace` / `delete_teams_from_workspace` —
+M34 scopes to the 4 core mutations only; tangentials defer
+to v0.5.x); **`add_users_to_team` returns
+`ChangeTeamMembershipsResult { failed_users, successful_
+users }`** — wire-side partial-success envelope the CLI
+wraps into §6.1 shape; **`Query.teams` has no pagination
+surface** (only `ids:` filter); **9 doc mutations exist
+verbatim** with camelCase/snake_case arg-naming asymmetry
+across the surface (R-NEW-41 4th supporting site).
+Next session opens M34 pre-flight contract diff: new
+`src/api/teams.ts` module + `TeamId` brand (10th) + 6 verbs
+(`team-list` / `team-get` / `team-create` / `team-delete` /
+`team-add-members` / `team-remove-members`) + `--description`
+drop from cli-design §4.3 row + ERROR_CODES count stays at
+29 + per-target partial-success envelope on the membership
+verbs. Estimated 3-4 sessions through M34 alone (pre-flight
++ IMPL + close-docs); doc CRUD (M35-M37) likely another 4-5
+sessions across 3 milestone clusters.
 
 **v0.4 release-prep close (prior session).** Mirrored v0.3-M28's
 release-prep cadence verbatim: 6 commits (envelope-snapshot
