@@ -979,6 +979,128 @@ exports[`envelope snapshot — cache > cache stats (empty cache) 1`] = `
 }
 `;
 
+exports[`envelope snapshot — completion (M33) > completion <invalid-shell> (usage_error from parseArgv boundary) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "Invalid option: expected one of "bash"|"zsh"|"fish"",
+          "path": "shell",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: shell: Invalid option: expected one of "bash"|"zsh"|"fish"",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — completion (M33) > completion --table (usage_error — only --json + raw-bytes default supported) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": null,
+    "http_status": null,
+    "message": "output format not applicable to monday completion: --table is rejected (the verb emits a shell script — raw bytes by default, JSON envelope via --json).",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — completion (M33) > completion bash --json (§6 envelope wraps the script) 1`] = `
+{
+  "data": {
+    "script": "<script:non-empty>",
+    "shell": "bash",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — completion (M33) > completion fish --json (§6 envelope wraps the script) 1`] = `
+{
+  "data": {
+    "script": "<script:non-empty>",
+    "shell": "fish",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — completion (M33) > completion zsh --json (§6 envelope wraps the script) 1`] = `
+{
+  "data": {
+    "script": "<script:non-empty>",
+    "shell": "zsh",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — config > config path 1`] = `
 {
   "data": {
@@ -1036,6 +1158,211 @@ exports[`envelope snapshot — config > config show 1`] = `
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — doc get (M32) > doc get (happy with blocks hydrated — direct-unwrap envelope) 1`] = `
+{
+  "data": {
+    "blocks": [
+      {
+        "content": {
+          "ops": [
+            {
+              "insert": "hello world",
+            },
+          ],
+        },
+        "created_at": "2026-05-01T12:00:00Z",
+        "created_by": {
+          "id": "7",
+          "name": "Nick Webster",
+        },
+        "doc_id": "88001",
+        "id": "block-a",
+        "parent_block_id": null,
+        "position": 1,
+        "type": "text",
+        "updated_at": "2026-05-01T12:00:00Z",
+      },
+      {
+        "content": {
+          "ops": [
+            {
+              "insert": "hello world",
+            },
+          ],
+        },
+        "created_at": "2026-05-01T12:00:00Z",
+        "created_by": {
+          "id": "7",
+          "name": "Nick Webster",
+        },
+        "doc_id": "88001",
+        "id": "block-b",
+        "parent_block_id": null,
+        "position": 2,
+        "type": "text",
+        "updated_at": "2026-05-01T12:00:00Z",
+      },
+    ],
+    "created_at": "2026-05-01T12:00:00Z",
+    "created_by": {
+      "id": "7",
+      "name": "Nick Webster",
+    },
+    "doc_folder_id": null,
+    "doc_kind": "public",
+    "id": "88001",
+    "name": "Sprint planning notes",
+    "object_id": "99001",
+    "relative_url": "/docs/88001",
+    "settings": {
+      "theme": "default",
+    },
+    "updated_at": "2026-05-13T14:00:00Z",
+    "url": "https://example.monday.com/docs/88001",
+    "workspace": {
+      "id": "12345",
+      "name": "Engineering",
+    },
+    "workspace_id": "12345",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — doc get (M32) > doc get not_found envelope (docs: [] — D8 closure) 1`] = `
+{
+  "error": {
+    "code": "not_found",
+    "details": {
+      "doc_id": "99999",
+    },
+    "http_status": null,
+    "message": "workdoc 99999 not found (does not exist or not visible to token)",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — doc list (M32) > doc list (empty account — wrapped record with documents: []) 1`] = `
+{
+  "data": {
+    "documents": [],
+    "has_more": false,
+    "limit": 25,
+    "page": 1,
+    "returned_count": 0,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — doc list (M32) > doc list (populated — two docs, live source, has_more heuristic) 1`] = `
+{
+  "data": {
+    "documents": [
+      {
+        "created_at": "2026-05-01T12:00:00Z",
+        "created_by": {
+          "id": "7",
+          "name": "Nick Webster",
+        },
+        "doc_folder_id": null,
+        "doc_kind": "public",
+        "id": "88001",
+        "name": "Sprint planning notes",
+        "object_id": "99001",
+        "relative_url": "/docs/88001",
+        "settings": {
+          "theme": "default",
+        },
+        "updated_at": "2026-05-13T14:00:00Z",
+        "url": "https://example.monday.com/docs/88001",
+        "workspace": {
+          "id": "12345",
+          "name": "Engineering",
+        },
+        "workspace_id": "12345",
+      },
+      {
+        "created_at": "2026-05-01T12:00:00Z",
+        "created_by": {
+          "id": "7",
+          "name": "Nick Webster",
+        },
+        "doc_folder_id": null,
+        "doc_kind": "private",
+        "id": "88002",
+        "name": "Retro notes",
+        "object_id": "99001",
+        "relative_url": "/docs/88001",
+        "settings": {
+          "theme": "default",
+        },
+        "updated_at": "2026-05-13T14:00:00Z",
+        "url": "https://example.monday.com/docs/88001",
+        "workspace": {
+          "id": "12345",
+          "name": "Engineering",
+        },
+        "workspace_id": "12345",
+      },
+    ],
+    "has_more": false,
+    "limit": 25,
+    "page": 1,
+    "returned_count": 2,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
   },
   "ok": true,
   "warnings": [],
@@ -3057,6 +3384,78 @@ exports[`envelope snapshot — item update --continue-on-error (M25 partial-succ
     "status": "status_4",
   },
   "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — item watch (M29) > item watch --once (empty backlog → trailer only, no event records) 1`] = `
+{
+  "events": [],
+  "trailer": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "circuit_broken_at": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "events_emitted": 0,
+    "exit_reason": "once_complete",
+    "failed_polls": 0,
+    "has_more": false,
+    "last_seen_event_id": null,
+    "polls_made": 1,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 0,
+    "warnings": [],
+    "watch_duration_seconds": "<watch_duration_seconds:number>",
+  },
+}
+`;
+
+exports[`envelope snapshot — item watch (M29) > item watch --once (single-event backlog → one event record + trailer) 1`] = `
+{
+  "events": [
+    {
+      "actor_id": "99",
+      "after": {
+        "index": 1,
+        "label": "Done",
+      },
+      "before": {
+        "index": 0,
+        "label": "In progress",
+      },
+      "column_id": "status",
+      "column_type": "status",
+      "created_at": "2026-05-13T10:00:00Z",
+      "id": "1001",
+      "kind": "update_column_value",
+      "pulse_id": "12345",
+      "pulse_name": "Refactor login",
+      "textual_value": "Done",
+    },
+  ],
+  "trailer": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "circuit_broken_at": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "events_emitted": 1,
+    "exit_reason": "once_complete",
+    "failed_polls": 0,
+    "has_more": false,
+    "last_seen_event_id": "1001",
+    "polls_made": 1,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+    "total_returned": 1,
+    "warnings": [],
+    "watch_duration_seconds": "<watch_duration_seconds:number>",
+  },
 }
 `;
 

@@ -3040,3 +3040,299 @@ describe('envelope snapshot — notification (M27)', () => {
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 });
+
+describe('envelope snapshot — item watch (M29)', () => {
+  // M29 ships the first long-poll streaming verb: an NDJSON stream
+  // of one event record per emitted activity-log row, terminated by
+  // a `{"_meta": {...}}` trailer carrying the seven M29 slots flat
+  // (events_emitted / polls_made / failed_polls / last_seen_event_id
+  // / circuit_broken_at / exit_reason / watch_duration_seconds /
+  // warnings / source). Snapshot pins the per-event projection shape
+  // + the trailer key set; `watch_duration_seconds` is wall-clock-
+  // dependent so we collapse it to a sentinel before snapshot.
+  const ITEM_ID = '12345';
+  const BOARD_ID = '67890';
+
+  const validItemBoardLookup = {
+    operation_name: 'ItemBoardLookup',
+    response: { data: { items: [{ id: ITEM_ID, board: { id: BOARD_ID } }] } },
+  } as const;
+
+  const pollResponse = (
+    rows: readonly { readonly id: string; readonly created_at: string }[],
+  ) => ({
+    operation_name: 'ItemWatchPoll',
+    response: {
+      data: {
+        boards: [
+          {
+            id: BOARD_ID,
+            activity_logs: rows.map((r) => ({
+              id: r.id,
+              event: 'update_column_value',
+              entity: 'pulse',
+              user_id: '99',
+              created_at: r.created_at,
+              data: JSON.stringify({
+                column_id: 'status',
+                column_type: 'status',
+                value: JSON.stringify({ label: 'Done', index: 1 }),
+                previous_value: JSON.stringify({
+                  label: 'In progress',
+                  index: 0,
+                }),
+                textual_value: 'Done',
+                pulse_id: ITEM_ID,
+                pulse_name: 'Refactor login',
+              }),
+            })),
+          },
+        ],
+      },
+    },
+  });
+
+  // NDJSON stream parser: returns the per-event records + trailer.
+  // `watch_duration_seconds` is wall-clock-dependent — normalise to
+  // a sentinel so the snapshot stays deterministic across runs.
+  const parseStreamSnapshot = (stdout: string): unknown => {
+    const records = stdout
+      .split('\n')
+      .filter((s) => s.length > 0)
+      .map((l) => JSON.parse(l) as Readonly<Record<string, unknown>>);
+    const last = records[records.length - 1] as
+      | { _meta?: Record<string, unknown> }
+      | undefined;
+    if (last?._meta === undefined) {
+      return { events: records, trailer: null };
+    }
+    const trailer = { ...last._meta };
+    if (typeof trailer.watch_duration_seconds === 'number') {
+      trailer.watch_duration_seconds = '<watch_duration_seconds:number>';
+    }
+    return { events: records.slice(0, -1), trailer };
+  };
+
+  it('item watch --once (single-event backlog → one event record + trailer)', async () => {
+    const out = await drive(
+      ['--retry', '0', 'item', 'watch', ITEM_ID, '--once'],
+      {
+        interactions: [
+          validItemBoardLookup,
+          pollResponse([{ id: '1001', created_at: '2026-05-13T10:00:00Z' }]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.stderr).toBe('');
+    expect(parseStreamSnapshot(out.stdout)).toMatchSnapshot();
+  });
+
+  it('item watch --once (empty backlog → trailer only, no event records)', async () => {
+    const out = await drive(
+      ['--retry', '0', 'item', 'watch', ITEM_ID, '--once'],
+      {
+        interactions: [validItemBoardLookup, pollResponse([])],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseStreamSnapshot(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — doc list (M32)', () => {
+  // M32 ships `doc list` as the first wrapped-paginated-record
+  // envelope on a read surface (`emitSuccess(kind: 'single')` carrying
+  // `{documents, page, limit, returned_count, has_more}` — see
+  // R-NEW-74 watch-item). Snapshot pins both the empty + populated
+  // shapes; the empty shape is structurally distinct from a flat
+  // list because the wrapper slots (`page`/`limit`/`returned_count`/
+  // `has_more`) still surface.
+  const wireDoc = (
+    overrides: Partial<Record<string, unknown>> = {},
+  ): Record<string, unknown> => ({
+    id: '88001',
+    object_id: '99001',
+    name: 'Sprint planning notes',
+    doc_kind: 'public',
+    url: 'https://example.monday.com/docs/88001',
+    relative_url: '/docs/88001',
+    workspace_id: '12345',
+    workspace: { id: '12345', name: 'Engineering' },
+    doc_folder_id: null,
+    created_at: '2026-05-01T12:00:00Z',
+    created_by: { id: '7', name: 'Nick Webster' },
+    updated_at: '2026-05-13T14:00:00Z',
+    settings: { theme: 'default' },
+    ...overrides,
+  });
+
+  it('doc list (empty account — wrapped record with documents: [])', async () => {
+    const out = await drive(['doc', 'list', '--json'], {
+      interactions: [
+        {
+          operation_name: 'ListDocs',
+          response: { data: { docs: [] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc list (populated — two docs, live source, has_more heuristic)', async () => {
+    const out = await drive(['doc', 'list', '--json'], {
+      interactions: [
+        {
+          operation_name: 'ListDocs',
+          response: {
+            data: {
+              docs: [
+                wireDoc(),
+                wireDoc({ id: '88002', name: 'Retro notes', doc_kind: 'private' }),
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — doc get (M32)', () => {
+  // M32 `doc get <did>` direct-unwraps `data: <Document with
+  // blocks>` (in contrast to `doc list`'s wrapped record). Two
+  // snapshot variants: the happy with `blocks: [...]` hydration, and
+  // the D8 `not_found` envelope when `docs: []` (Monday returns
+  // empty when the doc doesn't exist OR is inaccessible to the
+  // caller's token — single error code per D8 closure).
+  const wireBlock = (
+    overrides: Partial<Record<string, unknown>> = {},
+  ): Record<string, unknown> => ({
+    id: 'block-a',
+    type: 'text',
+    content: { ops: [{ insert: 'hello world' }] },
+    position: 1,
+    parent_block_id: null,
+    doc_id: '88001',
+    created_at: '2026-05-01T12:00:00Z',
+    created_by: { id: '7', name: 'Nick Webster' },
+    updated_at: '2026-05-01T12:00:00Z',
+    ...overrides,
+  });
+
+  const wireDoc = (
+    overrides: Partial<Record<string, unknown>> = {},
+  ): Record<string, unknown> => ({
+    id: '88001',
+    object_id: '99001',
+    name: 'Sprint planning notes',
+    doc_kind: 'public',
+    url: 'https://example.monday.com/docs/88001',
+    relative_url: '/docs/88001',
+    workspace_id: '12345',
+    workspace: { id: '12345', name: 'Engineering' },
+    doc_folder_id: null,
+    created_at: '2026-05-01T12:00:00Z',
+    created_by: { id: '7', name: 'Nick Webster' },
+    updated_at: '2026-05-13T14:00:00Z',
+    settings: { theme: 'default' },
+    blocks: [wireBlock(), wireBlock({ id: 'block-b', position: 2 })],
+    ...overrides,
+  });
+
+  it('doc get (happy with blocks hydrated — direct-unwrap envelope)', async () => {
+    const out = await drive(['doc', 'get', '88001', '--json'], {
+      interactions: [
+        {
+          operation_name: 'GetDoc',
+          response: { data: { docs: [wireDoc()] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc get not_found envelope (docs: [] — D8 closure)', async () => {
+    const out = await drive(['doc', 'get', '99999', '--json'], {
+      interactions: [
+        {
+          operation_name: 'GetDoc',
+          response: { data: { docs: [] } },
+        },
+      ],
+    });
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
+
+describe('envelope snapshot — completion (M33)', () => {
+  // M33 ships `monday completion <bash|zsh|fish>` as the first
+  // raw-bytes-carve-out verb (cli-design §3.1 #2). Default mode
+  // emits the install-time script on stdout WITHOUT the §6 envelope
+  // wrap (so `monday completion bash >> ~/.bashrc` works as a
+  // sourceable file). The `--json` / `--output json` /
+  // `MONDAY_OUTPUT=json` paths opt INTO the envelope with
+  // `data: { shell, script }` + `meta.source: "none"` (CLI-internal
+  // verb — no Monday wire call, no cache).
+  //
+  // Snapshot pins the §6 envelope shape for all three shell
+  // targets; `data.script` is collapsed to a sentinel because
+  // per-shell template bytes are pinned by the dedicated
+  // `tests/integration/commands/completion.test.ts` (registry-
+  // sync invariant + per-target sanity asserts), and the script
+  // body grows every time the command registry changes — pinning
+  // length here would churn this snapshot on every verb addition.
+  // The script is asserted non-empty as a separate per-shell
+  // expectation below.
+  const normaliseCompletion = (
+    raw: string,
+  ): Readonly<Record<string, unknown>> => {
+    const env = JSON.parse(raw) as {
+      ok: boolean;
+      data: { shell: string; script: string };
+      meta: Record<string, unknown>;
+      warnings: readonly unknown[];
+    };
+    expect(env.data.script.length).toBeGreaterThan(0);
+    return {
+      ok: env.ok,
+      data: {
+        shell: env.data.shell,
+        script: '<script:non-empty>',
+      },
+      meta: env.meta,
+      warnings: env.warnings,
+    };
+  };
+
+  for (const shell of ['bash', 'zsh', 'fish'] as const) {
+    it(`completion ${shell} --json (§6 envelope wraps the script)`, async () => {
+      const out = await drive(['completion', shell, '--json'], {
+        interactions: [],
+      });
+      expect(out.exitCode).toBe(0);
+      expect(normaliseCompletion(out.stdout)).toMatchSnapshot();
+    });
+  }
+
+  it('completion --table (usage_error — only --json + raw-bytes default supported)', async () => {
+    const out = await drive(['completion', 'bash', '--table'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('completion <invalid-shell> (usage_error from parseArgv boundary)', async () => {
+    const out = await drive(['completion', 'powershell', '--json'], {
+      interactions: [],
+    });
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+});
