@@ -337,6 +337,54 @@ describe('documents.ts schemas', () => {
       });
       expect(parsed.success).toBe(true);
     });
+
+    // Round-3 P2-1 — superRefine guard. An out-of-range `limit`
+    // must surface ONLY the range violation, not a derived
+    // has_more invariant error stacked on top (which would be
+    // misleading because the invariant evaluates `returned_count
+    // === limit` against the invalid limit value). Without the
+    // guard, `{ limit: 0, returned_count: 0, has_more: false }`
+    // would emit both `limit` (too_small) AND `has_more` (custom)
+    // issues; with the guard, only `limit` (too_small) surfaces.
+    it('REJECTS invalid limit with ONLY the range violation, not the derived has_more error (round-3 P2-1 guard)', () => {
+      const parsed = docListOutputSchema.safeParse({
+        documents: [],
+        page: 1,
+        limit: 0,
+        returned_count: 0,
+        has_more: false,
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const paths = parsed.error.issues.map((i) => i.path.join('.'));
+        const codes = parsed.error.issues.map((i) => i.code);
+        // The limit-floor violation must fire.
+        expect(paths).toContain('limit');
+        // The has_more derived invariant must NOT fire — the guard
+        // short-circuits when limit is out of range.
+        expect(paths).not.toContain('has_more');
+        // And no `custom` issue should be present (only the
+        // `too_small` range violation).
+        expect(codes).not.toContain('custom');
+      }
+    });
+
+    it('REJECTS invalid limit ceiling with ONLY the range violation (round-3 P2-1 guard)', () => {
+      const parsed = docListOutputSchema.safeParse({
+        documents: [],
+        page: 1,
+        limit: MAX_DOC_LIST_LIMIT + 1,
+        returned_count: 0,
+        has_more: false,
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const paths = parsed.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('limit');
+        expect(paths).not.toContain('has_more');
+        expect(paths).not.toContain('returned_count');
+      }
+    });
   });
 
   describe('docGetOutputSchema (= documentWithBlocksSchema direct unwrap per D9)', () => {

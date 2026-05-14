@@ -310,13 +310,14 @@ export const docListOutputSchema = z
     has_more: z.boolean(),
   })
   .strict()
-  // Pagination-invariant cross-field check (round-2 P2-1 fix).
-  // The schema-level field types/ranges don't enforce the documented
-  // invariants between `returned_count` / `documents.length` / `limit`
-  // / `has_more` — an IMPL bug could emit inconsistent pagination
-  // data and still pass output validation, then bleed agent-visible
-  // drift into the envelope. Pin the two invariants here so the
-  // unwrap-or-throw boundary catches violations at parse time:
+  // Pagination-invariant cross-field check (round-2 P2-1 fix +
+  // round-3 P2-1 guard). The schema-level field types/ranges don't
+  // enforce the documented invariants between `returned_count` /
+  // `documents.length` / `limit` / `has_more` — an IMPL bug could
+  // emit inconsistent pagination data and still pass output
+  // validation, then bleed agent-visible drift into the envelope.
+  // Pin the two invariants here so the unwrap-or-throw boundary
+  // catches violations at parse time:
   //
   //   1. `returned_count === documents.length` — the count field is
   //      the cached array length, not an independent counter.
@@ -324,7 +325,27 @@ export const docListOutputSchema = z
   //      surface doesn't expose a total-count, so "exactly `limit`
   //      rows returned" is the only signal that a follow-up page
   //      may exist (D9 closure).
+  //
+  // **Round-3 P2-1 fix — early-return guard.** Zod's `.superRefine`
+  // still runs even when scalar range checks above have produced
+  // "dirty" issues. Without this guard, a malformed input like
+  // `{ limit: 0, returned_count: 0, has_more: false }` would emit
+  // BOTH the legitimate `limit` range-floor violation AND a
+  // misleading `has_more` invariant violation (because `has_more
+  // === (returned_count === limit)` evaluates against the invalid
+  // limit value). Short-circuit when participating scalars are
+  // out-of-range so the user sees only the underlying range
+  // violation, not a derived inconsistency error stacked on top.
   .superRefine((value, ctx) => {
+    if (
+      value.limit < MIN_DOC_LIST_LIMIT ||
+      value.limit > MAX_DOC_LIST_LIMIT ||
+      value.returned_count < 0 ||
+      !Number.isInteger(value.limit) ||
+      !Number.isInteger(value.returned_count)
+    ) {
+      return;
+    }
     if (value.returned_count !== value.documents.length) {
       ctx.addIssue({
         code: 'custom',
