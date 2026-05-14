@@ -132,11 +132,22 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   consumer counts** — confirmed by the R-NEW-58 2-consumer
   scan at IMPL kickoff returning NEGATIVE.
 
-**No new R-class candidates filed at M33 IMPL** — the 1 P2 + 1 P3
-findings were a runtime fix + prose precision; neither surfaces
-a pattern that would crystallize as a watch-item. The three
-M33-pre-flight candidates (R-NEW-76 / R-NEW-77 / R-NEW-78) all
-carry forward; see below.
+**No new R-class candidates surfaced AT M33 IMPL review rounds**
+— the 1 P2 + 1 P3 round-1 findings were a runtime fix + prose
+precision; neither crystallized a pattern that would fire a
+watch-item directly. **However, the post-M33-IMPL refactor-audit
+sweep surfaced 3 retrospective candidates** (R-NEW-79 / R-NEW-80
+/ R-NEW-81; full entries at v0.4-plan §22) from the M33 IMPL
+code surface itself: a POSIX-shell-safe single-quote encoding
+helper (`shSingleQuote`, 1 consumer + 6 internal callsites), a
+commander program-tree walker pair (`buildCompletionTree` +
+`flattenPaths`, 1 consumer), and the per-target template
+emission with per-target option shapes pattern (1 supporting
+instance — process discipline, surfaced via the M33 round-1
+P2-1 catch). All three are LOW-priority watch-items at the
+1-consumer/instance threshold; none cross a lift trigger today.
+The three M33-pre-flight candidates (R-NEW-76 / R-NEW-77 /
+R-NEW-78) all carry forward; see below.
 
 **Three R-class candidates filed at M33 pre-flight** (full
 entries at v0.4-plan §22):

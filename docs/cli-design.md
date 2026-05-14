@@ -7652,7 +7652,7 @@ scoped idempotent changes, and post comments narrating its work.**
   "Wire-vs-CLI semantics documentation conventions" section in
   `docs/architecture.md` (R-NEW-41 shipped).
 - `doc list/get` (read-only workdocs; full docs CRUD deferred to
-  v0.5) **— M32 IMPL landed end-to-end** (pre-flight cluster
+  v0.5) **— M32 shipped end-to-end** (pre-flight cluster
   `05c5988..a889eac`, 4 rounds; IMPL cluster `2ca8b97..a7d6771`,
   3 rounds; cumulative IMPL findings 0 P1 + 1 P2 + 2 P3 within
   the M22 / M27 read-surface precedent). Two new verbs at §4.3:

@@ -4116,7 +4116,7 @@ only (cli-design §8 cache scope excludes workdocs — content-
 heavy + frequently human-edited; stale-cache risk outweighs
 cache-hit value).
 
-**Status: v0.4-M32 IMPL landed end-to-end.** Argv parsing + schema
+**Status: v0.4-M32 shipped end-to-end.** Argv parsing + schema
 + wire query documents shipped at v0.4-M32 pre-flight
 (`scripts/probe/m32-docs.ts` 2026-05-14 pinned
 `Query.docs(workspace_ids: [ID], order_by: DocsOrderBy, limit: Int,
@@ -4186,7 +4186,7 @@ documented shape is `[Document]`, possibly empty, never null —
 null indicates wire-shape regression worth surfacing loudly per
 the M32 IMPL round-1 P2-1 closure).
 
-**Status: v0.4-M32 IMPL landed end-to-end.** Argv parsing + schema
+**Status: v0.4-M32 shipped end-to-end.** Argv parsing + schema
 + wire query document shipped at v0.4-M32 pre-flight; the runtime
 body landed at IMPL via {@link getDocument} — single `client.raw`
 round-trip with `operationName: 'GetDoc'` pinned at the fetcher
