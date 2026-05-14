@@ -88,20 +88,29 @@
  * post an update or trigger automations beyond Monday's own
  * file-change activity log (which `item history` surfaces).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing is the shipped surface;
- * the file-read + multipart-dispatch + envelope emit are c8-ignored
- * (block-wrap) and land at v0.4-M31 IMPL when the runtime body of
- * {@link addFileToColumn} flips from stub-throws to multipart wire.
+ * **Status: runtime body shipped at v0.4-M31 IMPL.** Argv parsing
+ * + file-read + dry-run + multipart-dispatch + envelope emit + cache
+ * invalidation all land below.
  */
 import { z } from 'zod';
+import { stat as fsStat, readFile } from 'node:fs/promises';
+import { resolve as resolvePath, basename } from 'node:path';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { ItemIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import {
   itemUploadOutputSchema,
   type ItemUploadOutput,
+  addFileToColumn,
 } from '../../api/assets.js';
-import { ApiError } from '../../utils/errors.js';
+import { resolveClient } from '../../api/resolve-client.js';
+import { resolveColumnWithRefresh } from '../../api/columns.js';
+import { lookupItemBoard } from '../../api/item-board-lookup.js';
+import { invalidateBoard } from '../../api/cache.js';
+import { foldResolverWarningsIntoError } from '../../api/resolver-error-fold.js';
+import { ApiError, UsageError, asError, errorCode } from '../../utils/errors.js';
+import { sniffContentType } from '../../utils/mime.js';
+import { emitMutation, emitDryRun } from '../emit.js';
 
 const inputSchema = z
   .object({
@@ -162,7 +171,7 @@ export const itemUploadCommand: CommandModule<
         ].join('\n'),
       )
       .action(
-        (
+        async (
           itemIdArg: unknown,
           fileArg: unknown,
           opts: { column: string },
@@ -172,33 +181,229 @@ export const itemUploadCommand: CommandModule<
             file: fileArg,
             column: opts.column,
           });
-          void ctx;
 
-          /* c8 ignore start — pre-flight stub: the runtime body
-             (file read + multipart dispatch + envelope emit, plus
-             the dry-run `fs.stat()`-backed planned-change shape per
-             D5) lands at v0.4-M31 IMPL. Surfacing `internal_error`
-             rather than a fake `ok: true` envelope keeps the stub
-             discipline honest — the partial runtime would otherwise
-             emit a bogus `file_size_bytes: 0` dry-run plan that
-             agents could mistake for the real D5 contract. The c8
-             block drops with the IMPL feat per the M30 pre-flight
-             cadence (and lets coverage stay below the block-wrap's
-             unreachable branches). */
-          throw new ApiError(
-            'internal_error',
-            '`monday item upload` action body is a pre-flight stub; runtime body lands at v0.4-M31 IMPL',
-            {
-              details: {
-                deferred_to: 'v0.4-M31 IMPL',
-                item_id: parsed.itemId,
-                column_id: parsed.column,
-                file_path: parsed.file,
-                hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub validates argv shape only. IMPL replaces this body with the real file-read + dry-run + multipart wire dispatch per cli-design §6.4 asset-upload sub-section.',
+          // Resolve the absolute file path relative to cwd. Pre-check
+          // existence + readability + emptiness via `fs.stat()` BEFORE
+          // resolveClient so a missing-file error surfaces as
+          // usage_error (exit 1) rather than getting tangled up with
+          // config_error (exit 3) on a token miss. Same ordering
+          // invariant the destructive-gate verbs preserve.
+          const filePath = resolvePath(process.cwd(), parsed.file);
+          const filename = basename(filePath);
+          let fileSizeBytes: number;
+          try {
+            const stats = await fsStat(filePath);
+            if (!stats.isFile()) {
+              throw new UsageError(
+                `<file> ${JSON.stringify(parsed.file)} is not a regular file ` +
+                  `(resolved to ${JSON.stringify(filePath)}).`,
+                {
+                  details: {
+                    reason: 'file_not_readable',
+                    file_path: filePath,
+                    hint:
+                      'pass a path to a regular readable file; directories ' +
+                      'and special files (sockets, devices) are rejected.',
+                  },
+                },
+              );
+            }
+            fileSizeBytes = stats.size;
+          } catch (err) {
+            if (err instanceof UsageError) {
+              throw err;
+            }
+            const code = errorCode(err);
+            throw new UsageError(
+              `<file> ${JSON.stringify(parsed.file)} cannot be read ` +
+                `(resolved to ${JSON.stringify(filePath)}): ` +
+                `${asError(err).message}.`,
+              {
+                cause: err,
+                details: {
+                  reason: 'file_not_readable',
+                  file_path: filePath,
+                  ...(code === undefined ? {} : { errno_code: code }),
+                  hint:
+                    'check that the path exists, is readable by the current ' +
+                    'user, and isn\'t a directory.',
+                },
               },
-            },
-          );
-          /* c8 ignore stop */
+            );
+          }
+          if (fileSizeBytes === 0) {
+            throw new UsageError(
+              `<file> ${JSON.stringify(parsed.file)} is empty (0 bytes); ` +
+                `Monday rejects empty uploads server-side.`,
+              {
+                details: {
+                  reason: 'file_empty',
+                  file_path: filePath,
+                  filename,
+                  file_size_bytes: 0,
+                  hint:
+                    'Monday returns FILE_SIZE_LIMIT_EXCEEDED on empty ' +
+                    'uploads. Provide a non-empty file or remove the upload ' +
+                    'call.',
+                },
+              },
+            );
+          }
+
+          const { client, globalFlags, apiVersion, multipart, toEmit } =
+            resolveClient(ctx, program.opts());
+
+          if (globalFlags.dryRun) {
+            // D5 closure: dry-run is fs.stat()-backed (NOT a 0-byte
+            // stub). Planned-change carries `{operation, item_id,
+            // column_id, file_path, filename, file_size_bytes}` from
+            // the local stat; no wire mutation fires; no file bytes
+            // loaded into memory. `meta.source: 'none'`.
+            emitDryRun({
+              ctx,
+              programOpts: program.opts(),
+              plannedChanges: [
+                {
+                  operation: 'add_file_to_column',
+                  item_id: parsed.itemId,
+                  column_id: parsed.column,
+                  file_path: filePath,
+                  filename,
+                  file_size_bytes: fileSizeBytes,
+                },
+              ],
+              source: 'none',
+              cacheAgeSeconds: null,
+              apiVersion,
+            });
+            return;
+          }
+
+          // Live path. Resolve the parent board so we can (a) pin the
+          // column-type check to the right board metadata and (b) fire
+          // cache invalidation on the right board after a successful
+          // upload (D6 single-leg per §8). `lookupItemBoard` throws
+          // `not_found` on a missing item or null-board, so a bad
+          // <iid> surfaces a typed envelope before any file I/O.
+          const { boardId } = await lookupItemBoard({
+            client,
+            itemId: parsed.itemId,
+          });
+
+          const resolution = await resolveColumnWithRefresh({
+            client,
+            boardId,
+            token: parsed.column,
+            includeArchived: true,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          const resolverWarnings = resolution.warnings;
+          const resolvedColumn = resolution.match.column;
+
+          if (resolvedColumn.archived === true) {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'column_archived',
+                `Column ${JSON.stringify(resolvedColumn.title)} ` +
+                  `(id ${resolvedColumn.id}) on board ${boardId} is ` +
+                  `archived; un-archive the column before uploading to it.`,
+                {
+                  details: {
+                    column_id: resolvedColumn.id,
+                    column_title: resolvedColumn.title,
+                    column_type: resolvedColumn.type,
+                    board_id: boardId,
+                  },
+                },
+              ),
+              resolverWarnings,
+            );
+          }
+
+          if (resolvedColumn.type !== 'file') {
+            throw foldResolverWarningsIntoError(
+              new ApiError(
+                'unsupported_column_type',
+                `Column ${JSON.stringify(resolvedColumn.title)} ` +
+                  `(id ${resolvedColumn.id}) has type ` +
+                  `${JSON.stringify(resolvedColumn.type)}, which Monday ` +
+                  `writes via change_column_value not add_file_to_column. ` +
+                  `monday item upload only accepts file-typed columns.`,
+                {
+                  details: {
+                    column_id: resolvedColumn.id,
+                    column_title: resolvedColumn.title,
+                    type: resolvedColumn.type,
+                    board_id: boardId,
+                    hint:
+                      'use `monday item set` / `monday item update --set` ' +
+                      'against this column; `monday item upload` only ' +
+                      'accepts file-typed columns (cli-design §5.3 ' +
+                      'writer-expansion roadmap "files" row).',
+                  },
+                },
+              ),
+              resolverWarnings,
+            );
+          }
+
+          // Read the file bytes into a Blob with a sniffed content-
+          // type. Done AFTER column-type validation so a non-`file`
+          // column rejection doesn't pay for the full read.
+          const bytes = await readFile(filePath);
+          const file = new Blob([bytes], { type: sniffContentType(filename) });
+
+          const result = await addFileToColumn({
+            client,
+            multipart,
+            itemId: parsed.itemId,
+            columnId: resolvedColumn.id,
+            file,
+            filename,
+            signal: ctx.signal,
+            retries: globalFlags.retry,
+          });
+
+          // §8 single-leg cache invalidation (D6). Fired BEFORE
+          // emitMutation so a cache-unlink failure surfaces through
+          // the runner's catch-all rather than double-emitting after
+          // the success envelope already hit stdout.
+          await invalidateBoard(boardId, ctx.env);
+
+          const data: ItemUploadOutput = {
+            operation: 'add_file_to_column',
+            item_id: parsed.itemId,
+            column_id: resolvedColumn.id,
+            filename,
+            file_size_bytes: fileSizeBytes,
+            asset: result.asset,
+          };
+
+          // `toEmit` carries `source: 'live'` + the resolved
+          // `apiVersion`. Splat first; override `complexity` with the
+          // multipart wire's projection (Monday's asset-upload
+          // mutations don't return a complexity block today, but
+          // honoring the slot mirrors the JSON-fetcher pattern).
+          emitMutation({
+            ctx,
+            data,
+            schema: itemUploadCommand.outputSchema,
+            programOpts: program.opts(),
+            warnings: resolverWarnings.map((w) => ({
+              code: w.code,
+              message: w.message,
+              details: w.details,
+            })),
+            ...toEmit({
+              data: result.asset,
+              complexity: result.complexity,
+              stats: { attempts: 1, totalBackoffMs: 0 },
+            }),
+            source: 'live',
+            cacheAgeSeconds: null,
+            complexity: result.complexity,
+          });
         },
       );
   },

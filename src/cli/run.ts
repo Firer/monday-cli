@@ -17,6 +17,7 @@ import {
 } from './envelope-out.js';
 import { buildProgram } from './program.js';
 import type { Transport } from '../api/transport.js';
+import type { MultipartTransport } from '../api/multipart-transport.js';
 import type { CommandModule } from '../commands/types.js';
 
 /**
@@ -42,6 +43,17 @@ export interface RunOptions {
   readonly cliDescription?: string;
   readonly clock?: () => Date;
   readonly transport?: Transport;
+  /**
+   * Multipart-transport seam for the v0.4-M31 asset-upload verbs
+   * (`item upload` / `update upload`). Mirrors `transport` for the
+   * JSON path: integration tests inject a `MultipartFixtureTransport`
+   * here so the runner-level multipart wire is deterministic. When
+   * unset, `commands/item/upload.ts` + `commands/update/upload.ts`
+   * build a real `createMultipartFetchTransport(...)` instance from
+   * the resolved config (mirroring `resolveClient`'s
+   * `ctx.transport ?? createFetchTransport(...)` shape).
+   */
+  readonly multipartTransport?: MultipartTransport;
   readonly requestIdGenerator?: RequestIdGenerator;
   /**
    * External abort source. `runWithSignals` provides one tied to
@@ -88,6 +100,14 @@ export interface RunContext {
   readonly isTTY: boolean;
   readonly clock: () => Date;
   readonly transport: Transport | undefined;
+  /**
+   * Optional multipart-transport override threaded from
+   * {@link RunOptions.multipartTransport}. Asset-upload action bodies
+   * (`item upload` / `update upload`) read this slot and fall back to
+   * `createMultipartFetchTransport(...)` when unset — same shape as
+   * `transport`'s production-vs-test split.
+   */
+  readonly multipartTransport: MultipartTransport | undefined;
   readonly requestId: string;
   readonly cliVersion: string;
   /**
@@ -160,6 +180,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     isTTY: options.isTTY,
     clock,
     transport: options.transport,
+    multipartTransport: options.multipartTransport,
     requestId,
     cliVersion: options.cliVersion,
     signal: combinedSignal,

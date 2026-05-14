@@ -51,19 +51,27 @@
  * cache scope (board-metadata-only); the upload changes the
  * Update's asset collection but nothing the cache tracks.
  *
- * **Status: PRE-FLIGHT STUB** — same shape as `item upload`. Argv
- * parsing is the real surface; everything after is c8-ignored
- * until IMPL.
+ * **Status: runtime body shipped at v0.4-M31 IMPL** — mirrors
+ * `item upload` minus the column-resolution + cache-invalidation
+ * legs (Updates aren't part of the §8 cache scope; no per-column
+ * type check needed because Updates accept any file type Monday
+ * supports).
  */
 import { z } from 'zod';
+import { stat as fsStat, readFile } from 'node:fs/promises';
+import { resolve as resolvePath, basename } from 'node:path';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import {
   updateUploadOutputSchema,
   type UpdateUploadOutput,
+  addFileToUpdate,
 } from '../../api/assets.js';
-import { ApiError } from '../../utils/errors.js';
+import { resolveClient } from '../../api/resolve-client.js';
+import { UsageError, asError, errorCode } from '../../utils/errors.js';
+import { sniffContentType } from '../../utils/mime.js';
+import { emitMutation, emitDryRun } from '../emit.js';
 
 const inputSchema = z
   .object({
@@ -119,7 +127,7 @@ export const updateUploadCommand: CommandModule<
         ].join('\n'),
       )
       .action(
-        (
+        async (
           updateIdArg: unknown,
           fileArg: unknown,
         ) => {
@@ -127,29 +135,138 @@ export const updateUploadCommand: CommandModule<
             updateId: updateIdArg,
             file: fileArg,
           });
-          void ctx;
 
-          /* c8 ignore start — pre-flight stub: the runtime body
-             (file read + multipart dispatch + envelope emit, plus
-             the dry-run `fs.stat()`-backed planned-change shape per
-             D5) lands at v0.4-M31 IMPL. Surfacing `internal_error`
-             keeps the stub discipline honest (no fake `ok: true`
-             dry-run envelope with bogus `file_size_bytes: 0`). The
-             c8 block drops with the IMPL feat per the M30 pre-
-             flight cadence. */
-          throw new ApiError(
-            'internal_error',
-            '`monday update upload` action body is a pre-flight stub; runtime body lands at v0.4-M31 IMPL',
-            {
-              details: {
-                deferred_to: 'v0.4-M31 IMPL',
-                update_id: parsed.updateId,
-                file_path: parsed.file,
-                hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub validates argv shape only. IMPL replaces this body with the real file-read + dry-run + multipart wire dispatch per cli-design §6.4 asset-upload sub-section.',
+          // Same fs.stat() pre-check shape as `item upload`. Pre-
+          // resolveClient so a missing-file error surfaces as
+          // usage_error (exit 1) before any token check.
+          const filePath = resolvePath(process.cwd(), parsed.file);
+          const filename = basename(filePath);
+          let fileSizeBytes: number;
+          try {
+            const stats = await fsStat(filePath);
+            if (!stats.isFile()) {
+              throw new UsageError(
+                `<file> ${JSON.stringify(parsed.file)} is not a regular file ` +
+                  `(resolved to ${JSON.stringify(filePath)}).`,
+                {
+                  details: {
+                    reason: 'file_not_readable',
+                    file_path: filePath,
+                    hint:
+                      'pass a path to a regular readable file; directories ' +
+                      'and special files (sockets, devices) are rejected.',
+                  },
+                },
+              );
+            }
+            fileSizeBytes = stats.size;
+          } catch (err) {
+            if (err instanceof UsageError) {
+              throw err;
+            }
+            const code = errorCode(err);
+            throw new UsageError(
+              `<file> ${JSON.stringify(parsed.file)} cannot be read ` +
+                `(resolved to ${JSON.stringify(filePath)}): ` +
+                `${asError(err).message}.`,
+              {
+                cause: err,
+                details: {
+                  reason: 'file_not_readable',
+                  file_path: filePath,
+                  ...(code === undefined ? {} : { errno_code: code }),
+                  hint:
+                    'check that the path exists, is readable by the current ' +
+                    'user, and isn\'t a directory.',
+                },
               },
-            },
-          );
-          /* c8 ignore stop */
+            );
+          }
+          if (fileSizeBytes === 0) {
+            throw new UsageError(
+              `<file> ${JSON.stringify(parsed.file)} is empty (0 bytes); ` +
+                `Monday rejects empty uploads server-side.`,
+              {
+                details: {
+                  reason: 'file_empty',
+                  file_path: filePath,
+                  filename,
+                  file_size_bytes: 0,
+                  hint:
+                    'Monday returns FILE_SIZE_LIMIT_EXCEEDED on empty ' +
+                    'uploads. Provide a non-empty file or remove the upload ' +
+                    'call.',
+                },
+              },
+            );
+          }
+
+          const { client, globalFlags, apiVersion, multipart, toEmit } =
+            resolveClient(ctx, program.opts());
+
+          if (globalFlags.dryRun) {
+            // D5 closure mirror — dry-run is fs.stat()-backed; no
+            // wire mutation; no file bytes loaded. `update upload`
+            // dry-run carries `update_id` instead of `item_id` +
+            // `column_id`; otherwise structurally identical to the
+            // `item upload` dry-run shape.
+            emitDryRun({
+              ctx,
+              programOpts: program.opts(),
+              plannedChanges: [
+                {
+                  operation: 'add_file_to_update',
+                  update_id: parsed.updateId,
+                  file_path: filePath,
+                  filename,
+                  file_size_bytes: fileSizeBytes,
+                },
+              ],
+              source: 'none',
+              cacheAgeSeconds: null,
+              apiVersion,
+            });
+            return;
+          }
+
+          const bytes = await readFile(filePath);
+          const file = new Blob([bytes], { type: sniffContentType(filename) });
+
+          const result = await addFileToUpdate({
+            client,
+            multipart,
+            updateId: parsed.updateId,
+            file,
+            filename,
+            signal: ctx.signal,
+            retries: globalFlags.retry,
+          });
+
+          // No cache invalidation per D6 — Updates aren't part of the
+          // §8 cache scope (which covers board metadata only).
+
+          const data: UpdateUploadOutput = {
+            operation: 'add_file_to_update',
+            update_id: parsed.updateId,
+            filename,
+            file_size_bytes: fileSizeBytes,
+            asset: result.asset,
+          };
+
+          emitMutation({
+            ctx,
+            data,
+            schema: updateUploadCommand.outputSchema,
+            programOpts: program.opts(),
+            ...toEmit({
+              data: result.asset,
+              complexity: result.complexity,
+              stats: { attempts: 1, totalBackoffMs: 0 },
+            }),
+            source: 'live',
+            cacheAgeSeconds: null,
+            complexity: result.complexity,
+          });
         },
       );
   },

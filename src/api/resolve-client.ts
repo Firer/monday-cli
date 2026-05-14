@@ -27,6 +27,10 @@
 
 import { createFetchTransport, type Transport } from './transport.js';
 import {
+  createMultipartFetchTransport,
+  type MultipartTransport,
+} from './multipart-transport.js';
+import {
   MondayClient,
   PINNED_API_VERSION,
   type MondayResponse,
@@ -80,6 +84,16 @@ export interface ResolvedClient {
    */
   readonly transport: Transport;
   /**
+   * Multipart-transport seam for v0.4-M31 asset-upload verbs
+   * (`item upload` / `update upload`). Mirrors `transport` for the
+   * JSON path: `ctx.multipartTransport` (test injection) wins;
+   * otherwise built fresh from the same resolved endpoint / token /
+   * version / timeout the JSON transport uses. Action bodies that
+   * don't upload files leave this slot untouched — building the
+   * multipart transport is cheap (no I/O until `request()`).
+   */
+  readonly multipart: MultipartTransport;
+  /**
    * Builds the `EmitFromNetworkResult` shape for a given network
    * response — closes over the resolved `apiVersion` so call sites
    * can't pass a mismatched value. M2 commands all run live;
@@ -115,6 +129,15 @@ export const resolveClient = (
       timeoutMs,
     });
 
+  const multipart =
+    ctx.multipartTransport ??
+    createMultipartFetchTransport({
+      endpoint: config.apiUrl,
+      apiToken: config.apiToken,
+      apiVersion,
+      timeoutMs,
+    });
+
   const client = new MondayClient({
     transport,
     signal: ctx.signal,
@@ -140,5 +163,5 @@ export const resolveClient = (
     cacheAgeSeconds: null,
   });
 
-  return { client, globalFlags, apiVersion, transport, toEmit };
+  return { client, globalFlags, apiVersion, transport, multipart, toEmit };
 };

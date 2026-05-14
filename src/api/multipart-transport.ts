@@ -73,13 +73,13 @@
  * the standard `AbortSignal.any(timeout, caller)` chain mirroring
  * `transport.ts`'s `combineSignals` (lands at IMPL).
  *
- * **Status: PRE-FLIGHT STUB.** Wire-body builder + fetch dispatch
- * land at v0.4-M31 IMPL. The exported factory currently returns a
- * transport whose `request()` throws `internal_error` with
- * `details.deferred_to: "v0.4-M31 IMPL"`. The type signature +
- * named-operation contract are pinned at pre-flight so the
- * `src/api/assets.ts` fetcher module can land its argv-validation
- * + envelope-shape surface against a stable interface.
+ * **Status: runtime body shipped at v0.4-M31 IMPL.** Wire-body
+ * builder + fetch dispatch + header lockdown + signal combination +
+ * fetch-error mapping all land below. Header lockdown mirrors
+ * `transport.ts:createFetchTransport` (caller-supplied headers can
+ * never override `Authorization` / `API-Version`); `Content-Type`
+ * is intentionally NOT in the transport-owned override set —
+ * `fetch` sets it from the `FormData` body's boundary parameter.
  *
  * Per empirical probe `scripts/probe/m31-asset-upload.ts`
  * (2026-05-13, API `2026-01`):
@@ -97,7 +97,7 @@
  *     `url_thumbnail`).
  */
 
-import { ApiError } from '../utils/errors.js';
+import { ApiError, errorCode } from '../utils/errors.js';
 
 /**
  * One multipart request: the GraphQL operations payload (query +
@@ -187,53 +187,214 @@ export interface MultipartFetchTransportConfig {
   readonly fetchImpl?: typeof fetch;
 }
 
-/* c8 ignore start — stub body throws at pre-flight; IMPL replaces
-   the body with the real `FormData` assembly + fetch dispatch +
-   error-shape mapping (the same `wrapTransportError` /
-   `describeFetchError` shapes `transport.ts` uses), and the c8
-   ignore drops with the IMPL feat. */
 /**
- * **PRE-FLIGHT STUB.** Builds a `MultipartTransport` over Node's
- * `fetch` using the Web `FormData` API to assemble the multipart
- * body (operations + map + file parts). Header lockdown mirrors
- * `createFetchTransport`'s discipline: caller-supplied headers
- * never override `Authorization` / `API-Version`; `Content-Type`
- * is set by `fetch` from the `FormData` body's boundary, so it
- * is NOT in the transport-owned override set (different from the
- * JSON transport).
+ * Builds a `MultipartTransport` over Node's `fetch` using the Web
+ * `FormData` API to assemble the multipart body (operations + map
+ * + file parts per the standard GraphQL multipart-request
+ * specification). Header lockdown mirrors `createFetchTransport`'s
+ * discipline: caller-supplied headers never override `Authorization`
+ * / `API-Version`; `Content-Type` is set by `fetch` from the
+ * `FormData` body's boundary parameter, so it is NOT in the
+ * transport-owned override set (different from the JSON transport's
+ * hard-coded `application/json`).
  *
- * IMPL replaces this body with:
- *   - construct `FormData` with `operations` + `map` + the file
- *     part (`name='0'`, `Blob` with `filename` + content-type);
- *   - merge the timeout signal with the caller-supplied signal
- *     (mirrors `combineSignals`);
- *   - dispatch via `fetch` with method=POST + headers (no
- *     Content-Type — fetch sets it from FormData);
- *   - parse the response JSON + map errors per `ApiError` codes.
+ * Pipeline per request:
+ *
+ *   1. Strip caller-supplied headers whose lowercase names match the
+ *      reserved set (`authorization`, `api-version`); spread the safe
+ *      remainder into the request bag, then append the transport-
+ *      owned `Authorization` + `API-Version` so they always win.
+ *   2. Build the `FormData` body — `operations` JSON part with the
+ *      query + variables + operationName (the file variable's value
+ *      is `null` at the caller's request, per spec) + `map` JSON
+ *      part pointing the file part at
+ *      `variables.<fileVariableName>` + the file `Blob` keyed by
+ *      index `'0'` with the caller-supplied `filename`.
+ *   3. Combine the caller's `signal` with `AbortSignal.timeout
+ *      (timeoutMs)` so SIGINT + per-request timeout both propagate
+ *      to the in-flight upload.
+ *   4. Dispatch via `fetch` with `method: 'POST'` + the assembled
+ *      body + the merged signal. Don't set `Content-Type` — fetch
+ *      derives it from the FormData boundary.
+ *   5. Parse the JSON response body. Non-JSON (HTML error page,
+ *      etc.) surfaces as `ApiError('network_error')` mirroring
+ *      `transport.ts`'s discipline; abort vs timeout discrimination
+ *      follows the same rule (the timeout signal wins iff the
+ *      caller's signal didn't fire first).
+ *
+ * The transport does NOT own retry — the asset-upload fetchers in
+ * `src/api/assets.ts` wrap the `request(...)` call in `withRetry
+ * (...)` per cli-design §2.5; Web `Blob.stream()` returns a fresh
+ * `ReadableStream` per call so the FormData body re-assembles
+ * cleanly on each retry attempt without buffering.
  */
 export const createMultipartFetchTransport = (
   config: MultipartFetchTransportConfig,
 ): MultipartTransport => {
-  // PRE-FLIGHT STUB — return a transport whose request() throws
-  // `internal_error` so callers can wire the seam at pre-flight
-  // without the runtime body. Reference `config` so the lint rule
-  // doesn't flag the parameter as unused.
-  void config;
+  const fetchImpl = config.fetchImpl ?? fetch;
+
   return {
-    request: () => {
-      return Promise.reject(
-        new ApiError(
-          'internal_error',
-          'multipart transport stub — runtime body lands at v0.4-M31 IMPL',
-          {
-            details: {
-              deferred_to: 'v0.4-M31 IMPL',
-              hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub lands the type signature before the runtime body.',
-            },
-          },
-        ),
+    request: async ({
+      query,
+      variables,
+      operationName,
+      fileVariableName,
+      file,
+      filename,
+      signal,
+    }) => {
+      // Header lockdown — same intent as `transport.ts`'s reserved-
+      // header set, but `MultipartTransportRequest` carries NO
+      // `headers` slot, so the lockdown is closed-by-construction:
+      // there's no way for a caller to inject headers that could
+      // override the transport-owned `Authorization` / `API-Version`.
+      // `Content-Type` is intentionally absent from this bag — fetch
+      // sets it from the FormData body's boundary parameter, and
+      // preempting it would corrupt the multipart envelope (the
+      // boundary delimiter encoded in the header MUST match the one
+      // FormData chose internally).
+      const requestHeaders: Record<string, string> = {
+        Authorization: config.apiToken,
+        'API-Version': config.apiVersion,
+      };
+
+      // Build the multipart body per the spec. The operations JSON
+      // carries `null` in the file variable's slot (the caller
+      // already populated `variables[fileVariableName] = null`
+      // before reaching the transport). The `map` JSON pins the
+      // binary part at `variables.<fileVariableName>` so Monday's
+      // multipart parser can route the bytes to the right slot.
+      const operations: Record<string, unknown> = { query, variables };
+      operations.operationName = operationName;
+      const formData = new FormData();
+      formData.append('operations', JSON.stringify(operations));
+      formData.append(
+        'map',
+        JSON.stringify({ '0': [`variables.${fileVariableName}`] }),
       );
+      formData.append('0', file, filename);
+
+      const combinedSignal = combineSignals(
+        signal,
+        AbortSignal.timeout(config.timeoutMs),
+      );
+
+      let response: Response;
+      try {
+        response = await fetchImpl(config.endpoint, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: formData,
+          signal: combinedSignal,
+        });
+      } catch (err) {
+        if (isAbortError(err) && combinedSignal.reason !== signal.reason) {
+          throw new ApiError(
+            'timeout',
+            `request timed out after ${String(config.timeoutMs)}ms`,
+            { cause: err, details: { timeout_ms: config.timeoutMs } },
+          );
+        }
+        throw new ApiError('network_error', describeFetchError(err), {
+          cause: err,
+        });
+      }
+
+      const responseHeaders = headersToRecord(response.headers);
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch (err) {
+        throw new ApiError(
+          'network_error',
+          `non-JSON response (status ${String(response.status)})`,
+          { cause: err, httpStatus: response.status },
+        );
+      }
+      return {
+        status: response.status,
+        headers: responseHeaders,
+        body: parsed,
+      };
     },
   };
 };
-/* c8 ignore stop */
+
+const isAbortError = (err: unknown): boolean => {
+  if (err instanceof Error) {
+    return err.name === 'AbortError' || err.name === 'TimeoutError';
+  }
+  return false;
+};
+
+/**
+ * Mirrors `transport.ts:describeFetchError`. Extracted to keep
+ * messaging stable across the JSON + multipart paths — agents
+ * reading either envelope's `error.message` see the same vocabulary
+ * for connection / DNS / TLS failures regardless of which transport
+ * issued the call.
+ */
+const describeFetchError = (err: unknown): string => {
+  if (err instanceof Error) {
+    const code = errorCode(err);
+    if (code !== undefined) {
+      if (code.startsWith('ENOTFOUND') || code.startsWith('EAI_')) {
+        return 'fetch failed: dns lookup failed';
+      }
+      if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
+        return 'fetch failed: connection refused';
+      }
+      if (code === 'CERT_HAS_EXPIRED' || code.startsWith('UNABLE_TO_')) {
+        return 'fetch failed: tls error';
+      }
+    }
+    const lower = err.message.toLowerCase();
+    if (lower.includes('econnrefused') || lower.includes('connection refused')) {
+      return 'fetch failed: connection refused';
+    }
+    if (
+      lower.includes('enotfound') ||
+      lower.includes('eai_again') ||
+      lower.includes('getaddrinfo')
+    ) {
+      return 'fetch failed: dns lookup failed';
+    }
+    return 'fetch failed';
+  }
+  return 'fetch failed';
+};
+
+const headersToRecord = (
+  headers: Headers,
+): Readonly<Record<string, string>> => {
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+};
+
+/**
+ * Mirrors `transport.ts:combineSignals` — prefer the platform
+ * `AbortSignal.any` when available (Node 22+ pin always satisfies
+ * this) and synthesise a controller for the legacy fallback path.
+ */
+const combineSignals = (
+  ...signals: readonly (AbortSignal | undefined)[]
+): AbortSignal => {
+  const real = signals.filter((s): s is AbortSignal => s !== undefined);
+  const [first, ...rest] = real;
+  /* c8 ignore next 3 — defensive guard; production callers always
+     pass at least one signal (the caller's `ctx.signal` is REQUIRED
+     on `MultipartTransportRequest`). */
+  if (first === undefined) {
+    return new AbortController().signal;
+  }
+  /* c8 ignore next 3 — production callers always combine the
+     caller's signal with `AbortSignal.timeout(...)`, so this branch
+     is unreachable from the request() pipeline. */
+  if (rest.length === 0) {
+    return first;
+  }
+  return AbortSignal.any(real);
+};

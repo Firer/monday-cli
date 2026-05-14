@@ -81,16 +81,23 @@
  * semantics dedupe on the CLI side (e.g., read `Item.assets` first
  * and skip the upload if a matching `Asset.name` exists).
  *
- * **Status: PRE-FLIGHT STUB.** Runtime bodies for both fetchers land
- * at v0.4-M31 IMPL. The exports below ship as `Promise.reject
- * (internal_error)` stubs under c8 ignore start/stop block-wraps
- * (the testing.md preferred form). Pinned operation names + Asset
- * schema + argv input schemas are the real shipped surface; the
- * `dispatchPlaceholder` block-wraps drop with the IMPL feat.
+ * **Status: runtime body shipped at v0.4-M31 IMPL.** Both fetchers
+ * dispatch via `inputs.multipart.request(...)` wrapped in
+ * `withRetry(...)` per cli-design §2.5; the response-parse boundary
+ * uses `mapResponse` (mirroring `MondayClient.raw`'s discipline) +
+ * `assertResponseFieldPresent` for the schema-drift / null-payload
+ * distinction + `assetSchema.safeParse(...)` via `unwrapOrThrow`
+ * for the per-field shape. Server-side size-cap rewrap fires at
+ * the error-mapping layer below.
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { ApiError, MondayCliError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { parseComplexity } from './complexity.js';
+import { mapResponse, wrapTransportError } from './errors.js';
+import { withRetry } from './retry.js';
+import { assertResponseFieldPresent } from './response-root.js';
 import type { MondayClient } from './client.js';
 import type { MultipartTransport } from './multipart-transport.js';
 import type { Complexity } from '../utils/output/envelope.js';
@@ -334,76 +341,319 @@ export interface AddFileToUpdateResult {
   readonly complexity: Complexity | null;
 }
 
-/* c8 ignore start — pre-flight stub bodies. IMPL replaces both
-   functions with the real `multipart.request(...)` dispatch + the
-   response-parse boundary (zod `assetSchema` via `unwrapOrThrow`)
-   + complexity passthrough. The c8 ignore drops with the IMPL feat
-   per the M30 pre-flight cadence. */
+/**
+ * Re-wraps Monday's server-side file-size rejection as the
+ * agent-stable `usage_error` shape (D3 closure). Monday surfaces the
+ * cap a couple of ways depending on the error path — common signals:
+ *
+ *   - `extensions.code: 'FILE_SIZE_LIMIT_EXCEEDED'` on a 200 GraphQL
+ *     errors[] payload (the most common shape — Monday's GraphQL
+ *     server stays on 200 even for input-validation rejections).
+ *   - `extensions.error_code: 'FILE_SIZE_LIMIT_EXCEEDED'` (older API
+ *     shape preserved across versions).
+ *   - HTTP 413 with no GraphQL body (rare; intermediated by an LB
+ *     between us and Monday's server).
+ *   - The bare error message contains "file size" / "file too large"
+ *     / "exceeds the limit" (string-fallback for proxy-mediated paths
+ *     that strip extensions).
+ *
+ * The matcher reads `mapResponse`'s typed error rather than the raw
+ * body — `mapResponse` already extracted the GraphQL extensions +
+ * Monday code into the `validation_failed` ApiError; we then check
+ * the same signals here to upgrade the rewrap. `details.file_size_
+ * bytes` is the local `fs.stat()` measurement the caller threaded
+ * (D3 — Monday's wire rejection may not surface a size, but the CLI
+ * has the local size from the read leg and threads a stable
+ * envelope).
+ */
+const isFileTooLargeRejection = (err: MondayCliError): boolean => {
+  if (err.httpStatus === 413) return true;
+  const monday = err.mondayCode?.toUpperCase() ?? '';
+  if (monday === 'FILE_SIZE_LIMIT_EXCEEDED') return true;
+  // Fallback to the message vocabulary — Monday occasionally returns
+  // a generic `validation_failed` with the size language inline.
+  const msg = err.message.toLowerCase();
+  if (
+    msg.includes('file size limit') ||
+    msg.includes('file too large') ||
+    msg.includes('exceeds the limit')
+  ) {
+    return true;
+  }
+  return false;
+};
+
+interface RewrapSizeRejectionInputs {
+  readonly err: MondayCliError;
+  readonly fileSizeBytes: number;
+  readonly filename: string;
+}
+
+const rewrapAsFileTooLarge = ({
+  err,
+  fileSizeBytes,
+  filename,
+}: RewrapSizeRejectionInputs): ApiError =>
+  new ApiError(
+    'usage_error',
+    `Monday rejected the upload — file ${JSON.stringify(filename)} ` +
+      `exceeds the per-file size limit (uploaded ${String(fileSizeBytes)} bytes).`,
+    {
+      cause: err,
+      details: {
+        reason: 'file_too_large',
+        file_size_bytes: fileSizeBytes,
+        filename,
+        hint:
+          "Monday's per-file cap is plan-tier-dependent (typically 500 MB at " +
+          'standard tiers, larger at enterprise); contact Monday support to ' +
+          "confirm your account's exact ceiling.",
+      },
+    },
+  );
+
+interface DispatchInputs {
+  readonly multipart: MultipartTransport;
+  readonly query: string;
+  readonly variables: Readonly<Record<string, unknown>>;
+  readonly operationName: string;
+  readonly fileVariableName: string;
+  readonly file: Blob;
+  readonly filename: string;
+  readonly signal: AbortSignal;
+}
+
+interface DispatchResult {
+  readonly data: unknown;
+  readonly complexity: Complexity | null;
+}
 
 /**
- * **PRE-FLIGHT STUB.** Fires Monday's `add_file_to_column` mutation
- * via the multipart transport. IMPL replaces this body with:
+ * Single multipart round-trip with the standard parse-boundary
+ * (mirrors `MondayClient.raw`'s shape but for the multipart seam):
  *
- *   1. Build the operations payload — `{query: ADD_FILE_TO_COLUMN
- *      _MUTATION, variables: {itemId, columnId, file: null},
- *      operationName: 'AddFileToColumn'}`. The `file: null`
- *      placeholder is mandatory per the multipart spec.
- *   2. Dispatch via `inputs.multipart.request({query, variables,
- *      operationName, fileVariableName: 'file', file, filename,
- *      signal})`.
- *   3. Map the response — null `add_file_to_column` → `not_found`
- *      with `details.{item_id, column_id}`; non-Asset shape →
- *      `internal_error` with `details.issues` from
- *      `assetSchema.safeParse(...)`.
- *   4. Return the parsed `Asset` + `source: 'live'` +
- *      `cacheAgeSeconds: null` + the wire complexity.
+ *   1. `multipart.request(...)` → raw transport response.
+ *   2. `mapResponse<unknown>` → tagged `MapResult` ({ok, data} or
+ *      {ok, error}); non-ok throws the typed ApiError directly so
+ *      `withRetry` can inspect `error.retryable` + `retry_after_
+ *      seconds` upstream.
+ *   3. `parseComplexity` projects any `complexity` block Monday
+ *      surfaces (asset-upload mutations don't return one today, but
+ *      keeping the same shape as `MondayClient.raw` means future
+ *      Monday API revisions surface complexity uniformly).
  *
- * `operationName: 'AddFileToColumn'` stays in sync with the named
- * operation in {@link ADD_FILE_TO_COLUMN_MUTATION} (R-NEW-37 W2).
- * Not caller-overridable.
- *
- * Not idempotent — re-running mints a new Asset record.
+ * Wrapped with `wrapTransportError` so a non-ApiError throw (a bug
+ * in the fixture transport, a future SDK shim) becomes
+ * `internal_error` rather than escaping unmapped.
  */
-export const addFileToColumn = (
+const dispatchMultipartOnce = async (
+  inputs: DispatchInputs,
+): Promise<DispatchResult> => {
+  try {
+    const response = await inputs.multipart.request({
+      query: inputs.query,
+      variables: inputs.variables,
+      operationName: inputs.operationName,
+      fileVariableName: inputs.fileVariableName,
+      file: inputs.file,
+      filename: inputs.filename,
+      signal: inputs.signal,
+    });
+    const mapped = mapResponse({
+      status: response.status,
+      headers: response.headers,
+      body: response.body,
+    });
+    if (!mapped.ok) {
+      throw mapped.error;
+    }
+    const complexity = parseComplexity(response.body);
+    return { data: mapped.data, complexity };
+  } catch (err) {
+    throw wrapTransportError(err);
+  }
+};
+
+/**
+ * Fires Monday's `add_file_to_column` mutation via the multipart
+ * transport (operationName `AddFileToColumn`, pinned literally per
+ * R-NEW-37 W2 — NOT caller-overridable). Builds the operations
+ * payload with the `file: null` placeholder per the GraphQL
+ * multipart-request spec, dispatches through `inputs.multipart` +
+ * `withRetry(...)`, parses the response — null `add_file_to_column`
+ * → `not_found` with `details.{item_id, column_id}`; non-Asset
+ * shape → `internal_error` via `assetSchema.safeParse + unwrapOr
+ * Throw`. Server-side size rejections rewrap as `usage_error` with
+ * `details.reason: 'file_too_large'` + `details.file_size_bytes`
+ * from the caller-supplied local `fs.stat()` measurement (D3).
+ *
+ * Not idempotent — re-running mints a new `Asset` ID.
+ */
+export const addFileToColumn = async (
   inputs: AddFileToColumnInputs,
 ): Promise<AddFileToColumnResult> => {
-  void inputs;
-  return Promise.reject(
-    new ApiError(
-      'internal_error',
-      'addFileToColumn stub — runtime body lands at v0.4-M31 IMPL',
+  // Spec-compliant operations payload: the file variable's value is
+  // `null` (mandatory placeholder); the multipart `map` JSON in the
+  // transport pins the file part at `variables.file`.
+  const variables: Record<string, unknown> = {
+    itemId: inputs.itemId,
+    columnId: inputs.columnId,
+    file: null,
+  };
+
+  let result;
+  try {
+    result = await withRetry(
+      () =>
+        dispatchMultipartOnce({
+          multipart: inputs.multipart,
+          query: ADD_FILE_TO_COLUMN_MUTATION,
+          variables,
+          operationName: 'AddFileToColumn',
+          fileVariableName: 'file',
+          file: inputs.file,
+          filename: inputs.filename,
+          signal: inputs.signal,
+        }),
+      {
+        retries: inputs.retries,
+        signal: inputs.signal,
+      },
+    );
+  } catch (err) {
+    if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
+      throw rewrapAsFileTooLarge({
+        err,
+        fileSizeBytes: inputs.file.size,
+        filename: inputs.filename,
+      });
+    }
+    throw err;
+  }
+
+  // Reference `inputs.client` so future complexity-passthrough work
+  // can inspect verbose mode without changing the call signature.
+  // Today the multipart wire bypasses the JSON client entirely; the
+  // slot stays for symmetry with the JSON fetchers' shape.
+  void inputs.client;
+
+  const wireData = result.value.data;
+  assertResponseFieldPresent({
+    data: wireData,
+    key: 'add_file_to_column',
+    operationLabel: 'AddFileToColumn',
+    details: { item_id: inputs.itemId, column_id: inputs.columnId },
+    nullHandling: 'caller_handles',
+  });
+  // After `assertResponseFieldPresent`, `wireData` is structurally a
+  // record with the `add_file_to_column` key present (might be null).
+  const root = (wireData as Record<string, unknown>).add_file_to_column;
+  if (root === null || root === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Item ${inputs.itemId} or column ${JSON.stringify(inputs.columnId)} ` +
+        `does not exist on a board the token has write access to.`,
       {
         details: {
-          deferred_to: 'v0.4-M31 IMPL',
-          hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub lands the type signature + mutation document + Asset schema before the runtime body.',
+          item_id: inputs.itemId,
+          column_id: inputs.columnId,
         },
       },
-    ),
-  );
+    );
+  }
+  const asset = unwrapOrThrow(assetSchema.safeParse(root), {
+    context:
+      'Monday returned a malformed Asset shape from add_file_to_column',
+    details: {
+      item_id: inputs.itemId,
+      column_id: inputs.columnId,
+      filename: inputs.filename,
+    },
+  });
+  return {
+    asset,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: result.value.complexity,
+  };
 };
 
 /**
- * **PRE-FLIGHT STUB.** Fires Monday's `add_file_to_update` mutation
- * via the multipart transport. IMPL mirrors {@link addFileToColumn}'s
- * shape — same multipart-payload assembly, same response-parse
- * boundary, same idempotency caveat.
+ * Fires Monday's `add_file_to_update` mutation via the multipart
+ * transport (operationName `AddFileToUpdate`, pinned literally per
+ * R-NEW-37 W2). Mirrors {@link addFileToColumn}'s shape minus the
+ * `column_id` slot — Updates carry attachments via `Update.assets`
+ * directly. Same response-parse boundary, same `file_too_large`
+ * rewrap, same idempotency caveat (re-running mints a new Asset).
  */
-export const addFileToUpdate = (
+export const addFileToUpdate = async (
   inputs: AddFileToUpdateInputs,
 ): Promise<AddFileToUpdateResult> => {
-  void inputs;
-  return Promise.reject(
-    new ApiError(
-      'internal_error',
-      'addFileToUpdate stub — runtime body lands at v0.4-M31 IMPL',
-      {
-        details: {
-          deferred_to: 'v0.4-M31 IMPL',
-          hint: 'this code path is unreachable in v0.4-M30 release surface; pre-flight stub lands the type signature + mutation document + Asset schema before the runtime body.',
-        },
-      },
-    ),
-  );
-};
+  const variables: Record<string, unknown> = {
+    updateId: inputs.updateId,
+    file: null,
+  };
 
-/* c8 ignore stop */
+  let result;
+  try {
+    result = await withRetry(
+      () =>
+        dispatchMultipartOnce({
+          multipart: inputs.multipart,
+          query: ADD_FILE_TO_UPDATE_MUTATION,
+          variables,
+          operationName: 'AddFileToUpdate',
+          fileVariableName: 'file',
+          file: inputs.file,
+          filename: inputs.filename,
+          signal: inputs.signal,
+        }),
+      {
+        retries: inputs.retries,
+        signal: inputs.signal,
+      },
+    );
+  } catch (err) {
+    if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
+      throw rewrapAsFileTooLarge({
+        err,
+        fileSizeBytes: inputs.file.size,
+        filename: inputs.filename,
+      });
+    }
+    throw err;
+  }
+
+  void inputs.client;
+
+  const wireData = result.value.data;
+  assertResponseFieldPresent({
+    data: wireData,
+    key: 'add_file_to_update',
+    operationLabel: 'AddFileToUpdate',
+    details: { update_id: inputs.updateId },
+    nullHandling: 'caller_handles',
+  });
+  const root = (wireData as Record<string, unknown>).add_file_to_update;
+  if (root === null || root === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Update ${inputs.updateId} does not exist or the token has no write ` +
+        `access.`,
+      { details: { update_id: inputs.updateId } },
+    );
+  }
+  const asset = unwrapOrThrow(assetSchema.safeParse(root), {
+    context: 'Monday returned a malformed Asset shape from add_file_to_update',
+    details: {
+      update_id: inputs.updateId,
+      filename: inputs.filename,
+    },
+  });
+  return {
+    asset,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: result.value.complexity,
+  };
+};
