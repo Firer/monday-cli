@@ -127,8 +127,8 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   cluster — likely v0.5.0 — that catches >= 1 stale
   `deferred_to` site OR explicitly returns "no stale deferrals
   found"). Full entry at v0.4-plan §22 R-NEW-82.
-- **R-NEW-83 shipped at the post-v0.4-release-prep
-  housekeeping session.** `parseNdjsonStream(stdout, opts?)`
+- **R-NEW-83 shipped at `1e51093`** (post-v0.4-release-prep
+  housekeeping session). `parseNdjsonStream(stdout, opts?)`
   lifted to `tests/integration/helpers.ts` with an optional
   `normaliseTrailerField?: (key, value) => unknown` callback
   for the snapshot-determinism site (mirrors R-NEW-21's
