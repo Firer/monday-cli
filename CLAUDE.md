@@ -11,7 +11,7 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M32 IMPL landed end-to-end; next v0.4 milestone TBD.**
+**v0.4-M32 IMPL landed end-to-end; M33 = shell completion picked, pre-flight pending.**
 Doc list/get (`monday doc list [--workspace <wid>,...]
 [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]` +
 `monday doc get <did>`) — first v0.4 verbs against Monday's
@@ -247,6 +247,29 @@ entries at v0.4-plan §22):
   layout is where the conflation matters. Fires at 3rd
   consumer + an observed table-UX complaint (both M22 +
   M32 are agent-primary so the cost is hypothetical today).
+
+**One new R-class candidate filed at post-M32 candidate-
+selection session** (full entry at v0.4-plan §22):
+
+- **R-NEW-75 — Candidate-selection session shape for
+  post-feature-cluster milestone picking** (1 supporting
+  instance; LOW priority watch-item — process discipline,
+  NOT a code lift). Surfaced at the post-M32 IMPL
+  candidate-selection session `169b2bc` — first explicit
+  "scope each remaining backlog candidate + recommend"
+  session in the repo (prior milestones' preceded-by
+  sessions were either empirical probes or direct
+  pre-flight kickoffs). Pinned the 5-dimension scoping
+  framework (wire-shape novelty / transport seam /
+  destructive gate / R-class triggers / Codex cadence)
+  + the AskUserQuestion-driven single-round-trip approval
+  cycle. Fires at 2nd consumer if a future "post-feature-
+  cluster, multiple-candidates-remain" session uses the
+  same framework verbatim — likely v0.5 kickoff against
+  the 9-surface doc-CRUD-mutation backlog M32 D8 closure
+  deferred. Graduates to a permanent CLAUDE.md "Workflow
+  rules" addition if the 2nd consumer ratifies the
+  5-dimension framework without drift.
 
 **R-class state (post-M31 IMPL close — carried forward for
 historical context):**
