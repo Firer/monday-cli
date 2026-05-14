@@ -4275,13 +4275,27 @@ added).
 - **`--json` / `--output json` / `MONDAY_OUTPUT=json`**: standard §6
   envelope with `data: { shell, script }`. Agents introspect via
   `jq -r '.data.script'`.
-- **`--table` / `--text` / `--ndjson`**: rejected as `usage_error`
-  ("output format not applicable to monday completion") — no sensible
-  non-JSON envelope view of a multi-line script blob.
+- **`--table` / `--output table` / `--output text` / `--output
+  ndjson`**: rejected as `usage_error` ("output format not applicable
+  to monday completion") — no sensible non-JSON envelope view of a
+  multi-line script blob. Only `--json` and `--table` are global
+  shorthand flags per cli-design §4.4; `text` and `ndjson` are
+  accessible only via the long-form `--output <fmt>` value.
 
 **No wire surface.** CLI-internal verb (no Monday API call, no auth
 requirement, no cache). The `--json` envelope's `meta.source` is
 always `"none"`.
+
+**`monday schema completion` introspection caveat.** The
+`outputSchema` (`completionOutputSchema`) describes the `--json`
+envelope shape ONLY — agents calling `monday schema completion`
+see the `{ shell, script }` shape below. The default raw-bytes mode
+is OUT-OF-BAND of the schema contract: there is no
+schema-validatable envelope when the verb writes bare bytes to
+stdout. Agents that need to introspect what bytes the default mode
+will produce should call `monday completion <shell> --json` and
+read `data.script` — the byte sequence is identical between the
+default mode and the `--json` envelope's `script` field.
 
 **`--json` envelope shape (M33 pre-flight pinned):**
 

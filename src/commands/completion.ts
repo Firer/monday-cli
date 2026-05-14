@@ -34,13 +34,22 @@
  *     introspection (e.g., `monday completion bash --json | jq -r
  *     '.data.script'` extracts the same bytes the default mode
  *     prints).
- *   - **`--table` / `--text` / `--ndjson`**: rejected as `usage_error`
- *     (no sensible non-JSON envelope view of a multi-line script blob).
+ *   - **`--table` / `--output table` / `--output text` / `--output
+ *     ndjson`**: rejected as `usage_error` (no sensible non-JSON
+ *     envelope view of a multi-line script blob). The `--text` and
+ *     `--ndjson` shorthand flags don't exist on this CLI (only
+ *     `--json` and `--table` are global shorthands per cli-design
+ *     §4.4); text / ndjson are accessible only via `--output
+ *     <fmt>`.
  *
  * **`shell` argv (Decision 4).** Single positional, required. Closed
  * 3-value enum `bash` / `zsh` / `fish` validated at the parse
- * boundary. Unknown values reject with `usage_error.details.shell`
- * carrying the invalid input.
+ * boundary. Unknown values reject with `usage_error.details.issues[]`
+ * carrying a `{path: 'shell', message: 'Invalid option: expected one
+ * of "bash"|"zsh"|"fish"', code: 'invalid_value'}` entry (the shared
+ * `parseArgv` boundary shape — NOT a completion-specific
+ * `details.shell` slot). Agents key on `details.issues[].path ===
+ * 'shell'` to disambiguate from other parse-boundary rejections.
  *
  * **No wire surface (Decision 5).** Verb is CLI-internal — no Monday
  * API call, no `resolveClient`, no auth requirement. `meta.source:
@@ -80,7 +89,13 @@ import { ApiError } from '../utils/errors.js';
 export const COMPLETION_SHELLS = ['bash', 'zsh', 'fish'] as const;
 export type CompletionShell = (typeof COMPLETION_SHELLS)[number];
 
-const shellSchema = z.enum(COMPLETION_SHELLS);
+/**
+ * zod enum binding for the closed 3-value shell flavour. Exported so
+ * the M33 IMPL session (and downstream `monday schema completion`
+ * introspection consumers) can pin against the same enum the argv
+ * parse boundary uses.
+ */
+export const shellSchema = z.enum(COMPLETION_SHELLS);
 
 const inputSchema = z
   .object({
@@ -137,7 +152,7 @@ export const completionCommand: CommandModule<
           '  - Default output is the raw shell script on stdout (no envelope).',
           '    The standard install pipes to your rc file (see examples).',
           '  - --json wraps the script in the §6 envelope (data: { shell, script }).',
-          '  - --table / --text / --ndjson are rejected (not applicable to a script).',
+          '  - --table / --output table|text|ndjson are rejected (not applicable to a script).',
           '',
         ].join('\n'),
       )

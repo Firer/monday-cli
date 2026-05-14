@@ -335,9 +335,12 @@ linked items. Two consequences:
    - `--json` / `--output json` / `MONDAY_OUTPUT=json`: explicitly
      opts INTO the standard §6 envelope, wrapping the bytes as a
      string field under `data`. Useful for agent introspection.
-   - `--table` / `--text` / `--ndjson`: rejected as `usage_error`
-     ("output format not applicable to <verb>") — there is no
-     sensible non-JSON envelope rendering of an opaque byte blob.
+   - `--table` / `--output table` / `--output text` / `--output
+     ndjson`: rejected as `usage_error` ("output format not
+     applicable to <verb>") — there is no sensible non-JSON envelope
+     rendering of an opaque byte blob. Only `--json` and `--table`
+     are global shorthand flags per §4.4; `text` and `ndjson` are
+     accessible only via the long-form `--output <fmt>` value.
 
    The verb's `--help` and the §4.3 entry MUST make the carve-out
    explicit. This is the only documented exception to rule #2.
@@ -2375,9 +2378,14 @@ monday completion <bash|zsh|fish>                                            v0.
                                           # `fish`); unknown values
                                           # reject at the parse
                                           # boundary with `usage_error.
-                                          # details.shell` carrying the
-                                          # offending input. Standard
-                                          # install flow:
+                                          # details.issues[]` carrying
+                                          # a `{path: 'shell', message,
+                                          # code: 'invalid_value'}`
+                                          # entry (the shared
+                                          # `parseArgv` boundary shape,
+                                          # NOT a completion-specific
+                                          # `details.shell` slot).
+                                          # Standard install flow:
                                           #
                                           #   monday completion bash \
                                           #     >> ~/.bashrc
@@ -2404,11 +2412,19 @@ monday completion <bash|zsh|fish>                                            v0.
                                           #   (e.g., `monday completion
                                           #   bash --json | jq -r '.data
                                           #   .script'`).
-                                          # - **`--table` / `--text` /
-                                          #   `--ndjson`**: rejected as
-                                          #   `usage_error` (no sensible
-                                          #   non-JSON envelope view of
-                                          #   a multi-line script blob).
+                                          # - **`--table` / `--output
+                                          #   table` / `--output text` /
+                                          #   `--output ndjson`**:
+                                          #   rejected as `usage_error`
+                                          #   (no sensible non-JSON
+                                          #   envelope view of a multi-
+                                          #   line script blob). Only
+                                          #   `--json` and `--table` are
+                                          #   global shorthand flags per
+                                          #   §4.4; `text` and `ndjson`
+                                          #   are accessible only via
+                                          #   the long-form `--output
+                                          #   <fmt>` value.
                                           #
                                           # No wire surface — verb is
                                           # CLI-internal (no Monday API
@@ -7584,7 +7600,10 @@ scoped idempotent changes, and post comments narrating its work.**
   non-envelope stdout surface in the CLI — §3.1 #2 raw-bytes carve-out
   documents the discipline. ERROR_CODES count stays at 29 (failures
   route through existing `usage_error` for invalid shell flavour +
-  inapplicable `--table`/`--text`/`--ndjson` format flags). No new
+  inapplicable `--table` / `--output table|text|ndjson` format flags —
+  only `--json` and `--table` are global shorthand flags per §4.4;
+  `text` and `ndjson` are accessible only via the long-form
+  `--output <fmt>` value). No new
   transport seam (CLI-internal verb), no destructive gate, no
   GraphQL operation. Pre-flight stub at this commit ships the real
   argv parse boundary + the `--json` envelope schema + commander
