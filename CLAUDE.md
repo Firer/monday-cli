@@ -11,40 +11,67 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M31 pre-flight landed; M31 IMPL is next.** Asset upload
-(`monday item upload <iid> --column <col> <file>` +
+**v0.4-M31 IMPL landed end-to-end; next v0.4 milestone TBD.**
+Asset upload (`monday item upload <iid> --column <col> <file>` +
 `monday update upload <uid> <file>`) — first v0.4 verbs crossing
 the wire via `multipart/form-data` instead of the JSON-only
-`client.request` seam. Eight-commit pre-flight cluster
-(`6b4c91e..d4d7ec0`): initial contract diff at `6b4c91e` + seven
-Codex pre-flight review fix-up commits (`b97303d` round 1: 0 P1
-+ 2 P2 + 3 P3 — stdin `-` rejection at parse boundary + dry-run
-stub false-success replaced with `internal_error` throw + cli-
-design row placement + reason enum drift + 1 stale `§X`
-cross-link; `083ee79` round 2: 0 P1 + 0 P2 + 4 P3 — all
-round-1-introduced doc drift; `6d6f351` round 3: 0 P1 + 0 P2 +
-4 P3 — pre-existing drift caught by strict cross-doc audit;
-`0660aa0` round 4: 0 P1 + 0 P2 + 2 P3 — `file_size_bytes`
-provenance contradiction pinned to local `fs.stat()` measurement
-+ `§X` placeholder scope-out documented; `d6574d7` round 5:
-0 P1 + 0 P2 + 1 P3 — three remaining provenance sites pinned;
-`c897cc6` round 6: 0 P1 + 1 P2 + 1 P3 — NEW substantive P2:
-multipart fetcher inputs missed `signal?: AbortSignal` slot +
-stale §1 / §2 plan summary sites refreshed; `d4d7ec0` round 7:
-0 P1 + 2 P2 + 0 P3 — both substantive: signal-fallback to
-`client.signal` was unimplementable (private field +
-multipart bypasses `client.raw`; pinned `signal` as REQUIRED
-slot, no fallback) + retry ownership unpinned (added
-`retries: number` slot + pinned that asset upload honors
-`--retry` via `withRetry(...)` per cli-design §2.5; Blob.stream()
-is multi-readable so retries are safe). **7-round convergence
-exceeds the M30 IMPL 5-round / M27 IMPL 4-round prior ceiling**
-— driven by two distinct surface classes: prose drift (rounds
-2-5) + substantive contract gaps unique to "introduces NEW
-transport seam" milestones (rounds 6-7). New R-class watch-item
-**R-v0.4-W2** (pre-pre-flight "new transport seam" interface-
-mirror checklist) surfaced at close-docs; full detail at
-v0.4-plan §22.
+`client.request` seam. Pre-flight ran 7 Codex rounds across the
+8-commit cluster `6b4c91e..ada29d1` (driven by two distinct
+surface classes — prose drift in rounds 2-5 + substantive
+contract gaps unique to "introduces NEW transport seam" in rounds
+6-7); IMPL converged in 3 Codex rounds across the 4-commit
+cluster `18c5386..4582dd7`. **IMPL feat at `18c5386`**: real
+`createMultipartFetchTransport` body (FormData-driven body
+assembly + `fetch` dispatch + `AbortSignal.any` signal
+combination + JSON parse + fetch-error mapping mirroring
+`transport.ts`) + real `addFileToColumn` + `addFileToUpdate`
+fetcher bodies (`multipart.request(...)` + `mapResponse` +
+`assertResponseFieldPresent` + `unwrapOrThrow(assetSchema...)` +
+`withRetry(...)` per cli-design §2.5) + real action bodies for
+both verbs (`fs.stat` + `fs.access(R_OK)` pre-check + dry-run
+branch + `lookupItemBoard` + `resolveColumnWithRefresh` +
+column-type validation + `fs.readFile` → `Blob` with sniffed
+content-type + dispatch + cache invalidation per D6) + lifted
+`sniffContentType` to `src/utils/mime.ts` (R-NEW-NEW 2-consumer
+trigger crystallized at IMPL coverage check; integration tests
+only exercised one extension row) + extended `RunOptions` /
+`RunContext` / `ResolvedClient` with optional `multipartTransport`
+/ `multipart` slots mirroring the JSON `transport` shape +
+`MultipartFixtureTransport` test seam at
+`tests/fixtures/multipart-load.ts` mirroring the JSON
+`FixtureTransport`. **IMPL Codex rounds**: round 1 `f0952ea`
+(0 P1 + **2 P2** + 1 P3) — both P2 substantive runtime fixes:
+P2-1 lifted `file_too_large` rewrap INSIDE the retry thunk in
+both fetchers so the resulting `usage_error` (non-retryable)
+short-circuits `withRetry` immediately (pre-fix shape leaked HTTP
+413 with non-JSON body as retryable `network_error` → loop
+re-uploaded the same oversized file `--retry` times before the
+outer rewrap fired); P2-2 added `fs.access(filePath, R_OK)` to
+both action bodies' pre-check (fs.stat alone confirms type/size
+but NOT R_OK; an unreadable file would otherwise fail mid-upload
+AFTER wire calls); P3-1 widened the message-fallback substring
+match to bare `'file size'` per the documented contract. Round 2
+`6e06f90` (0 P1 + 0 P2 + 2 P3) — P3-1 added the parallel
+addFileToUpdate retry-short-circuit unit test (round-1 P2-1 fix
+applied to both fetchers but the regression test only covered
+addFileToColumn); P3-2 switched the dry-run `file_path` from
+resolved absolute to argv-derived (matches cli-design §6.4 +
+output-shapes sample `./screenshot.png`). Round 3 `4582dd7` (0 P1
++ 0 P2 + 2 P3) — P3-1 strengthened the dry-run regression tests
+to use `relative(process.cwd(), filePath)` so a revert from
+`parsed.file` to `resolvePath(...)` would actually fail; P3-2
+rewrote a stale "before any file I/O" ordering comment to
+"before file BYTES are loaded". **3-round IMPL convergence sits
+between the M27 IMPL 4-round + M30 IMPL 5-round precedents**;
+the pre-flight 7-round outlier was driven by the new transport
+seam class + does NOT predict the IMPL count (pre-flight rounds
+catch contract surface, IMPL rounds catch runtime + test +
+prose). New R-class watch-item **R-v0.4-W2** (pre-pre-flight
+"new transport seam" interface-mirror checklist) fired its 1st
+IMPL-side validation at M31 IMPL P2-1 (the "non-retryable
+rewrap placement" axis is a new invariant unique to multipart
+upload); recommendation at v0.4-plan §13 to extend R-v0.4-W2
+with that axis ahead of the next "new transport seam" milestone.
 
 **M31 highlights.** Two new write verbs + one new transport seam
 + one fetcher module + R-NEW-41 (asymmetric wire-vs-CLI
@@ -75,92 +102,137 @@ per R-NEW-37 W2). **Signal + retry pinned at round 7**:
 on `AddFileToUpdateInputs`; same shape on
 `MultipartTransportRequest.signal: AbortSignal` (REQUIRED).
 
-**Live numbers (M31 pre-flight close):**
-- Test count: **3367 + 1 skipped** across **136** test files
-  (+20 net vs 3347 + 1 skipped M30-IMPL-close baseline; 16 argv
-  unit tests at the initial pre-flight diff `6b4c91e` —
-  9 in `tests/unit/commands/item/upload-argv.test.ts` + 7 in
-  `tests/unit/commands/update/upload-argv.test.ts` — plus 4
-  additional `'-'`-rejection tests at round-1 fix-up `b97303d`
-  for D10).
-- Coverage: branches floor **95.45 holds** (margin ≈ 0.83pp).
-  Integration tests (cassette-backed multipart + column-type
-  rejection + file-too-large rewrap + dry-run shape
-  verification) deferred to IMPL.
+**Live numbers (M31 IMPL close):**
+- Test count: **3470 + 1 skipped** across **141** test files
+  (+103 net vs 3367 + 1 skipped M31-pre-flight close baseline:
+  30 unit assets + 22 unit multipart-transport + 24 unit mime +
+  14 integration item-upload + 11 integration update-upload + 2
+  round-1 R_OK pre-check integration tests + 1 round-1
+  retry-short-circuit unit test for addFileToColumn + 1 round-2
+  retry-short-circuit unit test for addFileToUpdate parity).
+- Coverage: **99.25 / 96.25 / 99.4 / 99.53** (stmts / branches /
+  fns / lines) at the **95 / 95.45 / 95 / 95** floor. **Branches
+  margin 0.80pp** (was 0.83pp at M31 pre-flight close; -0.03pp
+  from new c8-ignore-drop branches partially compensated by the
+  new test surface — well within the margin tolerance).
 - ERROR_CODES count: **29** (unchanged per D7 closure).
-- Command count: **98** (was 96 at M30 close; +2 from
-  `item upload` + `update upload`).
+- Command count: **98** (unchanged from M31 pre-flight; no new
+  verbs at IMPL — both upload verbs landed at pre-flight stubs).
 - `package.json` version: **0.3.0** (stays through v0.4
   milestones; bumps to `0.4.0` at v0.4 release-prep).
 
-**R-class state (post-M31 pre-flight close):**
+**R-class state (post-M31 IMPL close):**
 
 - **R-NEW-41 shipped** (3rd consumer trigger fired at M31
-  pre-flight). Wire-vs-CLI semantics documentation pattern
-  lifted as a new `docs/architecture.md` "Wire-vs-CLI semantics
-  documentation conventions" section enumerating the three
-  documented asymmetries (M27 webhook.config + M27
-  NotificationTargetType + M31 multipart-vs-JSON transport)
-  + the documentation cadence (inline-first per module
-  docstring; architecture section as the canonical cross-link
-  target). v0.3-plan §22 R-NEW-41 entry + v0.4-plan §22
-  R-NEW-41 entry both updated to "Status: shipped".
-- **R-v0.4-W2 NEW (M31-surfaced)** — pre-pre-flight "new
-  transport seam" interface-mirror checklist. M31's 7-round
-  Codex convergence (specifically rounds 6 + 7's three
-  substantive P2 findings) surfaced that introducing a new
-  transport interface needs a pre-flight checklist mirroring
-  every `Transport` / `MondayClient` / `withRetry` interaction
-  pattern (signal threading + retry layer + header lockdown +
-  timeout combination + error mapping + verbose/complexity).
-  R-NEW-56 (cross-doc grep at IMPL kickoff for "extends
-  existing surface" milestones) didn't cover the "new
-  transport interface" case; R-NEW-58 (lift-ahead-of-feat for
-  R-class 3rd-consumer triggers) didn't either. **Watch-item
-  fires at 2nd consumer** (likely a v0.4.x / v0.5 milestone
-  introducing webhook delivery / OAuth refresh / etc.); at
-  3rd consumer codify as
-  `.claude/templates/new-transport-preflight.md`. Full detail
-  at v0.4-plan §22 R-v0.4-W2 entry.
+  pre-flight + ratified at M31 IMPL). Wire-vs-CLI semantics
+  documentation pattern lifted as a new `docs/architecture.md`
+  "Wire-vs-CLI semantics documentation conventions" section
+  enumerating the three documented asymmetries (M27
+  webhook.config + M27 NotificationTargetType + M31 multipart-
+  vs-JSON transport). IMPL didn't surface a new asymmetry but
+  ratified the section's utility — the per-module docstrings
+  cross-link cleanly.
+- **R-NEW-NEW shipped (M31-IMPL-surfaced):
+  `sniffContentType` lift to `src/utils/mime.ts`** (R-class
+  trigger crystallized at IMPL coverage check; 2-consumer
+  lift ahead of the typical 3-consumer threshold). The
+  duplicated 31-line MIME-extension switch in both upload
+  command files would have left coverage at 95.32 branches
+  (0.13pp below floor) because the integration tests only
+  exercised the `'png'` row. Lift consolidated the helper +
+  added 24 exhaustive unit tests + brought coverage back to
+  96.25 branches. Mirrors R-NEW-29's M25 cadence (lift AHEAD
+  of the feat commit when the trigger fires at IMPL kickoff).
+  Carried into the IMPL feat commit `18c5386`. R-NEW-58
+  ratified — lift-at-2 is justified when duplicated surface
+  size makes branch-coverage from integration tests alone
+  intractable.
+- **R-v0.4-W2 (M31 pre-flight-surfaced)** — pre-pre-flight
+  "new transport seam" interface-mirror checklist.
+  **Fired its 1st IMPL-side validation at M31 IMPL** via
+  round-1 P2-1 (file_too_large rewrap retry placement) — a
+  NEW substantive runtime issue that the pre-flight checklist
+  didn't cover (the rewrap-inside-retry-thunk pattern is
+  unique to multipart upload — JSON fetchers don't have a
+  "non-retryable rewrap of a retryable underlying" shape).
+  Recommendation at v0.4-plan §13 lessons: extend R-v0.4-W2
+  with a "non-retryable rewrap placement" axis (axis 7) ahead
+  of the next "introduces NEW transport seam" milestone.
+  Watch-item fires at 2nd consumer (likely v0.4.x / v0.5
+  milestone introducing webhook delivery / OAuth refresh).
+- **R-NEW-NEW (M31-IMPL-surfaced): `dispatchMultipart` shared
+  helper for parallel-shape multipart fetchers** (1 consumer
+  today). Both `addFileToColumn` + `addFileToUpdate` share an
+  inline `dispatchMultipartOnce` helper PLUS an inline
+  retry-thunk rewrap pattern (added at round-1 P2-1). The
+  dispatch helper already lifted; the retry-thunk pattern stays
+  inline because the fetcher-specific arguments differ per
+  fetcher. Fires at 3rd consumer if a future v0.4.x verb (e.g.,
+  webhook delivery with multipart payload) adopts the same
+  shape; lift candidate is
+  `dispatchMultipartWithSizeRewrap(inputs)`. Tracked at v0.4-plan
+  §22.
+- **R-NEW-NEW (M31-IMPL-surfaced):
+  `ResolvedClient.multipart` slot mirror of `transport`** (1
+  consumer today). Pattern (test injection via `ctx.{slot}`
+  wins; production builds fresh via `create{X}Transport(...)`)
+  mirrors the JSON `transport`. Fires at 2nd consumer if a
+  future v0.4 verb introduces yet another transport shape
+  (e.g., websocket / streaming) — at which point lift to a
+  small protocol in `resolve-client.ts`. Today: 1 consumer
+  (multipart), implemented inline.
+- **R-NEW-56 (cross-doc grep at IMPL kickoff) ratified at M31
+  IMPL** — 2nd-time validated discipline. M30 IMPL's 5-round
+  prose-drift cadence forced the discipline; M31 IMPL's
+  3-round convergence vindicated it (the kickoff grep
+  enumerated ~25 prose sites that needed the "stub-shipped →
+  runtime-body-shipped" flip; without the grep, prose drift
+  would likely have fanned out across 4-5 Codex impl rounds).
+  Carry forward to every subsequent IMPL session.
+- **R-NEW-58 (lift-ahead-of-feat for R-class triggers)
+  ratified at M31 IMPL** — the `sniffContentType` lift fired
+  at the 2-consumer threshold (one consumer below the typical
+  3-consumer trigger) because coverage at IMPL would otherwise
+  have failed the floor.
 - **R-NEW-43** (deferred-feature surface pattern) stays at
   1 consumer; M31 doesn't fit (asset upload is NOT a deferred
   feature gated on external registration).
 - **R-NEW-31** (discriminated-union per-status detail schema)
   stays at 1 consumer; M31's three-value `details.reason`
   enum is a flat discriminator, not a per-status detail union.
+- **R-NEW-20** (`MondayClient` seam-injection stub factory)
+  stays at 4 consumers. M31 IMPL's `assets.test.ts` uses a
+  stub `MultipartTransport`, NOT a stub `MondayClient` (the
+  multipart fetchers `void inputs.client` — the JSON client
+  is a pass-through slot the multipart wire bypasses).
+  Fires at 5th consumer if a future verb extends
+  `MondayClient`'s test seam.
 - **R-NEW-44 / R-NEW-45 / R-NEW-46 / R-NEW-47 / R-NEW-48 /
   R-NEW-49 / R-NEW-50** all stay at their existing consumer
-  counts (M31's pre-flight stub doesn't exercise polling,
-  retry timing, signal accessors, numeric comparators,
-  deadlines, session counters, or epoch sentinels).
+  counts (M31's runtime body doesn't exercise polling, retry
+  timing, signal accessors, numeric comparators, deadlines,
+  session counters, or epoch sentinels).
 
 Per-milestone narrative + Codex round detail + lessons learned
-live in `docs/v0.4-plan.md` §3 M31 entry + §22 R-v0.4-W2 entry.
-Do not duplicate here.
+live in `docs/v0.4-plan.md` §3 M31 entry + §13 M31 post-mortem +
+§22 R-v0.4-W2 entry. Do not duplicate here.
 
 **Next session — likely scope:**
-1. **v0.4-M31 IMPL.** Replace `addFileToColumn` /
-   `addFileToUpdate` stub bodies with the real multipart
-   dispatch + response-parse boundary; replace
-   `createMultipartFetchTransport` stub with real FormData-
-   driven body assembly + fetch dispatch; replace `item
-   upload` / `update upload` c8-ignored action bodies with
-   real file-read I/O + column-type resolution (item only) +
-   cache invalidation (item only) + envelope emit. Drop the
-   c8 ignores; add integration tests covering happy path +
-   multipart envelope byte-shape verification + non-`file`
-   column rejection + file-not-found + file-empty + file-too-
-   large server-side rewrap + not_found on missing target +
-   dry-run shape verification + abort propagation under
-   SIGINT. **R-NEW-56 cross-doc grep at IMPL kickoff**:
-   `grep -rn 'add_file_to_column\|add_file_to_update\|
-   file_too_large\|multipart' src/ docs/ tests/` to enumerate
-   every prose site needing the IMPL framing BEFORE running
-   Codex round 1; mitigation collapses 4-5 rounds to 1-2 (M30
-   IMPL lesson applied).
-2. **Then: v0.4-M32 candidate selection.** Per v0.4-plan §3
-   ordering: `doc list/get` (workdocs); `team` writers;
-   shell completion; release-prep.
+1. **v0.4-M32 candidate selection.** Per v0.4-plan §3 ordering:
+   `doc list/get` (workdocs); `team` writers (team create / update
+   / list); shell completion (bash / zsh / fish completion
+   generation per cli-design §3.5); release-prep (CHANGELOG +
+   version bump 0.3.0 → 0.4.0 + envelope-snapshot refresh + npm
+   publish). Pick the next milestone via the same empirical-
+   probe-then-pre-flight cadence that v0.3 + v0.4 milestones have
+   used end-to-end.
+2. **Apply IMPL kickoff disciplines (R-NEW-56 + R-NEW-58)
+   ratified at M31 IMPL**: cross-doc grep at IMPL kickoff to
+   enumerate every prose site needing the stub→runtime flip
+   BEFORE running Codex round 1 + scan for R-class 2-consumer
+   triggers that crystallize at IMPL kickoff (lift AHEAD of the
+   feat commit when coverage at IMPL would otherwise fail the
+   floor).
 
 **v0.3.0 published — release complete.** M28 IMPL
 shipped end-to-end across 8 release-prep commits
