@@ -38,6 +38,7 @@ import {
   FIXTURE_API_URL,
   LEAK_CANARY,
   parseEnvelope,
+  parseNdjsonStream,
   useCachedIntegrationEnv,
 } from './helpers.js';
 import {
@@ -3096,21 +3097,13 @@ describe('envelope snapshot — item watch (M29)', () => {
   // `watch_duration_seconds` is wall-clock-dependent — normalise to
   // a sentinel so the snapshot stays deterministic across runs.
   const parseStreamSnapshot = (stdout: string): unknown => {
-    const records = stdout
-      .split('\n')
-      .filter((s) => s.length > 0)
-      .map((l) => JSON.parse(l) as Readonly<Record<string, unknown>>);
-    const last = records[records.length - 1] as
-      | { _meta?: Record<string, unknown> }
-      | undefined;
-    if (last?._meta === undefined) {
-      return { events: records, trailer: null };
-    }
-    const trailer = { ...last._meta };
-    if (typeof trailer.watch_duration_seconds === 'number') {
-      trailer.watch_duration_seconds = '<watch_duration_seconds:number>';
-    }
-    return { events: records.slice(0, -1), trailer };
+    const { records, trailer } = parseNdjsonStream(stdout, {
+      normaliseTrailerField: (key, value) =>
+        key === 'watch_duration_seconds' && typeof value === 'number'
+          ? '<watch_duration_seconds:number>'
+          : value,
+    });
+    return { events: records, trailer };
   };
 
   it('item watch --once (single-event backlog → one event record + trailer)', async () => {

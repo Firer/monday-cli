@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseEnvelope,
+  parseNdjsonStream,
   type EnvelopeShape,
 } from '../helpers.js';
 import {
@@ -350,19 +351,17 @@ describe('monday item search (integration)', () => {
         },
       );
       expect(out.exitCode).toBe(0);
-      const lines = out.stdout.trim().split('\n');
-      expect(lines).toHaveLength(3); // 2 items + trailer
-      const item1 = JSON.parse(lines[0] ?? '') as { id: string; name: string };
+      const { records, trailer } = parseNdjsonStream(out.stdout);
+      expect(records).toHaveLength(2);
+      const item1 = records[0] as { id: string; name: string };
       expect(item1.id).toBe('1');
       expect(item1.name).toBeDefined();
-      const item2 = JSON.parse(lines[1] ?? '') as { id: string };
+      const item2 = records[1] as { id: string };
       expect(item2.id).toBe('2');
-      const trailer = JSON.parse(lines[2] ?? '') as {
-        _meta: { next_cursor: string | null; has_more: boolean; total_returned: number };
-      };
-      expect(trailer._meta.next_cursor).toBeNull();
-      expect(trailer._meta.has_more).toBe(false);
-      expect(trailer._meta.total_returned).toBe(2);
+      expect(trailer).not.toBeNull();
+      expect(trailer?.next_cursor).toBeNull();
+      expect(trailer?.has_more).toBe(false);
+      expect(trailer?.total_returned).toBe(2);
     });
 
     it('streams NDJSON without --all (single page, has_more reflects cursor presence)', async () => {
@@ -399,13 +398,11 @@ describe('monday item search (integration)', () => {
         },
       );
       expect(out.exitCode).toBe(0);
-      const lines = out.stdout.trim().split('\n');
-      expect(lines).toHaveLength(2); // 1 item + trailer
-      const trailer = JSON.parse(lines[1] ?? '') as {
-        _meta: { next_cursor: string | null; has_more: boolean };
-      };
-      expect(trailer._meta.next_cursor).toBe('CURSOR-AHEAD');
-      expect(trailer._meta.has_more).toBe(true);
+      const { records, trailer } = parseNdjsonStream(out.stdout);
+      expect(records).toHaveLength(1);
+      expect(trailer).not.toBeNull();
+      expect(trailer?.next_cursor).toBe('CURSOR-AHEAD');
+      expect(trailer?.has_more).toBe(true);
     });
 
     it('NDJSON trailer has only the `_meta` key (no warnings sibling per §6.3)', async () => {
@@ -487,11 +484,11 @@ describe('monday item search (integration)', () => {
       expect(out.exitCode).toBe(0);
       expect(out.stdout).not.toMatch(/^\s*\{"ok":/);
       // First non-empty line is a resource (has `id`), not an envelope.
-      const firstLine = out.stdout.trim().split('\n')[0] ?? '';
-      const parsed = JSON.parse(firstLine) as Record<string, unknown>;
-      expect(parsed).toHaveProperty('id');
-      expect(parsed).not.toHaveProperty('ok');
-      expect(parsed).not.toHaveProperty('data');
+      const { records } = parseNdjsonStream(out.stdout);
+      const firstRecord = records[0] as Record<string, unknown>;
+      expect(firstRecord).toHaveProperty('id');
+      expect(firstRecord).not.toHaveProperty('ok');
+      expect(firstRecord).not.toHaveProperty('data');
     });
   });
 });

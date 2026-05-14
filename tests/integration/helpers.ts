@@ -122,6 +122,75 @@ export const parseEnvelope = (s: string): EnvelopeShape =>
   JSON.parse(s) as EnvelopeShape;
 
 /**
+ * Splits an NDJSON-streaming verb's captured stdout into per-line
+ * records + extracts the `_meta` trailer per `cli-design.md` §6.3.
+ *
+ * Six integration test files (item list, item search, item history,
+ * cross-board item search, item watch, envelope-snapshots) previously
+ * shipped near-identical inline copies of the split + JSON.parse +
+ * trailer-extract pattern; R-NEW-83 lifts that into one helper.
+ *
+ * Shape:
+ * - `records` — every non-trailer NDJSON record (event resources for
+ *   `item watch`, item resources for `item list`/`item search`/cross-
+ *   board, projected events for `item history`). Indices match the
+ *   stdout line order modulo the trailing `_meta` line.
+ * - `trailer` — the trailer's `_meta` *value* (unwrapped — callers
+ *   read `trailer.has_more`, NOT `trailer._meta.has_more`). `null`
+ *   defensively when the last line isn't `_meta`-bearing (every
+ *   NDJSON verb in v0.1–v0.4 emits one, but the helper handles the
+ *   zero-records case cleanly).
+ *
+ * `opts.normaliseTrailerField` is the snapshot-determinism hook:
+ * callers running under `toMatchSnapshot()` can collapse wall-clock
+ * fields (`watch_duration_seconds`, etc.) to a sentinel string. The
+ * callback runs once per trailer key with `(key, value)`; the
+ * returned value replaces the original. Mirrors R-NEW-21's
+ * `trialQuery` opts shape — single optional config object, default
+ * behaviour matches the inline copies verbatim.
+ *
+ * Outer-shape assertions (e.g. "trailer line has only the `_meta`
+ * key, no `warnings` sibling per §6.3") stay inline — the helper
+ * deliberately discards the wrapper level so per-verb payload reads
+ * stay direct.
+ */
+export const parseNdjsonStream = (
+  stdout: string,
+  opts: {
+    readonly normaliseTrailerField?: (key: string, value: unknown) => unknown;
+  } = {},
+): {
+  readonly records: readonly Readonly<Record<string, unknown>>[];
+  readonly trailer: Readonly<Record<string, unknown>> | null;
+} => {
+  const lines = stdout.split('\n').filter((s) => s.length > 0);
+  const parsed = lines.map(
+    (l) => JSON.parse(l) as Readonly<Record<string, unknown>>,
+  );
+  const last = parsed[parsed.length - 1];
+  if (
+    last === undefined ||
+    !('_meta' in last) ||
+    typeof last._meta !== 'object' ||
+    last._meta === null
+  ) {
+    return { records: parsed, trailer: null };
+  }
+  const rawTrailer = last._meta as Readonly<Record<string, unknown>>;
+  const { normaliseTrailerField } = opts;
+  const trailer =
+    normaliseTrailerField === undefined
+      ? rawTrailer
+      : (Object.fromEntries(
+          Object.entries(rawTrailer).map(([k, v]) => [
+            k,
+            normaliseTrailerField(k, v),
+          ]),
+        ) as Readonly<Record<string, unknown>>);
+  return { records: parsed.slice(0, -1), trailer };
+};
+
+/**
  * Asserts the universal §6.1 meta keys exist and have plausible
  * types. Doesn't pin specific values — that's the per-test concern.
  * Codex M0 review §10 caught a missing `meta.complexity` slot; this

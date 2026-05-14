@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertEnvelopeContract,
   parseEnvelope,
+  parseNdjsonStream,
   type EnvelopeShape,
 } from '../helpers.js';
 import {
@@ -177,19 +178,17 @@ describe('monday item list (integration)', () => {
       },
     );
     expect(out.exitCode).toBe(0);
-    const lines = out.stdout.trim().split('\n');
-    expect(lines).toHaveLength(3); // 2 items + trailer
-    const item1 = JSON.parse(lines[0] ?? '') as { id: string; name: string };
+    const { records, trailer } = parseNdjsonStream(out.stdout);
+    expect(records).toHaveLength(2);
+    const item1 = records[0] as { id: string; name: string };
     expect(item1.id).toBe('1');
     expect(item1.name).toBeDefined();
-    const item2 = JSON.parse(lines[1] ?? '') as { id: string };
+    const item2 = records[1] as { id: string };
     expect(item2.id).toBe('2');
-    const trailer = JSON.parse(lines[2] ?? '') as {
-      _meta: { next_cursor: string | null; has_more: boolean; total_returned: number };
-    };
-    expect(trailer._meta.next_cursor).toBeNull();
-    expect(trailer._meta.has_more).toBe(false);
-    expect(trailer._meta.total_returned).toBe(2);
+    expect(trailer).not.toBeNull();
+    expect(trailer?.next_cursor).toBeNull();
+    expect(trailer?.has_more).toBe(false);
+    expect(trailer?.total_returned).toBe(2);
   });
 
   it('parses --where through filters.ts and includes query_params in the request', async () => {

@@ -40,7 +40,7 @@
  * the vitest default test timeout.
  */
 import { describe, expect, it } from 'vitest';
-import { drive } from '../helpers.js';
+import { drive, parseNdjsonStream } from '../helpers.js';
 import type { Cassette } from '../../fixtures/load.js';
 
 type Interaction = Cassette['interactions'][number];
@@ -124,9 +124,10 @@ const complexityExceededResponse = (): Interaction => ({
 });
 
 /**
- * NDJSON-stream parser. Splits the captured stdout into per-line
- * JSON records + extracts the trailing `_meta` record. The trailer
- * is the FINAL line by §6.3 contract.
+ * Verb-specific wrapper around `parseNdjsonStream` that renames
+ * `records` → `events` for the item-watch lexicon (every callsite
+ * here reads "events") and pins the trailer as non-null since every
+ * `item watch` run emits the §6.3 trailer.
  */
 const parseStream = (
   stdout: string,
@@ -134,17 +135,9 @@ const parseStream = (
   readonly events: readonly Readonly<Record<string, unknown>>[];
   readonly trailer: Readonly<Record<string, unknown>>;
 } => {
-  const lines = stdout.split('\n').filter((s) => s.length > 0);
-  const records = lines.map(
-    (l) => JSON.parse(l) as Readonly<Record<string, unknown>>,
-  );
-  const last = records[records.length - 1];
-  expect(last).toBeDefined();
-  expect(last).toHaveProperty('_meta');
-  return {
-    events: records.slice(0, -1),
-    trailer: (last as { _meta: Readonly<Record<string, unknown>> })._meta,
-  };
+  const { records, trailer } = parseNdjsonStream(stdout);
+  expect(trailer).not.toBeNull();
+  return { events: records, trailer: trailer! };
 };
 
 describe('monday item watch — happy paths', () => {

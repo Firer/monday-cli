@@ -127,21 +127,38 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   cluster — likely v0.5.0 — that catches >= 1 stale
   `deferred_to` site OR explicitly returns "no stale deferrals
   found"). Full entry at v0.4-plan §22 R-NEW-82.
-- **One new R-class lift candidate filed at the post-release-
-  prep refactor-audit — R-NEW-83** (NDJSON-trailer parsing
-  helper for test files; 6 consumers across `tests/integration/
-  commands/{item-list,item-search,item-history,m23-cross-board,
-  item-watch}.test.ts` + `tests/integration/envelope-snapshots.
-  test.ts`; HIGH priority LIFT CANDIDATE — past the standard
-  3-consumer threshold by 3 sites; mirrors R-NEW-14/15/16's
-  "missed earlier triggers, mass-migrate when surfaced"
-  cadence). Lift target: `tests/integration/helpers.ts:
-  parseNdjsonStream(stdout): { records, trailer }` with
-  optional `normaliseTrailerField?` callback for the
-  snapshot-normalisation site (mirrors R-NEW-21's opts
-  shape). Ready to lift whenever the user wants a focused
-  housekeeping session. Full entry at v0.4-plan §22
-  R-NEW-83.
+- **R-NEW-83 shipped at the post-v0.4-release-prep
+  housekeeping session.** `parseNdjsonStream(stdout, opts?)`
+  lifted to `tests/integration/helpers.ts` with an optional
+  `normaliseTrailerField?: (key, value) => unknown` callback
+  for the snapshot-determinism site (mirrors R-NEW-21's
+  `trialQuery` opts shape). Returns `{records: readonly
+  Record<string, unknown>[]; trailer: Record<string, unknown>
+  | null}`; `trailer` is the unwrapped `_meta` value (callers
+  read `trailer.has_more`, NOT `trailer._meta.has_more`).
+  Six of the seven candidate sites migrated directly (item-
+  list, item-search at 353+402+490, item-history at 596+
+  645, m23-cross-board at 697, item-watch's local
+  `parseStream` wrapper now delegates, envelope-snapshots'
+  `parseStreamSnapshot` collapsed to a normaliser-callback
+  call); the seventh — item-search:445's `Object.keys(trailer).
+  toEqual(['_meta'])` outer-shape assertion — deliberately
+  stays inline since the helper unwraps the wrapper level.
+  Net `+19 lines` (helper JSDoc + defensive null-trailer
+  type-narrowing chain ran longer than the spec's
+  `~−20 lines` estimate; the longer-than-estimated helper
+  is fine — single source of truth + safer null-trailer
+  defaults). All 3634 + 1 skipped tests pass unchanged;
+  coverage 99.26 / 96.31 / 99.34 / 99.53 at floor 95 / 95.45
+  / 95 / 95 — branches margin 0.86pp (was 0.88pp; small
+  0.02pp shuffle from consumer-side branch reordering, NOT
+  from the helper itself which lives outside the
+  `src/**/*.ts` coverage scope). Snapshot file
+  `tests/integration/__snapshots__/envelope-snapshots.test.
+  ts.snap` byte-identical post-migration. Mirrors R-NEW-14/
+  15/16's "missed earlier triggers, mass-migrate when
+  surfaced" cadence at the v0.3 audit. Full entry at
+  v0.4-plan §22 R-NEW-83.
 
 **R-class state (post-M33 IMPL close — unchanged):**
 

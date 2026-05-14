@@ -23,7 +23,7 @@
  * — the history surface fits comfortably without shared fixtures.
  */
 import { describe, expect, it } from 'vitest';
-import { drive } from '../helpers.js';
+import { drive, parseNdjsonStream } from '../helpers.js';
 import type { Cassette } from '../../fixtures/load.js';
 
 const validItemBoardLookup: Cassette['interactions'][number] = {
@@ -592,15 +592,12 @@ describe('monday item history — streaming (--stream / --output ndjson)', () =>
       cassette,
     );
     expect(result.exitCode).toBe(0);
-    const lines = result.stdout
-      .split('\n')
-      .filter((line) => line.length > 0);
-    // 1 event + 1 trailer = 2 lines. If --stream were ignored the
-    // output would be a single JSON envelope (lines.length === 1
-    // with no trailer sentinel).
-    expect(lines).toHaveLength(2);
-    const trailer = JSON.parse(lines[1]!) as { _meta: { source: string } };
-    expect(trailer._meta.source).toBe('live');
+    const { records, trailer } = parseNdjsonStream(result.stdout);
+    // 1 event + 1 trailer. If --stream were ignored the output would
+    // be a single JSON envelope (records.length === 0 + trailer === null).
+    expect(records).toHaveLength(1);
+    expect(trailer).not.toBeNull();
+    expect(trailer?.source).toBe('live');
   });
 
   it('emits NDJSON one event per line + §6.3 trailer', async () => {
@@ -641,25 +638,16 @@ describe('monday item history — streaming (--stream / --output ndjson)', () =>
       cassette,
     );
     expect(result.exitCode).toBe(0);
-    const lines = result.stdout
-      .split('\n')
-      .filter((line) => line.length > 0);
-    // One event + one trailer = 2 lines.
-    expect(lines).toHaveLength(2);
-    const event = JSON.parse(lines[0]!) as { kind: string; id: string };
+    const { records, trailer } = parseNdjsonStream(result.stdout);
+    // One event + one trailer.
+    expect(records).toHaveLength(1);
+    const event = records[0] as { kind: string; id: string };
     expect(event.kind).toBe('update_column_value');
     expect(event.id).toBe('act-1');
-    const trailer = JSON.parse(lines[1]!) as {
-      _meta: {
-        source: string;
-        total_returned: number;
-        has_more: boolean;
-        complexity: unknown;
-      };
-    };
-    expect(trailer._meta.source).toBe('live');
-    expect(trailer._meta.total_returned).toBe(1);
-    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer).not.toBeNull();
+    expect(trailer?.source).toBe('live');
+    expect(trailer?.total_returned).toBe(1);
+    expect(trailer?.has_more).toBe(false);
   });
 });
 

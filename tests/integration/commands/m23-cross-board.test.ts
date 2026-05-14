@@ -21,7 +21,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run, type RunOptions } from '../../../src/cli/run.js';
-import { baseOptions, parseEnvelope, LEAK_CANARY } from '../helpers.js';
+import {
+  baseOptions,
+  parseEnvelope,
+  parseNdjsonStream,
+  LEAK_CANARY,
+} from '../helpers.js';
 import {
   createFixtureTransport,
   type Cassette,
@@ -694,19 +699,17 @@ describe('monday item search cross-board — NDJSON streaming', () => {
       cassette,
     );
     expect(result.exitCode).toBe(0);
-    const lines = result.stdout.trim().split('\n');
-    // 2 items + 1 trailer = 3 NDJSON lines.
-    expect(lines).toHaveLength(3);
-    const item1 = JSON.parse(lines[0]!) as { id: string };
-    const item2 = JSON.parse(lines[1]!) as { id: string };
+    const { records, trailer } = parseNdjsonStream(result.stdout);
+    // 2 items + 1 trailer.
+    expect(records).toHaveLength(2);
+    const item1 = records[0] as { id: string };
+    const item2 = records[1] as { id: string };
     expect(item1.id).toBe('i1');
     expect(item2.id).toBe('i2');
-    const trailer = JSON.parse(lines[2]!) as {
-      _meta: { source: string; total_returned: number; has_more: boolean };
-    };
-    expect(trailer._meta.source).toBe('live');
-    expect(trailer._meta.total_returned).toBe(2);
-    expect(trailer._meta.has_more).toBe(false);
+    expect(trailer).not.toBeNull();
+    expect(trailer?.source).toBe('live');
+    expect(trailer?.total_returned).toBe(2);
+    expect(trailer?.has_more).toBe(false);
   });
 });
 
