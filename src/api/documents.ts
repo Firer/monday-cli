@@ -475,9 +475,13 @@ export const GET_DOC_QUERY = `
 
 /**
  * Wrapping response schema for the `ListDocs` operation. Monday's
- * wire returns `{ docs: [Document] | null }` under `data.docs`; a
- * null root surfaces `not_found` (the wrapper schema accepts it
- * upstream, the fetcher rewraps after parse).
+ * documented wire shape is `[Document]` (an array, possibly empty)
+ * — never null. The wrapper accepts `null` defensively so a wire-
+ * shape regression parses cleanly and is rewrapped by the fetcher
+ * as `internal_error` with a drift hint (rather than faulting the
+ * parse with a confusing zod issue path). Both fetchers reject a
+ * null root post-parse; null is NEVER a `not_found` rewrap target
+ * — that's the empty-array D8 case in `getDocument`.
  *
  * `.loose()` mirrors the M27 `listWebhooksResponseSchema` cadence —
  * Monday occasionally returns side-band debug keys (`extensions`,
@@ -668,7 +672,21 @@ export const getDocument = async (
       hint: 'Monday may have amended the `Document` / `DocumentBlock` selection — re-probe and amend `src/api/documents.ts` if so',
     },
   );
-  if (parsed.docs === null || parsed.docs.length === 0) {
+  if (parsed.docs === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a null \`docs\` payload from GetDoc(${inputs.docId})`,
+      {
+        details: {
+          doc_id: inputs.docId,
+          hint:
+            'Monday\'s documented shape is `[Document]` (an array, possibly empty) — ' +
+            'a null root indicates a wire change that needs re-probing',
+        },
+      },
+    );
+  }
+  if (parsed.docs.length === 0) {
     throw new ApiError(
       'not_found',
       `workdoc ${inputs.docId} not found (does not exist or not visible to token)`,

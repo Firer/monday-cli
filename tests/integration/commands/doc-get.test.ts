@@ -115,7 +115,12 @@ describe('monday doc get (M32)', () => {
     expect(env.error?.details?.doc_id).toBe('99999');
   });
 
-  it('not_found when GetDoc returns docs: null', async () => {
+  it('internal_error when GetDoc returns docs: null (wire-shape regression — distinct from empty-array not_found)', async () => {
+    // Round-1 P2-1 closure: Monday's documented wire shape is
+    // `[Document]` (possibly empty, never null). The empty-array
+    // case is the D8 `not_found` rewrap target; a null root means
+    // the response shape drifted and surfaces `internal_error` with
+    // a drift hint rather than masquerading as a missing doc.
     const cassette: Cassette = {
       interactions: [
         {
@@ -126,7 +131,11 @@ describe('monday doc get (M32)', () => {
     };
     const out = await drive(['doc', 'get', '99999', '--json'], cassette);
     expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr).error?.code).toBe('not_found');
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { doc_id?: string } };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.doc_id).toBe('99999');
   });
 
   it('internal_error on multi-element response (defensive: wire shape regression)', async () => {
