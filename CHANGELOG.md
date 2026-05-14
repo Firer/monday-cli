@@ -7,6 +7,357 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.4.0] - 2026-05-14 — Operational features: long-poll watch, parallel bulk, asset upload, workdocs reads, shell completion
+
+The "agents can drive long-running workflows + multipart wire +
+shell completion" milestone — v0.3's "drive a real backlog"
+foundation gains long-poll item activity streaming (NDJSON), bounded
+parallel bulk dispatch, the first multipart wire surface (asset
+uploads), Monday workdocs reads, and per-shell completion script
+generation. **No breaking changes vs `0.3.0` — every v0.4 surface
+is additive.** Built incrementally across M29–M33.
+
+### Breaking changes vs `0.3.0`
+
+**None.** Every command, error code, envelope key, and warning
+shape shipped in v0.3.0 is preserved byte-for-byte. v0.4 only adds.
+
+### Surface
+
+**~101 commands shipped (was ~95 in v0.3).** Six new verbs +
+one orthogonal flag extension on an existing verb. The new noun
+namespaces are `doc` (workdocs reads) and `completion` (CLI-
+internal, shell completion script generator).
+
+**Long-poll item activity streaming (M29) — `monday item watch
+<iid>`.** Long-polls Monday's `boards.activity_logs(item_ids:)`
+with a polling cadence floor of `MIN_WATCH_INTERVAL_MS` (1000ms)
+and emits one NDJSON event record per emitted activity-log row
+plus a trailing `{"_meta": {...}}` record carrying the seven
+M29-specific session counters flat under `_meta`:
+`events_emitted`, `polls_made`, `failed_polls`,
+`last_seen_event_id`, `circuit_broken_at`, `exit_reason`,
+`watch_duration_seconds` (plus the standard meta keys + a
+`warnings: [...]` slot accumulating `poll_failed` /
+`circuit_breaker_armed` warnings). Modes: `--once` drains backlog
+and exits without polling further; `--max-events <N>` /
+`--max-duration <duration>` ceilings exit cleanly with the matching
+`exit_reason`; `--since <event-id>` looks up the event's
+`created_at` once and starts the loop from there; `--include
+<kind>` filter narrows emitted events (v0.5+ may extend with
+comment polling via `--include update_posted` once Monday's
+`activity_logs` surfaces those). SIGINT drains gracefully + exits
+130. Circuit-breaker trips after 5 consecutive `complexity_exceeded`
+polls (emits an `exit_reason: circuit_broken` trailer + a §6.5
+failure envelope on stderr + exit code 2; a successful poll between
+failures resets the consecutive counter). Walker-side
+`entity === 'pulse'` filter drops board-scoped rows per Decision 2
+closure.
+
+**Parallel bulk dispatch (M30) — `monday item update --where ...
+--concurrency <N>`.** Extends the M25 partial-success bulk path
+with bounded parallel dispatch via a new `--concurrency <N>` flag
+(range 1..32; default 1). `--concurrency 1` routes through
+`dispatchSequential` (byte-equivalent to the M25 default);
+`--concurrency > 1` routes through `dispatchParallel` (semaphore-
+bounded worker pool). The envelope is byte-equivalent across both
+paths — `--concurrency` is a dispatch-mode flag, not a contract
+extension. **Input-order preservation**: `data.results[]` lists
+per-target outcomes in the original matched-item order regardless
+of completion order, so agents can correlate `results[i]` ↔
+`matched_items[i]` deterministically. `--concurrency` is mutually
+exclusive with the single-item shape (rejected with `usage_error`
+at `validateInputShape` before any network call) and requires
+`--continue-on-error` on the bulk shape (the fail-fast bulk path
+keeps its v0.1 envelope).
+
+**Asset uploads (M31) — `monday item upload` + `monday update
+upload`.** First multipart wire surface (`add_file_to_column` /
+`add_file_to_update`). Per-verb shapes:
+
+- `monday item upload <iid> --column <col> <file>` uploads the
+  local file as a Monday asset attached to the named column on
+  the item. Column type is validated against the writable-files
+  allowlist (`file` only at v0.4 — Monday's `add_file_to_column`
+  doesn't generalise to other types).
+- `monday update upload <update-id> <file>` uploads the local
+  file as an asset attached to a Monday "update" (comment).
+
+Both verbs do a JSON-leg pre-read (item-board lookup + board
+metadata for column resolution, or update lookup) followed by
+the multipart `add_file_to_*` mutation. The success envelope
+carries Monday's full `Asset` projection (`id`, `name`, `url`,
+`public_url`, `file_extension`, `file_size`, `uploaded_by`, etc.).
+Pre-checks: `file_not_readable` (ENOENT or directory), `file_empty`
+(zero-byte). `file_too_large` rewrap on Monday's
+`FILE_SIZE_LIMIT_EXCEEDED` (non-retryable; the underlying
+multipart wire is retryable, but the file-size error isn't —
+M31 IMPL round-1 P2-1 closure). MIME content-type sniffed via the
+new lifted `src/utils/mime.ts` (R-NEW-NEW shipped at M31 IMPL —
+2-consumer trigger ahead of v0.4-plan §22's typical 3-consumer
+threshold). `--dry-run` previews the planned change envelope
+without firing the multipart wire (file path + filename +
+file_size_bytes echoed; argv path preserved verbatim for relative
+inputs per the R-class round-2/round-3 closure). Uploads are
+**non-idempotent**: each successful call mints a fresh `Asset`
+ID — re-running uploads the file a second time. Agents needing
+register-once dedupe pre-read `Item.assets` / `Update.assets`
+(read-side `item assets` / `update assets` verbs deferred to
+v0.4.x per M31 Decision D6). Cache invalidation fires single-leg
+on item-upload success (the parent item's board metadata cache
+invalidates per §8); update-upload doesn't touch board metadata
+so there's no invalidation step.
+
+**Monday workdocs reads (M32) — `monday doc list [--workspace
+<wid>,...] [--order-by <created_at|used_at>] [--limit <n>]
+[--page <n>]` + `monday doc get <did>`.** First read-only access
+to Monday's workdocs surface (`Query.docs(...)`). `doc list` is
+paginated via page/limit (no cursor on Monday's workdocs surface);
+defaults to `--limit 25 --page 1`; range 1..100. `--workspace
+<wid>,...` accepts a comma-separated `WorkspaceId` list and maps
+to wire `workspace_ids: [ID]` — Monday silently drops inaccessible
+IDs (best-effort, no resolver warning). `--order-by <created_at|
+used_at>` is a closed 2-value enum; both sort `desc` server-side.
+`doc list` emits a wrapped record envelope: `data:
+{ documents: [...], page, limit, returned_count, has_more }`
+where `has_more === (returned_count === limit)` (Monday's wire
+has no `total_count` slot). `doc get <did>` emits the direct-
+unwrap `data: <Document with blocks>` shape; empty `docs: []` →
+`not_found` with `details.doc_id` per D8 closure (Monday returns
+empty when the doc doesn't exist OR is inaccessible — single
+error code per the closure). `DocId` joins the brand registry
+(`src/types/ids.ts`) as the 9th brand. **The full workdocs CRUD
+mutation surface (9 mutations: `create_doc` / `update_doc_name`
+/ `delete_doc` / `duplicate_doc` / `import_doc_from_html` /
+`add_content_to_doc_from_markdown` / `create_doc_block` /
+`update_doc_block` / `delete_doc_block`) is deferred to v0.5 per
+D8 closure** — each mutation has enough surface area to warrant
+its own milestone cluster.
+
+**Shell completion (M33) — `monday completion <bash|zsh|fish>`.**
+First raw-bytes-carve-out verb (cli-design §3.1 #2). The default
+mode emits the install-time script bytes on stdout regardless of
+TTY/pipe context — `monday completion bash >> ~/.bashrc` writes
+the bash script to bashrc as a sourceable file. The `--json` /
+`--output json` / `MONDAY_OUTPUT=json` paths opt INTO the §6
+envelope with `data: { shell, script }` + `meta.source: "none"`
+(CLI-internal verb — no Monday wire call, no cache, no auth
+requirement). `--table` / `--output table` / `--output text` /
+`--output ndjson` reject with `usage_error` at the parse boundary
+(only `--json` and `--table` are global shorthand flags per
+cli-design §4.4). Per-shell scripts are hand-rolled templates
+(commander 14.0.3 ships **no** built-in completion machinery,
+verified by empirical probe at M33 pre-flight) generated by
+walking the registered command tree at runtime so agents adding a
+new verb get completion for free. ERROR_CODES count stays at 29
+per D4 closure. No new runtime dependency added per cli-design §1
+"minimum deps".
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** Every v0.4
+milestone closed the new-error-code question NEGATIVE: M29 routes
+poll failures through the existing `complexity_exceeded` /
+`rate_limited` / `network_error` codes (the trailer's
+`exit_reason: circuit_broken` is an envelope-level discriminator,
+not a `error.code`); M30 routes per-item failures through the M25
+codes (`column_archived` / `validation_failed` / etc.); M31 routes
+file-IO pre-checks through `usage_error.details.reason` discriminator
+(`file_not_readable` / `file_empty` / `file_too_large`); M32
+routes empty-array `doc get` through the existing `not_found`; M33
+routes invalid shells through `usage_error` from the `parseArgv`
+boundary.
+
+**New NDJSON trailer shape** (M29 — `monday item watch`). NDJSON-
+streaming verbs emit a final `{"_meta": {...}}` record carrying the
+seven M29-specific session counters flat alongside the standard
+meta keys (per cli-design §6.3 trailer contract). Pinned by the
+envelope-snapshot suite + dedicated per-command suite.
+
+**New wrapped-paginated-record envelope** (M32 — `monday doc
+list`). `data: { documents, page, limit, returned_count, has_more
+}` carries the pagination wrapper alongside the projection list.
+Mirrors the M22 `monday usage` wrapped-record shape but on a
+read-paginated surface. R-NEW-74 watch-item tracks the
+`kind: 'record'` candidate for a future `emitSuccess` shape
+extension (`emit.ts` ships only `kind: 'single' | 'collection'`
+today; `'single'` does double-duty for wrapped records). JSON
+output works correctly today; the watch-item fires only on a
+table-UX complaint + 3rd consumer.
+
+**New raw-bytes-default verb** (M33 — `monday completion`). First
+verb whose default stdout payload is NOT a §6 envelope. The
+carve-out at cli-design §3.1 #2 enumerates the rule: raw-bytes
+mode is opt-out (`--json` / `--output json` / `MONDAY_OUTPUT=json`
+opts INTO the envelope). The §6 envelope shape on the opt-in path
+is byte-identical to other CLI-internal verbs:
+`data: { shell, script }` + `meta.source: "none"`.
+
+**New multipart-mutation planned-change envelope** (M31 —
+`item upload --dry-run` + `update upload --dry-run`). The
+`planned_changes[]` entry shape extends the standard dry-run
+envelope with multipart-specific slots: `operation:
+"add_file_to_column"` / `"add_file_to_update"`, `file_path`,
+`filename`, `file_size_bytes`, plus the standard `item_id` /
+`column_id` (or `update_id`) keys.
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.4"` slips to
+  `"v0.5"`** for the files-shaped category (`file` column type via
+  `--set` / `--set-raw`). v0.4-M31 shipped the verb-shaped path
+  (`monday item upload`) — that's the alternative path agents
+  should use today — but NOT the friendly `--set
+  <file-col>=<path>` / `--set-raw <file-col>=<json>` form (which
+  would need a separate dispatch from the translator boundary
+  into the multipart wire). Agents that previously caught the
+  v0.3.0 envelope's `deferred_to: "v0.4"` for the files-shaped
+  reject path should update their comparison to `"v0.5"`; the
+  `error.code: "unsupported_column_type"` + the hint pointing at
+  `monday item upload` are unchanged. **The hint is the load-
+  bearing routing surface — agents key off the hint, not the
+  `deferred_to` value.**
+- **Multi-level subitem creation slips from `"v0.4"` → `"v0.5"`.**
+  Originally slipped from v0.3 → v0.4 at v0.3-M28 audit. v0.4
+  didn't pick it up — Monday's `sub_items_board` carries no
+  `subtasks` column at API `2026-01`, so depth-2 subitems still
+  have no data-model home. Single-level subitems (`item create
+  --parent <iid>` against classic boards) continue to work
+  byte-identically. The `error.code: "usage_error"` +
+  `details.hierarchy_type: "multi_level"` keys are unchanged.
+- **Cross-board `item move` value-overrides slip from `"v0.4"` →
+  `"v0.5"`.** Originally v0.3-M11-targeted, slipped to v0.4 at
+  v0.3-M28 audit, slipped to v0.5 at v0.4 release-prep. Monday's
+  `ColumnMappingInput` still carries no value slot; supporting it
+  would need a non-atomic post-move `change_multiple_column_
+  values` with cross-leg partial-failure envelope shapes that
+  have no precedent at v0.4 close. Agents needing overrides
+  continue to fire `monday item set <iid> <target>=<value>`
+  post-move.
+- **Cross-board resumable cursor slips from `"v0.4"` → `"v0.5"`.**
+  The `cross_board_truncated` warning's `details.hint` continues
+  to recommend narrowing via `--workspace` / `--favorites` /
+  `--max-boards`; v0.5 may pick the resumable surface up if
+  per-board cursor-lifetime under aggregation gets a clean design.
+- **Stable error-code registry stays at 29.** Existing codes'
+  shapes are unchanged across v0.3 → v0.4.
+- **`--concurrency <N>` is a new global-ish flag on bulk
+  `item update`.** Default `1` preserves the M25 sequential
+  envelope byte-for-byte; agents only opt INTO parallel dispatch
+  by passing the flag.
+- **`monday auth login` placeholder-guard unchanged.** The verb
+  is still registered and still surfaces `usage_error.details.
+  reason: oauth_unregistered` pointing at `MONDAY_API_TOKEN`
+  (unchanged from v0.3.0). The OAuth deferral revisits in v0.4.x
+  / v0.5 contingent on user demand.
+
+### Internals worth highlighting
+
+- **First multipart wire surface (M31)** introduces a new
+  transport seam (`MultipartTransport`) alongside the JSON
+  `transport` slot in `ResolvedClient`. Test seam mirrors the
+  JSON path's pattern (`ctx.multipart` injection wins;
+  production builds fresh via `createMultipartTransport(...)`).
+  The `add_file_to_column` / `add_file_to_update` fetchers share
+  an inline `dispatchMultipartOnce` helper + an inline retry-
+  thunk rewrap pattern for the non-retryable file_too_large case
+  (the wrap-vs-thunk placement is invariant — round-1 P2-1
+  closure). Codex pre-pre-flight checklist R-v0.4-W2 ratified
+  for "new transport seam" milestones.
+
+- **R-class refactors shipped during v0.4.** R-NEW-41 (asymmetric
+  wire-vs-CLI semantics documentation pattern) shipped at M31
+  pre-flight as a new `docs/architecture.md` "Wire-vs-CLI
+  semantics documentation conventions" section enumerating the
+  three documented asymmetries (M27 webhook.config wire-typing
+  + M27 NotificationTargetType + M31 multipart-vs-JSON
+  transport). R-NEW-NEW `sniffContentType` lift to
+  `src/utils/mime.ts` (M31 IMPL — 2-consumer trigger ahead of
+  the typical 3-consumer threshold; coverage from integration
+  tests alone would have failed the branches floor). R-NEW-56
+  ratified for the 3rd consecutive IMPL milestone (cross-doc
+  grep at IMPL kickoff catches prose-drift surface ahead of
+  Codex review). R-NEW-58 ratified via positive case at M31
+  + negative case at M32. R-NEW-72 (cross-doc grep after every
+  contract-flipping Codex fix-up) graduated to a permanent
+  CLAUDE.md "Workflow rules" entry at M33 IMPL close. R-NEW-75
+  (5-dimension candidate-selection framework) graduated at the
+  post-M33 candidate-selection session that picked release-prep
+  over team writers. Full register with shipped commit SHAs +
+  consumer counts lives in [`docs/v0.4-plan.md`](./docs/v0.4-plan.md) §22.
+
+- **Empirical probes** ratified across every novel v0.4 surface:
+  M29 `activity_logs` polling shape, M31 multipart `add_file_to_*`
+  wire, M32 `Query.docs(...)` filter + ordering enum + pagination
+  shape, M33 commander capability check (returned ZERO hits,
+  flipping the cli-design §13 entry from "via commander" to
+  "hand-rolled templates" before any pre-flight contract claim
+  could drift). R-NEW-77 (CLI-internal milestone empirical-probe-
+  slot equivalent) filed at M33 pre-flight as a 1-consumer
+  watch-item.
+
+- **Two-AI review** (cli-design pre-flight + implementation
+  review) ran for every milestone M29–M33. M30 IMPL took 5
+  rounds to converge (the lesson driving R-NEW-56's pre-IMPL
+  cross-doc grep + R-NEW-72's post-fix-up grep). M31 took 7
+  pre-flight rounds (two distinct surface classes plus
+  substantive transport-seam gaps at rounds 6-7) + 3 IMPL rounds.
+  M32 / M33 each converged in 3 IMPL rounds. The cumulative
+  finding count + per-milestone Codex-round breakdown lives in
+  the per-milestone post-mortems in
+  [`docs/v0.4-plan.md`](./docs/v0.4-plan.md) §3 + §13–§15.
+
+### Tests + quality gates
+
+- **3634 unit/integration + E2E tests** at v0.4.0 (+1 skipped;
+  was 3249+1 ≈ 3250 in v0.3.0; ~385 new tests across M29–M33 +
+  the v0.4 release-prep envelope-snapshot refresh). All green on
+  Node 22 + 24.
+- **Coverage at 99.26 / 96.33 / 99.34 / 99.53** (statements /
+  branches / functions / lines) against the floor 95 / 95.45 / 95
+  / 95. Branches margin **0.88pp** at v0.4.0 (was 0.95pp at
+  v0.3.0; the v0.4 surface introduced novel branch-heavy areas
+  like M29's circuit-breaker progression + M30's parallel
+  dispatcher, both of which carry full integration-test coverage
+  but eat margin). Floor unchanged across v0.3.0 → v0.4.0.
+- **Envelope-snapshot suite refreshed** for v0.4 surfaces — adds
+  11 snapshots covering item watch (NDJSON trailer shape),
+  doc list (wrapped record), doc get (direct unwrap + D8
+  not_found), completion bash/zsh/fish --json (raw-bytes-carve-
+  out envelope opt-in), completion --table + invalid-shell
+  rejections. Item upload / update upload pinned by the per-
+  command suites (multipart transport scaffolding stays out
+  of the envelope-snapshot suite per the v0.3-M28 cross-board /
+  dev precedent). `--concurrency` envelope byte-equivalent to
+  the existing M25 sequential snapshot — pinned by the per-
+  command bulk suite.
+- **Five test layers held**: unit, integration (in-process
+  `FixtureTransport` + `MultipartFixtureTransport`), E2E
+  (subprocess against fixture server), envelope-shape snapshot
+  suite, published-tarball E2E.
+
+### Documentation
+
+- **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** new — the v0.4
+  active plan with M29–M33 milestones, decisions log, R-class
+  register (R-NEW-44 through R-NEW-81), per-milestone post-
+  mortems (§3 + §13–§15 + §22).
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3 grew six
+  new verb entries; §3.1 #2 raw-bytes carve-out documented; §13
+  v0.4 entry closed out + the v0.5 frame pinned (team writers +
+  doc CRUD mutation surface deferred to v0.5).
+- **[`docs/architecture.md`](./docs/architecture.md)** gained
+  the "Wire-vs-CLI semantics documentation conventions" section
+  (R-NEW-41 shipped at M31 pre-flight).
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** — every
+  shipped v0.4 command has a per-section data shape entry,
+  snapshot-backed.
+- **README.md** quickstart expanded with v0.4 examples (`monday
+  completion`, `monday item watch`, `monday item upload`,
+  `--concurrency`, `monday doc list/get`).
+
+[0.4.0]: https://github.com/Firer/monday-cli/releases/tag/v0.4.0
+
 ## [0.3.0] - 2026-05-13 — Monday Dev + multi-profile + diagnostics + outbound writes
 
 The "agent can drive a real backlog with a real workflow" milestone —
