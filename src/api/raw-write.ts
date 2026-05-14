@@ -22,10 +22,12 @@
  *         from CLI-time to Monday-time with no new information.
  *       * **`files`-shaped** (`file`, anything else where Monday
  *         uses `add_file_to_column` rather than `change_column_value`)
- *         → `unsupported_column_type` with `deferred_to: "v0.4"`.
+ *         → `unsupported_column_type` with `deferred_to: "v0.5"`.
  *         The `--set-raw` payload reaches `change_column_value` /
  *         `change_multiple_column_values` only; files-shaped types
- *         can't be written through that wire surface.
+ *         can't be written through that wire surface. Hint points
+ *         at `monday item upload` (v0.4-M31 — the verb-shaped
+ *         alternative path).
  *     Otherwise builds a `TranslatedColumnValue` with `payload:
  *     { format: 'rich', value: <parsed> }` so the existing
  *     `selectMutation` dispatcher handles it uniformly.
@@ -172,13 +174,15 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *     `read_only: true`. Monday computes these server-side; no
  *     payload (raw or friendly) is ever accepted.
  *   - **`files`-shaped** → `unsupported_column_type` with
- *     `deferred_to: "v0.4"`. Monday writes via `add_file_to_column`
+ *     `deferred_to: "v0.5"`. Monday writes via `add_file_to_column`
  *     (multipart upload), not `change_column_value`; the raw
  *     payload can't reach the right wire surface. Hint points at
- *     `monday item upload` (shipped v0.4-M31; multipart wire).
- *     The `deferred_to` field value stays `"v0.4"` to keep the
- *     agent-facing key stable for v0.3.x users on npm — v0.4.0
- *     is the eventual npm release that includes this verb.
+ *     `monday item upload` (shipped v0.4-M31; multipart wire — the
+ *     alternative path agents should use today). The `deferred_to`
+ *     slot tracks the `--set-raw <file-col>=<json>` form
+ *     specifically; v0.4 shipped the verb-shaped path but not the
+ *     raw-payload-into-multipart-wire wiring, which would need a
+ *     separate dispatch from the escape-hatch boundary.
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the
@@ -239,7 +243,7 @@ export const translateRawColumnValue = (
         details: {
           column_id: column.id,
           type: column.type,
-          deferred_to: 'v0.4',
+          deferred_to: 'v0.5',
           hint:
             'use `monday item upload <iid> --column <col> <file>` ' +
             '(shipped v0.4-M31; multipart wire). --set-raw rejects ' +

@@ -664,7 +664,9 @@ describe('translateColumnValue — future-roadmap types', () => {
   // specific version. Pinned column types from cli-design §5.3
   // writer-expansion roadmap have their own branches:
   //   - `time_tracking` → `deferred_to: "v0.3"` (start/stop verbs)
-  //   - `file` (files-shaped) → `deferred_to: "v0.4"` (asset upload)
+  //   - `file` (files-shaped) → `deferred_to: "v0.5"` (the verb-shaped
+  //     `monday item upload` shipped at v0.4-M31; the friendly --set
+  //     form for file columns slipped from v0.4 to v0.5 at release-prep)
   // Both are tested in the dedicated describe blocks below.
   // M16 pre-flight reclassified `item_assignees` as read-only-forever.
   it.each([
@@ -724,12 +726,15 @@ describe('translateColumnValue — future-roadmap types', () => {
     }
   });
 
-  it('file (files-shaped) → unsupported_column_type with deferred_to: "v0.4" (Codex M18 round-2 P2)', () => {
+  it('file (files-shaped) → unsupported_column_type with deferred_to: "v0.5" (Codex M18 round-2 P2; slipped from v0.4 at v0.4 release-prep — `monday item upload` (v0.4-M31) is the alternative path agents should use today)', () => {
     // cli-design §5.3 writer-expansion roadmap row: files-shaped
     // types use add_file_to_column (multipart upload). Pinned as
-    // a v0.4 deferral. Pre-fix the runtime sent it through the
-    // generic `future` branch; the M18 round-2 fix special-cased
-    // it via isFilesShapedType.
+    // a v0.4 deferral originally; v0.4-M31 shipped the verb-shaped
+    // path (`monday item upload`) but NOT the friendly `--set` form
+    // for files (the translator boundary doesn't dispatch into the
+    // multipart wire). The slot slipped to v0.5 at v0.4 release-prep
+    // so v0.4.0 agents don't read `deferred_to: "v0.4"` on the
+    // release they're already running.
     expect(() => translate('file', 'whatever', 'col_z')).toThrow(
       /add_file_to_column/u,
     );
@@ -741,7 +746,7 @@ describe('translateColumnValue — future-roadmap types', () => {
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         type: 'file',
-        deferred_to: 'v0.4',
+        deferred_to: 'v0.5',
       });
     }
   });

@@ -289,7 +289,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     },
   );
 
-  it('files-shaped type (file) → unsupported_column_type with deferred_to: v0.4', () => {
+  it('files-shaped type (file) → unsupported_column_type with deferred_to: v0.5', () => {
     expect(() =>
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -309,7 +309,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       expect(err.details).toMatchObject({
         column_id: 'attachments',
         type: 'file',
-        deferred_to: 'v0.4',
+        deferred_to: 'v0.5',
       });
       expect(err.details).not.toHaveProperty('read_only');
     }
@@ -319,9 +319,12 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     // Updated post-M31 IMPL: the hint now points at the shipped
     // verb name (`monday item upload`) instead of the underlying
     // wire mutation (`add_file_to_column`). The error MESSAGE
-    // still names the wire mutation for the curious agent + still
-    // carries `details.deferred_to: 'v0.4'` for v0.3.x users on
-    // npm reading the contract for "what changes in v0.4".
+    // still names the wire mutation for the curious agent. The
+    // `details.deferred_to` slot slipped to `"v0.5"` at v0.4
+    // release-prep because v0.4 shipped the verb-shaped path but
+    // not the raw-payload-into-multipart-wire form; agents reading
+    // the v0.4.0 envelope key off the alternative-path hint
+    // pointing at `monday item upload`.
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },

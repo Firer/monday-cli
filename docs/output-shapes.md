@@ -934,8 +934,10 @@ warning-code registry:
 `--set-raw <col>=<json>`), `"read_only_forever"` (`suggested_
 write_path: null` — no write path; covers mirror / formula /
 auto_number / creation_log / last_updated / item_id /
-item_assignees), `"files_shaped"` (suggests `add_file_to_column`
-deferred to v0.4 — currently `file` only). Adding a category
+item_assignees), `"files_shaped"` (suggests `monday item upload`
+— the verb-shaped path shipped at v0.4-M31; the friendly `--set`
+form for file columns slipped to v0.5; currently `file` only).
+Adding a category
 value is SemVer-minor; removing/renaming is SemVer-major. The
 warning fires on dry-run too so the live call's behaviour is
 predictable.
@@ -2036,7 +2038,10 @@ Two shapes (mutually exclusive — exactly one per call):
   cli-design §5.3). Read-only-forever (mirror / formula /
   auto_number / creation_log / last_updated / item_id) →
   `unsupported_column_type` with `read_only: true`. Files-shaped
-  (file) → `unsupported_column_type` with `deferred_to: "v0.4"`.
+  (file) → `unsupported_column_type` with `deferred_to: "v0.5"`
+  (hint points at `monday item upload`, the verb-shaped path
+  shipped at v0.4-M31; the friendly `--set-raw` form for file
+  columns slipped to v0.5 at v0.4 release-prep).
 
 `--dry-run` returns a planned-change envelope (no API write):
 
@@ -2282,8 +2287,10 @@ present) derive the auto-generated subitems board from the parent's
 
 Multi-level boards (`hierarchy_type: "multi_level"`) are rejected
 pre-mutation with `usage_error` carrying `details.hierarchy_type` +
-`details.deferred_to: "v0.4"` (M28 Decision 11 closure — Monday's
-`sub_items_board` carries no `subtasks` column at API `2026-01`).
+`details.deferred_to: "v0.5"` (M28 Decision 11 closure — Monday's
+`sub_items_board` carries no `subtasks` column at API `2026-01`;
+slipped from v0.4 to v0.5 at v0.4 release-prep because v0.4 didn't
+pick the feature up and the data-model gap is unchanged).
 `--parent` is mutually exclusive with
 `--board`, `--group`, and `--position` / `--relative-to`. `--set` /
 `--set-raw` columns resolve against the **subitems board**, not the
@@ -2697,9 +2704,10 @@ simple `{<source_col_id>: <target_col_id>}` form — string-to-string
 — mapping directly to Monday's `columns_mapping: [ColumnMappingInput!]`
 parameter where `ColumnMappingInput = { source: ID!, target?: ID }`.
 The richer `{id, value?}` form for cross-board value-overrides is
-deferred to v0.4 (was originally v0.3-targeted at M11 close; no v0.3
-milestone picked up the extension — Monday's wire shape carries no
-value slot, and supporting it requires a non-atomic post-move
+deferred to v0.5 (was originally v0.3-targeted at M11 close; slipped
+to v0.4 at v0.3-M28 audit, then to v0.5 at v0.4 release-prep — no
+v0.3 or v0.4 milestone picked up the extension. Monday's wire shape
+carries no value slot, and supporting it requires a non-atomic post-move
 `change_multiple_column_values` mutation with cross-leg partial-
 failure envelope shapes that have no precedent at v0.3 close).
 Agents needing overrides fire `monday item set <iid>
@@ -3423,8 +3431,9 @@ which board each hit came from without a second round-trip.
   every board (either `--limit` short-circuit, or any board's
   per-board `items_page.cursor` was non-null at the v0.3
   single-call surface). v0.3 cross-board search is single-call-
-  only; no resumable cross-board cursor (deferred to v0.4 per
-  Decision 5 closure rationale). `details` carries `{ reason:
+  only; no resumable cross-board cursor (deferred to v0.5 per
+  Decision 5 closure rationale — v0.4 didn't pick the
+  resumable-cursor surface up). `details` carries `{ reason:
   "limit_hit" | "board_has_more", total_returned, limit,
   per_board_state: Record<board_id, "exhausted" | "has_more" |
   "not_started">, hint }`.

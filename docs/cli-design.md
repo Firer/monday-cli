@@ -1771,16 +1771,17 @@ monday item move <iid> --to-group <gid> [--to-board <bid>] [--columns-mapping <j
                                           # everything (Monday's permissive default)" opt-in.
                                           # Mapping value form: `{<src>: <target>}` (string-
                                           # to-string). The richer `{id, value?}` form for
-                                          # value-overrides is deferred to v0.4 (was
-                                          # originally v0.3-targeted at M11 close; no v0.3
-                                          # milestone picked up the extension — Monday's
-                                          # `ColumnMappingInput` carries no value slot, and
-                                          # supporting it requires a non-atomic post-move
-                                          # `change_multiple_column_values` with cross-leg
-                                          # partial-failure envelope shapes that have no
-                                          # precedent at v0.3 close). Agents needing
-                                          # overrides fire `monday item set <iid>
-                                          # <target>=<value>` post-move.
+                                          # value-overrides is deferred to v0.5 (was
+                                          # originally v0.3-targeted at M11 close; slipped
+                                          # to v0.4 at v0.3-M28 audit, then to v0.5 at v0.4
+                                          # release-prep — no v0.3 or v0.4 milestone picked
+                                          # up the extension. Monday's `ColumnMappingInput`
+                                          # carries no value slot; supporting it requires a
+                                          # non-atomic post-move `change_multiple_column_
+                                          # values` with cross-leg partial-failure envelope
+                                          # shapes that have no precedent at v0.4 close).
+                                          # Agents needing overrides fire `monday item set
+                                          # <iid> <target>=<value>` post-move.
                                           # `--dry-run` previews the source-item snapshot +
                                           # the planned `column_mappings` for cross-board
                                           # (still raises `usage_error` on unmatched —
@@ -2777,10 +2778,15 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `change_column_value` / `change_multiple_column_values`.
    - **`files`-shaped types** (`file`, anything else where Monday
      uses `add_file_to_column` rather than `change_column_value`)
-     carry `deferred_to: "v0.4"` (asset upload is pinned to v0.4
-     per §13). `--set-raw` rejects these too — the underlying
-     mutation isn't `change_column_value` so a raw payload can't
-     reach the right wire surface.
+     carry `deferred_to: "v0.5"`. The verb-shaped path
+     (`monday item upload`) shipped at v0.4-M31 — that's the
+     alternative agents should use today; the friendly `--set`
+     form for file columns (which would need a dispatch from the
+     translator boundary into the multipart wire) slipped to v0.5
+     at v0.4 release-prep. `--set-raw` rejects these too —
+     the underlying mutation isn't `change_column_value` so a raw
+     payload can't reach the right wire surface; hint points at
+     `monday item upload`.
    No silent partial support — every translator either lands
    end-to-end or surfaces `unsupported_column_type` with a
    hint that points at `--set-raw` or the type's roadmap slot.
@@ -2857,7 +2863,7 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
   - **`files`-shaped** (`file`, anything else where Monday's
     write path is `add_file_to_column` rather than
     `change_column_value`) → surfaces `unsupported_column_type`
-    with `deferred_to: "v0.4"`. The friendly translator and
+    with `deferred_to: "v0.5"`. The friendly translator and
     `--set-raw` both go through column-value mutations
     (`change_column_value` / `change_multiple_column_values`
     on `item set` / `item update`; `create_item` /
@@ -2865,7 +2871,10 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
     M9 carve-in above) — none of these wire surfaces accept
     `add_file_to_column`-style payloads, so a `--set-raw` raw
     payload can't reach the right wire surface for these
-    types. Asset upload is pinned to v0.4 (§13).
+    types. Asset upload itself shipped at v0.4-M31 as the
+    verb-shaped `monday item upload`; the friendly `--set` /
+    `--set-raw` forms for files slipped to v0.5 at v0.4
+    release-prep.
   Every other type (writable + tentative-slipped + future where
   the API accepts `change_column_value`) is accepted by
   `--set-raw`; the user owns wire-shape correctness.
@@ -3514,7 +3523,7 @@ should accept any documented union member):
 | `noncanonical_column_type` | M16 `column-create --type` resolved to a column type outside `WRITABLE_COLUMN_TYPES`; agents pick the right write path from `category` (M16 forward-pin — implementation lands at M16 close) | `{ column_type, category: "raw_writable" \| "read_only_forever" \| "files_shaped", suggested_write_path: string \| null }` |
 | `inaccessible_boards` | v0.3-M23 cross-board `monday item search` walker detected that Monday's `boards(ids:)` silently omitted N of the requested board IDs (no access, deleted, or never existed — per the empirical-probe finding at 2026-05-11). Emitted by `src/api/cross-board-search.ts`'s `buildInaccessibleBoardsWarning`. Forbids silent partial cross-board results | `{ requested_count: number, returned_count: number, missing_board_ids: string[], hint: string }` |
 | `column_not_found_on_board` | v0.3-M23 cross-board `monday item search` walker detected that the `--where` column token didn't resolve on a specific board (different boards have different column IDs; the cross-board fan-out skips boards lacking the column rather than failing the whole call). Emitted by `src/api/cross-board-search.ts`'s `buildColumnNotFoundOnBoardWarning`. One warning per skipped board (so a `--where status=Done` across 25 boards where 3 lack `status` surfaces 3 of these warnings) | `{ board_id, column, hint }` (the `column` key carries the user's `--where` column token; renamed from `column_token` → `column` at M23 implementation (`1f09a25`) per the v0.3-plan §15 contract drift finding — the redactor's `(token\|secret\|password\|api[-_]?key)` pattern would scrub the value otherwise) |
-| `cross_board_truncated` | v0.3-M23 cross-board `monday item search` walker stopped before draining every board — either `--limit` short-circuited the aggregate walk, or at least one board still had more items after the v0.3 single-call surface ran. Emitted by `src/api/cross-board-search.ts`'s `buildCrossBoardTruncatedWarning`. The per-board `state` slot lets agents introspect partial completion without a resumable cross-board cursor (deferred to v0.4 per Decision 5 closure rationale) | `{ reason: "limit_hit" \| "board_has_more", total_returned: number, limit: number \| null, per_board_state: Record<board_id, "exhausted" \| "has_more" \| "not_started">, hint: string }` |
+| `cross_board_truncated` | v0.3-M23 cross-board `monday item search` walker stopped before draining every board — either `--limit` short-circuited the aggregate walk, or at least one board still had more items after the v0.3 single-call surface ran. Emitted by `src/api/cross-board-search.ts`'s `buildCrossBoardTruncatedWarning`. The per-board `state` slot lets agents introspect partial completion without a resumable cross-board cursor (deferred to v0.5 per Decision 5 closure rationale — v0.4 didn't pick the resumable-cursor surface up) | `{ reason: "limit_hit" \| "board_has_more", total_returned: number, limit: number \| null, per_board_state: Record<board_id, "exhausted" \| "has_more" \| "not_started">, hint: string }` |
 | `board_favorites_stale` | v0.3-M23 `monday board favorites` 2-stage resolver detected that Stage 2 (`boards(ids:)` hydrate) returned fewer boards than Stage 1 (`Query.favorites`) yielded — the user lost access to a favorited board, the board was deleted, or it moved to a closed workspace. Emitted by `src/api/board-favorites.ts`'s `buildStaleFavoritesWarning`. Not fatal: the verb still returns the boards Stage 2 hydrated | `{ favorited_count: number, hydrated_count: number, missing_board_ids: string[], hint: string }` |
 
 Adding a new warning code, a new producer to an existing code

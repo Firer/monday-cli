@@ -242,8 +242,10 @@
   post-resolution: rejects read-only-forever types
   (`unsupported_column_type` with `read_only: true`) and files-
   shaped types (`unsupported_column_type` with
-  `deferred_to: "v0.4"` — `add_file_to_column` is multipart, not
-  `change_column_value`); otherwise builds a `TranslatedColumnValue`
+  `deferred_to: "v0.5"` — `add_file_to_column` is multipart, not
+  `change_column_value`; v0.4-M31 shipped the verb-shaped
+  `monday item upload` path, the friendly `--set-raw <file-col>=
+  <json>` form slipped to v0.5); otherwise builds a `TranslatedColumnValue`
   with `payload: {format: 'rich', value: <parsed>}` so
   `selectMutation` / `bundleColumnValues` handle it uniformly.
   Per cli-design §5.3 line 949–960: no per-type schema validation

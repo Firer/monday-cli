@@ -1831,7 +1831,7 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     expect(env.error?.details?.read_only).toBe(true);
   });
 
-  it('--set-raw rejects files-shaped (file) with deferred_to: v0.4 (no API call fires)', async () => {
+  it('--set-raw rejects files-shaped (file) with deferred_to: v0.5 (no API call fires; v0.4 release-prep slipped the raw-payload-into-multipart-wire form — `monday item upload` (v0.4-M31) is the alternative path)', async () => {
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -1871,7 +1871,7 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
       error?: { code: string; details?: { deferred_to?: string } };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.4');
+    expect(env.error?.details?.deferred_to).toBe('v0.5');
   });
 
   it('--set-raw with malformed JSON fails fast at argv-parse — no API call fires', async () => {

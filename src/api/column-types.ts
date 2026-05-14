@@ -214,8 +214,10 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  * `change_column_value` / `change_multiple_column_values`, so a
  * `--set-raw` raw payload cannot reach the right wire surface for
  * these types — `--set-raw` rejects them with `unsupported_column_
- * type` carrying `deferred_to: "v0.4"` (asset upload pinned to v0.4
- * per cli-design §13).
+ * type` carrying `deferred_to: "v0.5"`. v0.4-M31 shipped the verb-
+ * shaped path (`monday item upload`); the `--set-raw <file-col>=
+ * <json>` form remains deferred because it would need a separate
+ * dispatch from the escape-hatch boundary into the multipart wire.
  *
  * Currently one entry (`file`); the slot is plural because Monday may
  * surface other multipart-upload-shaped types in future API versions
