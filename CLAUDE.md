@@ -83,7 +83,7 @@ mutation surfaces (`create_doc` / `delete_doc` /
 `update_doc_block` / `delete_doc_block`) lives in prose, not as
 gated command stubs with placeholder guards. **Codex
 pre-flight review converged in 4 rounds** across the cluster
-`05c5988..<close-docs sha>` — initial contract diff at
+`05c5988..a889eac` — initial contract diff at
 `05c5988` + round 1 `a875add` (0 P1 + 2 P2 + 2 P3: strict
 decimal parser + `requiredJsonValueSchema` + 2 prose drifts)
 + round 2 `823fccc` (0 P1 + 1 P2 + 2 P3: pagination-invariant
@@ -145,6 +145,51 @@ findings: **0 P1 + 4 P2 + 5 P3 across the 3 fix-up rounds**.
 - **R-NEW-31 stays at 1 consumer post-M32.** No per-status
   detail union surfaces — `doc list` + `doc get` envelopes
   carry flat shapes without status discrimination.
+
+**Four new R-class candidates filed at M32 pre-flight** (full
+entries at v0.4-plan §22):
+
+- **R-NEW-68 — `parseStrictDecimal` strict-decimal-integer
+  parser for commander option-value coercion** (1 consumer;
+  LOW priority watch-item, code lift at 2nd consumer).
+  Surfaced at round-1 P2-1: `Number.parseInt` silently
+  truncates `'25.5'` → 25 in commander's coercer recipe,
+  bypassing the schema-layer `.int()` check. M32's strict
+  variant lives at `src/commands/doc/list.ts:232`; lift
+  target is `src/utils/numeric.ts` (or fold next to
+  `DECIMAL_USER_ID_PATTERN`) at the 2nd numeric-flag
+  consumer.
+- **R-NEW-69 — `requiredJsonValueSchema` zod helper for
+  required-but-any-JSON-shape slots** (1 consumer; LOW
+  priority watch-item, code lift at 2nd module consumer).
+  Surfaced at round-1 P2-2: bare `z.unknown()` accepts
+  missing keys, silently weakening the contract pin.
+  `z.unknown().refine((v) => v !== undefined)` at
+  `src/api/documents.ts:124` covers `Document.settings` +
+  `DocumentBlock.content`; lift target is
+  `src/utils/parse-boundary.ts` at the 2nd module consumer
+  (likely v0.5 doc-mutation `update_doc_block.content`).
+- **R-NEW-70 — Comma-separated brand-list argv parser
+  pattern** (2 consumers; MEDIUM priority watch-item, code
+  lift at 3rd consumer per R7/R8 threshold). `parseUsersArg`
+  at `src/commands/workspace/add-users.ts:144` (M14) +
+  `parseWorkspaceListArg` at `src/commands/doc/list.ts:244`
+  (M32) share the outer split + trim + empty-entry +
+  per-entry brand-validation outline; the per-call sites
+  carry distinct error-context strings so a lift today
+  would over-fit. Fires at 3rd consumer (likely v0.5 team
+  writers `team create --users` or board-relation verbs).
+- **R-NEW-71 — Pagination-invariant `.superRefine` with
+  dirty-input early-return guard** (1 consumer; LOW
+  priority watch-item, code lift at 2nd consumer).
+  Surfaced cumulatively at round-2 P2-1 (invariant check)
+  + round-3 P2-1 (early-return guard). Pattern reusable
+  across any paginated read envelope using the `has_more
+  === (returned_count === limit)` heuristic; the
+  dirty-input guard is the load-bearing detail (zod runs
+  `.superRefine` even when scalar range checks have
+  produced "dirty" issues). Today: 1 consumer
+  (`docListOutputSchema` in `src/api/documents.ts:307`).
 
 **R-class state (post-M31 IMPL close — carried forward for
 historical context):**
