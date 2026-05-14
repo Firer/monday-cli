@@ -2379,12 +2379,17 @@ monday completion <bash|zsh|fish>                                            v0.
                                           # reject at the parse
                                           # boundary with `usage_error.
                                           # details.issues[]` carrying
-                                          # a `{path: 'shell', message,
-                                          # code: 'invalid_value'}`
-                                          # entry (the shared
-                                          # `parseArgv` boundary shape,
-                                          # NOT a completion-specific
-                                          # `details.shell` slot).
+                                          # a `{path: 'shell',
+                                          # message}` entry per
+                                          # `parseArgv`'s
+                                          # `SummarisedIssue` shape
+                                          # (NOT a completion-specific
+                                          # `details.shell` slot; the
+                                          # boundary's issue records
+                                          # carry only `path` +
+                                          # `message` + optional
+                                          # `params`, NOT a Zod `code`
+                                          # field).
                                           # Standard install flow:
                                           #
                                           #   monday completion bash \

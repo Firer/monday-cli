@@ -46,10 +46,13 @@
  * 3-value enum `bash` / `zsh` / `fish` validated at the parse
  * boundary. Unknown values reject with `usage_error.details.issues[]`
  * carrying a `{path: 'shell', message: 'Invalid option: expected one
- * of "bash"|"zsh"|"fish"', code: 'invalid_value'}` entry (the shared
- * `parseArgv` boundary shape — NOT a completion-specific
- * `details.shell` slot). Agents key on `details.issues[].path ===
- * 'shell'` to disambiguate from other parse-boundary rejections.
+ * of "bash"|"zsh"|"fish"'}` entry (the shared `parseArgv` boundary
+ * shape per `src/commands/parse-argv.ts:SummarisedIssue` — NOT a
+ * completion-specific `details.shell` slot; the boundary's
+ * `SummarisedIssue` carries only `path` + `message` + optional
+ * `params`, NOT a Zod `code` field). Agents key on
+ * `details.issues[].path === 'shell'` to disambiguate from other
+ * parse-boundary rejections.
  *
  * **No wire surface (Decision 5).** Verb is CLI-internal — no Monday
  * API call, no `resolveClient`, no auth requirement. `meta.source:
