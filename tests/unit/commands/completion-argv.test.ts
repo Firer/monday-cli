@@ -1,21 +1,20 @@
 /**
  * Argv parser unit tests for `src/commands/completion.ts` v0.4-M33
- * pre-flight surface (cli-design §4.3 COMPLETION section + §13 v0.4
- * entry).
+ * (cli-design §4.3 COMPLETION section + §13 v0.4 entry).
  *
  * Test matrix scope: schema-level parse-boundary surface only — the
  * closed 3-value `shell` enum + strict schema rejection of extra keys
  * + command-module metadata pins. Downstream behaviour (raw-script
- * emit on stdout, `--json` envelope wrap, format-flag rejection)
- * lives at the action body and ships at M33 IMPL via integration
- * tests.
+ * emit on stdout, `--json` envelope wrap, format-flag rejection,
+ * `MONDAY_OUTPUT` env opt-in, per-shell script content sanity) lives
+ * at the action body and is covered by the integration suite at
+ * `tests/integration/commands/completion.test.ts`.
  *
- * The argv schema is the ONLY shipped runtime surface at M33
- * pre-flight — the action body is c8-ignored and throws
- * `internal_error` with `details.deferred_to: 'v0.4-M33 IMPL'`
- * post-parse. The c8-ignored throw is NOT exercised by these tests
- * (per the M31/M32 pre-flight cadence — stub action bodies are
- * out-of-scope for pre-flight test coverage).
+ * The argv schema shipped byte-identical pre-flight → IMPL (only
+ * the action body changed at IMPL — the schema, the
+ * `CommandModule` metadata, and the strict-extras rejection are
+ * stable across the milestone). These tests cover that stable
+ * surface independent of the IMPL feat.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -65,7 +64,7 @@ describe('completionCommand.inputSchema (M33 completion argv)', () => {
     it('rejects a case-mismatched shell (Bash vs bash)', () => {
       // The closed enum is lowercase-only; the validator does NOT
       // case-fold. Mixed-case input is a parse-boundary rejection so
-      // the contract surface is tight (M33 IMPL needn't carry
+      // the contract surface is tight (the IMPL doesn't carry
       // case-insensitive matching).
       expect(() =>
         parseArgv(completionCommand.inputSchema, { shell: 'Bash' }),

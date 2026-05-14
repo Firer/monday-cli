@@ -4257,15 +4257,18 @@ monday completion zsh  >> ~/.zshrc
 monday completion fish >  ~/.config/fish/completions/monday.fish
 ```
 
-**Status: v0.4-M33 pre-flight landed end-to-end (cluster
-`c619425..affbf70`, 3 Codex rounds; IMPL pending).** Argv parsing
-+ commander wiring + the `--json` envelope schema ship at pre-
-flight; the per-shell hand-rolled script templates land at M33
-IMPL. Empirical probe
-at pre-flight (`grep -rn 'completion\|complete' node_modules/
-commander/lib/ node_modules/commander/typings/` 2026-05-14, commander
-14.0.3) confirmed commander ships NO built-in completion machinery —
-the templates are hand-rolled (Decision 1 closure; no runtime dep
+**Status: v0.4-M33 shipped end-to-end (pre-flight cluster
+`c619425..affbf70`, 3 Codex rounds; IMPL cluster
+`7cbb120..e651674`, 1 fix-up round + ratification).** The IMPL
+feat ships the three-mode format-aware action body (raw-bytes
+default / `--json` envelope / format-flag rejection) + three
+hand-rolled per-shell template builders that walk
+`program.commands` at emit time so completions stay in sync with
+the registry. Empirical probe at pre-flight
+(`grep -rn 'completion\|complete' node_modules/commander/lib/
+node_modules/commander/typings/` 2026-05-14, commander 14.0.3)
+confirmed commander ships NO built-in completion machinery — the
+templates are hand-rolled (Decision 1 closure; no runtime dep
 added).
 
 **Three output modes:**
@@ -4314,9 +4317,14 @@ default mode and the `--json` envelope's `script` field.
 ```
 
 The `script` field is the EXACT same byte sequence the default mode
-prints to stdout. Per-shell script content lands at M33 IMPL; the
-contract pins the SHAPE (one script per closed-enum flavour, opaque
-string payload) but not the content.
+prints to stdout (the IMPL feat pins a byte-identity round-trip
+integration assertion per shell flavour). The contract pins the
+SHAPE (one script per closed-enum flavour, opaque string payload)
+plus the per-shell directives the IMPL feat shipped: bash scripts
+contain `_monday_completion()` + `complete -F _monday_completion
+monday`; zsh scripts contain `#compdef monday` + `_monday()`; fish
+scripts contain `complete -c monday -f` + per-depth
+`__fish_seen_subcommand_from ...` predicate chains.
 
 Idempotent: yes (deterministic per shell flavour). Adding a 4th
 shell flavour (`powershell`, `nushell`, etc.) is a SemVer-minor

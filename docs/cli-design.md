@@ -7594,30 +7594,32 @@ scoped idempotent changes, and post comments narrating its work.**
 - `item watch <iid>` (polling at default 30s cadence; reactive circuit
   breaker on Monday wire errors per §14.4 closure) **— M29 shipped**
 - Shell completion (bash / zsh / fish) via hand-rolled templates
-  **— M33 pre-flight landed end-to-end (cluster `c619425..affbf70`,
-  3 rounds; cumulative findings 0 P1 + 3 P2 + 4 P3 across 2 fix-up
-  rounds within the M22 / M27 / M32 read-surface precedent)**.
+  **— M33 shipped end-to-end (pre-flight cluster `c619425..affbf70`,
+  3 rounds, 0 P1 + 3 P2 + 4 P3 cumulative; IMPL cluster
+  `7cbb120..e651674`, 1 fix-up round + ratification, 0 P1 + 1 P2 +
+  1 P3 cumulative — at the lower bound of the M22 / M27 / M32
+  read-surface precedent for a CLI-internal milestone).**
   Empirical probe at
   pre-flight (`grep -rn 'completion\|complete' node_modules/commander/
   lib/ node_modules/commander/typings/` 2026-05-14, commander 14.0.3)
   returned zero hits — commander ships NO built-in completion
-  machinery, so the verb hand-rolls per-shell templates (Decision 1
-  closure; no runtime dep added per the cli-design §1 "minimum deps"
-  principle). New top-level verb at §4.3 COMPLETION section: `monday
-  completion <bash|zsh|fish>` (closed 3-value enum positional). First
-  non-envelope stdout surface in the CLI — §3.1 #2 raw-bytes carve-out
-  documents the discipline. ERROR_CODES count stays at 29 (failures
-  route through existing `usage_error` for invalid shell flavour +
-  inapplicable `--table` / `--output table|text|ndjson` format flags —
-  only `--json` and `--table` are global shorthand flags per §4.4;
-  `text` and `ndjson` are accessible only via the long-form
-  `--output <fmt>` value). No new
+  machinery, so the verb hand-rolls per-shell templates at runtime
+  (Decision 1 closure; no runtime dep added per the cli-design §1
+  "minimum deps" principle). New top-level verb at §4.3 COMPLETION
+  section: `monday completion <bash|zsh|fish>` (closed 3-value enum
+  positional). First non-envelope stdout surface in the CLI — §3.1
+  #2 raw-bytes carve-out documents the discipline. ERROR_CODES count
+  stays at 29 (failures route through existing `usage_error` for
+  invalid shell flavour + inapplicable `--table` / `--output
+  table|text|ndjson` format flags — only `--json` and `--table` are
+  global shorthand flags per §4.4; `text` and `ndjson` are
+  accessible only via the long-form `--output <fmt>` value). No new
   transport seam (CLI-internal verb), no destructive gate, no
-  GraphQL operation. Pre-flight stub at this commit ships the real
-  argv parse boundary + the `--json` envelope schema + commander
-  wiring; the action body is c8-ignored and throws `internal_error`
-  with `details.deferred_to: 'v0.4-M33 IMPL'`. Per-shell hand-rolled
-  script templates land at M33 IMPL.
+  GraphQL operation. The IMPL feat ships the three-mode format-
+  aware action body (raw-bytes default / `--json` envelope /
+  format-flag rejection) + three hand-rolled per-shell template
+  builders walking `program.commands` at emit time so completions
+  stay in sync with the registry.
 - Bulk operations with `--concurrency` (probed against Monday's
   per-account concurrency cap; empirical probe at 2026-05-13
   observed cap > 100 in-flight for trivial reads, see §9.3)

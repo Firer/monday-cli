@@ -217,12 +217,12 @@ import { docGetCommand } from './doc/get.js';
 // M33 pre-flight (`grep -rn 'completion\|complete' node_modules/
 // commander/lib/ node_modules/commander/typings/` 2026-05-14, commander
 // 14.0.3) returned zero hits — commander has no built-in completion
-// machinery, so the verb hand-rolls per-shell templates (no runtime
-// dep added). Pre-flight stub at this commit (argv schema + commander
-// wiring + `--json` envelope schema ship as the real shipped surface;
-// action body is c8-ignored and throws `internal_error` with
-// `details.deferred_to: 'v0.4-M33 IMPL'`). Per-shell script templates
-// land at M33 IMPL.
+// machinery, so the verb hand-rolls per-shell templates at runtime (no
+// runtime dep added). Shipped end-to-end at v0.4-M33 IMPL: argv schema
+// + commander wiring + `--json` envelope schema + the three-mode
+// format-aware action body + three per-shell template builders that
+// walk `program.commands` at emit time so completions stay in sync
+// with the registry.
 import { completionCommand } from './completion.js';
 // M6 commands — diagnostics + GraphQL escape hatch + agent-flow E2E.
 import { rawCommand } from './raw/index.js';
