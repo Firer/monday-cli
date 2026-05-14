@@ -11,8 +11,29 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.4-M33 IMPL landed end-to-end; next v0.4 milestone TBD.**
-Shell completion (`monday completion <bash|zsh|fish>`) — first
+**v0.4.0 ready for publish — pending user push authorization +
+npm publish.** The v0.4 release-prep cluster (this session)
+mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim across 6
+commits: `c193f21` envelope-snapshot refresh (+11 snapshots for
+M29-M33 surfaces) + `eb9e7a9` ToC audit + slip stale `deferred_to:
+"v0.4"` slots to `"v0.5"` (3 production sites + matching test +
+doc prose; mirrors M28's `f2600fa` v0.3-deferral slip) + `f9eef68`
+README v0.4 quickstart + scope refresh + `861a734` version bump
+0.3.0 → 0.4.0 in `package.json` + `package-lock.json` + `b1739bf`
+CHANGELOG `[0.4.0]` entry + this close-docs sweep commit. Annotated
+`v0.4.0` git tag created locally pointing at this cluster's HEAD;
+push to `origin/main`, `gh release create`, and `npm publish`
+pending user authorization (mirroring v0.3-M28's wait-for-
+authorization cadence).
+
+**No code-surface change in the release-prep cluster** — only docs,
+tests, envelope-snapshot regen, and the version bump. ERROR_CODES
+count stays at 29; command count stays at 101; the 95.45 branches
+floor + 95 stmts/fns/lines floor unchanged. Coverage at the cluster
+close: 99.26 / 96.33 / 99.34 / 99.53 (branches margin 0.88pp).
+
+**v0.4-M33 IMPL closed at `7cbb120..e651674`** (prior session) —
+shell completion (`monday completion <bash|zsh|fish>`), first
 non-envelope stdout surface in the CLI (cli-design §3.1 #2
 raw-bytes carve-out). Empirical commander-capability check at
 pre-flight (`grep -rn 'completion\|complete' node_modules/
@@ -57,34 +78,48 @@ no auth requirement; no cache); `meta.source: "none"` on the
 GraphQL operation (R-NEW-37 W2 audit returns "nothing
 flagged"). ERROR_CODES count stays at 29 per D4 closure.
 
-**Live numbers (M33 IMPL close):**
-- Test count: **3623 + 1 skipped** across **148** test files
-  (+32 net vs 3591 + 1 skipped M33 pre-flight close baseline:
-  32 integration tests at `tests/integration/commands/
-  completion.test.ts` covering 3 raw-bytes happy paths × 2 TTY
-  contexts + 3 `--json` envelope paths + byte-identity round-
-  trip + `--output json` synonym + 4 format-flag rejections +
-  invalid shell + parse-vs-format-flag precedence + missing
-  positional + 3 script-content-sanity + registry-sync
-  invariant + 2 MONDAY_OUTPUT env paths + fish per-depth
-  local-flag invariant (round-1 P2-1 catch) + 3 LEAK_CANARY
-  redaction asserts).
+**Live numbers (v0.4.0 ready for publish):**
+- Test count: **3634 + 1 skipped** across **148** test files
+  (+11 net vs 3623 + 1 skipped at M33 IMPL close: 11 envelope-
+  shape snapshots at `c193f21` covering item watch (NDJSON
+  trailer happy single-event + empty backlog) / doc list
+  (wrapped record empty + populated) / doc get (direct unwrap
+  happy with blocks + D8 not_found) / completion bash|zsh|fish
+  --json envelopes (script body collapsed to a sentinel so
+  registry-additions don't churn the snapshot) / completion
+  --table + invalid-shell usage_error rejections.
 - Coverage: **99.26 / 96.33 / 99.34 / 99.53** (stmts /
   branches / fns / lines) at the **95 / 95.45 / 95 / 95**
-  floor. **Branches margin 0.88pp** (was 0.85pp at M33 pre-
-  flight close; +0.03pp recovery from runtime-body branches
-  covered by integration tests vs the c8-ignored stub drop +
-  the round-1 per-depth fish local-flag branch). **All four
-  metrics improved vs pre-flight close** — third v0.4
-  milestone where every metric improved at IMPL (after M32 +
-  the same M33 cadence).
-- ERROR_CODES count: **29** (unchanged per D4 closure).
-- Command count: **101** (unchanged — IMPL adds no verbs).
-- `package.json` version: **0.3.0** (stays through every v0.4
-  feature milestone; bumps to `0.4.0` at v0.4 release-prep,
-  the LAST v0.4 milestone).
+  floor. **Branches margin 0.88pp** (unchanged from M33 IMPL
+  close — the envelope-snapshot refresh adds no production
+  branches; the deferral slip changes string literals; the
+  README + CHANGELOG additions are doc-only). The release-
+  prep cluster matched v0.3-M28's "no coverage residual sweep
+  needed" branch (margin >= 0.5pp baseline + no per-file
+  100%-residual gap surfaced).
+- ERROR_CODES count: **29** (unchanged — release-prep adds no
+  new codes).
+- Command count: **101** (unchanged — release-prep adds no
+  verbs).
+- `package.json` version: **0.4.0** (bumped at `861a734`).
+- `v0.4.0` annotated tag points at the cluster's final commit
+  (created locally; **pushed to `origin/main` + GitHub release
+  + npm publish pending user authorization**, mirroring the
+  v0.3-M28 cadence). v0.3.0's tag remains live at `5e8c210`.
 
-**R-class state (post-M33 IMPL close):**
+**R-class state (post-v0.4 release-prep close):**
+
+- **One new R-class candidate filed at v0.4 release-prep close
+  — R-NEW-82** (release-prep `deferred_to: '<currently-
+  releasing-version>'` audit step; 2 supporting instances —
+  v0.3-M28 audit at `f2600fa` + v0.4 release-prep audit at
+  `eb9e7a9`; LOW priority watch-item — process discipline, NOT
+  a code lift; graduates at the 3rd consecutive release-prep
+  cluster — likely v0.5.0 — that catches >= 1 stale
+  `deferred_to` site OR explicitly returns "no stale deferrals
+  found"). Full entry at v0.4-plan §22 R-NEW-82.
+
+**R-class state (post-M33 IMPL close — unchanged):**
 
 - **No code-lift R-class movement at M33 IMPL.** The 1-round
   Codex IMPL cluster's findings (1 P2 + 1 P3) were a runtime
@@ -218,29 +253,36 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — v0.4 release-prep.** Picked at the post-M33
-IMPL candidate-selection session over M34 team writers on three
-grounds: (a) the v0.4 surface as it stands (M29 watch / M30
-concurrency / M31 asset upload / M32 doc list+get / M33
-completion) is already larger than v0.3's shipped surface, so
-0.4.0 has earned a tag; (b) ships in a single session (mirroring
-v0.3-M28's `d9ad757..5e8c210` 8-commit cluster) vs 3-4 sessions
-for team writers (empirical probe + pre-flight + IMPL +
-close-docs); (c) deferring team writers to v0.5 lets v0.5 open
-with the team + doc-CRUD-mutation backlog together (10 wire
-surfaces — team mutations + 9 doc mutations Monday exposes),
-which is a cleaner v0.5 frame than "leftover v0.4 item + doc
-CRUD". Session scope mirrors v0.3-M28 verbatim: CHANGELOG `0.4.0`
-entry + envelope-snapshot refresh covering M29–M33 surfaces +
-version bump 0.3.0 → 0.4.0 in `package.json` + README quickstart
-+ close-docs sweep + annotated `v0.4.0` git tag (push + GitHub
-release + npm publish pending user authorization mirroring v0.3.0
-cadence). Team writers slip to v0.5 alongside the deferred
-doc-CRUD-mutation backlog. **R-NEW-75 graduated at this session**
-— the 5-dimension scoping framework applied cleanly (release-prep
-returning zero on 4 of 5 axes IS the signal that it's
-process-only, not a sign the dimensions are wrong); promoted to a
-permanent CLAUDE.md "Workflow rules" entry below.
+**Next session — v0.5 kickoff (externally-blocked on user
+authorization for v0.4.0 push + publish first).** v0.5 opens
+with the team writers + Monday workdocs CRUD mutation backlog
+together — 10 wire surfaces (team mutations + 9 doc mutations
+Monday exposes). Team writers deferred from v0.4-M34 at the
+post-v0.4-M33 candidate-selection session because the v0.4
+shipped surface had already grown beyond v0.3's, and bundling
+team writers with the v0.5 doc-CRUD-mutation backlog is a
+cleaner frame than "leftover v0.4 item + doc CRUD"
+(rationale at v0.4-plan §22 R-NEW-75 entry). Empirical-probe-
+first session shape per the v0.4 cadence (probe Monday's
+`create_team` / `update_team` / `delete_team` / `add_users_to_
+team` / `remove_users_from_team` + workdocs CRUD mutations at
+API `2026-01` before the pre-flight contract diff). Estimated
+3-4 sessions through team writers alone (empirical probe +
+pre-flight + IMPL + close-docs); doc CRUD likely another 4-5
+sessions across 2-3 milestone clusters.
+
+**v0.4 release-prep close (this session).** Mirrored v0.3-M28's
+release-prep cadence verbatim: 6 commits (envelope-snapshot
+refresh + ToC audit / deferral slip + README + version bump +
+CHANGELOG + this close-docs sweep) + annotated `v0.4.0` git
+tag created locally (push + GitHub release + npm publish
+pending user authorization). **R-NEW-75 graduated at the
+candidate-selection session that picked this release-prep over
+M34 team writers** — the 5-dimension scoping framework applied
+cleanly (release-prep returning zero on 4 of 5 axes IS the
+signal that it's process-only, not a sign the dimensions are
+wrong); promoted to a permanent CLAUDE.md "Workflow rules"
+entry below.
 
 **Prior milestone — v0.4-M32 IMPL landed end-to-end.**
 Doc list/get (`monday doc list [--workspace <wid>,...]
