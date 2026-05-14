@@ -9,7 +9,7 @@
  * JSON wire calls — Update IDs validate via the brand at parse-
  * boundary, then go straight to the multipart dispatch).
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -244,6 +244,31 @@ describe('monday update upload (integration, M31 IMPL)', () => {
     expect(env.error).toMatchObject({
       details: { reason: 'file_not_readable' },
     });
+  });
+
+  it('rejects an unreadable file with usage_error file_not_readable (round-1 P2-2)', async () => {
+    if (process.getuid?.() === 0) {
+      return;
+    }
+    const noReadPath = join(workdir, 'noread.png');
+    await writeFile(noReadPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await chmod(noReadPath, 0o000);
+    try {
+      const out = await driveUpload({
+        argv: ['update', 'upload', '987654321', noReadPath, '--json'],
+        multipartCassette: [],
+        xdgRoot,
+      });
+      expect(out.exitCode).toBe(1);
+      expect(out.multipart.requests).toHaveLength(0);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error).toMatchObject({
+        details: { reason: 'file_not_readable' },
+      });
+    } finally {
+      await chmod(noReadPath, 0o600).catch(() => undefined);
+    }
   });
 
   it('rejects a 0-byte file with usage_error file_empty', async () => {

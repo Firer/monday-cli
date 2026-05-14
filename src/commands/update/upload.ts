@@ -58,7 +58,8 @@
  * supports).
  */
 import { z } from 'zod';
-import { stat as fsStat, readFile } from 'node:fs/promises';
+import { stat as fsStat, access as fsAccess, readFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { resolve as resolvePath, basename } from 'node:path';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
@@ -136,9 +137,10 @@ export const updateUploadCommand: CommandModule<
             file: fileArg,
           });
 
-          // Same fs.stat() pre-check shape as `item upload`. Pre-
-          // resolveClient so a missing-file error surfaces as
-          // usage_error (exit 1) before any token check.
+          // Same fs.stat() + fs.access(R_OK) pre-check shape as
+          // `item upload` (round-1 P2-2 fix). Pre-resolveClient so a
+          // missing/unreadable-file error surfaces as usage_error
+          // (exit 1) before any token check.
           const filePath = resolvePath(process.cwd(), parsed.file);
           const filename = basename(filePath);
           let fileSizeBytes: number;
@@ -159,6 +161,7 @@ export const updateUploadCommand: CommandModule<
                 },
               );
             }
+            await fsAccess(filePath, fsConstants.R_OK);
             fileSizeBytes = stats.size;
           } catch (err) {
             if (err instanceof UsageError) {

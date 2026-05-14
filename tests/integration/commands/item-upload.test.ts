@@ -12,7 +12,13 @@
  *   - file-too-large rewrap (Monday's FILE_SIZE_LIMIT_EXCEEDED)
  *   - cache invalidation post-upload (board cache file gone)
  */
-import { mkdtemp, rm, writeFile, stat as fsStat } from 'node:fs/promises';
+import {
+  chmod,
+  mkdtemp,
+  rm,
+  stat as fsStat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -320,6 +326,48 @@ describe('monday item upload (integration, M31 IMPL)', () => {
     expect(env.error).toMatchObject({
       details: { reason: 'file_not_readable' },
     });
+  });
+
+  it('rejects an unreadable file with usage_error file_not_readable BEFORE any wire call (round-1 P2-2)', async () => {
+    // chmod 000 → fs.access(..., R_OK) rejects with EACCES BEFORE
+    // any wire call fires. This catches the round-1 P2-2 case where
+    // fs.stat() alone would have passed the pre-check and the
+    // failure would have surfaced AFTER lookupItemBoard +
+    // resolveColumnWithRefresh wire calls.
+    if (process.getuid?.() === 0) {
+      // Root bypasses POSIX permission checks; skip in that case so
+      // the test stays meaningful in a normal-user shell.
+      return;
+    }
+    const noReadPath = join(workdir, 'noread.png');
+    await writeFile(noReadPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await chmod(noReadPath, 0o000);
+    try {
+      const out = await driveUpload({
+        argv: [
+          'item',
+          'upload',
+          '12345',
+          '--column',
+          'files',
+          noReadPath,
+          '--json',
+        ],
+        cassette: [],
+        multipartCassette: [],
+        xdgRoot,
+      });
+      expect(out.exitCode).toBe(1);
+      expect(out.multipart.requests).toHaveLength(0);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error).toMatchObject({
+        details: { reason: 'file_not_readable' },
+      });
+    } finally {
+      // Restore permissions so afterEach's `rm` can clean up.
+      await chmod(noReadPath, 0o600).catch(() => undefined);
+    }
   });
 
   it('rejects a 0-byte file with usage_error file_empty', async () => {

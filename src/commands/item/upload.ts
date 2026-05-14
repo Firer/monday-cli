@@ -93,7 +93,8 @@
  * invalidation all land below.
  */
 import { z } from 'zod';
-import { stat as fsStat, readFile } from 'node:fs/promises';
+import { stat as fsStat, access as fsAccess, readFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { resolve as resolvePath, basename } from 'node:path';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
@@ -183,11 +184,16 @@ export const itemUploadCommand: CommandModule<
           });
 
           // Resolve the absolute file path relative to cwd. Pre-check
-          // existence + readability + emptiness via `fs.stat()` BEFORE
-          // resolveClient so a missing-file error surfaces as
-          // usage_error (exit 1) rather than getting tangled up with
-          // config_error (exit 3) on a token miss. Same ordering
-          // invariant the destructive-gate verbs preserve.
+          // existence + type + read-permission + emptiness via
+          // `fs.stat()` + `fs.access(..., R_OK)` BEFORE resolveClient
+          // so a missing/unreadable-file error surfaces as usage_error
+          // (exit 1) rather than getting tangled up with config_error
+          // (exit 3) on a token miss OR firing AFTER `lookupItemBoard`
+          // / `resolveColumnWithRefresh` Monday wire calls (round-1
+          // P2-2 fix — `fs.stat()` alone confirms type/size but not
+          // R_OK; an unreadable file would otherwise pass the
+          // pre-check and `fs.readFile()` would throw a raw fs error
+          // mid-upload after wire calls).
           const filePath = resolvePath(process.cwd(), parsed.file);
           const filename = basename(filePath);
           let fileSizeBytes: number;
@@ -208,6 +214,7 @@ export const itemUploadCommand: CommandModule<
                 },
               );
             }
+            await fsAccess(filePath, fsConstants.R_OK);
             fileSizeBytes = stats.size;
           } catch (err) {
             if (err instanceof UsageError) {

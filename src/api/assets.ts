@@ -372,9 +372,14 @@ const isFileTooLargeRejection = (err: MondayCliError): boolean => {
   if (monday === 'FILE_SIZE_LIMIT_EXCEEDED') return true;
   // Fallback to the message vocabulary — Monday occasionally returns
   // a generic `validation_failed` with the size language inline.
+  // Match the broader `'file size'` substring (covers "file size
+  // limit exceeded" + "file size exceeds maximum" + similar
+  // proxy-rephrased variants), plus `'file too large'` and
+  // `'exceeds the limit'` for vocabulary that doesn't include
+  // "size" explicitly.
   const msg = err.message.toLowerCase();
   if (
-    msg.includes('file size limit') ||
+    msg.includes('file size') ||
     msg.includes('file too large') ||
     msg.includes('exceeds the limit')
   ) {
@@ -501,11 +506,18 @@ export const addFileToColumn = async (
     file: null,
   };
 
-  let result;
-  try {
-    result = await withRetry(
-      () =>
-        dispatchMultipartOnce({
+  // Rewrap server-side size rejections INSIDE the retry thunk so the
+  // resulting `usage_error` (non-retryable per CODE_RETRYABLE_DEFAULT)
+  // short-circuits `withRetry` immediately. If the rewrap lived on
+  // the outer `await withRetry(...)` catch instead, a non-JSON HTTP
+  // 413 (proxy-served HTML body) would surface as `network_error`
+  // (retryable) and the loop would re-upload the same oversized file
+  // up to `--retry` times before the rewrap finally fired (round-1
+  // P2-1 fix).
+  const result = await withRetry(
+    async () => {
+      try {
+        return await dispatchMultipartOnce({
           multipart: inputs.multipart,
           query: ADD_FILE_TO_COLUMN_MUTATION,
           variables,
@@ -514,22 +526,23 @@ export const addFileToColumn = async (
           file: inputs.file,
           filename: inputs.filename,
           signal: inputs.signal,
-        }),
-      {
-        retries: inputs.retries,
-        signal: inputs.signal,
-      },
-    );
-  } catch (err) {
-    if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
-      throw rewrapAsFileTooLarge({
-        err,
-        fileSizeBytes: inputs.file.size,
-        filename: inputs.filename,
-      });
-    }
-    throw err;
-  }
+        });
+      } catch (err) {
+        if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
+          throw rewrapAsFileTooLarge({
+            err,
+            fileSizeBytes: inputs.file.size,
+            filename: inputs.filename,
+          });
+        }
+        throw err;
+      }
+    },
+    {
+      retries: inputs.retries,
+      signal: inputs.signal,
+    },
+  );
 
   // Reference `inputs.client` so future complexity-passthrough work
   // can inspect verbose mode without changing the call signature.
@@ -594,11 +607,12 @@ export const addFileToUpdate = async (
     file: null,
   };
 
-  let result;
-  try {
-    result = await withRetry(
-      () =>
-        dispatchMultipartOnce({
+  // Same rewrap-inside-retry-thunk shape as addFileToColumn — see
+  // its inline rationale (round-1 P2-1 fix).
+  const result = await withRetry(
+    async () => {
+      try {
+        return await dispatchMultipartOnce({
           multipart: inputs.multipart,
           query: ADD_FILE_TO_UPDATE_MUTATION,
           variables,
@@ -607,22 +621,23 @@ export const addFileToUpdate = async (
           file: inputs.file,
           filename: inputs.filename,
           signal: inputs.signal,
-        }),
-      {
-        retries: inputs.retries,
-        signal: inputs.signal,
-      },
-    );
-  } catch (err) {
-    if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
-      throw rewrapAsFileTooLarge({
-        err,
-        fileSizeBytes: inputs.file.size,
-        filename: inputs.filename,
-      });
-    }
-    throw err;
-  }
+        });
+      } catch (err) {
+        if (err instanceof MondayCliError && isFileTooLargeRejection(err)) {
+          throw rewrapAsFileTooLarge({
+            err,
+            fileSizeBytes: inputs.file.size,
+            filename: inputs.filename,
+          });
+        }
+        throw err;
+      }
+    },
+    {
+      retries: inputs.retries,
+      signal: inputs.signal,
+    },
+  );
 
   void inputs.client;
 

@@ -436,6 +436,50 @@ describe('addFileToColumn', () => {
     await expect(promise).rejects.toMatchObject({ code: 'not_found' });
   });
 
+  it('file_too_large rewrap (HTTP 413 non-JSON body) short-circuits the retry loop (round-1 P2-1)', async () => {
+    // Simulates an LB-mediated 413 with HTML body: the transport's
+    // JSON-parse failure throws as network_error (retryable per
+    // CODE_RETRYABLE_DEFAULT). If the rewrap lived OUTSIDE
+    // withRetry's catch, the loop would re-upload up to `retries`
+    // times before surfacing file_too_large. With the round-1 P2-1
+    // fix the rewrap fires inside the retry thunk so the resulting
+    // usage_error (non-retryable) short-circuits the loop after the
+    // first attempt.
+    const transport: MultipartTransport = {
+      request: () =>
+        Promise.resolve({
+          status: 413,
+          headers: { 'content-type': 'text/html' },
+          body: '<html>oops</html>',
+        }),
+    };
+    let calls = 0;
+    const countingTransport: MultipartTransport = {
+      request: (req) => {
+        calls++;
+        return transport.request(req);
+      },
+    };
+    await expect(
+      addFileToColumn({
+        client: FAKE_CLIENT,
+        multipart: countingTransport,
+        itemId: '12345',
+        columnId: 'files',
+        file: sampleBlob(new Uint8Array(789)),
+        filename: 'big.png',
+        signal: new AbortController().signal,
+        retries: 3,
+      }),
+    ).rejects.toMatchObject({
+      code: 'usage_error',
+      details: { reason: 'file_too_large', file_size_bytes: 789 },
+    });
+    // EXACTLY one call — the rewrap inside the retry thunk produces a
+    // non-retryable usage_error that withRetry surfaces immediately.
+    expect(calls).toBe(1);
+  });
+
   it('honors retries on rate_limited (succeeds on second attempt)', async () => {
     const { transport, remaining } = stubTransport([
       {
