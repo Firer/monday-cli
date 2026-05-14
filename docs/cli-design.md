@@ -2269,7 +2269,17 @@ monday doc get <did>                                                         v0.
                                           # — Monday collapses the two cases
                                           # into the same wire shape so the
                                           # CLI can't distinguish them (no
-                                          # `forbidden` rewrap). Envelope
+                                          # `forbidden` rewrap). A null `docs`
+                                          # root (distinct from empty-array)
+                                          # surfaces `internal_error` with a
+                                          # drift hint — Monday's documented
+                                          # shape is `[Document]` (possibly
+                                          # empty, never null), so null
+                                          # indicates wire-shape regression
+                                          # worth surfacing loudly rather than
+                                          # masquerading as a missing doc
+                                          # (M32 IMPL round-1 P2-1 closure).
+                                          # Envelope
                                           # `data: <Document with blocks>` —
                                           # direct unwrap matching the read-
                                           # one-verb convention (`board get`,
@@ -7499,8 +7509,11 @@ scoped idempotent changes, and post comments narrating its work.**
   "Wire-vs-CLI semantics documentation conventions" section in
   `docs/architecture.md` (R-NEW-41 shipped).
 - `doc list/get` (read-only workdocs; full docs CRUD deferred to
-  v0.5) **— M32 pre-flight shipped; IMPL pending**. Two new verbs
-  at §4.3: `monday doc list [--workspace <wid>,...] [--order-by
+  v0.5) **— M32 IMPL landed end-to-end** (pre-flight cluster
+  `05c5988..a889eac`, 4 rounds; IMPL cluster `2ca8b97..a7d6771`,
+  3 rounds; cumulative IMPL findings 0 P1 + 1 P2 + 2 P3 within
+  the M22 / M27 read-surface precedent). Two new verbs at §4.3:
+  `monday doc list [--workspace <wid>,...] [--order-by
   <created_at|used_at>] [--limit <n>] [--page <n>]` and `monday
   doc get <did>`. Empirical probe `scripts/probe/m32-docs.ts`
   (2026-05-14, API `2026-01`) pinned `Query.docs(workspace_ids:

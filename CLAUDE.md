@@ -127,10 +127,13 @@ findings: **0 P1 + 4 P2 + 5 P3 across the 3 fix-up rounds**.
 
 **R-class state (post-M32 IMPL close):**
 
-- **No R-class movement at M32 IMPL.** The 3-round IMPL cluster's
-  findings (1 P2 + 2 P3) were a runtime correctness issue
-  (null-vs-empty branch split) + prose drift fix-ups — none
-  constitute a refactor pattern. The four post-M32-pre-flight
+- **No code-lift R-class movement at M32 IMPL** — but **three
+  new R-class candidates surfaced** (R-NEW-72 / R-NEW-73 /
+  R-NEW-74; full entries at v0.4-plan §22). The 3-round IMPL
+  cluster's findings (1 P2 + 2 P3) were a runtime correctness
+  issue + prose drift fix-ups; the R-class candidates that
+  surfaced are watch-items at 1-3 consumers, none crystallized
+  for an immediate lift. The four post-M32-pre-flight
   candidates (R-NEW-68/69/70/71) all stay at their pre-IMPL
   consumer counts; the R-NEW-58 2-consumer scan at IMPL kickoff
   returned NEGATIVE (no lift fired ahead of the feat).
@@ -202,6 +205,48 @@ entries at v0.4-plan §22):
   `.superRefine` even when scalar range checks have
   produced "dirty" issues). Today: 1 consumer
   (`docListOutputSchema` in `src/api/documents.ts:307`).
+
+**Three new R-class candidates filed at M32 IMPL** (full
+entries at v0.4-plan §22):
+
+- **R-NEW-72 — Cross-doc grep AFTER every contract-flipping
+  Codex fix-up (R-NEW-56 extension)** (1 supporting instance;
+  LOW priority watch-item — process discipline, NOT a code
+  lift). Surfaced at M32 IMPL round 2: the round-1 fix
+  flipped the null-vs-empty contract but introduced two new
+  prose-drift sites the kickoff grep couldn't have caught
+  (it ran BEFORE the round-1 fix). Extension: run the
+  cross-doc grep after EVERY Codex fix-up that flips a
+  contract surface, not just at IMPL kickoff. Fires at 2nd
+  supporting instance (one more "round-N fix introduces
+  prose drift round-N+1 catches" cadence pins R-NEW-72 as
+  a permanent CLAUDE.md "Workflow rules" addition).
+- **R-NEW-73 — `assertNonNullArrayPayload` helper for
+  fetcher response-parse boundaries** (3 consumers; LOW
+  priority watch-item, code lift at 4th consumer with
+  tractable signature). Pattern: `if (parsed.X === null)
+  throw ApiError(code, msg, { details })` after schema-parse.
+  Three consumers across `listWebhooks` M27 (null → not_found
+  data-shape semantics) + `listDocuments` M32 + `getDocument`
+  M32 (null → internal_error wire-regression semantics). The
+  per-consumer divergence in error code + message + details
+  shape is why the helper stays UNFILED at 3 consumers — a
+  parametrised signature would carry 4-5 args + a message
+  closure, likely exceeding the 6-7 lines it would replace.
+  Fires at 4th consumer if the shape stays tractable;
+  otherwise stays documented at v0.4-plan §22 entry.
+- **R-NEW-74 — `kind: 'record'` for wrapped-paginated-
+  record `emitSuccess` shape** (2 consumers; LOW priority
+  watch-item, code lift at 3rd consumer + a table-UX
+  complaint). The session prompt referenced `kind: 'record'`
+  at M32 IMPL kickoff but `src/commands/emit.ts` only ships
+  `kind: 'single' | 'collection'`; `'single'` is doing
+  double-duty across `monday usage` (M22 wrapped record) +
+  `monday doc list` (M32 wrapped paginated record). JSON
+  output works correctly with `'single'`; table-rendering
+  layout is where the conflation matters. Fires at 3rd
+  consumer + an observed table-UX complaint (both M22 +
+  M32 are agent-primary so the cost is hypothetical today).
 
 **R-class state (post-M31 IMPL close — carried forward for
 historical context):**
