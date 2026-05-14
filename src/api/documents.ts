@@ -231,8 +231,10 @@ export type DocumentBlock = z.infer<typeof documentBlockSchema>;
 /**
  * Base Document projection (13 fields — all of Monday's 14 minus
  * `blocks`). Used as the list-row shape under `doc list` envelopes;
- * extended with the optional `blocks: [DocumentBlock]` slot for
- * `doc get` envelopes via {@link documentWithBlocksSchema}.
+ * appended with the required `blocks: [DocumentBlock]` slot for
+ * `doc get` envelopes via {@link documentWithBlocksSchema} (the
+ * extension makes `blocks` mandatory — `doc get` always hydrates
+ * the rich-text body per D6).
  *
  * `settings` is `JSON` on the wire (per-doc display/sharing config)
  * — passed through as `unknown` for the same reason
@@ -307,7 +309,42 @@ export const docListOutputSchema = z
     returned_count: z.number().int().min(0),
     has_more: z.boolean(),
   })
-  .strict();
+  .strict()
+  // Pagination-invariant cross-field check (round-2 P2-1 fix).
+  // The schema-level field types/ranges don't enforce the documented
+  // invariants between `returned_count` / `documents.length` / `limit`
+  // / `has_more` — an IMPL bug could emit inconsistent pagination
+  // data and still pass output validation, then bleed agent-visible
+  // drift into the envelope. Pin the two invariants here so the
+  // unwrap-or-throw boundary catches violations at parse time:
+  //
+  //   1. `returned_count === documents.length` — the count field is
+  //      the cached array length, not an independent counter.
+  //   2. `has_more === (returned_count === limit)` — Monday's wire
+  //      surface doesn't expose a total-count, so "exactly `limit`
+  //      rows returned" is the only signal that a follow-up page
+  //      may exist (D9 closure).
+  .superRefine((value, ctx) => {
+    if (value.returned_count !== value.documents.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['returned_count'],
+        message:
+          `returned_count (${String(value.returned_count)}) must equal ` +
+          `documents.length (${String(value.documents.length)})`,
+      });
+    }
+    const expectedHasMore = value.returned_count === value.limit;
+    if (value.has_more !== expectedHasMore) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['has_more'],
+        message:
+          `has_more (${String(value.has_more)}) must equal ` +
+          `(returned_count === limit) which is ${String(expectedHasMore)}`,
+      });
+    }
+  });
 
 export type DocListOutput = z.infer<typeof docListOutputSchema>;
 
@@ -325,9 +362,9 @@ export const docGetOutputSchema = documentWithBlocksSchema;
 export type DocGetOutput = DocumentWithBlocks;
 
 /**
- * Mutation document for `Query.docs(...)` listing variant. Operation
- * name pinned literally to `ListDocs` and matches the wire
- * `operationName` payload (R-NEW-37 W2 audit-point — caller-
+ * GraphQL query document for `Query.docs(...)` listing variant.
+ * Operation name pinned literally to `ListDocs` and matches the
+ * wire `operationName` payload (R-NEW-37 W2 audit-point — caller-
  * overridable operationName slots were closed at M27 IMPL round-1
  * P2-1; M32 maintains the safely-by-construction shape).
  *
@@ -369,10 +406,10 @@ export const LIST_DOCS_QUERY = `
 `;
 
 /**
- * Mutation document for `Query.docs(ids:)` single-id read variant.
- * Operation name pinned to `GetDoc` (R-NEW-37 W2). Selects all base
- * Document fields plus the `blocks` selection (the per-doc body-
- * hydrating leg).
+ * GraphQL query document for `Query.docs(ids:)` single-id read
+ * variant. Operation name pinned to `GetDoc` (R-NEW-37 W2). Selects
+ * all base Document fields plus the `blocks` selection (the per-doc
+ * body-hydrating leg).
  *
  * Single-id wire shape — Monday returns `[Document]` (an array even
  * for one id); the fetcher extracts index 0. An empty array

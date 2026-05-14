@@ -279,6 +279,64 @@ describe('documents.ts schemas', () => {
       const parsed = docListOutputSchema.safeParse(rest);
       expect(parsed.success).toBe(false);
     });
+
+    // Codex round-2 P2-1 regression — the pagination invariants
+    // documented in D9 closure (returned_count === documents.length;
+    // has_more === (returned_count === limit)) are enforced by a
+    // `.superRefine` so an IMPL bug that emits inconsistent
+    // pagination data fails parse rather than silently shipping
+    // drift through the success envelope.
+    it('REJECTS returned_count not equal to documents.length (round-2 P2-1 invariant)', () => {
+      const parsed = docListOutputSchema.safeParse({
+        ...validList,
+        returned_count: 99,
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const paths = parsed.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('returned_count');
+      }
+    });
+
+    it('REJECTS has_more=true when returned_count < limit (round-2 P2-1 invariant)', () => {
+      const parsed = docListOutputSchema.safeParse({
+        ...validList,
+        has_more: true,
+        // returned_count (1) < limit (25), so has_more must be false
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const paths = parsed.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('has_more');
+      }
+    });
+
+    it('REJECTS has_more=false when returned_count === limit (round-2 P2-1 invariant)', () => {
+      // Build a list where returned_count === limit (1 doc, limit=1).
+      const parsed = docListOutputSchema.safeParse({
+        documents: [validDocument],
+        page: 1,
+        limit: 1,
+        returned_count: 1,
+        has_more: false,
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const paths = parsed.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('has_more');
+      }
+    });
+
+    it('ACCEPTS has_more=true when returned_count === limit (round-2 P2-1 positive case)', () => {
+      const parsed = docListOutputSchema.safeParse({
+        documents: [validDocument],
+        page: 1,
+        limit: 1,
+        returned_count: 1,
+        has_more: true,
+      });
+      expect(parsed.success).toBe(true);
+    });
   });
 
   describe('docGetOutputSchema (= documentWithBlocksSchema direct unwrap per D9)', () => {
