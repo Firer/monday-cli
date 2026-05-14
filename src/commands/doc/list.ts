@@ -50,26 +50,27 @@
  *
  * **Idempotent: yes** (pure read).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring + `--workspace` comma-split helper all ship at pre-flight
- * (the real shipped argv surface). The action body's wire-call
- * dispatch + envelope emit land at v0.4-M32 IMPL — the stub throws
- * `internal_error` post-parse so a premature invocation surfaces a
- * clear "not yet implemented" signal rather than a misleading
- * false-success envelope (M31 pre-flight round-1 P2-2 lesson).
+ * **Runtime body landed at v0.4-M32 IMPL.** Argv parsing + schema +
+ * commander wiring + `--workspace` comma-split helper all ship as
+ * the real shipped argv surface; the action body's wire-call
+ * dispatch + envelope emit are below. The verb is a thin wrapper
+ * around {@link listDocuments} — comma-split argv → branded array
+ * → fetcher → envelope.
  */
 import { z } from 'zod';
-import { ApiError, UsageError } from '../../utils/errors.js';
+import { UsageError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
 import {
-  DEFAULT_DOCS_ORDER_BY,
   DEFAULT_DOC_LIST_LIMIT,
   MAX_DOC_LIST_LIMIT,
   MIN_DOC_LIST_LIMIT,
   docListOutputSchema,
   docsOrderBySchema,
+  listDocuments,
   type DocListOutput,
 } from '../../api/documents.js';
 
@@ -184,31 +185,33 @@ export const docListCommand: CommandModule<
               ? undefined
               : parseWorkspaceListArg(parsed.workspace);
 
-          /* c8 ignore start */
-          // Stub body — IMPL session lands the wire call + envelope
-          // emit. The pre-flight surface (argv schema + comma-split
-          // helper + commander wiring) is real-and-shipped; the
-          // throw below MUST NOT be reachable from any green-tree
-          // invocation, only from a deliberate stub-poke test.
-          void ctx;
-          void program;
-          void workspaceIds;
-          void DEFAULT_DOCS_ORDER_BY;
-          await Promise.resolve();
-          throw new ApiError(
-            'internal_error',
-            'monday doc list — runtime body lands at v0.4-M32 IMPL.',
-            {
-              details: {
-                deferred_to: 'v0.4-M32 IMPL',
-                hint:
-                  'pre-flight ships argv parsing + schema + wire query ' +
-                  'document only; the live dispatch + envelope emit land ' +
-                  'at the IMPL session.',
-              },
+          const { client, apiVersion } = resolveClient(ctx, program.opts());
+          const result = await listDocuments({
+            client,
+            ...(workspaceIds === undefined ? {} : { workspaceIds }),
+            ...(parsed.orderBy === undefined ? {} : { orderBy: parsed.orderBy }),
+            ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+            ...(parsed.page === undefined ? {} : { page: parsed.page }),
+          });
+          const returnedCount = result.documents.length;
+          emitSuccess({
+            ctx,
+            data: {
+              documents: [...result.documents],
+              page: result.page,
+              limit: result.limit,
+              returned_count: returnedCount,
+              has_more: returnedCount === result.limit,
             },
-          );
-          /* c8 ignore stop */
+            schema: docListCommand.outputSchema,
+            programOpts: program.opts(),
+            kind: 'single',
+            warnings: [],
+            source: result.source,
+            cacheAgeSeconds: result.cacheAgeSeconds,
+            complexity: result.complexity,
+            apiVersion,
+          });
         },
       );
   },

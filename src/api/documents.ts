@@ -90,16 +90,21 @@
  * `monday status` (M22) + webhook list (M27) — diagnostics /
  * volatile surfaces don't cache.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.4-M32 IMPL.
- * `listDocuments` + `getDocument` throw `internal_error` until the
- * IMPL session swaps the c8-ignored stub bodies for real
- * `client.raw` round-trips with `operationName: 'ListDocs'` /
- * `'GetDoc'` (R-NEW-37 W2 audit-point — operationNames pinned
- * literally at the fetcher boundary, NOT caller-overridable).
+ * **Runtime bodies landed at v0.4-M32 IMPL.** `listDocuments` +
+ * `getDocument` each issue a single `client.raw` round-trip with
+ * `operationName: 'ListDocs'` / `'GetDoc'` pinned literally at the
+ * fetcher boundary (R-NEW-37 W2 audit-point — operationNames are
+ * NOT caller-overridable). Responses parse through
+ * {@link documentSchema} / {@link documentWithBlocksSchema} via
+ * `unwrapOrThrow`, so payload drift surfaces `internal_error` with
+ * `details.issues`. The `doc get` empty-array case rewraps to
+ * `not_found` with `details.doc_id` per D8 (Monday's wire collapses
+ * "doesn't exist" + "not visible to token" into the same shape).
  */
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
@@ -468,6 +473,33 @@ export const GET_DOC_QUERY = `
   }
 `;
 
+/**
+ * Wrapping response schema for the `ListDocs` operation. Monday's
+ * wire returns `{ docs: [Document] | null }` under `data.docs`; a
+ * null root surfaces `not_found` (the wrapper schema accepts it
+ * upstream, the fetcher rewraps after parse).
+ *
+ * `.loose()` mirrors the M27 `listWebhooksResponseSchema` cadence —
+ * Monday occasionally returns side-band debug keys (`extensions`,
+ * `account_id`) alongside the documented data root; the loose
+ * mode lets them pass without faulting the parse.
+ */
+const listDocsResponseSchema = z
+  .object({
+    docs: z.array(documentSchema).nullable(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `GetDoc` operation. Same shape
+ * as the list variant but with `blocks` hydrated on every entry.
+ */
+const getDocResponseSchema = z
+  .object({
+    docs: z.array(documentWithBlocksSchema).nullable(),
+  })
+  .loose();
+
 export interface ListDocumentsInputs {
   readonly client: MondayClient;
   /**
@@ -520,38 +552,75 @@ export interface ListDocumentsResult {
  * (R-NEW-37 W2). Source is always `'live'` per cli-design §8 cache
  * scope; workdocs aren't cached at v0.4 per D7.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.4-M32 IMPL.
- * The stub throws `internal_error` so a premature invocation
- * surfaces a clear "not yet implemented" signal rather than a
- * misleading false-success envelope (matches the M31 pre-flight
- * round-1 P2-2 lesson — pre-flight stubs MUST NOT emit `ok: true`
- * bogus envelopes; the dry-run path is no exception).
+ * Variables map to Monday's wire `Query.docs(...)` args:
+ * `workspaceIds` → `workspace_ids: [ID]`; `orderBy` →
+ * `order_by: DocsOrderBy`; `limit` → `limit: Int`; `page` →
+ * `page: Int`. Omitted inputs drop the corresponding `$variable`
+ * so Monday's per-arg server-side default applies (rather than
+ * threading an explicit `null` that the wire treats as "field
+ * present").
+ *
+ * Echoed `page` / `limit` carry Monday's defaults when the caller
+ * omits them ({@link DEFAULT_DOC_LIST_LIMIT} for limit, `1` for
+ * page) so the envelope's pagination-invariant `.superRefine`
+ * sees consistent values regardless of which inputs the verb
+ * received.
+ *
+ * A null `docs` root surfaces `internal_error` (Monday's documented
+ * shape is `[Document]` even for empty accounts — the array, never
+ * null at this layer). Schema drift in the per-doc shape rewraps to
+ * `internal_error` with `details.issues` via `unwrapOrThrow`.
  */
-/* c8 ignore start */
 export const listDocuments = async (
   inputs: ListDocumentsInputs,
 ): Promise<ListDocumentsResult> => {
-  void inputs;
-  void LIST_DOCS_QUERY;
-  // `await Promise.resolve()` keeps the function genuinely async
-  // (so the IMPL session can drop in `await inputs.client.raw(...)`
-  // without re-typing the signature) while satisfying
-  // `@typescript-eslint/require-await` on the stub.
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'listDocuments stub — runtime body lands at v0.4-M32 IMPL.',
+  const variables: Record<string, unknown> = {};
+  if (inputs.workspaceIds !== undefined) {
+    variables.workspaceIds = inputs.workspaceIds;
+  }
+  if (inputs.orderBy !== undefined) {
+    variables.orderBy = inputs.orderBy;
+  }
+  if (inputs.limit !== undefined) {
+    variables.limit = inputs.limit;
+  }
+  if (inputs.page !== undefined) {
+    variables.page = inputs.page;
+  }
+  const response = await inputs.client.raw<unknown>(
+    LIST_DOCS_QUERY,
+    variables,
+    { operationName: 'ListDocs' },
+  );
+  const parsed = unwrapOrThrow(
+    listDocsResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.4-M32 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday `Query.docs(ListDocs)` response',
+      hint: 'Monday may have amended the `Document` selection — re-probe and amend `src/api/documents.ts` if so',
     },
   );
+  if (parsed.docs === null) {
+    throw new ApiError(
+      'internal_error',
+      'Monday returned a null `docs` payload from ListDocs',
+      {
+        details: {
+          hint:
+            'Monday\'s documented shape is `[Document]` (an array, possibly empty) — ' +
+            'a null root indicates a wire change that needs re-probing',
+        },
+      },
+    );
+  }
+  return {
+    documents: parsed.docs,
+    page: inputs.page ?? 1,
+    limit: inputs.limit ?? DEFAULT_DOC_LIST_LIMIT,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface GetDocumentInputs {
   readonly client: MondayClient;
@@ -577,26 +646,60 @@ export interface GetDocumentResult {
  * collapses the two cases into one shape and the CLI can't
  * distinguish them per D8.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.4-M32 IMPL.
+ * A multi-element wire response (which Monday's `docs(ids:)`
+ * shouldn't return for a single-id query) surfaces `internal_error`
+ * as a defensive guard — the CLI assumes one doc per id and a
+ * count mismatch indicates a wire-shape regression worth surfacing
+ * loudly rather than silently dropping entries.
  */
-/* c8 ignore start */
 export const getDocument = async (
   inputs: GetDocumentInputs,
 ): Promise<GetDocumentResult> => {
-  void inputs;
-  void GET_DOC_QUERY;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'getDocument stub — runtime body lands at v0.4-M32 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    GET_DOC_QUERY,
+    { ids: [inputs.docId] },
+    { operationName: 'GetDoc' },
+  );
+  const parsed = unwrapOrThrow(
+    getDocResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.4-M32 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday `Query.docs(GetDoc)` response',
+      details: { doc_id: inputs.docId },
+      hint: 'Monday may have amended the `Document` / `DocumentBlock` selection — re-probe and amend `src/api/documents.ts` if so',
     },
   );
+  if (parsed.docs === null || parsed.docs.length === 0) {
+    throw new ApiError(
+      'not_found',
+      `workdoc ${inputs.docId} not found (does not exist or not visible to token)`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  if (parsed.docs.length > 1) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned ${String(parsed.docs.length)} docs for a single-id GetDoc query`,
+      {
+        details: {
+          doc_id: inputs.docId,
+          hint: 'wire shape regression — re-probe `Query.docs(ids:)`',
+        },
+      },
+    );
+  }
+  const [document] = parsed.docs;
+  /* c8 ignore next 6 */
+  if (document === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a sparse docs array for GetDoc(${inputs.docId})`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  return {
+    document,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */

@@ -29,21 +29,21 @@
  *
  * **Idempotent: yes** (pure read).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight (real shipped surface). The action
- * body's wire-call dispatch + envelope emit land at v0.4-M32 IMPL.
- * The stub throws `internal_error` post-parse so a premature
- * invocation surfaces a clear "not yet implemented" signal rather
- * than a misleading false-success envelope (M31 pre-flight round-1
- * P2-2 lesson).
+ * **Runtime body landed at v0.4-M32 IMPL.** Argv parsing + schema +
+ * commander wiring all ship as the real shipped surface; the action
+ * body's wire-call dispatch + envelope emit are below. The verb is
+ * a thin wrapper around {@link getDocument} — branded `<docId>` →
+ * fetcher → direct-unwrap envelope.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
   docGetOutputSchema,
+  getDocument,
   type DocGetOutput,
 } from '../../api/documents.js';
 
@@ -89,28 +89,23 @@ export const docGetCommand: CommandModule<
           docId: docIdArg,
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the wire call + envelope
-        // emit. Argv parsing above is real-and-shipped; only the
-        // wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc get — runtime body lands at v0.4-M32 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.4-M32 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire query ' +
-                'document only; the live dispatch + envelope emit land ' +
-                'at the IMPL session.',
-            },
-          },
-        );
-        /* c8 ignore stop */
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await getDocument({
+          client,
+          docId: parsed.docId,
+        });
+        emitSuccess({
+          ctx,
+          data: result.document,
+          schema: docGetCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'single',
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };
