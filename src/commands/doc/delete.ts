@@ -21,13 +21,10 @@
  * + M34 `team delete` (id bogus or doc already deleted by a
  * concurrent caller).
  *
- * **Wire-name asymmetry note.** `delete_doc` takes camelCase
- * `docId` on the wire per Finding 7 (Monday's mutation-arg
- * casing inconsistency); the fetcher boundary mirrors the wire,
- * but CLI argv positional + error envelope `details.*` keys stay
- * snake_case-friendly throughout (`<doc-id>` argv + `details.
- * doc_id` envelope). 4th supporting site for R-NEW-41 — see
- * `src/api/documents.ts` module header for the canonical note.
+ * **camelCase wire-arg note.** `delete_doc` takes camelCase
+ * `docId` on the wire (Finding 7) — see the canonical
+ * asymmetry note at `src/api/documents.ts` module header (4th
+ * supporting site for R-NEW-41).
  *
  * **Argv shape.**
  *

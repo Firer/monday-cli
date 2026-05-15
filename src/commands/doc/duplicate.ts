@@ -42,13 +42,10 @@
  * succeeded, one failed → the verb's envelope shape doesn't fit
  * cli-design §6.1 single-mutation success/failure dichotomy).
  *
- * **Wire-name asymmetry note.** `duplicate_doc` takes camelCase
- * `docId` + `duplicateType` on the wire per Finding 7. The
- * fetcher boundary mirrors the wire shape; CLI argv stays
- * kebab-case (`<doc-id>` positional + `--with-updates` flag).
- * Error envelope `details.*` keys stay snake_case
- * (`details.doc_id`). 4th supporting site for R-NEW-41 — see
- * `src/api/documents.ts` module header for the canonical note.
+ * **camelCase wire-arg note.** `duplicate_doc` takes camelCase
+ * `docId` + `duplicateType` on the wire (Finding 7) — see the
+ * canonical asymmetry note at `src/api/documents.ts` module
+ * header (4th supporting site for R-NEW-41).
  *
  * **Argv shape.**
  *
