@@ -42,7 +42,23 @@ flipped to single-shot bulk shape). Round 4 ratified clean
 findings: 0 P1 + 1 P2 + 4 P3 across 3 fix-up rounds** —
 within the M22 / M27 / M30 / M31 / M32 IMPL read-or-write
 precedent (1-3 fix-up rounds typical for new wire surfaces).
-**Pushed to `origin/main`** at close-docs.
+**Pushed to `origin/main`** at close-docs. **Post-IMPL
+refactor-audit** filed R-v0.5-NEW-7 (read-one-by-id wrapper-
+extract helper; 2 consumers post-M34 — `getDocument` +
+`getTeam`; LOW watch-item, lift at 3rd consumer) +
+R-v0.5-NEW-8 (test-fixture `wireUser` consolidation; 7
+consumers across 6 team integration test files + envelope-
+snapshot describe block; LOW watch-item, lift at next test-
+refactor session) + R-v0.5-NEW-9 (round-N parallel-fetcher
+fix-up test parity discipline; 1 supporting instance from
+M34 IMPL round-2 P3-2) + R-v0.5-NEW-10 (sibling-verb module-
+docstring prose audit at IMPL kickoff; 1 supporting instance
+from M34 IMPL round-3 P3-1) + expanded the R-v0.5-NEW-6 full
+entry that was pending from close-docs; swept 3 carry-
+forward drift sites annotating M34 IMPL outcomes for R-NEW-73
+(stays UNFILED at 6 candidates — IMPL confirmed per-fetcher
+divergence too high) + R-NEW-74 (M34 negative-case
+validation — team-list has no pagination per D6).
 
 **v0.4.0 published — release complete.** The v0.4 release-prep
 cluster mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim
