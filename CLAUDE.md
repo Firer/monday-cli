@@ -11,44 +11,38 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.5-M34 pre-flight closed at `17c1a54..df4f036`.** First
-v0.5 milestone — team writer surface (6 new verbs under the
-existing `monday user` namespace: `team-list` / `team-get` /
-`team-create` / `team-delete` / `team-add-members` /
-`team-remove-members`). Pre-flight cluster: `17c1a54`
-R-NEW-70 lift (`parseBrandedListArg` helper ahead-of-feat per
-R-NEW-29's M25 cadence — 4 consumers post-lift: doc/list
-`--workspace` migrated + 3 new team `--users` sites) +
-`e0eb7f9` M34 pre-flight feat commit (new `src/api/teams.ts`
-with 6 stub fetchers + literal-pinned operationNames; 6
-command stubs under `src/commands/user/team-*.ts`;
-`TeamIdSchema` 10th brand; cli-design §4.3 + §13 updated +
-44 argv-parser unit tests) + `dc1b931` Codex round-1 fix-up
-(team-create `[--dry-run]` contract surface + `Team.users`
-nullable-entries widening + architecture.md cross-link) +
-`359a667` Codex round-2 fix-up (wire-vs-output schema split:
-`teamWireSchema` accepts sparse users entries at the fetcher
-parse boundary; `teamSchema` retains non-null entries as the
-agent-facing output projection — mirrors v0.3-M22 loose-wire /
-strict-output cadence; asymmetry prose trimmed to canonical
-note at `teamMembershipResultSchema` + one-line per-verb
-pointers) + `df4f036` Codex round-3 fix-up (cli-design
-team-remove-members row pointer-cadence drift only — doc-prose
-fix). Round 4 ratified clean (0 P1 + 0 P2 + 0 P3 across W1-W14).
-**Cumulative pre-flight findings: 0 P1 + 3 P2 + 3 P3 across 3
-fix-up rounds** — within the M22 / M27 / M30 / M31 / M32 read-
-or-write surface precedent for pre-flight Codex convergence.
-**Pushed to `origin/main`** at close-docs. **Post-close
-refactor-audit** filed R-v0.5-NEW-4 (wire-vs-output schema
-split at sub-field granularity; 2 supporting instances —
-v0.3-M22 full-schema + v0.5-M34 sub-field; watch-item) +
-R-v0.5-NEW-5 (codex template W{N} audit-point for paired-verb
-cli-design row consistency; 1 supporting instance from
-round-3 P3-1; template-stable candidate, fires at 2nd
-consumer) + swept 6 drift sites annotating M34 negative-case
-outcomes for the carried-forward R-NEW-31 / R-NEW-68 /
-R-NEW-71 / R-NEW-73 / R-NEW-84 v0.4→v0.5 watch-items + the
-post-M32 historical-snapshot R-NEW-70 pointer.
+**v0.5-M34 IMPL closed at `afdba15..02f1b1a`.** First v0.5
+milestone shipped end-to-end — team writer surface (6 new
+verbs under the existing `monday user` namespace: `team-list`
+/ `team-get` / `team-create` / `team-delete` / `team-add-
+members` / `team-remove-members`). IMPL cluster: `afdba15`
+IMPL feat (6 runtime fetcher bodies in `src/api/teams.ts`
+swap the c8-ignored stubs for live `client.raw` round-trips
+against literal-pinned operationNames; new wrapping response
+schemas + `projectTeam` wire-vs-output filter helper + new
+shared `_team-membership.ts:projectMembershipResults` for the
+partial-success projection lifted at IMPL kickoff — 2-consumer
+inline lift mirroring M26b `_shared.ts:requireDevBoard`
+cadence; 6 action bodies wired via `resolveClient` + fetcher +
+emit; dry-run paths for the 4 mutation verbs; +40 integration
+tests across 6 new files + 12 envelope snapshots) + `99bbd01`
+Codex round-1 fix-up (0 P1 + 1 P2 + 2 P3 — widen
+`changeTeamMembershipsResultSchema` bucket containers to
+nullable + normalise null → [] in both fetchers per the
+empirical-probe outer-LIST nullability; pin team-create
+missing-key + same-user-in-both-buckets regression tests) +
+`72470b3` Codex round-2 fix-up (0 P1 + 0 P2 + 2 P3 —
+team-delete no-token destructive-gate regression test for the
+M10 P2 invariant; remove-members null-bucket cassettes
+parallel to add-members) + `02f1b1a` Codex round-3 fix-up
+(0 P1 + 0 P2 + 1 P3 — dry-run docstring prose drift on team-
+add-members / team-remove-members, "per supplied user_id"
+flipped to single-shot bulk shape). Round 4 ratified clean
+(0 P1 + 0 P2 + 0 P3 across W1-W11). **Cumulative IMPL
+findings: 0 P1 + 1 P2 + 4 P3 across 3 fix-up rounds** —
+within the M22 / M27 / M30 / M31 / M32 IMPL read-or-write
+precedent (1-3 fix-up rounds typical for new wire surfaces).
+**Pushed to `origin/main`** at close-docs.
 
 **v0.4.0 published — release complete.** The v0.4 release-prep
 cluster mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim
@@ -74,22 +68,25 @@ sites weren't swept until this audit). v0.4.0 ships **no
 breaking changes vs v0.3.0** — every v0.4 surface is additive
 across M29–M33.
 
-**Live numbers (v0.5-M34 pre-flight close):**
-- Test count: **3693 + 1 skipped** across **150** test files
-  (+59 net vs 3634 + 1 skipped at v0.4.0 release close: 18 new
-  in `tests/unit/utils/parse-brand-list.test.ts` for the R-NEW-70
-  lift + 50 new in `tests/unit/commands/user/team-argv.test.ts`
-  for the 6 team verbs including 6 wire-vs-output schema-split
-  tests added at round 2; -9 dropped from doc/list-argv.test.ts
-  that pinned the now-lifted `parseWorkspaceListArg` helper).
-- Coverage: **99.11 / 96.17 / 98.86 / 99.37** (stmts / branches
+**Live numbers (v0.5-M34 IMPL close):**
+- Test count: **3752 + 1 skipped** across **156** test files
+  (+59 net vs 3693 + 1 skipped at M34 pre-flight close: 40 new
+  in `tests/integration/commands/team-*.test.ts` covering all
+  6 verb surfaces + 12 envelope snapshots in
+  `tests/integration/envelope-snapshots.test.ts` + 7 added
+  across the 3 Codex IMPL fix-up rounds — 3 round-1 fix-ups
+  for null-bucket / missing-key / same-user-in-both-buckets, 3
+  round-2 fix-ups for no-token destructive-gate +
+  remove-members null-bucket parity, 1 round-3 doc-prose fix
+  added no tests).
+- Coverage: **99.26 / 96.29 / 99.43 / 99.53** (stmts / branches
   / fns / lines) at the **95 / 95.45 / 95 / 95** floor.
-  **Branches margin 0.72pp** (was 0.86pp at v0.4-M33 IMPL close;
-  -0.14pp shuffle reflects new c8-ignored stub branches + 19 new
-  functions across the stub surface — standard pre-flight
-  cadence per the M32 precedent; IMPL session recovers margin
-  when stub c8-ignores drop in favour of integration-test-
-  covered runtime bodies).
+  **Branches margin 0.84pp** (was 0.72pp at v0.5-M34 pre-flight
+  close; +0.12pp recovery from the 6 c8-ignored stub fetcher
+  bodies dropping in favour of integration-test-covered runtime
+  bodies + the 12 stub functions becoming covered — standard
+  IMPL cadence per the M32 precedent where every metric
+  improved at IMPL close).
 - ERROR_CODES count: **29** (unchanged per D1-D6 closures).
 - Command count: **107** (was 101 — 6 new team verbs).
 - `package.json` version: **0.4.0** (stays through v0.5
@@ -180,8 +177,24 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
 - npm registry version: **0.4.0** (`latest` dist-tag,
   published 2026-05-14T22:46:28Z).
 
-**R-class state (post-v0.5-M34 pre-flight close):**
+**R-class state (post-v0.5-M34 IMPL close):**
 
+- **`_team-membership.ts:projectMembershipResults` lifted at
+  IMPL kickoff** (2-consumer inline lift mirroring M26b
+  `_shared.ts:requireDevBoard` cadence). Shared partial-
+  success projection for `team-add-members` + `team-remove-
+  members`: takes wire `ChangeTeamMembershipsResult`
+  (`failed_users` + `successful_users` lists) + input user_id
+  argv order, projects to universal §6.1 `results: [{user_id,
+  ok, ...}]` shape with input-order preserved + failed-bucket-
+  priority discipline. Surfaces `internal_error` when an input
+  user is in neither bucket (wire-shape regression defensive).
+  Lifted ahead of any 3-consumer threshold because the
+  two-verb-byte-identical pattern + the wire-vs-CLI
+  asymmetry's documentation cross-link make a shared helper
+  the cleaner expression — fold-in-place would have left two
+  copies of the same generic-`membership_failed`-message
+  constant.
 - **R-NEW-70 shipped at `17c1a54`** (ahead-of-feat per R-NEW-29's
   M25 cadence). Comma-separated brand-list argv parser pattern
   lifted to `src/utils/parse-brand-list.ts` as
@@ -202,6 +215,18 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
   discriminator + directory-cache leg coupling don't fold
   into the pure-brand-list shape without inflating the helper
   signature.
+- **R-NEW-73 stays UNFILED post-M34 IMPL** at 6 candidate
+  consumers. IMPL surfaced the runtime divergence: per-fetcher
+  error code (`internal_error` for list / get null root +
+  create-team missing-key + add/remove-members null payload;
+  `not_found` for delete-team null payload + get-team empty
+  array; `internal_error` for get-team multi-element) +
+  per-fetcher details shape (`team_id` / `team_name` /
+  contextual hint) make a parametrised helper signature carry
+  more surface than the 4-6 inline lines it would replace.
+  Re-evaluate at v0.5.x consumer-7+ if a future verb's
+  null-payload semantics happen to align with an existing
+  fetcher's exact shape.
 - **R-NEW-76 graduated** (pre-flight stub argv-before-deferred-
   feature-throw discipline) — 6th forcing supporting instance
   fired across the 6 M34 team command stubs (all 6 carry
@@ -478,38 +503,33 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — v0.5-M34 team writers IMPL.** Pre-flight
-closed at `17c1a54..df4f036` with 4 Codex rounds (0 P1 +
-3 P2 + 3 P3 cumulative across 3 fix-up rounds; round-4
-ratified clean across W1-W14). IMPL session swaps the 6
-c8-ignored stub fetcher bodies for real `client.raw` round-
-trips against the literal-pinned operationNames (`ListTeams`
-/ `GetTeam` / `CreateTeam` / `DeleteTeam` / `AddUsersToTeam`
-/ `RemoveUsersFromTeam`); adds the wrapping response schemas
-(`listTeamsResponseSchema` etc.) consuming `teamWireSchema`;
-filters null entries out of `users` arrays at the projection
-layer so `outputSchema.parse(...)` at `emitSuccess` sees the
-clean shape; wires the dry-run emit paths for team-create /
-team-delete / team-add-members / team-remove-members per §6.4
-mutation-dry-run cadence; lands the universal §6.1 partial-
-success envelope projection at team-add-members / team-
-remove-members wrapping `ChangeTeamMembershipsResult
-{failed_users, successful_users}` into `data.results:
-[{ok, user_id, ...}]`. Integration tests + envelope
-snapshots land at IMPL. Empirical IMPL cassette verifies (a)
-whether Monday surfaces a per-user failure reason elsewhere
-(`errors[]` extension, side-band keys) — if so, the CLI
-upgrades from the generic `membership_failed` code to the
-wire-supplied reason; (b) whether `Team.owners` entries
-carry nulls on the wire — the round-1 probe truncated the
-inner detail, so the IMPL cassette is authoritative.
+**Next session — v0.5 candidate-selection for M35** (post-M34
+IMPL close). M34 closed end-to-end at `afdba15..02f1b1a` (IMPL
+feat + 3 Codex fix-up rounds + 1 ratification — 0 P1 + 1 P2 +
+4 P3 cumulative). 6 team writer verbs live + tested against
+fixture cassettes. Empirical findings from the IMPL cassettes:
+no per-user failure reason on Monday's `ChangeTeamMemberships
+Result` wire today (probe round-2 introspection holds; CLI's
+generic `membership_failed` code stays the agent contract);
+wire's outer bucket containers are NULLABLE list wrappers
+(round-1 P2-1 caught the schema-vs-docstring inconsistency
+in the pre-flight schema — IMPL widens to
+`z.array(...).nullable()` + normalises to `[]` at the
+projection boundary); `Team.owners` inner-entry nullability
+not probed at IMPL (no integration test cassette exercised
+the owners-null edge — defer until a real wire response
+surfaces it).
 
-After M34 IMPL closes, candidate-selection session opens M35
+Next session opens **M35 candidate-selection** per the
+R-NEW-75 5-dimension framework against the v0.5 backlog
 (doc-level CRUD: `create_doc` / `update_doc_name` /
-`delete_doc` / `duplicate_doc`) per the R-NEW-75 5-dimension
-framework. Estimated 2-3 sessions through M34 IMPL alone;
-doc CRUD (M35-M37) likely another 4-5 sessions across 3
-milestone clusters.
+`delete_doc` / `duplicate_doc`; 4 verbs across 4-5 sessions
+expected if M35-M37 ship as one cluster). Other candidates on
+the backlog: tangential team mutations (assign_team_owners,
+add/remove teams from board/workspace), the `--parent <ptid>`
+team-create flag (D3 deferral), user-scoped `monday user
+teams <uid>`. Estimated 4-5 sessions through M35-M37 doc CRUD
+cluster.
 
 **v0.4 release-prep close (prior session).** Mirrored v0.3-M28's
 release-prep cadence verbatim: 6 commits (envelope-snapshot
