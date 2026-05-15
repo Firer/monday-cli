@@ -58,12 +58,12 @@
  * → fetcher → envelope.
  */
 import { z } from 'zod';
-import { UsageError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { emitSuccess } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema } from '../../types/ids.js';
+import { parseBrandedListArg } from '../../utils/parse-brand-list.js';
 import {
   DEFAULT_DOC_LIST_LIMIT,
   MAX_DOC_LIST_LIMIT,
@@ -180,10 +180,20 @@ export const docListCommand: CommandModule<
           // with a clear hint. Brand each entry via WorkspaceIdSchema
           // so a non-numeric token reaches the agent with the same
           // brand-error shape every other ID validator uses.
+          // Helper lifted to `src/utils/parse-brand-list.ts` at the
+          // M34 pre-flight kickoff (R-NEW-70 4-consumer lift ahead-
+          // of-feat per R-NEW-29 M25 cadence; v0.5-plan §22).
           const workspaceIds: readonly string[] | undefined =
             parsed.workspace === undefined
               ? undefined
-              : parseWorkspaceListArg(parsed.workspace);
+              : parseBrandedListArg(parsed.workspace, WorkspaceIdSchema, {
+                  flagName: '--workspace',
+                  entryDescription: 'numeric workspace ID',
+                  hint: 'workspace IDs are numeric (e.g. 12345)',
+                  emptyEntryHint:
+                    'e.g. --workspace 12345,67890 — no leading, trailing, or ' +
+                    'duplicate commas',
+                });
 
           const { client, apiVersion } = resolveClient(ctx, program.opts());
           const result = await listDocuments({
@@ -240,62 +250,14 @@ const parseStrictDecimal = (raw: string): number => {
 };
 
 /**
- * Splits a comma-separated `--workspace` argv string into an array of
- * brand-validated WorkspaceId strings. Empty entries reject with
- * `usage_error`; non-numeric entries reject via the WorkspaceIdSchema
- * brand. Whitespace around commas is trimmed.
- *
- * Exported via {@link _internals} only for parity with the existing
- * comma-split-helper pattern in `src/commands/workspace/add-users.ts`
- * — production code calls it inline within the command's action
- * body.
- */
-const parseWorkspaceListArg = (raw: string): readonly string[] => {
-  const tokens = raw.split(',').map((t) => t.trim());
-  const ids: string[] = [];
-  for (const token of tokens) {
-    if (token === '') {
-      throw new UsageError(
-        '--workspace contains an empty entry (trailing comma or double ' +
-          'comma); pass a comma-separated list of numeric workspace IDs.',
-        {
-          details: {
-            hint:
-              'e.g. --workspace 12345,67890 — no leading, trailing, or ' +
-              'duplicate commas',
-            argv_value: raw,
-          },
-        },
-      );
-    }
-    const parsed = WorkspaceIdSchema.safeParse(token);
-    if (!parsed.success) {
-      throw new UsageError(
-        `--workspace entry ${JSON.stringify(token)} is not a numeric ` +
-          `workspace ID`,
-        {
-          details: {
-            issues: parsed.error.issues.map((i) => ({
-              path: i.path.map((p) => String(p)).join('.'),
-              message: i.message,
-            })),
-            argv_value: raw,
-            hint: 'workspace IDs are numeric (e.g. 12345)',
-          },
-        },
-      );
-    }
-    ids.push(parsed.data);
-  }
-  return ids;
-};
-
-/**
  * Internals exposed for unit-test access (argv parser pinning).
- * NOT a public API — the comma-split helper + decimal parser stay
- * production-internal.
+ * NOT a public API — the decimal parser stays production-internal.
+ * The previous `parseWorkspaceListArg` member migrated to the
+ * lifted {@link parseBrandedListArg} helper at the M34 pre-flight
+ * kickoff (R-NEW-70 4-consumer lift); per-flag user-facing message
+ * shapes for `--workspace` are pinned via the lifted helper's
+ * options + tested at `tests/unit/utils/parse-brand-list.test.ts`.
  */
 export const _internals = {
-  parseWorkspaceListArg,
   parseStrictDecimal,
 } as const;

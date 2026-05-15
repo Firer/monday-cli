@@ -3,11 +3,16 @@
  * pre-flight surface (cli-design §4.3 DOC section + §13 v0.4 entry).
  *
  * Test matrix scope: schema-level parse-boundary surface +
- * `parseWorkspaceListArg` comma-split helper. Combination-rule
- * rejections beyond the argv layer (Monday-side empty-result for
- * inaccessible workspace IDs; wire-side limit enforcement) live
- * downstream of `parseArgv` and are exercised via integration tests
- * once the runtime body lands at M32 IMPL.
+ * `parseStrictDecimal` commander-coercer. The `--workspace` comma-
+ * split helper migrated to the lifted {@link parseBrandedListArg}
+ * helper at the M34 pre-flight kickoff (R-NEW-70 4-consumer lift);
+ * generic split / trim / empty-entry / brand-rejection behaviour is
+ * pinned at `tests/unit/utils/parse-brand-list.test.ts`. The
+ * `--workspace`-specific user-facing message shape (verb name,
+ * entryDescription, hint, emptyEntryHint) is exercised here via the
+ * end-to-end `parseArgv` + action body once integration tests cover
+ * the runtime body at M32 IMPL — argv-only tests don't traverse the
+ * action body.
  *
  * The schema is the contract surface; agents key off the
  * `usage_error.details.issues` + `details.argv_value` /
@@ -130,70 +135,6 @@ describe('docListCommand.inputSchema (M32 doc-list argv)', () => {
 
     it('ships at least one example', () => {
       expect(docListCommand.examples.length).toBeGreaterThan(0);
-    });
-  });
-});
-
-describe('_internals.parseWorkspaceListArg (--workspace comma-split)', () => {
-  describe('happy paths', () => {
-    it('splits a single numeric id', () => {
-      expect(_internals.parseWorkspaceListArg('12345')).toEqual(['12345']);
-    });
-
-    it('splits two numeric ids', () => {
-      expect(_internals.parseWorkspaceListArg('12345,67890')).toEqual([
-        '12345',
-        '67890',
-      ]);
-    });
-
-    it('trims whitespace around commas', () => {
-      expect(_internals.parseWorkspaceListArg('12345 , 67890')).toEqual([
-        '12345',
-        '67890',
-      ]);
-    });
-  });
-
-  describe('rejections', () => {
-    it('rejects a trailing comma (empty entry at end)', () => {
-      expect(() => _internals.parseWorkspaceListArg('12345,')).toThrow(
-        /empty entry/u,
-      );
-    });
-
-    it('rejects a leading comma (empty entry at start)', () => {
-      expect(() => _internals.parseWorkspaceListArg(',12345')).toThrow(
-        /empty entry/u,
-      );
-    });
-
-    it('rejects a double comma (empty entry in middle)', () => {
-      expect(() =>
-        _internals.parseWorkspaceListArg('12345,,67890'),
-      ).toThrow(/empty entry/u);
-    });
-
-    it('rejects a non-numeric entry', () => {
-      expect(() =>
-        _internals.parseWorkspaceListArg('abc'),
-      ).toThrow(/not a numeric workspace ID/u);
-    });
-
-    it('rejects a mixed numeric + non-numeric list (per-entry validation)', () => {
-      expect(() =>
-        _internals.parseWorkspaceListArg('12345,abc'),
-      ).toThrow(/not a numeric workspace ID/u);
-    });
-
-    it('surfaces the argv_value on rejection for agent debugging', () => {
-      try {
-        _internals.parseWorkspaceListArg('12345,abc');
-      } catch (err) {
-        expect(err).toBeInstanceOf(UsageError);
-        const detail = (err as UsageError).details as Record<string, unknown>;
-        expect(detail.argv_value).toBe('12345,abc');
-      }
     });
   });
 });
