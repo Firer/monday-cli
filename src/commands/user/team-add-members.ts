@@ -36,15 +36,11 @@
  * into `user_id` for correlation; wire User object hydrated
  * into `user` slot when successful).
  *
- * **Wire-vs-CLI semantics asymmetry note.** Monday's wire
- * `failed_users[]` carries the User who failed but NO
- * per-user reason on the wire today. The CLI emits a generic
- * `membership_failed` error code per failed user; verify at
- * IMPL cassette whether Monday surfaces a reason elsewhere
- * (`errors[]` extension, side-band keys). This asymmetry
- * extends the `docs/architecture.md` "Wire-vs-CLI semantics
- * documentation conventions" section in the close-docs sweep
- * (R-NEW-41 4th consumer trigger — see also R-v0.5-NEW-3).
+ * **Wire-vs-CLI semantics asymmetry.** See
+ * `teamMembershipResultSchema` JSDoc in `src/api/teams.ts` for
+ * the canonical note + cross-link to `docs/architecture.md`'s
+ * "Wire-vs-CLI semantics documentation conventions" section
+ * (R-NEW-41 4th consumer trigger).
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run
  * variant. Mirror M14 `workspace add-users` cadence —

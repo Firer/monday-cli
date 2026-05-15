@@ -136,9 +136,10 @@ export const teamUserSchema = z
 export type TeamUser = z.infer<typeof teamUserSchema>;
 
 /**
- * Team projection — Monday's 6-field wire shape per the v0.5
- * kickoff probe (rounds 1 + 2; `scripts/probe/v0.5-team-
- * mutations.ts` 2026-05-15, API `2026-01`).
+ * Wire-parse Team projection — Monday's 6-field wire shape per
+ * the v0.5 kickoff probe (rounds 1 + 2; `scripts/probe/v0.5-team-
+ * mutations.ts` 2026-05-15, API `2026-01`). Fetcher-internal;
+ * NOT the agent-facing output schema (see {@link teamSchema}).
  *
  * Wire-side nullability per the probe:
  *
@@ -155,14 +156,12 @@ export type TeamUser = z.infer<typeof teamUserSchema>;
  *     the entries; compare to `ChangeTeamMembershipsResult.
  *     successful_users -> LIST/<wrapped>[NON_NULL/<wrapped>]<OBJECT/
  *     User>` from the round-2 probe which DOES carry the inner
- *     non-null marker). The schema accepts `users: null` for the
- *     container AND `[user1, null, user2]` for sparse entries so a
- *     wire-shape variant doesn't surface as `internal_error` from
- *     the response-parse boundary. M34 IMPL filters null entries
- *     out of the envelope projection so agent-facing
- *     `data.users[]` never carries `null` (verify at IMPL
- *     cassette — Monday surfaces null entries when a team member's
- *     User record was tombstoned post-team-creation).
+ *     non-null marker). The wire schema accepts `users: null` for
+ *     the container AND `[user1, null, user2]` for sparse entries
+ *     so a wire-shape variant doesn't surface as `internal_error`
+ *     from the response-parse boundary (Monday surfaces null
+ *     entries when a team member's User record was tombstoned
+ *     post-team-creation; verify at M34 IMPL cassette).
  *   - `owners: [User!]!` — non-null wire-side per the round-1
  *     probe `NON_NULL/<wrapped>[LIST/<wrapped>]` outer wrapper.
  *     The probe-formatter truncates the inner detail beyond the
@@ -171,13 +170,50 @@ export type TeamUser = z.infer<typeof teamUserSchema>;
  *     User objects); if M34 IMPL cassette surfaces a null entry,
  *     widen to `z.array(teamUserSchema.nullable())` here.
  */
-export const teamSchema = z
+export const teamWireSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
     picture_url: z.string().nullable(),
     is_guest: z.boolean().nullable(),
     users: z.array(teamUserSchema.nullable()).nullable(),
+    owners: z.array(teamUserSchema),
+  })
+  .strict();
+
+export type TeamWire = z.infer<typeof teamWireSchema>;
+
+/**
+ * Agent-facing Team projection — the exported output schema
+ * reused by `teamListOutputSchema` / `teamGetOutputSchema` /
+ * `teamCreateOutputSchema` / `teamDeleteOutputSchema`. Mirrors
+ * {@link teamWireSchema}'s field shape EXCEPT for the `users`
+ * entries which are pinned non-null at this boundary.
+ *
+ * **Wire-vs-CLI projection.** M34 IMPL fetcher bodies parse the
+ * wire response via {@link teamWireSchema}, then filter null
+ * entries out of `Team.users` before constructing the
+ * `outputSchema.parse(...)` call. Agents see a clean array;
+ * `monday schema user.team-list` exports a non-null
+ * entries shape; `emitSuccess` then enforces the output schema
+ * for free at the action boundary (`outputSchema.parse(data)`
+ * would reject a leaked null otherwise — defence-in-depth
+ * against a missed projection-layer filter at IMPL).
+ *
+ * Splitting wire-parse from output-projection — the discipline
+ * Codex flagged at M34 pre-flight round-2 P2-1 — keeps the
+ * agent contract narrow while the wire-parse boundary stays
+ * permissive enough to absorb wire-shape variations. Mirrors
+ * v0.3-M22 `monday usage` cadence (loose wire schema, strict
+ * output projection) at a sub-field granularity.
+ */
+export const teamSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    picture_url: z.string().nullable(),
+    is_guest: z.boolean().nullable(),
+    users: z.array(teamUserSchema).nullable(),
     owners: z.array(teamUserSchema),
   })
   .strict();

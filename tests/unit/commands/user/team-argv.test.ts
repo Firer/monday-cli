@@ -26,6 +26,7 @@ import { teamCreateCommand } from '../../../../src/commands/user/team-create.js'
 import { teamDeleteCommand } from '../../../../src/commands/user/team-delete.js';
 import { teamAddMembersCommand } from '../../../../src/commands/user/team-add-members.js';
 import { teamRemoveMembersCommand } from '../../../../src/commands/user/team-remove-members.js';
+import { teamSchema, teamWireSchema } from '../../../../src/api/teams.js';
 import { UsageError } from '../../../../src/utils/errors.js';
 import { parseArgv } from '../../../../src/commands/parse-argv.js';
 
@@ -347,5 +348,71 @@ describe('team-* output schemas — partial-success envelope shape', () => {
         ],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('teamWireSchema vs teamSchema — wire-vs-output split (M34 round-2 P2-1)', () => {
+  // The wire-parse schema accepts a sparse users array (Monday
+  // surfaces null entries when a member's User record was
+  // tombstoned post-team-creation per round-1 fix prose); the
+  // output schema rejects sparse entries because the projection
+  // layer at IMPL filters nulls before the envelope emit, so an
+  // agent reading `monday schema user.team-list` sees a clean
+  // entries-non-null contract.
+  const sparseUsersTeam = {
+    id: '12345',
+    name: 'Backend Eng',
+    picture_url: null,
+    is_guest: false,
+    users: [
+      { id: '67890', name: 'Ada', email: 'ada@example.test' },
+      null,
+      { id: '67891', name: 'Grace', email: 'grace@example.test' },
+    ],
+    owners: [{ id: '67890', name: 'Ada', email: 'ada@example.test' }],
+  };
+
+  it('teamWireSchema accepts a sparse users array', () => {
+    expect(teamWireSchema.safeParse(sparseUsersTeam).success).toBe(true);
+  });
+
+  it('teamSchema rejects a sparse users array', () => {
+    expect(teamSchema.safeParse(sparseUsersTeam).success).toBe(false);
+  });
+
+  it('teamWireSchema accepts a null users container', () => {
+    expect(
+      teamWireSchema.safeParse({
+        ...sparseUsersTeam,
+        users: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('teamSchema accepts a null users container (the container nullability is shared)', () => {
+    expect(
+      teamSchema.safeParse({
+        ...sparseUsersTeam,
+        users: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('both schemas accept a fully-populated team (no nulls)', () => {
+    const populated = {
+      ...sparseUsersTeam,
+      users: [
+        { id: '67890', name: 'Ada', email: 'ada@example.test' },
+        { id: '67891', name: 'Grace', email: 'grace@example.test' },
+      ],
+    };
+    expect(teamWireSchema.safeParse(populated).success).toBe(true);
+    expect(teamSchema.safeParse(populated).success).toBe(true);
+  });
+
+  it('both schemas reject a missing required field', () => {
+    const missingName = { ...sparseUsersTeam, name: undefined } as unknown;
+    expect(teamWireSchema.safeParse(missingName).success).toBe(false);
+    expect(teamSchema.safeParse(missingName).success).toBe(false);
   });
 });
