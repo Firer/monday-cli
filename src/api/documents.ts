@@ -225,11 +225,14 @@
  * envelopes).
  *
  * **R-NEW-76 discipline preserved** across all 5 M35 command stubs
- * — `parseArgv` (+ `parseBrandedListArg` /
- * `enforceDestructiveGate` / `parseGlobalFlags`) fires BEFORE the
- * `c8 ignore start` block-wrap on every verb so invalid argv
+ * — `parseArgv` plus applicable helpers (`parseGlobalFlags` on
+ * all five; `enforceDestructiveGate` on `doc delete`) fire BEFORE
+ * the `c8 ignore start` block-wrap on every verb so invalid argv
  * surfaces `usage_error` from the parse boundary, NOT
- * `internal_error` from the c8-ignored stub throw.
+ * `internal_error` from the c8-ignored stub throw. M35 verbs do
+ * not consume comma-separated brand-list flags (`parseBrandedList
+ * Arg` is an M34 team-writer / M32 `doc list --workspace` helper);
+ * the M35 surface doesn't need it.
  */
 
 import { z } from 'zod';
