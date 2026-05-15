@@ -50,9 +50,10 @@
  * on the target workspace surface `forbidden` (mapped from
  * Monday's PERMISSION_DENIED extension).
  *
- * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
- * flags parse run BEFORE `resolveClient` so invalid argv surfaces
- * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * **Runtime body landed at v0.5-M35 IMPL.** `parseArgv` runs
+ * BEFORE `resolveClient` so invalid argv surfaces `usage_error`
+ * ahead of any missing-token `config_error`; `resolveClient`
+ * parses global flags internally before `loadConfig`. Dry-run
  * path emits minimal planned changes (no wire call fires); live
  * path dispatches {@link createDocInWorkspace} + projects via
  * `emitMutation`.

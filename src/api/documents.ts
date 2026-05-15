@@ -246,13 +246,17 @@
  * with a re-probe hint.
  *
  * **R-NEW-76 discipline preserved** across all 5 M35 command
- * action bodies — `parseArgv` plus applicable helpers
- * (`parseGlobalFlags` on all five; `enforceDestructiveGate` on
- * `doc delete`) fire BEFORE `resolveClient` so invalid argv +
- * missing-`--yes` surface from the parse boundary, ahead of any
- * `config_error` from a missing token. M35 verbs do not consume
- * comma-separated brand-list flags (`parseBrandedListArg` is an
- * M34 team-writer / M32 `doc list --workspace` helper); the M35
+ * action bodies — `parseArgv` fires BEFORE `resolveClient` on
+ * every verb so invalid argv surfaces `usage_error` from the
+ * parse boundary, ahead of any `config_error` from a missing
+ * token. `doc delete` additionally calls `parseGlobalFlags` +
+ * `enforceDestructiveGate` BEFORE `resolveClient` (the gate
+ * needs the parsed global flags to check `--yes`; M10 round-1
+ * P2 invariant); the other four verbs let `resolveClient` parse
+ * global flags internally before `loadConfig` runs. M35 verbs
+ * do not consume comma-separated brand-list flags
+ * (`parseBrandedListArg` is an M34 team-writer / M32 `doc list
+ * --workspace` helper); the M35
  * surface doesn't need it.
  */
 

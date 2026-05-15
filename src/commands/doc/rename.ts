@@ -41,9 +41,10 @@
  * `--name <n>` produces the same end state; Monday's wire is a
  * no-op when the name matches the current value.
  *
- * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
- * flags parse run BEFORE `resolveClient` so invalid argv surfaces
- * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * **Runtime body landed at v0.5-M35 IMPL.** `parseArgv` runs
+ * BEFORE `resolveClient` so invalid argv surfaces `usage_error`
+ * ahead of any missing-token `config_error`; `resolveClient`
+ * parses global flags internally before `loadConfig`. Dry-run
  * path emits minimal planned changes (no wire call fires); live
  * path dispatches {@link renameDoc} + projects via `emitMutation`.
  */
