@@ -4266,16 +4266,19 @@ parsing + schema + wire mutation document + envelope shape all
 ship at pre-flight (real shipped surface). Runtime body lands
 at v0.5-M35 IMPL — the IMPL cassette will pin the actual
 `Document` response shape Monday returns immediately
-post-create (current expectation per the v0.5 kickoff probe:
-full Document with `blocks: null`).
+post-create.
 
 Envelope `data: <Document>` — direct unwrap matching the
 create-verb convention (`workspace create` / `board create` /
 `team create` all return `data: <CreatedObject>`). The
-Document's `id` field is the new workdoc's id; the wire returns
-`blocks: null` on a fresh create (Monday hasn't materialised
-the rich-text body for an empty doc); agents call
-`monday doc get <new-id>` if they need the body.
+Document's `id` field is the new workdoc's id. **The envelope
+OMITS the wire's `blocks` slot** (the base 13-field Document
+projection per M32 is the create projection). Monday returns
+`blocks: null` on a fresh create — surfacing a constant-null
+slot on every create envelope would add agent-noise. Agents
+that need block hydration (rare on a fresh create — usually
+the next step is content authoring) call
+`monday doc get <new-id>` per the M32 read cadence.
 
 **Live success envelope** (target shape — IMPL cassette pins):
 

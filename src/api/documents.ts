@@ -118,10 +118,13 @@
  *   - **Create-in-workspace variant** — `create_doc(location:
  *     CreateDocInput!) → Document` with `location: { workspace:
  *     CreateDocWorkspaceInput { workspace_id!, name!, kind?:
- *     BoardKind, folder_id? } }`. Returns the full Document
- *     (with `blocks: null` — Monday hasn't hydrated blocks for a
- *     freshly-created doc; the agent calls `monday doc get
- *     <new-doc-id>` if it needs them).
+ *     BoardKind, folder_id? } }`. CLI envelope OMITS the wire's
+ *     `blocks` slot entirely (the base 13-field
+ *     {@link documentSchema} M32 pin is the create projection).
+ *     Monday returns `blocks: null` on a fresh create — agents
+ *     needing block hydration (rare on a fresh create — usually
+ *     the next step is content authoring) call `monday doc get
+ *     <new-doc-id>` per the M32 read cadence.
  *   - **Create-on-column variant** — `create_doc(location:
  *     CreateDocInput!) → Document` with `location: { board:
  *     CreateDocBoardInput { column_id!, item_id! } }`.
@@ -937,17 +940,20 @@ export type DocMutationResult = z.infer<typeof docMutationResultSchema>;
  * Output shape for `monday doc create-in-workspace --workspace
  * <wid> --name <n> [--folder <fid>] [--kind public|private|share]`.
  * Direct unwrap of the created Document — `data: <Document>` per
- * cli-design §6.1 single-record convention.
+ * cli-design §6.1 single-record convention. The envelope OMITS
+ * the `blocks` slot entirely (the base {@link documentSchema} M32
+ * pin is the 13-field projection without `blocks`).
  *
- * The Document carries `blocks: null` on the wire immediately
- * post-create (Monday hasn't materialised the rich-text body yet
- * for an empty doc); the schema accepts the null slot but the
- * field is hydrated via a follow-up `monday doc get <new-doc-id>`
- * call. The base {@link documentSchema} (M32) omits the `blocks`
- * field entirely from the projection — pre-flight ratifies the
- * choice because a `blocks: null` slot on every create response
- * adds no agent-useful signal (a freshly-created doc always lacks
- * blocks until edits land).
+ * **Rationale for the omit.** Monday's wire returns
+ * `blocks: null` on a fresh `create_doc` because a freshly-
+ * created doc has no rich-text body yet (Monday hasn't
+ * materialised it). Surfacing a constant-null `blocks` slot on
+ * every create envelope would add agent-noise — every caller
+ * has to ignore it. Agents that need block hydration (rare on a
+ * fresh create — usually the next step is content authoring)
+ * call `monday doc get <new-doc-id>` per the M32 read cadence.
+ * The omit is a contract decision, not a schema-flexibility
+ * artifact.
  */
 export const docCreateInWorkspaceOutputSchema = documentSchema;
 
