@@ -502,15 +502,20 @@ export const REMOVE_USERS_FROM_TEAM_MUTATION = `
  * `ChangeTeamMembershipsResult` wire shape per the v0.5 kickoff
  * round-2 probe: `failed_users: [User!]` + `successful_users:
  * [User!]`. Both lists are nullable containers on the wire (per
- * the probe's outer-wrapper introspection), but the inner
- * entries are non-null (`NON_NULL/<wrapped>` inside the `LIST/
- * <wrapped>`). The action body wraps this shape into the §6.1
- * universal partial-success envelope at the verb boundary.
+ * the probe's outer-wrapper introspection — outer `LIST` is NOT
+ * `NON_NULL`-wrapped), but the inner entries are non-null
+ * (`NON_NULL/<wrapped>` inside the `LIST/<wrapped>`). The
+ * fetcher normalises a null bucket to `[]` at the projection
+ * boundary so the partial-success envelope downstream sees a
+ * uniform shape regardless of which (or both) buckets are
+ * `null` on the wire — addresses Codex IMPL round-1 P2-1
+ * (rejecting a wire-valid all-success or all-failed response
+ * was the pre-fix risk).
  */
 const changeTeamMembershipsResultSchema = z
   .object({
-    failed_users: z.array(teamUserSchema),
-    successful_users: z.array(teamUserSchema),
+    failed_users: z.array(teamUserSchema).nullable(),
+    successful_users: z.array(teamUserSchema).nullable(),
   })
   .strict();
 
@@ -1025,9 +1030,14 @@ export const addUsersToTeam = async (
       },
     );
   }
+  // Normalise null buckets to `[]` so the partial-success
+  // projection sees a uniform shape — Monday's wire types both
+  // bucket containers as nullable list (`[User!]`, no outer
+  // `NON_NULL`), so an all-success response can land with
+  // `failed_users: null` and vice versa (Codex IMPL round-1 P2-1).
   return {
-    failedUsers: parsed.add_users_to_team.failed_users,
-    successfulUsers: parsed.add_users_to_team.successful_users,
+    failedUsers: parsed.add_users_to_team.failed_users ?? [],
+    successfulUsers: parsed.add_users_to_team.successful_users ?? [],
     source: 'live',
     cacheAgeSeconds: null,
     complexity: response.complexity,
@@ -1094,9 +1104,14 @@ export const removeUsersFromTeam = async (
       },
     );
   }
+  // Normalise null buckets to `[]` so the partial-success
+  // projection sees a uniform shape — Monday's wire types both
+  // bucket containers as nullable list (`[User!]`, no outer
+  // `NON_NULL`), so an all-success response can land with
+  // `failed_users: null` and vice versa (Codex IMPL round-1 P2-1).
   return {
-    failedUsers: parsed.remove_users_from_team.failed_users,
-    successfulUsers: parsed.remove_users_from_team.successful_users,
+    failedUsers: parsed.remove_users_from_team.failed_users ?? [],
+    successfulUsers: parsed.remove_users_from_team.successful_users ?? [],
     source: 'live',
     cacheAgeSeconds: null,
     complexity: response.complexity,

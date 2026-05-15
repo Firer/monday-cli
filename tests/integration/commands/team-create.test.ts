@@ -170,6 +170,27 @@ describe('monday user team-create (M34)', () => {
     expect(out.requests).toBe(0);
   });
 
+  it('internal_error when create_team key is absent (schema drift via R42 helper)', async () => {
+    // Codex IMPL round-1 P3-1: pin the missing-root-key branch
+    // for `CreateTeam` alongside the null-payload branch.
+    // `assertResponseFieldPresent` (R42 helper) surfaces the
+    // schema-drift case as `internal_error`.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'CreateTeam',
+          response: { data: { other_root: 'unexpected' } },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-create', '--name', 'X', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr).error?.code).toBe('internal_error');
+  });
+
   it('internal_error when create_team payload is null (no team returned post-mutation)', async () => {
     const cassette: Cassette = {
       interactions: [

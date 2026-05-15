@@ -182,6 +182,93 @@ describe('monday user team-add-members (M34)', () => {
     expect(env.data.results.every((r) => r.error?.code === 'membership_failed')).toBe(true);
   });
 
+  it('null bucket: failed_users: null normalised to [] (Codex round-1 P2-1)', async () => {
+    // Monday's wire types both buckets as nullable list (`[User!]`,
+    // no outer `NON_NULL`), so an all-success response can land
+    // with `failed_users: null`. The fetcher normalises to `[]` so
+    // the partial-success projection sees a uniform shape.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'AddUsersToTeam',
+          response: {
+            data: {
+              add_users_to_team: {
+                failed_users: null,
+                successful_users: [wireUser('67890')],
+              },
+            },
+          },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-add-members', '11001', '--users', '67890', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as MembershipResultEnvelope;
+    expect(env.data.results).toHaveLength(1);
+    expect(env.data.results[0]?.ok).toBe(true);
+  });
+
+  it('null bucket: successful_users: null normalised to [] (all-failed response)', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'AddUsersToTeam',
+          response: {
+            data: {
+              add_users_to_team: {
+                failed_users: [wireUser('67890')],
+                successful_users: null,
+              },
+            },
+          },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-add-members', '11001', '--users', '67890', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as MembershipResultEnvelope;
+    expect(env.data.results[0]?.ok).toBe(false);
+    expect(env.data.results[0]?.error?.code).toBe('membership_failed');
+  });
+
+  it('same user in BOTH buckets: failed-bucket priority lands as ok: false (Codex round-1 P3-2)', async () => {
+    // W4 sub-axis: a user_id present in BOTH failed + successful
+    // (defensive against wire-shape regression) MUST land as
+    // `ok: false`. Pins the helper's check order — failed lookup
+    // before successful.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'AddUsersToTeam',
+          response: {
+            data: {
+              add_users_to_team: {
+                failed_users: [wireUser('67890')],
+                successful_users: [wireUser('67890')],
+              },
+            },
+          },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-add-members', '11001', '--users', '67890', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as MembershipResultEnvelope;
+    expect(env.data.results[0]?.ok).toBe(false);
+    expect(env.data.results[0]?.error?.code).toBe('membership_failed');
+    expect(env.data.results[0]?.user).toBeUndefined();
+  });
+
   it('internal_error when add_users_to_team payload is null (wire shape regression)', async () => {
     const cassette: Cassette = {
       interactions: [
