@@ -13,8 +13,8 @@
  * fetcher's `extractDuplicateDocId` helper pulls the new id from
  * the opaque JSON payload defensively (the v0.5 probe was
  * read-only, so the helper accepts plausible shapes today;
- * a future live cassette would let a follow-up commit narrow the
- * accepted shapes).
+ * a future live wire response would let a follow-up commit
+ * narrow the accepted shapes).
  *
  * **`--with-updates` semantics.** Monday's `duplicate_doc.
  * duplicateType` is a 2-value enum (`duplicate_doc_with_content`

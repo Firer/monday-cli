@@ -212,8 +212,8 @@
  * **NEWLY-CREATED doc's id** extracted from the opaque JSON via
  * {@link extractDuplicateDocId} — defensive across multiple
  * plausible wire shapes (bare string / number / record-with-`id`
- * / `doc_id` / `new_doc_id`). Capturing a live duplicate-doc
- * cassette would let a future revision narrow the helper's
+ * / `doc_id` / `new_doc_id`). Capturing a live duplicate-doc wire
+ * response would let a future revision narrow the helper's
  * accepted shapes; today's helper is constructed against the
  * read-only probe + Monday's wire description, not a live wire
  * response.
@@ -927,11 +927,10 @@ export const duplicateTypeSchema = z.enum(DUPLICATE_TYPE_VALUES);
  * success: true }` envelope so agents read a uniform shape across
  * mutations — Monday's wire returns an opaque `JSON` scalar whose
  * exact shape isn't pinned by introspection (the v0.5 doc-CRUD
- * probe was read-only — no live mutation cassette captured the
- * payload). The projection insulates agents from any wire-side
- * shape drift; the runtime accepts plausible-defensive shapes
- * today, and a future live cassette would narrow what the helper
- * accepts.
+ * probe was read-only — no live mutation response was captured).
+ * The projection insulates agents from any wire-side shape drift;
+ * the runtime accepts plausible-defensive shapes today, and a
+ * future live wire response would narrow what the helper accepts.
  *
  * `success` is pinned to literal `true` because Monday surfaces
  * failure via GraphQL `errors[]` (mapped to typed `ApiError`s at
@@ -1029,8 +1028,8 @@ export type DocDeleteOutput = DocMutationResult;
  * the source-doc id. The verb's positional argv is the source-doc
  * id; the wire returns the new id in its JSON payload, which
  * {@link extractDuplicateDocId} pulls out (defensive across
- * plausible shapes today; a future live cassette would narrow
- * what the helper accepts).
+ * plausible shapes today; a future live wire response would
+ * narrow what the helper accepts).
  *
  * **No `--name <n>` slot per D8** — Monday's `duplicate_doc`
  * mutation carries no rename-on-duplicate arg. Agents needing a
@@ -1231,8 +1230,8 @@ const deleteDocResponseSchema = z
  * the new id via {@link extractDuplicateDocId}, which accepts
  * multiple plausible shapes defensively (bare string / number /
  * record-with-`id` / `doc_id` / `new_doc_id`). A future live
- * cassette would let a follow-up commit narrow what the helper
- * accepts to the exact wire shape.
+ * wire response would let a follow-up commit narrow what the
+ * helper accepts to the exact wire shape.
  */
 const duplicateDocResponseSchema = z
   .object({
