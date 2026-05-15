@@ -25,23 +25,18 @@
  *
  * **Idempotent: yes** (pure read).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema +
- * commander wiring all ship at pre-flight (the real shipped
- * argv surface — argv is empty for team-list so the
- * `parseArgv` call still fires + verifies "no unknown flags"
- * at the parse boundary). The action body's wire-call
- * dispatch + envelope emit land at v0.5-M34 IMPL — the stub
- * throws `internal_error` post-parse so a premature
- * invocation surfaces a clear "not yet implemented" signal
- * rather than a misleading false-success envelope (M31
- * pre-flight round-1 P2-2 lesson).
+ * **Runtime body landed at v0.5-M34 IMPL.** A single wire
+ * round-trip via {@link listTeams} populates the wrapped
+ * record envelope; `returned_count` is the cached
+ * `teams.length` for agent ergonomics.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import {
-  LIST_TEAMS_QUERY,
+  listTeams,
   teamListOutputSchema,
   type TeamListOutput,
 } from '../../api/teams.js';
@@ -80,33 +75,28 @@ export const teamListCommand: CommandModule<
         ].join('\n'),
       )
       .action(async (opts: unknown) => {
-        const parsed = parseArgv(teamListCommand.inputSchema, opts ?? {});
+        // Argv is empty for team-list; parseArgv still fires to
+        // verify "no unknown flags" at the parse boundary.
+        parseArgv(teamListCommand.inputSchema, opts ?? {});
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the wire call + envelope
-        // emit. The pre-flight surface (argv schema + commander
-        // wiring) is real-and-shipped; the throw below MUST NOT
-        // be reachable from any green-tree invocation, only from
-        // a deliberate stub-poke test.
-        void ctx;
-        void program;
-        void parsed;
-        void LIST_TEAMS_QUERY;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-list — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire query ' +
-                'document only; the live dispatch + envelope emit land ' +
-                'at the IMPL session.',
-            },
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await listTeams({ client });
+        const returnedCount = result.teams.length;
+        emitSuccess({
+          ctx,
+          data: {
+            teams: [...result.teams],
+            returned_count: returnedCount,
           },
-        );
-        /* c8 ignore stop */
+          schema: teamListCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'single',
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

@@ -3329,3 +3329,277 @@ describe('envelope snapshot — completion (M33)', () => {
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
   });
 });
+
+describe('envelope snapshot — team (v0.5-M34)', () => {
+  // M34 wraps `Query.teams` (list + get), `create_team`,
+  // `delete_team`, `add_users_to_team`, `remove_users_from_team`.
+  // Teams are live-only (outside cli-design §8 cache scope); the
+  // membership verbs project Monday's `ChangeTeamMembershipsResult`
+  // (failed_users + successful_users) into the universal §6.1
+  // partial-success envelope (`data.results: [{user_id, ok, ...}]`).
+  const wireUser = (id: string) => ({
+    id,
+    name: `User ${id}`,
+    email: `user${id}@example.test`,
+  });
+
+  it('team-list (happy — two teams)', async () => {
+    const out = await drive(
+      ['user', 'team-list', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ListTeams',
+            response: {
+              data: {
+                teams: [
+                  {
+                    id: '11001',
+                    name: 'Backend Engineering',
+                    picture_url: null,
+                    is_guest: false,
+                    users: [wireUser('67890')],
+                    owners: [wireUser('999')],
+                  },
+                  {
+                    id: '11002',
+                    name: 'Sales',
+                    picture_url: null,
+                    is_guest: true,
+                    users: [],
+                    owners: [wireUser('888')],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-list (empty account)', async () => {
+    const out = await drive(
+      ['user', 'team-list', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ListTeams',
+            response: { data: { teams: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-get (happy)', async () => {
+    const out = await drive(
+      ['user', 'team-get', '11001', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GetTeam',
+            response: {
+              data: {
+                teams: [
+                  {
+                    id: '11001',
+                    name: 'Backend Engineering',
+                    picture_url: null,
+                    is_guest: false,
+                    users: [wireUser('67890'), wireUser('67891')],
+                    owners: [wireUser('999')],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-get (not_found — D8 collapse of doesn\'t-exist + inaccessible)', async () => {
+    const out = await drive(
+      ['user', 'team-get', '99999', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'GetTeam',
+            response: { data: { teams: [] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('team-create (live mutation envelope)', async () => {
+    const out = await drive(
+      ['user', 'team-create', '--name', 'Backend Eng', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'CreateTeam',
+            response: {
+              data: {
+                create_team: {
+                  id: '11005',
+                  name: 'Backend Eng',
+                  picture_url: null,
+                  is_guest: false,
+                  users: [],
+                  owners: [wireUser('999')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-create --dry-run (argv-derived planned envelope with all optional fields)', async () => {
+    const out = await drive(
+      [
+        'user',
+        'team-create',
+        '--name',
+        'Vendors',
+        '--users',
+        '67890,67891',
+        '--guest-team',
+        '--allow-empty',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-delete (confirmation_required without --yes / --dry-run)', async () => {
+    const out = await drive(
+      ['user', 'team-delete', '11001', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('team-delete --dry-run (argv-derived minimal planned envelope)', async () => {
+    const out = await drive(
+      ['user', 'team-delete', '11001', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-delete --yes (live mutation envelope echoes deleted Team)', async () => {
+    const out = await drive(
+      ['user', 'team-delete', '11001', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'DeleteTeam',
+            response: {
+              data: {
+                delete_team: {
+                  id: '11001',
+                  name: 'Doomed Team',
+                  picture_url: null,
+                  is_guest: false,
+                  users: [wireUser('67890')],
+                  owners: [wireUser('999')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-add-members (partial-success envelope with input-order preserved)', async () => {
+    const out = await drive(
+      [
+        'user',
+        'team-add-members',
+        '11001',
+        '--users',
+        '67890,67891,67892',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'AddUsersToTeam',
+            response: {
+              data: {
+                add_users_to_team: {
+                  failed_users: [wireUser('67891')],
+                  successful_users: [wireUser('67890'), wireUser('67892')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-add-members --dry-run (argv-derived planned envelope)', async () => {
+    const out = await drive(
+      [
+        'user',
+        'team-add-members',
+        '11001',
+        '--users',
+        '67890,67891',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('team-remove-members (partial-success envelope with input-order preserved)', async () => {
+    const out = await drive(
+      ['user', 'team-remove-members', '11001', '--users', '67890,67891', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'RemoveUsersFromTeam',
+            response: {
+              data: {
+                remove_users_from_team: {
+                  failed_users: [wireUser('67890')],
+                  successful_users: [wireUser('67891')],
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});

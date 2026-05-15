@@ -4266,6 +4266,424 @@ exports[`envelope snapshot — schema > schema config.show — single-command na
 }
 `;
 
+exports[`envelope snapshot — team (v0.5-M34) > team-add-members (partial-success envelope with input-order preserved) 1`] = `
+{
+  "data": {
+    "operation": "add_users_to_team",
+    "results": [
+      {
+        "ok": true,
+        "user": {
+          "email": "user67890@example.test",
+          "id": "67890",
+          "name": "User 67890",
+        },
+        "user_id": "67890",
+      },
+      {
+        "error": {
+          "code": "membership_failed",
+          "message": "Monday rejected this user for team membership change (no per-user reason on the wire — see \`docs/architecture.md\` Wire-vs-CLI semantics documentation conventions).",
+        },
+        "ok": false,
+        "user_id": "67891",
+      },
+      {
+        "ok": true,
+        "user": {
+          "email": "user67892@example.test",
+          "id": "67892",
+          "name": "User 67892",
+        },
+        "user_id": "67892",
+      },
+    ],
+    "team_id": "11001",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-add-members --dry-run (argv-derived planned envelope) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "operation": "add_users_to_team",
+      "team_id": "11001",
+      "user_ids": [
+        "67890",
+        "67891",
+      ],
+    },
+  ],
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-create (live mutation envelope) 1`] = `
+{
+  "data": {
+    "id": "11005",
+    "is_guest": false,
+    "name": "Backend Eng",
+    "owners": [
+      {
+        "email": "user999@example.test",
+        "id": "999",
+        "name": "User 999",
+      },
+    ],
+    "picture_url": null,
+    "users": [],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-create --dry-run (argv-derived planned envelope with all optional fields) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "allow_empty_team": true,
+      "is_guest_team": true,
+      "name": "Vendors",
+      "operation": "create_team",
+      "subscriber_ids": [
+        "67890",
+        "67891",
+      ],
+    },
+  ],
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-delete (confirmation_required without --yes / --dry-run) 1`] = `
+{
+  "error": {
+    "code": "confirmation_required",
+    "details": {
+      "hint": "delete is destructive — Monday's wire surface offers no restore mutation for teams; agents needing reversal must recreate via \`monday user team-create\` (lossy: new id, membership must be re-added).",
+      "team_id": "11001",
+    },
+    "http_status": null,
+    "message": "monday user team-delete 11001 would delete the team. Re-run with --yes to confirm, or --dry-run to preview.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-delete --dry-run (argv-derived minimal planned envelope) 1`] = `
+{
+  "data": null,
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "dry_run": true,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": true,
+  "planned_changes": [
+    {
+      "operation": "delete_team",
+      "team_id": "11001",
+    },
+  ],
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-delete --yes (live mutation envelope echoes deleted Team) 1`] = `
+{
+  "data": {
+    "id": "11001",
+    "is_guest": false,
+    "name": "Doomed Team",
+    "owners": [
+      {
+        "email": "user999@example.test",
+        "id": "999",
+        "name": "User 999",
+      },
+    ],
+    "picture_url": null,
+    "users": [
+      {
+        "email": "user67890@example.test",
+        "id": "67890",
+        "name": "User 67890",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-get (happy) 1`] = `
+{
+  "data": {
+    "id": "11001",
+    "is_guest": false,
+    "name": "Backend Engineering",
+    "owners": [
+      {
+        "email": "user999@example.test",
+        "id": "999",
+        "name": "User 999",
+      },
+    ],
+    "picture_url": null,
+    "users": [
+      {
+        "email": "user67890@example.test",
+        "id": "67890",
+        "name": "User 67890",
+      },
+      {
+        "email": "user67891@example.test",
+        "id": "67891",
+        "name": "User 67891",
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-get (not_found — D8 collapse of doesn't-exist + inaccessible) 1`] = `
+{
+  "error": {
+    "code": "not_found",
+    "details": {
+      "team_id": "99999",
+    },
+    "http_status": null,
+    "message": "team 99999 not found (does not exist or not visible to token)",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-list (empty account) 1`] = `
+{
+  "data": {
+    "returned_count": 0,
+    "teams": [],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-list (happy — two teams) 1`] = `
+{
+  "data": {
+    "returned_count": 2,
+    "teams": [
+      {
+        "id": "11001",
+        "is_guest": false,
+        "name": "Backend Engineering",
+        "owners": [
+          {
+            "email": "user999@example.test",
+            "id": "999",
+            "name": "User 999",
+          },
+        ],
+        "picture_url": null,
+        "users": [
+          {
+            "email": "user67890@example.test",
+            "id": "67890",
+            "name": "User 67890",
+          },
+        ],
+      },
+      {
+        "id": "11002",
+        "is_guest": true,
+        "name": "Sales",
+        "owners": [
+          {
+            "email": "user888@example.test",
+            "id": "888",
+            "name": "User 888",
+          },
+        ],
+        "picture_url": null,
+        "users": [],
+      },
+    ],
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
+exports[`envelope snapshot — team (v0.5-M34) > team-remove-members (partial-success envelope with input-order preserved) 1`] = `
+{
+  "data": {
+    "operation": "remove_users_from_team",
+    "results": [
+      {
+        "error": {
+          "code": "membership_failed",
+          "message": "Monday rejected this user for team membership change (no per-user reason on the wire — see \`docs/architecture.md\` Wire-vs-CLI semantics documentation conventions).",
+        },
+        "ok": false,
+        "user_id": "67890",
+      },
+      {
+        "ok": true,
+        "user": {
+          "email": "user67891@example.test",
+          "id": "67891",
+          "name": "User 67891",
+        },
+        "user_id": "67891",
+      },
+    ],
+    "team_id": "11001",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — update > update clear-all (M13 — partial-success envelope) 1`] = `
 {
   "data": {

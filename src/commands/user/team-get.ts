@@ -26,16 +26,18 @@
  *
  * **Idempotent: yes** (pure read).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight; action body's wire-call
- * dispatch + envelope emit land at v0.5-M34 IMPL.
+ * **Runtime body landed at v0.5-M34 IMPL.** A thin wrapper
+ * around {@link getTeam} — branded `<teamId>` → fetcher →
+ * direct-unwrap envelope.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitSuccess } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { TeamIdSchema } from '../../types/ids.js';
 import {
+  getTeam,
   teamGetOutputSchema,
   type TeamGetOutput,
 } from '../../api/teams.js';
@@ -78,28 +80,20 @@ export const teamGetCommand: CommandModule<
           teamId: teamIdArg,
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the wire call + envelope
-        // emit. Argv parsing above is real-and-shipped; only the
-        // wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-get — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire query ' +
-                'document only; the live dispatch + envelope emit land ' +
-                'at the IMPL session.',
-            },
-          },
-        );
-        /* c8 ignore stop */
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await getTeam({ client, teamId: parsed.teamId });
+        emitSuccess({
+          ctx,
+          data: result.team,
+          schema: teamGetCommand.outputSchema,
+          programOpts: program.opts(),
+          kind: 'single',
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

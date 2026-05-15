@@ -50,21 +50,25 @@
  * **Admin-permission-sensitive.** Non-admin callers surface
  * `forbidden`.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema +
- * `--users` comma-split + commander wiring all ship at
- * pre-flight. The action body's wire-call dispatch + dry-run
- * emit + envelope emit land at v0.5-M34 IMPL.
+ * **Runtime body landed at v0.5-M34 IMPL.** Mirrors the
+ * `team-add-members` cadence verbatim modulo the `operation`
+ * literal — argv + `--users` parse → resolveClient → dry-run
+ * or live dispatch via {@link removeUsersFromTeam} → shared
+ * {@link projectMembershipResults} → `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { TeamIdSchema, UserIdSchema } from '../../types/ids.js';
 import { parseBrandedListArg } from '../../utils/parse-brand-list.js';
 import {
+  removeUsersFromTeam,
   teamRemoveMembersOutputSchema,
   type TeamRemoveMembersOutput,
 } from '../../api/teams.js';
+import { projectMembershipResults } from './_team-membership.js';
 
 const inputSchema = z
   .object({
@@ -130,28 +134,62 @@ export const teamRemoveMembersCommand: CommandModule<
             'duplicate commas',
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit.
-        void ctx;
-        void program;
-        void parsed;
-        void userIds;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-remove-members — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + ' +
-                'partial-success envelope emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          // Minimal dry-run shape per cli-design §6.4 — single
+          // planned operation echoing what the live wire call
+          // would send. No preflight read fires; `meta.source:
+          // 'none'`.
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'remove_users_from_team',
+                team_id: parsed.teamId,
+                user_ids: [...userIds],
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await removeUsersFromTeam({
+          client,
+          teamId: parsed.teamId,
+          userIds,
+        });
+        const results = projectMembershipResults({
+          inputUserIds: userIds,
+          failedUsers: result.failedUsers,
+          successfulUsers: result.successfulUsers,
+          operation: 'remove_users_from_team',
+          teamId: parsed.teamId,
+        });
+        const data: TeamRemoveMembersOutput = {
+          operation: 'remove_users_from_team',
+          team_id: parsed.teamId,
+          results: [...results],
+        };
+        emitMutation({
+          ctx,
+          data,
+          schema: teamRemoveMembersCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

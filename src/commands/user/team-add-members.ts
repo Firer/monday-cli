@@ -57,22 +57,27 @@
  * `forbidden` (mapped from Monday's PERMISSION_DENIED
  * extension).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema +
- * `--users` comma-split + commander wiring all ship at
- * pre-flight (real shipped surface). The action body's
- * wire-call dispatch + dry-run emit + envelope emit land at
- * v0.5-M34 IMPL.
+ * **Runtime body landed at v0.5-M34 IMPL.** Argv + `--users`
+ * parse run BEFORE `resolveClient` (usage-error-before-config-
+ * error precedence). Dry-run path emits the minimal planned
+ * shape; live path dispatches {@link addUsersToTeam} and
+ * projects `failed_users[]` / `successful_users[]` into the
+ * universal §6.1 partial-success envelope via
+ * {@link projectMembershipResults} (input order preserved).
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { TeamIdSchema, UserIdSchema } from '../../types/ids.js';
 import { parseBrandedListArg } from '../../utils/parse-brand-list.js';
 import {
+  addUsersToTeam,
   teamAddMembersOutputSchema,
   type TeamAddMembersOutput,
 } from '../../api/teams.js';
+import { projectMembershipResults } from './_team-membership.js';
 
 const inputSchema = z
   .object({
@@ -138,30 +143,62 @@ export const teamAddMembersCommand: CommandModule<
             'duplicate commas',
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing +
-        // comma-list parsing above are real-and-shipped; only the
-        // wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void userIds;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-add-members — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + ' +
-                'partial-success envelope emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          // Minimal dry-run shape per cli-design §6.4 — single
+          // planned operation echoing what the live wire call
+          // would send. No preflight read fires; `meta.source:
+          // 'none'`.
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'add_users_to_team',
+                team_id: parsed.teamId,
+                user_ids: [...userIds],
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await addUsersToTeam({
+          client,
+          teamId: parsed.teamId,
+          userIds,
+        });
+        const results = projectMembershipResults({
+          inputUserIds: userIds,
+          failedUsers: result.failedUsers,
+          successfulUsers: result.successfulUsers,
+          operation: 'add_users_to_team',
+          teamId: parsed.teamId,
+        });
+        const data: TeamAddMembersOutput = {
+          operation: 'add_users_to_team',
+          team_id: parsed.teamId,
+          results: [...results],
+        };
+        emitMutation({
+          ctx,
+          data,
+          schema: teamAddMembersCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

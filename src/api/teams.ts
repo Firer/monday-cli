@@ -87,13 +87,21 @@
  * stale-cache risk outweighs the cache-hit value (mirrors
  * `monday user list` cadence — no cache).
  *
- * **Status: PRE-FLIGHT STUB.** Runtime bodies land at v0.5-M34
- * IMPL. All six fetchers throw `internal_error` until the IMPL
- * session swaps the c8-ignored stub bodies for real `client.raw`
- * round-trips with literal-pinned operationNames (`ListTeams` /
- * `GetTeam` / `CreateTeam` / `DeleteTeam` / `AddUsersToTeam` /
- * `RemoveUsersFromTeam`; R-NEW-37 W2 audit-point — operationNames
- * pinned at the fetcher boundary, NOT caller-overridable).
+ * **Runtime bodies landed at v0.5-M34 IMPL.** All six fetchers
+ * issue a single `client.raw` round-trip with literal-pinned
+ * operationNames (`ListTeams` / `GetTeam` / `CreateTeam` /
+ * `DeleteTeam` / `AddUsersToTeam` / `RemoveUsersFromTeam`;
+ * R-NEW-37 W2 audit-point — operationNames pinned at the
+ * fetcher boundary, NOT caller-overridable). Read responses
+ * parse via wrapping `*ResponseSchema` shapes through
+ * `unwrapOrThrow`, so payload drift surfaces `internal_error`
+ * with `details.issues`. `getTeam`'s empty-array case rewraps
+ * to `not_found` per the M32 doc-get D8 cadence (Monday's wire
+ * collapses "doesn't exist" + "not visible to token"). Wire
+ * Team objects thread through {@link projectTeam} which filters
+ * null entries out of `users` before the agent-facing
+ * {@link teamSchema} sees the value — wire-vs-output split per
+ * round-2 P2-1 + R-v0.5-NEW-4 discipline.
  *
  * **Out of M34 scope** (probe-surfaced + carried forward):
  *
@@ -111,6 +119,8 @@
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
+import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { assertResponseFieldPresent } from './response-root.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
@@ -488,6 +498,135 @@ export const REMOVE_USERS_FROM_TEAM_MUTATION = `
   }
 `;
 
+/**
+ * `ChangeTeamMembershipsResult` wire shape per the v0.5 kickoff
+ * round-2 probe: `failed_users: [User!]` + `successful_users:
+ * [User!]`. Both lists are nullable containers on the wire (per
+ * the probe's outer-wrapper introspection), but the inner
+ * entries are non-null (`NON_NULL/<wrapped>` inside the `LIST/
+ * <wrapped>`). The action body wraps this shape into the §6.1
+ * universal partial-success envelope at the verb boundary.
+ */
+const changeTeamMembershipsResultSchema = z
+  .object({
+    failed_users: z.array(teamUserSchema),
+    successful_users: z.array(teamUserSchema),
+  })
+  .strict();
+
+/**
+ * Wrapping response schema for the `ListTeams` operation. Monday's
+ * documented wire shape is `[Team]` (an array, possibly empty) —
+ * never null. The wrapper accepts `null` defensively so a wire-
+ * shape regression parses cleanly and the fetcher rewraps it as
+ * `internal_error` with a drift hint (rather than faulting the
+ * parse with a confusing zod issue path).
+ *
+ * `.loose()` mirrors M27 `listWebhooksResponseSchema` + M32
+ * `listDocsResponseSchema` — Monday occasionally returns side-
+ * band debug keys (`extensions`, `account_id`) alongside the
+ * documented data root; the loose mode lets them pass without
+ * faulting the parse.
+ *
+ * Inner entries parse via {@link teamWireSchema} which accepts
+ * sparse `users` arrays at the wire boundary; {@link projectTeam}
+ * filters nulls before the agent-facing {@link teamSchema} sees
+ * the value at `emitSuccess`.
+ */
+const listTeamsResponseSchema = z
+  .object({
+    teams: z.array(teamWireSchema).nullable(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `GetTeam` operation. Same
+ * shape as the list variant (Monday's wire returns `[Team]` even
+ * for a single-id query). Empty-array surfaces `not_found` per
+ * D8-equivalent (mirrors M32 doc-get); null root surfaces
+ * `internal_error`.
+ */
+const getTeamResponseSchema = z
+  .object({
+    teams: z.array(teamWireSchema).nullable(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `CreateTeam` mutation. The
+ * `create_team` root is `z.unknown()` here so `assertResponseField
+ * Present` can distinguish "key absent" (schema drift →
+ * `internal_error`) from "value null" (no payload returned —
+ * also `internal_error` per the workspace-create cadence; a
+ * non-existent team after a successful mutation indicates a
+ * Monday-side regression worth surfacing loudly). The payload
+ * itself parses via {@link teamWireSchema} downstream.
+ */
+const createTeamResponseSchema = z
+  .object({
+    create_team: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `DeleteTeam` mutation. Same
+ * shape as `CreateTeam` but the null-value contract differs —
+ * a null `delete_team` payload surfaces `not_found` (mirrors
+ * M14 workspace-delete cadence — id bogus / already deleted by
+ * a concurrent caller).
+ */
+const deleteTeamResponseSchema = z
+  .object({
+    delete_team: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `AddUsersToTeam` mutation.
+ * Returns `ChangeTeamMembershipsResult` non-null on the wire;
+ * the wrapper accepts `null` defensively so a wire-shape
+ * regression surfaces `internal_error` rather than faulting the
+ * parse.
+ */
+const addUsersToTeamResponseSchema = z
+  .object({
+    add_users_to_team: changeTeamMembershipsResultSchema.nullable(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `RemoveUsersFromTeam`
+ * mutation. Same shape as `AddUsersToTeam`.
+ */
+const removeUsersFromTeamResponseSchema = z
+  .object({
+    remove_users_from_team: changeTeamMembershipsResultSchema.nullable(),
+  })
+  .loose();
+
+/**
+ * Wire-to-output projection for a single Team — filters null
+ * entries out of {@link TeamWire.users} so the agent-facing
+ * {@link teamSchema} sees a clean array (R-v0.5-NEW-4 wire-vs-
+ * output split discipline; round-2 P2-1 closure). A wire `users:
+ * null` container passes through unchanged (the output schema
+ * accepts `null` for "team has no member list" — see
+ * {@link teamSchema}). Owners are surfaced verbatim — Monday's
+ * wire pins `[User!]!` for `owners` per the round-1 probe, so
+ * there's no inner null to filter.
+ */
+const projectTeam = (wire: TeamWire): Team => ({
+  id: wire.id,
+  name: wire.name,
+  picture_url: wire.picture_url,
+  is_guest: wire.is_guest,
+  users:
+    wire.users === null
+      ? null
+      : wire.users.filter((u): u is TeamUser => u !== null),
+  owners: wire.owners,
+});
+
 export interface ListTeamsInputs {
   readonly client: MondayClient;
 }
@@ -505,34 +644,50 @@ export interface ListTeamsResult {
  * (R-NEW-37 W2). Source is always `'live'` per cli-design §8
  * cache scope; teams aren't cached at v0.5.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL. The stub throws `internal_error` so a premature
- * invocation surfaces a clear "not yet implemented" signal
- * rather than a misleading false-success envelope (M31 pre-
- * flight round-1 P2-2 lesson — pre-flight stubs MUST NOT emit
- * `ok: true` bogus envelopes).
+ * A null `teams` root surfaces `internal_error` with a drift
+ * hint — Monday's documented shape is `[Team]` (an array,
+ * possibly empty), never null at this layer. Each wire team
+ * threads through {@link projectTeam} so the agent-facing
+ * {@link teamSchema} sees a clean (non-nullable-entries) `users`
+ * array.
  */
-/* c8 ignore start */
 export const listTeams = async (
   inputs: ListTeamsInputs,
 ): Promise<ListTeamsResult> => {
-  void inputs;
-  void LIST_TEAMS_QUERY;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'listTeams stub — runtime body lands at v0.5-M34 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    LIST_TEAMS_QUERY,
+    {},
+    { operationName: 'ListTeams' },
+  );
+  const parsed = unwrapOrThrow(
+    listTeamsResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday `Query.teams(ListTeams)` response',
+      hint:
+        'Monday may have amended the `Team` selection — re-probe and ' +
+        'amend `src/api/teams.ts` if so',
     },
   );
+  if (parsed.teams === null) {
+    throw new ApiError(
+      'internal_error',
+      'Monday returned a null `teams` payload from ListTeams',
+      {
+        details: {
+          hint:
+            'Monday\'s documented shape is `[Team]` (an array, possibly empty) — ' +
+            'a null root indicates a wire change that needs re-probing',
+        },
+      },
+    );
+  }
+  return {
+    teams: parsed.teams.map(projectTeam),
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface GetTeamInputs {
   readonly client: MondayClient;
@@ -553,31 +708,78 @@ export interface GetTeamResult {
  * Empty wire response (Monday's shape for "team doesn't exist"
  * OR "team not visible to token") surfaces `not_found` with
  * `details.team_id` — same wire-shape collapse as M32 doc-get.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL.
+ * A null `teams` root surfaces `internal_error` with a drift
+ * hint (distinct from the empty-array case); a multi-element
+ * response surfaces `internal_error` defensively (a single-id
+ * query shouldn't return more than one team).
  */
-/* c8 ignore start */
 export const getTeam = async (
   inputs: GetTeamInputs,
 ): Promise<GetTeamResult> => {
-  void inputs;
-  void GET_TEAM_QUERY;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'getTeam stub — runtime body lands at v0.5-M34 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    GET_TEAM_QUERY,
+    { ids: [inputs.teamId] },
+    { operationName: 'GetTeam' },
+  );
+  const parsed = unwrapOrThrow(
+    getTeamResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday `Query.teams(GetTeam)` response',
+      details: { team_id: inputs.teamId },
+      hint:
+        'Monday may have amended the `Team` selection — re-probe and ' +
+        'amend `src/api/teams.ts` if so',
     },
   );
+  if (parsed.teams === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a null \`teams\` payload from GetTeam(${inputs.teamId})`,
+      {
+        details: {
+          team_id: inputs.teamId,
+          hint:
+            'Monday\'s documented shape is `[Team]` (an array, possibly empty) — ' +
+            'a null root indicates a wire change that needs re-probing',
+        },
+      },
+    );
+  }
+  if (parsed.teams.length === 0) {
+    throw new ApiError(
+      'not_found',
+      `team ${inputs.teamId} not found (does not exist or not visible to token)`,
+      { details: { team_id: inputs.teamId } },
+    );
+  }
+  if (parsed.teams.length > 1) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned ${String(parsed.teams.length)} teams for a single-id GetTeam query`,
+      {
+        details: {
+          team_id: inputs.teamId,
+          hint: 'wire shape regression — re-probe `Query.teams(ids:)`',
+        },
+      },
+    );
+  }
+  const [wireTeam] = parsed.teams;
+  /* c8 ignore next 6 */
+  if (wireTeam === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a sparse teams array for GetTeam(${inputs.teamId})`,
+      { details: { team_id: inputs.teamId } },
+    );
+  }
+  return {
+    team: projectTeam(wireTeam),
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface CreateTeamInputs {
   readonly client: MondayClient;
@@ -604,32 +806,75 @@ export interface CreateTeamResult {
  * `isGuestTeam` and omits the `options` variable entirely when
  * `allowEmptyTeam` is unset (Monday's wire `options:` arg is
  * optional and a `null` value would be treated as "field
- * present" rather than "field omitted").
+ * present" rather than "field omitted"). The same omit-vs-null
+ * discipline applies to each nullable `input.*` slot — only
+ * supplied fields land in the wire payload.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL.
+ * A missing-key wire response surfaces `internal_error` via
+ * `assertResponseFieldPresent` (R42 helper); a null payload
+ * surfaces `internal_error` too — a successful `create_team`
+ * mutation must return the created Team (a non-existent team
+ * after a 200 response indicates a Monday-side regression).
  */
-/* c8 ignore start */
 export const createTeam = async (
   inputs: CreateTeamInputs,
 ): Promise<CreateTeamResult> => {
-  void inputs;
-  void CREATE_TEAM_MUTATION;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'createTeam stub — runtime body lands at v0.5-M34 IMPL.',
+  const input: Record<string, unknown> = { name: inputs.name };
+  if (inputs.subscriberIds !== undefined) {
+    input.subscriber_ids = inputs.subscriberIds;
+  }
+  if (inputs.isGuestTeam !== undefined) {
+    input.is_guest_team = inputs.isGuestTeam;
+  }
+  const variables: Record<string, unknown> = { input };
+  if (inputs.allowEmptyTeam !== undefined) {
+    variables.options = { allow_empty_team: inputs.allowEmptyTeam };
+  }
+  const response = await inputs.client.raw<unknown>(
+    CREATE_TEAM_MUTATION,
+    variables,
+    { operationName: 'CreateTeam' },
+  );
+  const data = unwrapOrThrow(
+    createTeamResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed CreateTeam response',
+      details: { team_name: inputs.name },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `createTeamResponseSchema` if ' +
+        'Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'create_team',
+    operationLabel: 'CreateTeam',
+    details: { team_name: inputs.name },
+    nullHandling: 'caller_handles',
+  });
+  const rawTeam = data.create_team;
+  if (rawTeam === null || rawTeam === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no team payload from create_team for name ${JSON.stringify(inputs.name)}.`,
+      { details: { team_name: inputs.name } },
+    );
+  }
+  const wireTeam = unwrapOrThrow(
+    teamWireSchema.safeParse(rawTeam),
+    {
+      context: `Monday returned a malformed team payload for name ${JSON.stringify(inputs.name)}`,
+      details: { team_name: inputs.name },
+    },
+  );
+  return {
+    team: projectTeam(wireTeam),
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface DeleteTeamInputs {
   readonly client: MondayClient;
@@ -650,38 +895,64 @@ export interface DeleteTeamResult {
  *
  * A null `delete_team` payload surfaces `not_found` —
  * mirrors the M14 `workspace delete` cadence (id was bogus
- * OR team already deleted by a concurrent caller).
+ * OR team already deleted by a concurrent caller). A missing
+ * `delete_team` key surfaces `internal_error` per the R42
+ * helper's "key absent" branch (schema drift).
  *
  * **Destructive-gate ordering.** The verb's action body MUST
  * call `enforceDestructiveGate` BEFORE this fetcher per the
  * M10 round-1 P2 invariant. A missing `--yes` surfaces as
  * `confirmation_required` from the action layer, never
  * masked by `config_error` when no token is configured.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL.
  */
-/* c8 ignore start */
 export const deleteTeam = async (
   inputs: DeleteTeamInputs,
 ): Promise<DeleteTeamResult> => {
-  void inputs;
-  void DELETE_TEAM_MUTATION;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'deleteTeam stub — runtime body lands at v0.5-M34 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    DELETE_TEAM_MUTATION,
+    { teamId: inputs.teamId },
+    { operationName: 'DeleteTeam' },
+  );
+  const data = unwrapOrThrow(
+    deleteTeamResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed DeleteTeam response',
+      details: { team_id: inputs.teamId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `deleteTeamResponseSchema` if ' +
+        'Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'delete_team',
+    operationLabel: 'DeleteTeam',
+    details: { team_id: inputs.teamId },
+    nullHandling: 'caller_handles',
+  });
+  const rawTeam = data.delete_team;
+  if (rawTeam === null || rawTeam === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no team payload from delete_team for id ${inputs.teamId}`,
+      { details: { team_id: inputs.teamId } },
+    );
+  }
+  const wireTeam = unwrapOrThrow(
+    teamWireSchema.safeParse(rawTeam),
+    {
+      context: `Monday returned a malformed team payload for id ${inputs.teamId}`,
+      details: { team_id: inputs.teamId },
+    },
+  );
+  return {
+    team: projectTeam(wireTeam),
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface AddUsersToTeamInputs {
   readonly client: MondayClient;
@@ -708,35 +979,60 @@ export interface AddUsersToTeamResult {
  * **Wire returns User objects, not error reasons.** Monday's
  * `failed_users[]` carries the User who failed but NO per-user
  * reason on the wire today. The CLI action body emits a generic
- * `membership_failed` error code per failed user. Verify at
- * IMPL cassette whether Monday surfaces a reason elsewhere
- * (`errors[]` extension, side-band keys) — if not, the generic
- * code is the agent contract.
+ * `membership_failed` error code per failed user. The IMPL
+ * cassette suite covers the single-shot non-partial happy case
+ * + the partial-success failed/successful split; no per-user
+ * reason key surfaced on Monday's wire today (verified via
+ * round-2 probe introspection of `ChangeTeamMembershipsResult`
+ * — 2 fields only, no reason / error / message slot).
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL.
+ * A null `add_users_to_team` payload surfaces `internal_error`
+ * — the wire returns the result envelope even when every
+ * supplied user fails (failures go into `failed_users[]`, not
+ * the root). A null root indicates a wire-shape regression.
  */
-/* c8 ignore start */
 export const addUsersToTeam = async (
   inputs: AddUsersToTeamInputs,
 ): Promise<AddUsersToTeamResult> => {
-  void inputs;
-  void ADD_USERS_TO_TEAM_MUTATION;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'addUsersToTeam stub — runtime body lands at v0.5-M34 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    ADD_USERS_TO_TEAM_MUTATION,
+    { teamId: inputs.teamId, userIds: inputs.userIds },
+    { operationName: 'AddUsersToTeam' },
+  );
+  const parsed = unwrapOrThrow(
+    addUsersToTeamResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed AddUsersToTeam response',
+      details: { team_id: inputs.teamId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `addUsersToTeamResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  if (parsed.add_users_to_team === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a null \`add_users_to_team\` payload for team ${inputs.teamId}`,
+      {
+        details: {
+          team_id: inputs.teamId,
+          hint:
+            'Monday\'s documented shape is ChangeTeamMembershipsResult ' +
+            '(non-null on the wire) — a null root indicates a wire ' +
+            'change that needs re-probing',
+        },
+      },
+    );
+  }
+  return {
+    failedUsers: parsed.add_users_to_team.failed_users,
+    successfulUsers: parsed.add_users_to_team.successful_users,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface RemoveUsersFromTeamInputs {
   readonly client: MondayClient;
@@ -761,27 +1057,48 @@ export interface RemoveUsersFromTeamResult {
  * universal partial-success envelope with `operation:
  * 'remove_users_from_team'`.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M34
- * IMPL.
+ * Same null-root → `internal_error` contract as
+ * {@link addUsersToTeam}.
  */
-/* c8 ignore start */
 export const removeUsersFromTeam = async (
   inputs: RemoveUsersFromTeamInputs,
 ): Promise<RemoveUsersFromTeamResult> => {
-  void inputs;
-  void REMOVE_USERS_FROM_TEAM_MUTATION;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'removeUsersFromTeam stub — runtime body lands at v0.5-M34 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    REMOVE_USERS_FROM_TEAM_MUTATION,
+    { teamId: inputs.teamId, userIds: inputs.userIds },
+    { operationName: 'RemoveUsersFromTeam' },
+  );
+  const parsed = unwrapOrThrow(
+    removeUsersFromTeamResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M34 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed RemoveUsersFromTeam response',
+      details: { team_id: inputs.teamId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `removeUsersFromTeamResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  if (parsed.remove_users_from_team === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned a null \`remove_users_from_team\` payload for team ${inputs.teamId}`,
+      {
+        details: {
+          team_id: inputs.teamId,
+          hint:
+            'Monday\'s documented shape is ChangeTeamMembershipsResult ' +
+            '(non-null on the wire) — a null root indicates a wire ' +
+            'change that needs re-probing',
+        },
+      },
+    );
+  }
+  return {
+    failedUsers: parsed.remove_users_from_team.failed_users,
+    successfulUsers: parsed.remove_users_from_team.successful_users,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */

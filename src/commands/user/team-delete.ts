@@ -39,21 +39,22 @@
  * agents can't safely retry without verifying the id still
  * names the same record.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema +
- * destructive-gate ordering all ship at pre-flight (real
- * shipped surface — the gate's `confirmation_required` shape
- * is the agent contract for missing-`--yes` invocations).
- * The wire-call dispatch + envelope emit land at v0.5-M34
- * IMPL.
+ * **Runtime body landed at v0.5-M34 IMPL.** Destructive gate
+ * fires BEFORE `resolveClient` (M10 round-1 P2 invariant);
+ * dry-run path emits minimal `{operation, team_id}` (no wire
+ * call); live path dispatches {@link deleteTeam} + projects via
+ * `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { TeamIdSchema } from '../../types/ids.js';
 import {
+  deleteTeam,
   teamDeleteOutputSchema,
   type TeamDeleteOutput,
 } from '../../api/teams.js';
@@ -94,9 +95,9 @@ export const teamDeleteCommand: CommandModule<
         // A missing `--yes` must surface as `confirmation_required`
         // per cli-design §3.1 #7's unconditional contract, never
         // masked by `config_error` when no token is configured.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        const preGateGlobalFlags = parseGlobalFlags(program.opts(), ctx.env);
         enforceDestructiveGate({
-          globalFlags,
+          globalFlags: preGateGlobalFlags,
           verb: 'user team-delete',
           target: parsed.teamId,
           detailKey: 'team_id',
@@ -108,29 +109,44 @@ export const teamDeleteCommand: CommandModule<
             'membership must be re-added).',
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing +
-        // destructive-gate firing above are real-and-shipped; only
-        // the wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-delete — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + destructive-gate ' +
-                'invariant + wire mutation document only; the live dispatch ' +
-                '+ dry-run emit + envelope emit land at the IMPL session.',
-            },
-          },
-        );
-        /* c8 ignore stop */
+        if (preGateGlobalFlags.dryRun) {
+          // Minimal dry-run shape — no preflight read fires. Per
+          // cli-design §6.4 mutation-dry-run variant: `operation:
+          // "delete_team"`, `team_id`, nothing else. `meta.source:
+          // 'none'` because no API call fires; live surfaces
+          // `not_found` for missing ids on its own. Mirrors
+          // workspace-delete cadence.
+          const { apiVersion } = resolveClient(ctx, program.opts());
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'delete_team',
+                team_id: parsed.teamId,
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await deleteTeam({ client, teamId: parsed.teamId });
+        emitMutation({
+          ctx,
+          data: result.team,
+          schema: teamDeleteCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

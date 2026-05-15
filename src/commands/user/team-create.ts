@@ -61,18 +61,22 @@
  * `forbidden` (mapped from Monday's PERMISSION_DENIED
  * extension).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema +
- * commander wiring all ship at pre-flight (real shipped
- * surface). The action body's wire-call dispatch + envelope
- * emit land at v0.5-M34 IMPL.
+ * **Runtime body landed at v0.5-M34 IMPL.** Argv parsing +
+ * `--users` comma-split run BEFORE `resolveClient` so a
+ * malformed `--users` surfaces `usage_error` ahead of any
+ * missing-token `config_error`. Dry-run path emits minimal
+ * planned changes (no wire call fires); live path dispatches
+ * {@link createTeam} + projects via `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { UserIdSchema } from '../../types/ids.js';
 import { parseBrandedListArg } from '../../utils/parse-brand-list.js';
 import {
+  createTeam,
   teamCreateOutputSchema,
   type TeamCreateOutput,
 } from '../../api/teams.js';
@@ -164,29 +168,65 @@ export const teamCreateCommand: CommandModule<
                   'duplicate commas',
               });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the wire call + envelope
-        // emit. Argv parsing + comma-list parsing above are
-        // real-and-shipped; only the wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void userIds;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday user team-create — runtime body lands at v0.5-M34 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M34 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + envelope emit land ' +
-                'at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          // Minimal dry-run shape per cli-design §6.4 mutation-
+          // dry-run variant — argv-derived, no preflight read.
+          // Only supplied input slots land in the planned payload
+          // (mirrors the wire-side omit-vs-null discipline the live
+          // path uses; agents see exactly what the live mutation
+          // would send).
+          const planned: Record<string, unknown> = {
+            operation: 'create_team',
+            name: parsed.name,
+          };
+          if (userIds !== undefined) {
+            planned.subscriber_ids = [...userIds];
+          }
+          if (parsed.guestTeam !== undefined) {
+            planned.is_guest_team = parsed.guestTeam;
+          }
+          if (parsed.allowEmpty !== undefined) {
+            planned.allow_empty_team = parsed.allowEmpty;
+          }
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [planned],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await createTeam({
+          client,
+          name: parsed.name,
+          ...(userIds === undefined ? {} : { subscriberIds: userIds }),
+          ...(parsed.guestTeam === undefined
+            ? {}
+            : { isGuestTeam: parsed.guestTeam }),
+          ...(parsed.allowEmpty === undefined
+            ? {}
+            : { allowEmptyTeam: parsed.allowEmpty }),
+        });
+        emitMutation({
+          ctx,
+          data: result.team,
+          schema: teamCreateCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };
