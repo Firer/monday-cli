@@ -124,6 +124,28 @@ describe('docCreateInWorkspaceCommand.inputSchema (M35 create-in-workspace argv)
     ).toThrow(UsageError);
   });
 
+  it('rejects board-variant slots `item` / `column` (D7 mutual-exclusion guard)', () => {
+    // D7 closure splits Monday's mutually-exclusive `CreateDocInput`
+    // (`board` vs `workspace`) into two CLI verbs. The workspace
+    // verb's strict schema must reject the board-variant slots
+    // outright so the argv boundary catches a mis-targeted invocation
+    // before the wire call.
+    expect(() =>
+      parseArgv(docCreateInWorkspaceCommand.inputSchema, {
+        workspace: '5555',
+        name: 'foo',
+        item: '12345',
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      parseArgv(docCreateInWorkspaceCommand.inputSchema, {
+        workspace: '5555',
+        name: 'foo',
+        column: 'doc_column_1',
+      }),
+    ).toThrow(UsageError);
+  });
+
   it('declares the canonical command name', () => {
     expect(docCreateInWorkspaceCommand.name).toBe('doc.create-in-workspace');
   });
@@ -191,6 +213,40 @@ describe('docCreateOnColumnCommand.inputSchema (M35 create-on-column argv)', () 
         item: '12345',
         column: 'doc_column_1',
         unknownFlag: 'oops',
+      }),
+    ).toThrow(UsageError);
+  });
+
+  it('rejects workspace-variant slots `workspace` / `folder` / `kind` / `name` (D7 mutual-exclusion guard)', () => {
+    // D7 closure: column verb's strict schema must reject every
+    // workspace-variant slot outright so the argv boundary catches
+    // mis-targeted invocations before the wire call.
+    expect(() =>
+      parseArgv(docCreateOnColumnCommand.inputSchema, {
+        item: '12345',
+        column: 'doc_column_1',
+        workspace: '5555',
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      parseArgv(docCreateOnColumnCommand.inputSchema, {
+        item: '12345',
+        column: 'doc_column_1',
+        folder: '67890',
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      parseArgv(docCreateOnColumnCommand.inputSchema, {
+        item: '12345',
+        column: 'doc_column_1',
+        kind: 'public',
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      parseArgv(docCreateOnColumnCommand.inputSchema, {
+        item: '12345',
+        column: 'doc_column_1',
+        name: 'doc name',
       }),
     ).toThrow(UsageError);
   });

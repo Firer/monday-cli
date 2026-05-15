@@ -181,7 +181,7 @@
  * return Monday's `JSON` scalar — an untyped wire payload that
  * Monday currently surfaces as `null` or an empty record per the
  * v0.5 kickoff probe. The CLI projects to a flat
- * `{ doc_id: string, success: boolean }` envelope at the fetcher
+ * `{ doc_id: string, success: true }` envelope at the fetcher
  * boundary so agents read a uniform shape across rename / delete /
  * duplicate. `doc_id` echoes the input id verbatim; `success` is
  * `true` whenever Monday's GraphQL response carries no errors.

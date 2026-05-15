@@ -4345,6 +4345,14 @@ on the item's board; CLI does NOT pre-check column-type
 compatibility (mirrors M8's `change_column_value` cadence);
 incompatible columns surface `validation_failed` at the wire.
 
+**Permission-sensitive.** Tokens lacking write scope on the
+target item's board (or lacking the column-write permission
+for the doc-typed column) surface `forbidden` (mapped from
+Monday's PERMISSION_DENIED extension); distinct from the
+`validation_failed` rejection for incompatible column types —
+permission failure precedes column-type validation at the
+wire.
+
 **Dry-run envelope**:
 
 ```json
@@ -4379,15 +4387,10 @@ Rename an existing workdoc via Monday's
 success: true }` envelope at the fetcher boundary per D9
 closure.
 
-**Wire-name asymmetry note.** Monday's `update_doc_name`
-uses camelCase `docId` on the wire per Finding 7 (vs the
-snake_case `doc_id` Monday uses for `Document` field names
-elsewhere on the schema); the fetcher boundary mirrors the
-wire verbatim, but CLI argv stays kebab-case (`<did>`
-positional + `--name <n>` flag) and error envelope
-`details.*` keys stay snake_case (`details.doc_id`). 4th
-supporting site for R-NEW-41; canonical asymmetry note at
-`src/api/documents.ts` module header.
+**camelCase wire-arg note.** `update_doc_name` uses
+camelCase `docId` on the wire (Finding 7) — see the
+canonical asymmetry note at `src/api/documents.ts` module
+header (4th supporting site for R-NEW-41).
 
 **Status: v0.5-M35 pre-flight stub at this commit.** Runtime
 body lands at v0.5-M35 IMPL — IMPL cassette pins how Monday

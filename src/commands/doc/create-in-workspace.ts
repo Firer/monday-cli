@@ -59,6 +59,7 @@ import { z } from 'zod';
 import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import { WorkspaceIdSchema, DocFolderIdSchema } from '../../types/ids.js';
 import {
   CREATE_DOC_IN_WORKSPACE_MUTATION,
@@ -122,6 +123,16 @@ export const docCreateInWorkspaceCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         const parsed = parseArgv(docCreateInWorkspaceCommand.inputSchema, opts);
+
+        // Parse global flags BEFORE the c8-ignored stub throw so
+        // invalid global argv (e.g. `--json --table` conflict,
+        // unknown `--output` value) surfaces as `usage_error` from
+        // the parse boundary rather than masked as `internal_error`
+        // from the stub. R-NEW-76 extends to global-flag parsing,
+        // not just `parseArgv`. The parsed value is `void`ed until
+        // the IMPL session wires it through `resolveClient`.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        void globalFlags;
 
         /* c8 ignore start */
         // Stub body — IMPL session lands the dry-run emit + live

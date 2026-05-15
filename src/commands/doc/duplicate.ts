@@ -87,6 +87,7 @@ import { z } from 'zod';
 import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
   DUPLICATE_DOC_MUTATION,
@@ -145,6 +146,14 @@ export const docDuplicateCommand: CommandModule<
           docId: docIdArg,
           ...(opts as Readonly<Record<string, unknown>>),
         });
+
+        // Parse global flags BEFORE the c8-ignored stub throw so
+        // invalid global argv surfaces as `usage_error` from the
+        // parse boundary, not masked as `internal_error` from the
+        // stub. See `create-in-workspace.ts` for the canonical
+        // rationale.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        void globalFlags;
 
         /* c8 ignore start */
         // Stub body — IMPL session lands the dry-run emit + live

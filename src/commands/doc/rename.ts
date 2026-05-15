@@ -9,16 +9,12 @@
  * Returns Monday's opaque `JSON` scalar — the fetcher projects to
  * the flat `{ doc_id: <echoed>, success: true }` envelope per D9.
  *
- * **Wire-name asymmetry note.** Monday's `update_doc_name` mutation
- * uses **camelCase** arg names on the wire (`docId`, `name`) per
- * Finding 7; the fetcher boundary mirrors the wire shape, but
- * CLI argv stays kebab-case (`<doc-id>` positional + `--name <n>`)
- * and error envelope `details.*` keys stay snake_case
- * (`details.doc_id`). The asymmetry is wire-side and never
- * surfaces to agents — 4th supporting site for R-NEW-41
- * (R-v0.5-NEW-3 graduation candidate; full entry at v0.5-plan
- * §22 R-v0.5-NEW-3 + canonical wire-vs-CLI asymmetry note in
- * `src/api/documents.ts` module header).
+ * **camelCase wire-arg note.** `update_doc_name` uses camelCase
+ * `docId` on the wire (Finding 7); CLI argv stays kebab-case;
+ * error envelope `details.*` keys stay snake_case. See the
+ * canonical asymmetry note at `src/api/documents.ts` module
+ * header (4th supporting site for R-NEW-41; R-v0.5-NEW-3
+ * graduation candidate).
  *
  * **Argv shape.**
  *
@@ -53,6 +49,7 @@ import { z } from 'zod';
 import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
   UPDATE_DOC_NAME_MUTATION,
@@ -106,6 +103,14 @@ export const docRenameCommand: CommandModule<
           docId: docIdArg,
           ...(opts as Readonly<Record<string, unknown>>),
         });
+
+        // Parse global flags BEFORE the c8-ignored stub throw so
+        // invalid global argv surfaces as `usage_error` from the
+        // parse boundary, not masked as `internal_error` from the
+        // stub. See `create-in-workspace.ts` for the canonical
+        // rationale.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        void globalFlags;
 
         /* c8 ignore start */
         // Stub body — IMPL session lands the dry-run emit + live

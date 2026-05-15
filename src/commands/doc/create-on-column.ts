@@ -43,6 +43,14 @@
  * to one item-column pair). Agents that need idempotency must
  * pair with a column-value read first.
  *
+ * **Permission-sensitive.** Tokens lacking write scope on the
+ * target item's board (or lacking the column-write permission
+ * for the doc-typed column) surface `forbidden` (mapped from
+ * Monday's PERMISSION_DENIED extension). Distinct from the
+ * separate `validation_failed` rejection for incompatible
+ * column types — permission failure precedes column-type
+ * validation at Monday's wire.
+ *
  * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
  * wiring all ship at pre-flight. Runtime body lands at v0.5-M35
  * IMPL.
@@ -51,6 +59,7 @@ import { z } from 'zod';
 import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { parseGlobalFlags } from '../../types/global-flags.js';
 import { ItemIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import {
   CREATE_DOC_ON_COLUMN_MUTATION,
@@ -104,6 +113,14 @@ export const docCreateOnColumnCommand: CommandModule<
       )
       .action(async (opts: unknown) => {
         const parsed = parseArgv(docCreateOnColumnCommand.inputSchema, opts);
+
+        // Parse global flags BEFORE the c8-ignored stub throw so
+        // invalid global argv surfaces as `usage_error` from the
+        // parse boundary, not masked as `internal_error` from the
+        // stub. See `create-in-workspace.ts` for the canonical
+        // rationale.
+        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        void globalFlags;
 
         /* c8 ignore start */
         // Stub body — IMPL session lands the dry-run emit + live

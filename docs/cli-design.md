@@ -2544,7 +2544,21 @@ monday doc create-on-column --item <iid> --column <cid> [--dry-run]             
                                           # `validation_failed` at the wire.
                                           # Envelope `data: <Document>` —
                                           # same shape as `create-in-
-                                          # workspace`. `operationName:
+                                          # workspace`. Permission-
+                                          # sensitive — tokens lacking
+                                          # write scope on the target
+                                          # item's board (or lacking the
+                                          # column-write permission for
+                                          # the doc-typed column) surface
+                                          # `forbidden` (mapped from
+                                          # Monday's PERMISSION_DENIED
+                                          # extension); distinct from the
+                                          # `validation_failed` rejection
+                                          # for incompatible column
+                                          # types — permission failure
+                                          # precedes column-type
+                                          # validation at the wire.
+                                          # `operationName:
                                           # 'CreateDocOnColumn'` pinned at
                                           # the fetcher boundary (R-NEW-37
                                           # W2). Live-only; dry-run emits
@@ -2555,23 +2569,12 @@ monday doc rename <did> --name <n> [--dry-run]                                  
                                           # ID!, name: String!) → JSON`
                                           # (opaque scalar). Pinned at M35
                                           # pre-flight via empirical probe.
-                                          # **camelCase vs snake_case wire-
-                                          # arg asymmetry (Finding 7):**
-                                          # `update_doc_name` uses camelCase
-                                          # `docId` on the wire (distinct
-                                          # from snake_case `doc_id` Monday
-                                          # uses for `Document` field names
-                                          # elsewhere on the schema);
-                                          # fetcher boundary mirrors the
-                                          # wire verbatim; CLI argv stays
-                                          # kebab-case (`<did>` positional +
-                                          # `--name <n>`); error envelope
-                                          # `details.*` keys stay
-                                          # snake_case (`details.doc_id`).
-                                          # 4th supporting site for
-                                          # R-NEW-41; canonical asymmetry
-                                          # note at `src/api/documents.ts`
-                                          # module header. Envelope projects
+                                          # camelCase wire-arg note
+                                          # (`docId`; Finding 7) — see the
+                                          # canonical asymmetry note at
+                                          # `src/api/documents.ts` module
+                                          # header (4th supporting site for
+                                          # R-NEW-41). Envelope projects
                                           # Monday's opaque JSON return
                                           # into `data: { doc_id: <echoed>,
                                           # success: true }` per D9
