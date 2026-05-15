@@ -696,37 +696,50 @@ context at v0.5-plan §12):
 - `package.json` version: **0.4.0** (stays through v0.5
   milestones; bumps to `0.5.0` at v0.5 release-prep).
 
-**Next session — post-M35 IMPL candidate-selection.** Per the
-R-NEW-75 5-dimension framework, run a dedicated candidate-
-selection session for the next v0.5 milestone before any
-pre-flight contract diff. Open candidates (from cli-design §13
-v0.5 backlog):
+**Candidate-selection closed: M36 = doc-block CRUD** per the
+R-NEW-75 5-dimension framework (this session). Decision pinned
+across the 3 candidates evaluated (M36 doc-block CRUD vs M37
+doc-content import first vs v0.5.x cleanup bundle). M36 won on
+neutral trade-offs: empirical probes already ran at v0.5
+kickoff (no fresh probe needed — scope pinned at v0.5-plan §3
+M36 + §8 D10-D11); JSON `client.raw` transport seam verbatim
+(mirrors M22 / M27 / M32 / M35 — R-v0.4-W2 does NOT fire); 1
+destructive verb (`doc block-delete --yes`) follows the
+standard `enforceDestructiveGate` cadence per M10 invariant;
+R-NEW-42 `parseJsonArg` already 3-consumer-lifted at v0.3-M27
+(M36 consumes the helper at consumer 4 + 5 for `block-create
+--content` + `block-update --content` — no new R-class
+trigger at pre-flight). Codex round estimate 3-5 IMPL rounds
+per the M22 / M27 / M30 / M31 / M32 / M34 OBJECT-return
+mutation-surface precedent (16-value `DocBlockContentType`
+enum may add ~1 round for per-block-type content cassette
+breadth at IMPL; M35's 7-round outlier was opaque-JSON-driven
+and doesn't apply here — `create_doc_block` /
+`update_doc_block` return `DocumentBlock` OBJECT;
+`delete_doc_block` returns `{id}` OBJECT). Estimated 3-4
+sessions through M36 pre-flight + IMPL. **Trade-off surfaced
+at the AskUserQuestion**: M37-first would close D13 (empirical
+size-limit probe) earlier and de-risk v0.5 release-prep
+sooner; the user picked M36 first on the lower-risk-session
+axis (all M36 probes already settled vs M37's still-tentative
+D13). M37 + v0.5.x cleanup open at their own candidate-
+selection sessions per the framework's per-milestone cadence.
 
-- **M36 doc-block CRUD** (`create_doc_block` /
-  `update_doc_block` / `delete_doc_block`) — 3 verbs against
-  Monday's per-block wire surface; probe already ran at v0.5
-  kickoff (`DocBlockContentType` is a 16-value closed enum).
-  D10 + D11 tentative-closed at planning; pre-flight will
-  ratify. R-v0.5-NEW-1 (input-shape introspect-helper
-  widening) MAY fire if the pre-flight needs a fresh
-  `CreateDocBlockInput` probe.
-- **M37 doc-content import** (`import_doc_from_html` /
-  `add_content_to_doc_from_markdown`) — 2 verbs; both wire
-  surfaces return `{ success, error? }` discriminated unions
-  (D12 — first M37-style success/error result pattern in v0.5
-  scope). D13 (empirical size-limit probe at M37 pre-flight)
-  fires.
-- **v0.5.x cleanup bundle / tangential team mutations** —
-  M34-deferred surfaces (`assign_team_owners` /
-  `remove_team_owners` / `add_teams_to_board` / etc.);
-  agent-UX hierarchical-team semantics unclear today.
-
-Codex round estimate for each: M36 = 3-5 IMPL rounds (16-value
-enum on `--type` may surface contract drift; per-block-type
-payload shapes ship across 16 cassettes); M37 = 4-6 IMPL
-rounds (first success/error discriminated union per D12 + the
-size-limit probe per D13). Estimated 3-4 sessions through
-the chosen milestone's pre-flight + IMPL.
+**Next session — M36 doc-block CRUD pre-flight.** Lands the
+contract surface: 3 stub fetcher functions in
+`src/api/documents.ts` (`createDocBlock` / `updateDocBlock` /
+`deleteDocBlock`) + 3 GraphQL mutation documents + wrapping
+response schemas + new `DocBlockIdSchema` brand at
+`src/types/ids.ts` (12th brand) + 3 command stubs at
+`src/commands/doc/block-{create,update,delete}.ts` + 16-value
+`DOC_BLOCK_CONTENT_TYPE_VALUES` closed enum (per D10
+tentative-closure) + cli-design §4.3 DOC extension + argv-
+parser unit tests. Per-block content payload structure (D11)
+documented in output-shapes.md as deferred to IMPL cassettes
+for 16-shape breadth. Single destructive gate on
+`block-delete --yes` per the M10 round-1 P2 invariant
+(parseArgv + enforceDestructiveGate BEFORE the c8-ignored
+stub throw per R-NEW-76).
 
 R-class state to carry forward at next session:
 
