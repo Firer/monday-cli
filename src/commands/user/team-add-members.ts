@@ -43,10 +43,14 @@
  * (R-NEW-41 4th consumer trigger).
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run
- * variant. Mirror M14 `workspace add-users` cadence —
- * minimal envelope listing the planned `add_users_to_team`
- * operation per supplied user_id (no preflight read; argv-
- * derived). `meta.source: 'none'`.
+ * variant. SINGLE planned operation entry `{operation:
+ * 'add_users_to_team', team_id, user_ids: [...]}` with
+ * `user_ids` echoing the input argv order — Monday's wire
+ * is a single-shot bulk call (`add_users_to_team(team_id,
+ * user_ids: [ID!]!)`), NOT a per-user fan-out like
+ * `monday workspace add-users` (which dispatches sequentially
+ * one wire call per user). No preflight read fires; argv-
+ * derived. `meta.source: 'none'`.
  *
  * **Idempotent: yes** — Monday is no-op on a re-add (the
  * user already being in the team surfaces as `successful_

@@ -38,10 +38,13 @@
  * "Wire-vs-CLI semantics documentation conventions" section.
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run
- * variant. Mirror M14 `workspace remove-users` cadence —
- * minimal envelope listing the planned
- * `remove_users_from_team` operation per supplied user_id (no
- * preflight read; argv-derived). `meta.source: 'none'`.
+ * variant. SINGLE planned operation entry `{operation:
+ * 'remove_users_from_team', team_id, user_ids: [...]}` with
+ * `user_ids` echoing the input argv order — Monday's wire is
+ * a single-shot bulk call (`remove_users_from_team(team_id,
+ * user_ids: [ID!]!)`), NOT a per-user fan-out like
+ * `monday workspace remove-users`. No preflight read fires;
+ * argv-derived. `meta.source: 'none'`.
  *
  * **Idempotent: yes** — Monday is no-op on a re-remove (the
  * user already being out of the team surfaces in
