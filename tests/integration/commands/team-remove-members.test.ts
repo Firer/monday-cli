@@ -123,6 +123,60 @@ describe('monday user team-remove-members (M34)', () => {
     expect(env.data.results[1]?.ok).toBe(true);
   });
 
+  it('null bucket: failed_users: null normalised to [] (Codex round-2 P3-2 — parity with add-members)', async () => {
+    // The `?? []` normalisation lives independently in
+    // `removeUsersFromTeam` so pin it explicitly — a future refactor
+    // could regress one fetcher without the other.
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'RemoveUsersFromTeam',
+          response: {
+            data: {
+              remove_users_from_team: {
+                failed_users: null,
+                successful_users: [wireUser('67890')],
+              },
+            },
+          },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-remove-members', '11001', '--users', '67890', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as MembershipResultEnvelope;
+    expect(env.data.results[0]?.ok).toBe(true);
+  });
+
+  it('null bucket: successful_users: null normalised to [] (all-failed response)', async () => {
+    const cassette: Cassette = {
+      interactions: [
+        {
+          operation_name: 'RemoveUsersFromTeam',
+          response: {
+            data: {
+              remove_users_from_team: {
+                failed_users: [wireUser('67890')],
+                successful_users: null,
+              },
+            },
+          },
+        },
+      ],
+    };
+    const out = await drive(
+      ['user', 'team-remove-members', '11001', '--users', '67890', '--json'],
+      cassette,
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as MembershipResultEnvelope;
+    expect(env.data.results[0]?.ok).toBe(false);
+    expect(env.data.results[0]?.error?.code).toBe('membership_failed');
+  });
+
   it('internal_error when remove_users_from_team payload is null', async () => {
     const cassette: Cassette = {
       interactions: [

@@ -54,6 +54,24 @@ describe('monday user team-delete (M34)', () => {
     expect(out.requests).toBe(0);
   });
 
+  it('confirmation_required precedes config_error when no token is set (gate-before-resolveClient invariant)', async () => {
+    // M10 round-1 P2 invariant: `confirmation_required` must surface
+    // even when the runner can't reach the config layer. The gate
+    // ordering prevents `config_error` from masking the agent-
+    // observable destructive-gate signal. Codex IMPL round-2 P3-1.
+    const out = await drive(
+      ['user', 'team-delete', '11001', '--json'],
+      { interactions: [] },
+      { env: { MONDAY_API_URL: 'https://api.monday.com/v2' } },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string };
+    };
+    expect(env.error?.code).toBe('confirmation_required');
+    expect(out.requests).toBe(0);
+  });
+
   it('dry-run: emits minimal planned changes with no wire call (source: none)', async () => {
     const out = await drive(
       ['user', 'team-delete', '11001', '--dry-run', '--json'],
