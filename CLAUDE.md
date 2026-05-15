@@ -519,33 +519,62 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**Next session — v0.5 candidate-selection for M35** (post-M34
-IMPL close). M34 closed end-to-end at `afdba15..02f1b1a` (IMPL
-feat + 3 Codex fix-up rounds + 1 ratification — 0 P1 + 1 P2 +
-4 P3 cumulative). 6 team writer verbs live + tested against
-fixture cassettes. Empirical findings from the IMPL cassettes:
-no per-user failure reason on Monday's `ChangeTeamMemberships
-Result` wire today (probe round-2 introspection holds; CLI's
-generic `membership_failed` code stays the agent contract);
-wire's outer bucket containers are NULLABLE list wrappers
-(round-1 P2-1 caught the schema-vs-docstring inconsistency
-in the pre-flight schema — IMPL widens to
-`z.array(...).nullable()` + normalises to `[]` at the
-projection boundary); `Team.owners` inner-entry nullability
+**Next session — v0.5-M35 doc-level CRUD pre-flight**
+(post-v0.5 candidate-selection session). M34 closed end-to-end
+at `afdba15..02f1b1a` (IMPL feat + 3 Codex fix-up rounds + 1
+ratification — 0 P1 + 1 P2 + 4 P3 cumulative). 6 team writer
+verbs live + tested against fixture cassettes. Empirical
+findings from the IMPL cassettes: no per-user failure reason
+on Monday's `ChangeTeamMembershipsResult` wire today (probe
+round-2 introspection holds; CLI's generic `membership_failed`
+code stays the agent contract); wire's outer bucket containers
+are NULLABLE list wrappers (round-1 P2-1 caught the schema-
+vs-docstring inconsistency in the pre-flight schema — IMPL
+widens to `z.array(...).nullable()` + normalises to `[]` at
+the projection boundary); `Team.owners` inner-entry nullability
 not probed at IMPL (no integration test cassette exercised
 the owners-null edge — defer until a real wire response
 surfaces it).
 
-Next session opens **M35 candidate-selection** per the
-R-NEW-75 5-dimension framework against the v0.5 backlog
-(doc-level CRUD: `create_doc` / `update_doc_name` /
-`delete_doc` / `duplicate_doc`; 4 verbs across 4-5 sessions
-expected if M35-M37 ship as one cluster). Other candidates on
-the backlog: tangential team mutations (assign_team_owners,
-add/remove teams from board/workspace), the `--parent <ptid>`
-team-create flag (D3 deferral), user-scoped `monday user
-teams <uid>`. Estimated 4-5 sessions through M35-M37 doc CRUD
-cluster.
+**Candidate-selection closed: M35 = doc-level CRUD** per the
+R-NEW-75 5-dimension framework. Decision pinned at this session
+across the 4 candidates evaluated (M35 doc-level CRUD vs M37
+doc-content import first vs small cleanup bundle vs tangential
+team mutations). M35 wins on neutral trade-offs: empirical
+probes already ran at v0.5 kickoff (no fresh probe needed —
+scope pinned at v0.5-plan §3 M35 + §8 D7-D9); JSON
+`client.raw` transport seam verbatim (mirrors M22 / M27 / M32 —
+R-v0.4-W2 does NOT fire); 1 destructive verb (`doc delete
+--yes`) follows the standard `enforceDestructiveGate` cadence;
+**R-class lift opportunities crystallize at pre-flight
+kickoff** — R-v0.5-NEW-1 (`inputFields` introspect-helper
+widening to `scripts/probe/_lib.ts`) likely fires the 3rd
+consumer via R-NEW-58 ahead-of-feat cadence, plus R-v0.5-NEW-5
++ R-v0.5-NEW-10 (paired-verb consistency on `create-in-
+workspace` / `create-on-column`); Codex round estimate
+3-4 pre-flight + 2-3 IMPL per the M22/M27/M30/M31/M32 write-
+surface precedent. Tangential team mutations excluded per M34
+D4 (deferred to v0.5.x); M37-first skips sequencing M35→M36
+and adds transport-seam risk; small cleanup bundle stalls the
+doc-CRUD cluster. Estimated 3-4 sessions through M35
+pre-flight + IMPL; M36 / M37 open at their own candidate-
+selection sessions per the framework's per-milestone cadence.
+
+**M35 scope (pre-flight will refine):** 4-5 new verbs under
+`monday doc *` — `doc create-in-workspace --workspace <wid>
+--name <n> [--folder <fid>] [--kind public|private|share]` +
+`doc create-on-column --item <iid> --column <cid>` (two verbs
+because Monday's `CreateDocInput` is mutually-exclusive
+`board` vs `workspace` — D7 tentative closure favours two
+verbs over one verb with placement choosers) + `doc rename
+<doc-id> --name <n>` (wire: `update_doc_name`) + `doc delete
+<doc-id> --yes` (wire: `delete_doc`) + `doc duplicate
+<doc-id> [--with-updates]` (wire: `duplicate_doc` +
+`duplicate_doc_with_content_and_updates`; D8 tentative
+closure drops the `--name <n>` slot since wire has no
+rename-on-duplicate). 3 of 4 mutations return opaque
+`JSON` scalar — CLI projects to flat `{ doc_id: string,
+success: boolean }` envelope at fetcher boundary per D9.
 
 **v0.4 release-prep close (prior session).** Mirrored v0.3-M28's
 release-prep cadence verbatim: 6 commits (envelope-snapshot
