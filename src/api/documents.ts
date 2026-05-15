@@ -925,10 +925,13 @@ export const duplicateTypeSchema = z.enum(DUPLICATE_TYPE_VALUES);
  * results (`update_doc_name` / `delete_doc` / `duplicate_doc`).
  * Per D9 closure, the CLI surfaces a flat `{ doc_id: string,
  * success: true }` envelope so agents read a uniform shape across
- * mutations — Monday's wire returns an opaque `JSON` scalar that's
- * currently undocumented (the IMPL cassette pins the actual
- * payload; the projection insulates agents from any wire-side
- * shape drift).
+ * mutations — Monday's wire returns an opaque `JSON` scalar whose
+ * exact shape isn't pinned by introspection (the v0.5 doc-CRUD
+ * probe was read-only — no live mutation cassette captured the
+ * payload). The projection insulates agents from any wire-side
+ * shape drift; the runtime accepts plausible-defensive shapes
+ * today, and a future live cassette would narrow what the helper
+ * accepts.
  *
  * `success` is pinned to literal `true` because Monday surfaces
  * failure via GraphQL `errors[]` (mapped to typed `ApiError`s at
@@ -945,12 +948,11 @@ export const duplicateTypeSchema = z.enum(DUPLICATE_TYPE_VALUES);
  *     targets that specific doc; success means it was renamed /
  *     deleted).
  *   - `duplicate` — emits the **NEWLY-CREATED** doc's id (Monday's
- *     `duplicate_doc` payload includes the new id; the fetcher
- *     extracts it from the opaque JSON). The original source-doc id
- *     stays available via the argv positional.
- *
- * IMPL cassette pins the duplicate-id-extraction shape; the
- * projection contract is the agent-visible surface.
+ *     `duplicate_doc` description: "Returns the new document's ID
+ *     on success"; the fetcher extracts the new id from the
+ *     opaque JSON via {@link extractDuplicateDocId}, which is
+ *     defensive across plausible wire shapes today). The original
+ *     source-doc id stays available via the argv positional.
  */
 export const docMutationResultSchema = z
   .object({
@@ -1025,8 +1027,10 @@ export type DocDeleteOutput = DocMutationResult;
  * Same flat `{ doc_id, success: true }` projection per D9, BUT the
  * `doc_id` slot carries the **newly-created duplicate's id** — NOT
  * the source-doc id. The verb's positional argv is the source-doc
- * id; the wire returns the new id in its JSON payload (IMPL
- * cassette pins the extraction shape).
+ * id; the wire returns the new id in its JSON payload, which
+ * {@link extractDuplicateDocId} pulls out (defensive across
+ * plausible shapes today; a future live cassette would narrow
+ * what the helper accepts).
  *
  * **No `--name <n>` slot per D8** — Monday's `duplicate_doc`
  * mutation carries no rename-on-duplicate arg. Agents needing a
@@ -1219,12 +1223,16 @@ const deleteDocResponseSchema = z
 
 /**
  * Wrapping response schema for the `DuplicateDoc` mutation. Same
- * opaque-JSON shape as the rename/delete variants. The IMPL
- * cassette pins how Monday surfaces the newly-created doc id in
- * the JSON payload — likely as a top-level `{ id: <new-id> }`
- * record per the workdocs-mutation cadence Monday's reference
- * docs hint at (the empirical probe couldn't trigger a duplicate
- * without write scope; the wire response is verified at IMPL).
+ * opaque-JSON shape as the rename/delete variants. Monday's wire
+ * carries the newly-created doc id in this opaque JSON payload
+ * (probe description: "Returns the new document's ID on
+ * success"); the exact shape isn't pinned by introspection and
+ * the v0.5 doc-CRUD probe was read-only. The fetcher extracts
+ * the new id via {@link extractDuplicateDocId}, which accepts
+ * multiple plausible shapes defensively (bare string / number /
+ * record-with-`id` / `doc_id` / `new_doc_id`). A future live
+ * cassette would let a follow-up commit narrow what the helper
+ * accepts to the exact wire shape.
  */
 const duplicateDocResponseSchema = z
   .object({
