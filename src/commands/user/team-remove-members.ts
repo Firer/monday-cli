@@ -33,9 +33,14 @@
  *
  * **Wire-vs-CLI semantics asymmetry note.** Same generic-
  * `membership_failed`-code asymmetry as team-add-members —
- * Monday's `failed_users[]` carries the User but no per-user
- * reason. Verify at IMPL cassette whether Monday surfaces a
- * reason elsewhere.
+ * Monday's `failed_users[]` carries the User but NO per-user
+ * reason on the wire today. The CLI emits a generic
+ * `membership_failed` error code per failed user; verify at
+ * IMPL cassette whether Monday surfaces a reason elsewhere
+ * (`errors[]` extension, side-band keys). This asymmetry
+ * extends the `docs/architecture.md` "Wire-vs-CLI semantics
+ * documentation conventions" section in the close-docs sweep
+ * (R-NEW-41 4th consumer trigger — see also R-v0.5-NEW-3).
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run
  * variant. Mirror M14 `workspace remove-users` cadence —

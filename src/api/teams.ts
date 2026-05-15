@@ -149,11 +149,27 @@ export type TeamUser = z.infer<typeof teamUserSchema>;
  *     conceptual non-null shape; pin the wire's actual nullable
  *     surface so a `null` from a non-guest-aware org doesn't
  *     fault the schema-parse)
- *   - `users: [User]` — nullable container, nullable entries per
- *     wire shape (relaxed via `.nullable()` on the list itself;
- *     entries pin to `teamUserSchema`)
- *   - `owners: [User!]!` — non-null wire-side (each entry
- *     non-null, list non-null)
+ *   - `users: [User]` — nullable container AND nullable entries
+ *     per the wire signature (the probe-formatter renders
+ *     `LIST/<wrapped>[OBJECT/User]` — no inner `NON_NULL` wrap on
+ *     the entries; compare to `ChangeTeamMembershipsResult.
+ *     successful_users -> LIST/<wrapped>[NON_NULL/<wrapped>]<OBJECT/
+ *     User>` from the round-2 probe which DOES carry the inner
+ *     non-null marker). The schema accepts `users: null` for the
+ *     container AND `[user1, null, user2]` for sparse entries so a
+ *     wire-shape variant doesn't surface as `internal_error` from
+ *     the response-parse boundary. M34 IMPL filters null entries
+ *     out of the envelope projection so agent-facing
+ *     `data.users[]` never carries `null` (verify at IMPL
+ *     cassette — Monday surfaces null entries when a team member's
+ *     User record was tombstoned post-team-creation).
+ *   - `owners: [User!]!` — non-null wire-side per the round-1
+ *     probe `NON_NULL/<wrapped>[LIST/<wrapped>]` outer wrapper.
+ *     The probe-formatter truncates the inner detail beyond the
+ *     LIST wrapper so the inner non-null is inferred from the
+ *     description (owners is conceptually a non-empty set of
+ *     User objects); if M34 IMPL cassette surfaces a null entry,
+ *     widen to `z.array(teamUserSchema.nullable())` here.
  */
 export const teamSchema = z
   .object({
@@ -161,7 +177,7 @@ export const teamSchema = z
     name: z.string().min(1),
     picture_url: z.string().nullable(),
     is_guest: z.boolean().nullable(),
-    users: z.array(teamUserSchema).nullable(),
+    users: z.array(teamUserSchema.nullable()).nullable(),
     owners: z.array(teamUserSchema),
   })
   .strict();
@@ -253,6 +269,14 @@ export type TeamDeleteOutput = Team;
  * reason — the CLI emits a generic `membership_failed` message
  * (verify at IMPL cassette whether Monday surfaces a reason
  * elsewhere in the response or via the `errors[]` extension).
+ *
+ * **Wire-vs-CLI semantics convention.** This asymmetry extends
+ * `docs/architecture.md`'s "Wire-vs-CLI semantics documentation
+ * conventions" section (R-NEW-41 4th consumer trigger — see
+ * also v0.5-plan §22 R-v0.5-NEW-3). Per-verb docstrings at
+ * `src/commands/user/team-add-members.ts` +
+ * `src/commands/user/team-remove-members.ts` cross-link this
+ * note + the architecture section for the canonical convention.
  */
 export const teamMembershipResultSchema = z
   .object({

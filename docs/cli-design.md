@@ -2263,7 +2263,7 @@ monday user team-get <tid>                                                   v0.
                                           # collapses doesn't-exist + not-
                                           # accessible). `operationName:
                                           # 'GetTeam'` pinned. Idempotent: yes.
-monday user team-create --name <n> [--users <id>,...] [--guest-team] [--allow-empty]   v0.5
+monday user team-create --name <n> [--users <id>,...] [--guest-team] [--allow-empty] [--dry-run]   v0.5
                                           # `create_team(input:
                                           # CreateTeamAttributesInput!,
                                           # options: CreateTeamOptionsInput)
@@ -2280,8 +2280,18 @@ monday user team-create --name <n> [--users <id>,...] [--guest-team] [--allow-em
                                           # `operationName: 'CreateTeam'`
                                           # pinned. Idempotent: NO —
                                           # Monday allows duplicate names.
+                                          # Dry-run per §6.4 mutation-
+                                          # dry-run variant: minimal
+                                          # `{operation: "create_team",
+                                          # name, is_guest_team?,
+                                          # subscriber_ids?,
+                                          # allow_empty_team?}`. No
+                                          # preflight read fires; the dry-
+                                          # run is purely argv-derived.
+                                          # `meta.source: 'none'`.
                                           # Admin-permission-sensitive.
-                                          # `meta.source: 'live'`.
+                                          # `meta.source: 'live'` on the
+                                          # live path.
 monday user team-delete <tid> --yes [--dry-run]                              v0.5
                                           # `delete_team(team_id) → Team`.
                                           # Destructive gate per §3.1 #7 —

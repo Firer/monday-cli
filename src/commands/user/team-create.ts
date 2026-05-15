@@ -1,7 +1,7 @@
 /**
  * `monday user team-create --name <n> [--users <id,...>]
- * [--guest-team] [--allow-empty]` — create a new team
- * (`cli-design.md` §4.3 USER section + §13 v0.5 entry;
+ * [--guest-team] [--allow-empty] [--dry-run]` — create a new
+ * team (`cli-design.md` §4.3 USER section + §13 v0.5 entry;
  * `v0.5-plan.md` §3 M34).
  *
  * **Wire shape.** Single `create_team(input, options)` round-
@@ -41,6 +41,16 @@
  *
  * **Output envelope.** Direct unwrap of the created Team —
  * `data: <Team>`. Mirrors M14 `workspace create` cadence.
+ *
+ * **Dry-run shape** per cli-design §6.4 mutation-dry-run variant.
+ * Minimal envelope listing the planned `create_team` operation
+ * + the resolved input fields (`name`, optional `is_guest_team`,
+ * optional `subscriber_ids`, optional `allow_empty_team`). No
+ * preflight read fires; the dry-run is purely argv-derived.
+ * `meta.source: 'none'`. Mirrors M14 `workspace create` cadence —
+ * the create-no-read pattern is uniform across non-destructive
+ * write verbs (`workspace create` / `board create` / now
+ * `user team-create`).
  *
  * **Idempotent: false.** Re-running `team-create --name foo`
  * creates a SECOND team with the same name (Monday allows
@@ -95,6 +105,7 @@ export const teamCreateCommand: CommandModule<
     'monday user team-create --name "Backend Eng" --users 67890,67891',
     'monday user team-create --name "Empty Bootstrap" --allow-empty',
     'monday user team-create --name "Vendor Access" --guest-team --users 67890',
+    'monday user team-create --name "Backend Eng" --users 67890 --dry-run --json',
   ],
   // Re-running creates a duplicate-named team — Monday's wire
   // does NOT dedupe by name. Mark non-idempotent so agents
@@ -126,6 +137,7 @@ export const teamCreateCommand: CommandModule<
           '',
           'Notes:',
           '  - Monday allows duplicate team names; this verb is non-idempotent.',
+          '  - `--dry-run` emits the planned `create_team` operation + resolved input fields (no wire call fires; `meta.source: "none"`).',
           '  - `--parent <ptid>` is deferred to v0.5.x (hierarchical-team UX TBD).',
           '  - No `--description` slot — Monday\'s Team object carries no description field.',
           '',
