@@ -241,13 +241,20 @@ describe('monday doc create-in-workspace (M35)', () => {
         '--workspace',
         '5555',
         '--name',
-        'X',
+        'Q4 launch plan',
         '--json',
       ],
       cassette,
     );
     expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr).error?.code).toBe('internal_error');
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: Record<string, unknown> };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    // Detail-slot contract — agents reading the envelope scope retries
+    // off these keys. Round-1 P3-2 closure.
+    expect(env.error?.details?.workspace_id).toBe('5555');
+    expect(env.error?.details?.name).toBe('Q4 launch plan');
   });
 
   it('internal_error when create_doc payload is null (no doc returned post-mutation)', async () => {
@@ -296,12 +303,17 @@ describe('monday doc create-in-workspace (M35)', () => {
         '--workspace',
         '5555',
         '--name',
-        'X',
+        'Q4 launch plan',
         '--json',
       ],
       cassette,
     );
     expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr).error?.code).toBe('internal_error');
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: Record<string, unknown> };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.workspace_id).toBe('5555');
+    expect(env.error?.details?.name).toBe('Q4 launch plan');
   });
 });

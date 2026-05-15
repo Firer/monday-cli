@@ -182,22 +182,41 @@
  * at v0.5-plan §22).
  *
  * **Opaque-JSON return shape (D9 closure).** 3 of 4 M35 mutations
- * return Monday's `JSON` scalar — an untyped wire payload that
- * Monday currently surfaces as `null` or an empty record per the
- * v0.5 kickoff probe. The CLI projects to a flat
- * `{ doc_id: string, success: true }` envelope at the fetcher
- * boundary so agents read a uniform shape across rename / delete /
- * duplicate. `doc_id` echoes the input id verbatim; `success` is
- * `true` whenever Monday's GraphQL response carries no errors.
- * The empirical IMPL cassette pins what Monday actually returns
- * in the JSON slot (likely `null` or `{}` per the probe sample);
- * the projection insulates agents from any wire-side shape drift.
- * For `duplicate_doc`, the projected `doc_id` is the **NEWLY-
- * CREATED doc's id** — Monday's duplicate_doc wire response
- * includes the new doc's id in its return payload OR fails the
- * mutation; the fetcher extracts it from the opaque JSON. (IMPL
- * cassette pins the JSON shape — fetcher stub today; the
- * projection contract is the agent-visible surface.)
+ * return Monday's `JSON` scalar — an untyped wire payload whose
+ * exact shape isn't pinned by introspection. The CLI projects to
+ * a flat `{ doc_id: string, success: true }` envelope at the
+ * fetcher boundary so agents read a uniform shape across rename /
+ * delete / duplicate; `success` is pinned literal-`true` because
+ * Monday surfaces failure via GraphQL `errors[]` (mapped to typed
+ * `ApiError`s upstream), not via a wire-side success flag.
+ *
+ * Per-fetcher null-payload semantics ARE asymmetric (round-1 P2-1
+ * closure):
+ *
+ *   - **`renameDoc` (`update_doc_name`)** — present-but-null
+ *     payload → success envelope. Monday's probe description
+ *     carries NO "returns X" prose, so null is plausibly an
+ *     empty-success indicator.
+ *   - **`deleteDoc` (`delete_doc`)** — present-but-null payload
+ *     → `not_found`. Probe description: "Returns success status
+ *     and the deleted document ID" — null indicates the source
+ *     doc was bogus or already-deleted.
+ *   - **`duplicateDoc` (`duplicate_doc`)** — present-but-null
+ *     payload → `not_found`. Probe description: "Returns the new
+ *     document's ID on success" — null indicates the source
+ *     wasn't duplicable.
+ *
+ * Missing-root-key cases for all three uniformly throw
+ * `internal_error` via `assertResponseFieldPresent` (schema
+ * drift). For `duplicate_doc`, the projected `doc_id` is the
+ * **NEWLY-CREATED doc's id** extracted from the opaque JSON via
+ * {@link extractDuplicateDocId} — defensive across multiple
+ * plausible wire shapes (bare string / number / record-with-`id`
+ * / `doc_id` / `new_doc_id`). Capturing a live duplicate-doc
+ * cassette would let a future revision narrow the helper's
+ * accepted shapes; today's helper is constructed against the
+ * read-only probe + Monday's wire description, not a live wire
+ * response.
  *
  * **No new ERROR_CODES at M35.** Existing codes route doc-mutation
  * failures: `not_found` (rename/delete/duplicate against a
@@ -1408,16 +1427,27 @@ export interface RenameDocResult {
  * Monday's opaque JSON return into the flat
  * `{ doc_id: <echoed>, success: true }` envelope per D9.
  *
- * A null `update_doc_name` payload surfaces `not_found` —
- * mirrors the M34 team-delete + M14 workspace-delete cadence
- * (id was bogus or doc already deleted by a concurrent caller).
- * A missing key surfaces `internal_error` via
- * `assertResponseFieldPresent`. **Empirical IMPL cassette pins**
- * how Monday's wire actually behaves on a missing doc — the
- * defensive `not_found` rewrap may flip to `validation_failed`
- * if Monday surfaces a typed error instead. The agent-facing
- * envelope shape (the projection contract) doesn't change either
- * way; only the error-code mapping is empirically pinned at IMPL.
+ * Failure modes:
+ *
+ *   - **Missing `update_doc_name` key** → `internal_error` via
+ *     `assertResponseFieldPresent` (schema drift — Monday's
+ *     response shape regressed).
+ *   - **Present-but-null payload** → projected as success (the
+ *     `{doc_id, success: true}` envelope). Monday's probe
+ *     description for `update_doc_name` carries NO "returns X"
+ *     prose (unlike `delete_doc` which promises "success status
+ *     and the deleted document ID"), so a null wire payload is a
+ *     plausible empty-success indicator. If Monday returns a
+ *     typed error for non-existent doc IDs, that bubbles via
+ *     GraphQL `errors[]` (mapped to typed `ApiError`s upstream) —
+ *     a present-but-null JSON return reaching this projection is
+ *     by construction the success path. Distinct from
+ *     `deleteDoc` + `duplicateDoc` cadence which DO treat null
+ *     as `not_found` because their probe descriptions explicitly
+ *     promise a non-null return payload on success.
+ *   - **Typed Monday errors** (forbidden / not_found from a wire-
+ *     side `errors[]`) → bubble through the transport's error-
+ *     mapping layer.
  */
 export const renameDoc = async (
   inputs: RenameDocInputs,
@@ -1445,19 +1475,13 @@ export const renameDoc = async (
     details: { doc_id: inputs.docId },
     nullHandling: 'caller_handles',
   });
-  const rawPayload = data.update_doc_name;
-  if (rawPayload === null || rawPayload === undefined) {
-    throw new ApiError(
-      'not_found',
-      `Monday returned no payload from update_doc_name for doc ${inputs.docId}`,
-      { details: { doc_id: inputs.docId } },
-    );
-  }
   // Project Monday's opaque JSON return per D9 — agents see a
   // uniform `{ doc_id, success: true }` envelope regardless of
-  // what's inside `rawPayload`. The wire JSON's content is
-  // verified to be non-null + present above; its internal shape
-  // is documented as "opaque" + insulated from agents.
+  // what's inside `data.update_doc_name`. Unlike `delete_doc` +
+  // `duplicate_doc`, a present `null` is NOT remapped to
+  // `not_found` (round-1 P2-1 closure — Monday's
+  // `update_doc_name` probe description makes no return-shape
+  // promise, so null is a plausible empty-success indicator).
   return {
     result: { doc_id: inputs.docId, success: true },
     source: 'live',

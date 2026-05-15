@@ -130,7 +130,12 @@ describe('monday doc delete (M35)', () => {
       cassette,
     );
     expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr).error?.code).toBe('internal_error');
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: Record<string, unknown> };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    // Detail-slot contract — round-1 P3-2 closure.
+    expect(env.error?.details?.doc_id).toBe('88010');
   });
 
   it('usage_error rejects non-numeric <docId> at parse boundary (no gate / wire call)', async () => {

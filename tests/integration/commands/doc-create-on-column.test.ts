@@ -147,7 +147,13 @@ describe('monday doc create-on-column (M35)', () => {
       cassette,
     );
     expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr).error?.code).toBe('internal_error');
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: Record<string, unknown> };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    // Detail-slot contract — round-1 P3-2 closure.
+    expect(env.error?.details?.item_id).toBe('12345');
+    expect(env.error?.details?.column_id).toBe('doc_column_1');
   });
 
   it('internal_error when create_doc payload is null', async () => {
