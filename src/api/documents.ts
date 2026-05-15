@@ -1,7 +1,8 @@
 /**
- * Workdocs read surface for the v0.4-M32 `monday doc list/get` verbs
- * (`cli-design.md` §2.7 + §4.3 + §13 v0.4 entry; `v0.4-plan.md` §3
- * M32).
+ * Workdocs read + mutation surface for the v0.4-M32 `monday doc
+ * list/get` verbs + the v0.5-M35 doc-level CRUD verbs
+ * (`cli-design.md` §2.7 + §4.3 + §13 v0.4/v0.5 entries;
+ * `v0.4-plan.md` §3 M32; `v0.5-plan.md` §3 M35 + §8 D7-D9).
  *
  * **Wire surface (empirical probe 2026-05-14, API `2026-01`).** Two
  * Monday GraphQL operations land here, both against `Query.docs(...)`:
@@ -105,11 +106,132 @@
  * `details.issues`. The `doc get` empty-array case rewraps to
  * `not_found` with `details.doc_id` per D8 (Monday's wire collapses
  * "doesn't exist" + "not visible to token" into the same shape).
+ *
+ * **v0.5-M35 mutation surface (empirical probe 2026-05-15, API
+ * `2026-01`; v0.5 kickoff rounds 1-3).** Five Monday GraphQL
+ * mutations land here at v0.5-M35 — `create_doc` (2 CLI verbs
+ * because Monday's `CreateDocInput` is mutually-exclusive `board`
+ * vs `workspace` per D7) + `update_doc_name` + `delete_doc` +
+ * `duplicate_doc`. All four are synchronous on Monday's wire —
+ * the v0.4-W1 `dispatchPollingLoop` watch-item DOES NOT fire here.
+ *
+ *   - **Create-in-workspace variant** — `create_doc(location:
+ *     CreateDocInput!) → Document` with `location: { workspace:
+ *     CreateDocWorkspaceInput { workspace_id!, name!, kind?:
+ *     BoardKind, folder_id? } }`. Returns the full Document
+ *     (with `blocks: null` — Monday hasn't hydrated blocks for a
+ *     freshly-created doc; the agent calls `monday doc get
+ *     <new-doc-id>` if it needs them).
+ *   - **Create-on-column variant** — `create_doc(location:
+ *     CreateDocInput!) → Document` with `location: { board:
+ *     CreateDocBoardInput { column_id!, item_id! } }`.
+ *   - **Rename variant** — `update_doc_name(docId: ID!,
+ *     name: String!) → JSON` (opaque scalar). Returns wire-side
+ *     opaque payload; the CLI projects to flat `{ doc_id: <input>,
+ *     success: true }` envelope at the fetcher boundary per D9.
+ *     The agent contract is the projected envelope shape, NOT the
+ *     opaque Monday return value.
+ *   - **Delete variant** — `delete_doc(docId: ID!) → JSON`
+ *     (opaque). Same `{ doc_id, success }` projection per D9.
+ *     Destructive gate per cli-design §3.1 (M35 verb requires
+ *     `--yes`).
+ *   - **Duplicate variant** — `duplicate_doc(docId: ID!,
+ *     duplicateType?: DuplicateType) → JSON` (opaque). Same
+ *     `{ doc_id, success }` projection per D9. `--with-updates`
+ *     argv flag flips wire `duplicateType` from
+ *     `duplicate_doc_with_content` (default) to
+ *     `duplicate_doc_with_content_and_updates`. **No `--name <n>`
+ *     rename slot per D8** — Monday's `duplicate_doc` mutation
+ *     carries no name-override arg on the wire, so the CLI defers
+ *     the rename-on-duplicate UX (an agent that needs a renamed
+ *     duplicate pairs the verb with a follow-up `monday doc
+ *     rename <new-id> --name <n>` call).
+ *
+ * **`CreateDocInput` is mutually-exclusive on Monday's wire.**
+ * Per Finding 6 + round-3 nested-inputs probe, supplying both
+ * `board` AND `workspace` slots fails server-side. The CLI's
+ * two-verb split (`monday doc create-in-workspace` vs `monday doc
+ * create-on-column`) flows the mutual-exclusion into the argv
+ * boundary — each verb's input schema declares the slot it
+ * supports, and there's no way to set both via the CLI surface.
+ * Single verb with `--workspace` / `--board` choosers was the
+ * D7 alternative; pre-flight ratified the two-verb shape per the
+ * agent-UX principle of "fewer ambiguous flags is clearer than
+ * one verb with mutually-exclusive choosers" (mirrors how the
+ * v0.4 cli-design ships separate `monday item upload` /
+ * `monday update upload` verbs for the same multipart wire path).
+ *
+ * **camelCase vs snake_case asymmetry across the doc-mutation
+ * surface (Finding 7).** Monday's `update_doc_name` /
+ * `delete_doc` / `duplicate_doc` mutations use **camelCase** arg
+ * names (`docId`, `duplicateType`) on the wire — distinct from
+ * the snake_case `doc_id` Monday uses for `Document` field names
+ * elsewhere on the schema. The fetcher boundary uses the wire's
+ * camelCase variable shape verbatim; the CLI argv stays kebab-case
+ * throughout (`--name <n>`, `--with-updates`); the error envelope
+ * `details.*` keys stay snake_case per cli-design §6.5 (e.g.
+ * `details.doc_id`). The asymmetry is wire-side and stays at the
+ * fetcher boundary; agents see camelCase nowhere. Cross-link to
+ * `docs/architecture.md` "Wire-vs-CLI semantics documentation
+ * conventions" — 4th supporting site for R-NEW-41 (camelCase vs
+ * snake_case arg-name asymmetry; R-v0.5-NEW-3 graduation candidate
+ * at v0.5-plan §22).
+ *
+ * **Opaque-JSON return shape (D9 closure).** 3 of 4 M35 mutations
+ * return Monday's `JSON` scalar — an untyped wire payload that
+ * Monday currently surfaces as `null` or an empty record per the
+ * v0.5 kickoff probe. The CLI projects to a flat
+ * `{ doc_id: string, success: boolean }` envelope at the fetcher
+ * boundary so agents read a uniform shape across rename / delete /
+ * duplicate. `doc_id` echoes the input id verbatim; `success` is
+ * `true` whenever Monday's GraphQL response carries no errors.
+ * The empirical IMPL cassette pins what Monday actually returns
+ * in the JSON slot (likely `null` or `{}` per the probe sample);
+ * the projection insulates agents from any wire-side shape drift.
+ * For `duplicate_doc`, the projected `doc_id` is the **NEWLY-
+ * CREATED doc's id** — Monday's duplicate_doc wire response
+ * includes the new doc's id in its return payload OR fails the
+ * mutation; the fetcher extracts it from the opaque JSON. (IMPL
+ * cassette pins the JSON shape — fetcher stub today; the
+ * projection contract is the agent-visible surface.)
+ *
+ * **No new ERROR_CODES at M35.** Existing codes route doc-mutation
+ * failures: `not_found` (rename/delete/duplicate against a
+ * non-existent or inaccessible doc), `usage_error` (argv-parse
+ * rejections — bad DocId, missing `--name`, unknown `--kind`),
+ * `validation_failed` (Monday-side rejection, e.g. workspace
+ * lacks doc-create permission), `forbidden`/`unauthorized` (token
+ * lacks workdoc write scope), `confirmation_required` (destructive
+ * gate on `doc delete` missing `--yes`).
+ *
+ * **Doc mutations are live-only at v0.5-M35.** Pure-mutation
+ * surfaces don't cache by definition (cli-design §8); `meta.source:
+ * "live"`. Dry-run paths emit `meta.source: "none"` per §6.4
+ * mutation-dry-run discipline.
+ *
+ * **Status at v0.5-M35 pre-flight: STUB FETCHERS shipped at this
+ * commit.** Runtime bodies land at v0.5-M35 IMPL — see each stub's
+ * `c8 ignore start/stop` block-wrap. The argv parse boundary +
+ * input/output schemas + GraphQL mutation documents + envelope
+ * shapes are real-and-shipped; pre-flight Codex review covers
+ * those surfaces. Stubs throw `internal_error` so a premature
+ * invocation surfaces "not yet implemented" rather than a
+ * misleading false-success envelope (M31 pre-flight round-1 P2-2
+ * lesson — pre-flight stubs MUST NOT emit `ok: true` bogus
+ * envelopes).
+ *
+ * **R-NEW-76 discipline preserved** across all 5 M35 command stubs
+ * — `parseArgv` (+ `parseBrandedListArg` /
+ * `enforceDestructiveGate` / `parseGlobalFlags`) fires BEFORE the
+ * `c8 ignore start` block-wrap on every verb so invalid argv
+ * surfaces `usage_error` from the parse boundary, NOT
+ * `internal_error` from the c8-ignored stub throw.
  */
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
 import { unwrapOrThrow } from '../utils/parse-boundary.js';
+import { assertResponseFieldPresent } from './response-root.js';
 import type { MondayClient } from './client.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
@@ -726,3 +848,645 @@ export const getDocument = async (
     complexity: response.complexity,
   };
 };
+
+// ===========================================================================
+// v0.5-M35 doc-level CRUD mutation surface
+// ===========================================================================
+// All five fetchers below ship as PRE-FLIGHT STUBS at v0.5-M35 — the argv
+// parse boundary, input/output schemas, GraphQL mutation documents, and
+// envelope shapes are real-and-shipped surfaces; the wire-call leg lands
+// at v0.5-M35 IMPL. Stubs throw `internal_error` so a premature invocation
+// surfaces "not yet implemented" rather than a misleading false-success
+// envelope (M31 pre-flight round-1 P2-2 lesson).
+
+/**
+ * Monday's `DuplicateType` enum vocabulary (empirical probe 2026-05-15,
+ * API `2026-01`; 2 values). Pinned at M35 pre-flight as a closed
+ * literal-union so unknown values reject at the parse boundary with
+ * `usage_error`.
+ *
+ * - `duplicate_doc_with_content` — clone the doc body only; comments
+ *   and update history are NOT copied. Wire-side default when
+ *   `duplicateType` is omitted.
+ * - `duplicate_doc_with_content_and_updates` — clone the doc body
+ *   AND every comment / update thread attached to the source doc.
+ *   Picks up Monday's "full backup" duplicate semantics.
+ *
+ * Maps to the CLI's boolean `--with-updates` flag at the M35
+ * `monday doc duplicate` argv boundary: absent → wire default
+ * (`duplicate_doc_with_content`, content-only); present → wire
+ * `duplicate_doc_with_content_and_updates`. The two-value enum
+ * stays internal to the fetcher — agents see a boolean opt-in, not
+ * the wire enum name.
+ *
+ * Adding a third value to Monday's enum is a minor (additive) bump
+ * for the CLI — extend this list + the fetcher mapping; the
+ * boolean argv stays.
+ */
+export const DUPLICATE_TYPE_VALUES = [
+  'duplicate_doc_with_content',
+  'duplicate_doc_with_content_and_updates',
+] as const;
+
+export type DuplicateType = (typeof DUPLICATE_TYPE_VALUES)[number];
+
+export const duplicateTypeSchema = z.enum(DUPLICATE_TYPE_VALUES);
+
+/**
+ * Projected envelope shape for the three opaque-JSON mutation
+ * results (`update_doc_name` / `delete_doc` / `duplicate_doc`).
+ * Per D9 closure, the CLI surfaces a flat `{ doc_id: string,
+ * success: true }` envelope so agents read a uniform shape across
+ * mutations — Monday's wire returns an opaque `JSON` scalar that's
+ * currently undocumented (the IMPL cassette pins the actual
+ * payload; the projection insulates agents from any wire-side
+ * shape drift).
+ *
+ * `success` is pinned to literal `true` because Monday surfaces
+ * failure via GraphQL `errors[]` (mapped to typed `ApiError`s at
+ * the transport layer); a JSON return that reaches this projection
+ * is by construction the success path. If Monday ever flips to a
+ * `success/error` result OBJECT shape for these mutations (mirroring
+ * `import_doc_from_html` / `add_content_to_doc_from_markdown` per
+ * Finding 6), the projection widens to a discriminated union — for
+ * today the literal-`true` form keeps the shape pinned.
+ *
+ * `doc_id` semantics differ per mutation:
+ *
+ *   - `rename` / `delete` — echoes the input id (the operation
+ *     targets that specific doc; success means it was renamed /
+ *     deleted).
+ *   - `duplicate` — emits the **NEWLY-CREATED** doc's id (Monday's
+ *     `duplicate_doc` payload includes the new id; the fetcher
+ *     extracts it from the opaque JSON). The original source-doc id
+ *     stays available via the argv positional.
+ *
+ * IMPL cassette pins the duplicate-id-extraction shape; the
+ * projection contract is the agent-visible surface.
+ */
+export const docMutationResultSchema = z
+  .object({
+    doc_id: z.string().min(1),
+    success: z.literal(true),
+  })
+  .strict();
+
+export type DocMutationResult = z.infer<typeof docMutationResultSchema>;
+
+/**
+ * Output shape for `monday doc create-in-workspace --workspace
+ * <wid> --name <n> [--folder <fid>] [--kind public|private|share]`.
+ * Direct unwrap of the created Document — `data: <Document>` per
+ * cli-design §6.1 single-record convention.
+ *
+ * The Document carries `blocks: null` on the wire immediately
+ * post-create (Monday hasn't materialised the rich-text body yet
+ * for an empty doc); the schema accepts the null slot but the
+ * field is hydrated via a follow-up `monday doc get <new-doc-id>`
+ * call. The base {@link documentSchema} (M32) omits the `blocks`
+ * field entirely from the projection — pre-flight ratifies the
+ * choice because a `blocks: null` slot on every create response
+ * adds no agent-useful signal (a freshly-created doc always lacks
+ * blocks until edits land).
+ */
+export const docCreateInWorkspaceOutputSchema = documentSchema;
+
+export type DocCreateInWorkspaceOutput = Document;
+
+/**
+ * Output shape for `monday doc create-on-column --item <iid>
+ * --column <cid>`. Same shape as
+ * {@link docCreateInWorkspaceOutputSchema} — Monday's wire returns
+ * the full Document regardless of placement; the two-verb split
+ * (per D7) lives at the argv layer, not the response shape.
+ */
+export const docCreateOnColumnOutputSchema = documentSchema;
+
+export type DocCreateOnColumnOutput = Document;
+
+/**
+ * Output shape for `monday doc rename <doc-id> --name <n>`.
+ * Projected from Monday's opaque `JSON` scalar return per D9 — the
+ * fetcher emits `{ doc_id: <echoed>, success: true }`. Agents key
+ * off `ok: true` for retry/idempotency reasoning; the literal
+ * `success: true` slot exists for envelope-snapshot stability and
+ * future-proofing (if Monday ever surfaces a wire-side success
+ * flag, the schema widens to read the wire value rather than
+ * always emitting `true`).
+ */
+export const docRenameOutputSchema = docMutationResultSchema;
+
+export type DocRenameOutput = DocMutationResult;
+
+/**
+ * Output shape for `monday doc delete <doc-id> --yes`. Same
+ * `{ doc_id: <echoed>, success: true }` projection as rename per
+ * D9. The destructive-gate envelope sits at the action body —
+ * `confirmation_required` fires BEFORE this output schema is
+ * referenced (cli-design §3.1 #6).
+ */
+export const docDeleteOutputSchema = docMutationResultSchema;
+
+export type DocDeleteOutput = DocMutationResult;
+
+/**
+ * Output shape for `monday doc duplicate <doc-id> [--with-updates]`.
+ * Same flat `{ doc_id, success: true }` projection per D9, BUT the
+ * `doc_id` slot carries the **newly-created duplicate's id** — NOT
+ * the source-doc id. The verb's positional argv is the source-doc
+ * id; the wire returns the new id in its JSON payload (IMPL
+ * cassette pins the extraction shape).
+ *
+ * **No `--name <n>` slot per D8** — Monday's `duplicate_doc`
+ * mutation carries no rename-on-duplicate arg. Agents needing a
+ * renamed duplicate pair with a follow-up `monday doc rename
+ * <new-id> --name <n>` call.
+ */
+export const docDuplicateOutputSchema = docMutationResultSchema;
+
+export type DocDuplicateOutput = DocMutationResult;
+
+/**
+ * GraphQL mutation document for `create_doc(location: {workspace:
+ * ...})`. Operation name pinned to `CreateDocInWorkspace`
+ * (R-NEW-37 W2 audit-point — operationNames NOT caller-overridable).
+ * Selects every base-Document field per the M32 cadence; `blocks`
+ * deliberately omitted (Monday's wire returns `blocks: null` on a
+ * fresh create — see the module header's create-variant note).
+ *
+ * `$input: CreateDocInput!` carries the mutually-exclusive wire
+ * shape; the verb's action body composes
+ * `{ workspace: { workspace_id, name, folder_id?, kind? } }` from
+ * the parsed argv. The `board` slot stays unset at the wire — the
+ * two-verb CLI split (per D7) makes the mutual-exclusion safely-
+ * by-construction.
+ */
+export const CREATE_DOC_IN_WORKSPACE_MUTATION = `
+  mutation CreateDocInWorkspace($input: CreateDocInput!) {
+    create_doc(location: $input) {
+      id
+      object_id
+      name
+      doc_kind
+      url
+      relative_url
+      workspace_id
+      workspace { id name }
+      doc_folder_id
+      created_at
+      created_by { id name }
+      updated_at
+      settings
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation document for `create_doc(location: {board: ...})`.
+ * Operation name pinned to `CreateDocOnColumn` (R-NEW-37 W2). Same
+ * Document selection as {@link CREATE_DOC_IN_WORKSPACE_MUTATION};
+ * `$input: CreateDocInput!` is composed as `{ board: { column_id,
+ * item_id } }` at the action body. Distinct named operation per
+ * verb so the wire-side `operationName` payload mirrors the CLI
+ * verb name verbatim (agents tracing wire traffic can identify the
+ * verb without parsing the doc body).
+ */
+export const CREATE_DOC_ON_COLUMN_MUTATION = `
+  mutation CreateDocOnColumn($input: CreateDocInput!) {
+    create_doc(location: $input) {
+      id
+      object_id
+      name
+      doc_kind
+      url
+      relative_url
+      workspace_id
+      workspace { id name }
+      doc_folder_id
+      created_at
+      created_by { id name }
+      updated_at
+      settings
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation document for `update_doc_name(docId, name) →
+ * JSON`. Operation name pinned to `UpdateDocName` (R-NEW-37 W2).
+ * The wire return type is the opaque `JSON` scalar — no selection
+ * set per GraphQL grammar (scalars are leaves). The CLI projects
+ * the opaque value to the flat `{ doc_id, success }` envelope at
+ * the fetcher boundary per D9.
+ *
+ * `docId` + `name` are camelCase on Monday's wire per Finding 7;
+ * the variable names mirror the wire shape verbatim. CLI argv is
+ * `<doc-id>` positional + `--name <n>` flag (kebab-case throughout).
+ */
+export const UPDATE_DOC_NAME_MUTATION = `
+  mutation UpdateDocName($docId: ID!, $name: String!) {
+    update_doc_name(docId: $docId, name: $name)
+  }
+`;
+
+/**
+ * GraphQL mutation document for `delete_doc(docId) → JSON`.
+ * Operation name pinned to `DeleteDoc` (R-NEW-37 W2). Wire return
+ * is opaque JSON — same projection cadence as
+ * {@link UPDATE_DOC_NAME_MUTATION}.
+ *
+ * **Destructive-gate ordering.** The verb's action body MUST call
+ * `enforceDestructiveGate` BEFORE this fetcher per the M10 round-1
+ * P2 invariant. A missing `--yes` surfaces as
+ * `confirmation_required` from the action layer, never masked by
+ * `config_error` when no token is configured.
+ */
+export const DELETE_DOC_MUTATION = `
+  mutation DeleteDoc($docId: ID!) {
+    delete_doc(docId: $docId)
+  }
+`;
+
+/**
+ * GraphQL mutation document for `duplicate_doc(docId,
+ * duplicateType?) → JSON`. Operation name pinned to `DuplicateDoc`
+ * (R-NEW-37 W2). `duplicateType` is the optional 2-value enum
+ * (see {@link DUPLICATE_TYPE_VALUES}); when omitted at the variable
+ * boundary, Monday's wire-side default (`duplicate_doc_with_content`,
+ * content-only) applies.
+ *
+ * The verb's `--with-updates` boolean argv maps to:
+ * absent → omit the variable entirely (wire default applies);
+ * present → `duplicateType: 'duplicate_doc_with_content_and_updates'`.
+ * The omit-vs-null discipline mirrors M34 `team-create`'s
+ * `is_guest_team` handling — Monday treats a `null` variable as
+ * "field present with null value" rather than "field omitted".
+ *
+ * Wire return is opaque JSON — same projection cadence as the
+ * rename + delete mutations.
+ */
+export const DUPLICATE_DOC_MUTATION = `
+  mutation DuplicateDoc($docId: ID!, $duplicateType: DuplicateType) {
+    duplicate_doc(docId: $docId, duplicateType: $duplicateType)
+  }
+`;
+
+/**
+ * Wrapping response schema for the `CreateDocInWorkspace` /
+ * `CreateDocOnColumn` mutations. Monday's wire shape returns the
+ * full Document on success; a `null` payload surfaces
+ * `internal_error` (a successful `create_doc` must return the
+ * created Document per Monday's documented contract — null
+ * indicates a wire-shape regression worth surfacing loudly rather
+ * than silently dropping the response).
+ *
+ * Shared between both create-variants because the wire returns
+ * the same Document shape regardless of placement; the schema's
+ * `.loose()` mode mirrors M27 / M32 / M34 — Monday occasionally
+ * surfaces side-band debug keys (`extensions`, `account_id`)
+ * alongside the documented data root, and the loose mode lets
+ * them pass without faulting the parse.
+ */
+const createDocResponseSchema = z
+  .object({
+    create_doc: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `UpdateDocName` mutation. The
+ * `update_doc_name` root carries Monday's opaque `JSON` scalar —
+ * `z.unknown()` accepts any wire shape (null / record / scalar)
+ * and the projection layer extracts what it needs. Missing key
+ * surfaces `internal_error` via `assertResponseFieldPresent`.
+ */
+const updateDocNameResponseSchema = z
+  .object({
+    update_doc_name: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `DeleteDoc` mutation. Same
+ * shape as {@link updateDocNameResponseSchema} — opaque JSON
+ * scalar at the root; projection layer handles the extraction.
+ * A `null` value surfaces `not_found` (mirrors M14 workspace-
+ * delete + M34 team-delete cadence — id bogus / already deleted
+ * by a concurrent caller).
+ */
+const deleteDocResponseSchema = z
+  .object({
+    delete_doc: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `DuplicateDoc` mutation. Same
+ * opaque-JSON shape as the rename/delete variants. The IMPL
+ * cassette pins how Monday surfaces the newly-created doc id in
+ * the JSON payload — likely as a top-level `{ id: <new-id> }`
+ * record per the workdocs-mutation cadence Monday's reference
+ * docs hint at (the empirical probe couldn't trigger a duplicate
+ * without write scope; the wire response is verified at IMPL).
+ */
+const duplicateDocResponseSchema = z
+  .object({
+    duplicate_doc: z.unknown(),
+  })
+  .loose();
+
+export interface CreateDocInWorkspaceInputs {
+  readonly client: MondayClient;
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly folderId?: string;
+  readonly kind?: DocKind;
+}
+
+export interface CreateDocInWorkspaceResult {
+  readonly document: Document;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Creates a workspace-scoped workdoc via `create_doc(location:
+ * { workspace: {...} })` with `operationName:
+ * 'CreateDocInWorkspace'` (R-NEW-37 W2). Returns the created
+ * Document with `id` populated post-create.
+ *
+ * The fetcher composes `location: { workspace: { workspace_id,
+ * name, folder_id?, kind? } }` from the inputs; `folderId` /
+ * `kind` are omitted entirely from the wire payload when unset
+ * (Monday's per-arg server-side defaults apply — null would be
+ * treated as "field present" rather than "field omitted",
+ * mirroring M34 `createTeam`'s discipline).
+ *
+ * A missing-key wire response surfaces `internal_error` via
+ * `assertResponseFieldPresent`; a null payload surfaces
+ * `internal_error` too — a successful `create_doc` mutation must
+ * return the created Document per Monday's documented contract.
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
+ * IMPL — the stub throws `internal_error` so a premature
+ * invocation surfaces "not yet implemented" rather than a
+ * misleading false-success envelope.
+ */
+/* c8 ignore start */
+export const createDocInWorkspace = async (
+  inputs: CreateDocInWorkspaceInputs,
+): Promise<CreateDocInWorkspaceResult> => {
+  void inputs;
+  void CREATE_DOC_IN_WORKSPACE_MUTATION;
+  void createDocResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'createDocInWorkspace stub — runtime body lands at v0.5-M35 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M35 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface CreateDocOnColumnInputs {
+  readonly client: MondayClient;
+  readonly itemId: string;
+  readonly columnId: string;
+}
+
+export interface CreateDocOnColumnResult {
+  readonly document: Document;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Creates an item-scoped workdoc via `create_doc(location:
+ * { board: {...} })` with `operationName: 'CreateDocOnColumn'`
+ * (R-NEW-37 W2). Returns the created Document; the doc is
+ * embedded into the named column of the named item.
+ *
+ * The fetcher composes `location: { board: { column_id, item_id
+ * } }` from the inputs. Both slots are required on Monday's wire
+ * (`CreateDocBoardInput.column_id!` + `CreateDocBoardInput.
+ * item_id!`); the CLI verb's `--item <iid>` + `--column <cid>`
+ * flags are both required at the parse boundary.
+ *
+ * Failure modes mirror the workspace variant: missing-key
+ * response → `internal_error`; null payload → `internal_error`;
+ * column not configured for docs → `validation_failed` (Monday-
+ * side rejection — the CLI doesn't pre-check column-type
+ * compatibility, mirroring M8's `change_column_value` cadence).
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
+ * IMPL.
+ */
+/* c8 ignore start */
+export const createDocOnColumn = async (
+  inputs: CreateDocOnColumnInputs,
+): Promise<CreateDocOnColumnResult> => {
+  void inputs;
+  void CREATE_DOC_ON_COLUMN_MUTATION;
+  void createDocResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'createDocOnColumn stub — runtime body lands at v0.5-M35 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M35 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface RenameDocInputs {
+  readonly client: MondayClient;
+  readonly docId: string;
+  readonly name: string;
+}
+
+export interface RenameDocResult {
+  readonly result: DocMutationResult;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Renames a workdoc via `update_doc_name(docId, name)` with
+ * `operationName: 'UpdateDocName'` (R-NEW-37 W2). Projects
+ * Monday's opaque JSON return into the flat
+ * `{ doc_id: <echoed>, success: true }` envelope per D9.
+ *
+ * A null `update_doc_name` payload surfaces `not_found` —
+ * mirrors the M34 team-delete + M14 workspace-delete cadence
+ * (id was bogus or doc already deleted by a concurrent caller).
+ * A missing key surfaces `internal_error` via
+ * `assertResponseFieldPresent`. **Empirical IMPL cassette pins**
+ * how Monday's wire actually behaves on a missing doc — the
+ * defensive `not_found` rewrap may flip to `validation_failed`
+ * if Monday surfaces a typed error instead. The agent-facing
+ * envelope shape (the projection contract) doesn't change either
+ * way; only the error-code mapping is empirically pinned at IMPL.
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
+ * IMPL.
+ */
+/* c8 ignore start */
+export const renameDoc = async (
+  inputs: RenameDocInputs,
+): Promise<RenameDocResult> => {
+  void inputs;
+  void UPDATE_DOC_NAME_MUTATION;
+  void updateDocNameResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'renameDoc stub — runtime body lands at v0.5-M35 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M35 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface DeleteDocInputs {
+  readonly client: MondayClient;
+  readonly docId: string;
+}
+
+export interface DeleteDocResult {
+  readonly result: DocMutationResult;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Deletes a workdoc by ID via `delete_doc(docId)` with
+ * `operationName: 'DeleteDoc'` (R-NEW-37 W2). Projects Monday's
+ * opaque JSON return into the flat `{ doc_id: <echoed>,
+ * success: true }` envelope per D9.
+ *
+ * A null `delete_doc` payload surfaces `not_found` — same
+ * cadence as M34 team-delete + M14 workspace-delete. A missing
+ * key surfaces `internal_error`.
+ *
+ * **Destructive-gate ordering.** The verb's action body MUST
+ * call `enforceDestructiveGate` BEFORE this fetcher per the
+ * M10 round-1 P2 invariant. A missing `--yes` surfaces as
+ * `confirmation_required` from the action layer, never masked
+ * by `config_error` when no token is configured.
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
+ * IMPL.
+ */
+/* c8 ignore start */
+export const deleteDoc = async (
+  inputs: DeleteDocInputs,
+): Promise<DeleteDocResult> => {
+  void inputs;
+  void DELETE_DOC_MUTATION;
+  void deleteDocResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'deleteDoc stub — runtime body lands at v0.5-M35 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M35 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface DuplicateDocInputs {
+  readonly client: MondayClient;
+  readonly docId: string;
+  readonly duplicateType?: DuplicateType;
+}
+
+export interface DuplicateDocResult {
+  readonly result: DocMutationResult;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Duplicates a workdoc by ID via `duplicate_doc(docId,
+ * duplicateType?)` with `operationName: 'DuplicateDoc'`
+ * (R-NEW-37 W2). Projects Monday's opaque JSON return into the
+ * flat `{ doc_id: <NEW>, success: true }` envelope per D9 — the
+ * `doc_id` slot carries the **newly-created duplicate's id**,
+ * NOT the input source-doc id (the source id stays accessible
+ * via the verb's positional argv).
+ *
+ * The fetcher omits the `duplicateType` variable entirely when
+ * `inputs.duplicateType` is unset so Monday's wire-side default
+ * applies (the M34 `team-create` omit-vs-null discipline). A
+ * null `duplicate_doc` payload surfaces `not_found` (source
+ * doc id bogus or inaccessible); missing key surfaces
+ * `internal_error`. The new-id extraction from the opaque JSON
+ * payload pins at IMPL cassette — `duplicate_doc` is the one
+ * M35 mutation whose return JSON carries semantic content
+ * (the new doc's id), and the projection layer needs to find it.
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
+ * IMPL.
+ */
+/* c8 ignore start */
+export const duplicateDoc = async (
+  inputs: DuplicateDocInputs,
+): Promise<DuplicateDocResult> => {
+  void inputs;
+  void DUPLICATE_DOC_MUTATION;
+  void duplicateDocResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'duplicateDoc stub — runtime body lands at v0.5-M35 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M35 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */

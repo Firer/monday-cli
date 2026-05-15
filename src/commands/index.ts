@@ -211,6 +211,32 @@ import { updateUploadCommand } from './update/upload.js';
 // shape + the `DocsOrderBy` 2-value enum.
 import { docListCommand } from './doc/list.js';
 import { docGetCommand } from './doc/get.js';
+// M35 (v0.5) — doc-level CRUD mutation surface (`doc create-in-
+// workspace` / `create-on-column` / `rename` / `delete` /
+// `duplicate`). 5 new mutation verbs under the existing `doc`
+// namespace; second v0.5 milestone after M34 team writers.
+// Pre-flight stubs at this commit (argv schema + wire mutation
+// documents + envelope projection only); runtime bodies +
+// integration tests land at M35 IMPL. Empirical probe at
+// `scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results.ts`
+// + `v0.5-nested-inputs.ts` (2026-05-15, API `2026-01`) pinned
+// Monday's `Mutation.create_doc / update_doc_name / delete_doc /
+// duplicate_doc` signatures + the `CreateDocInput` mutually-
+// exclusive `board` vs `workspace` shape + the `DuplicateType`
+// 2-value enum + the opaque-JSON return cadence for the 3 non-
+// create mutations. D7 closure: two CLI verbs over one with
+// placement choosers. D8 closure: drop `--name <n>` from
+// duplicate (no wire-side rename slot). D9 closure: project
+// opaque JSON returns to `{ doc_id, success: true }` envelope.
+// 4 doc-content / per-block mutations (`create_doc_block` /
+// `update_doc_block` / `delete_doc_block` / `import_doc_from_html` /
+// `add_content_to_doc_from_markdown`) defer to M36 / M37
+// per the v0.5 doc-CRUD-mutation backlog sequencing.
+import { docCreateInWorkspaceCommand } from './doc/create-in-workspace.js';
+import { docCreateOnColumnCommand } from './doc/create-on-column.js';
+import { docRenameCommand } from './doc/rename.js';
+import { docDeleteCommand } from './doc/delete.js';
+import { docDuplicateCommand } from './doc/duplicate.js';
 // M34 (v0.5) — team writer surface (`user team-list` / `team-get` /
 // `team-create` / `team-delete` / `team-add-members` /
 // `team-remove-members`). 6 new verbs under the existing `user`
@@ -356,6 +382,11 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateUploadCommand,
     docListCommand,
     docGetCommand,
+    docCreateInWorkspaceCommand,
+    docCreateOnColumnCommand,
+    docRenameCommand,
+    docDeleteCommand,
+    docDuplicateCommand,
     completionCommand,
     rawCommand,
     boardDoctorCommand,

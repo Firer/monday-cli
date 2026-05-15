@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
 /**
- * Branded zod schemas for the ten ID kinds Monday surfaces (v0.5-M34
- * adds `TeamId` alongside the nine v0.1+M27+M32 brands). Brands make
- * `BoardId`/`ItemId`/etc. nominally distinct at the type level even
- * though they're all numeric strings on the wire — passing a
- * `BoardId` where an `ItemId` is wanted becomes a compile error,
- * which is the whole point.
+ * Branded zod schemas for the eleven ID kinds Monday surfaces
+ * (v0.5-M35 adds `DocFolderId` alongside the v0.5-M34 `TeamId` +
+ * nine v0.1+M27+M32 brands). Brands make `BoardId`/`ItemId`/etc.
+ * nominally distinct at the type level even though they're all
+ * numeric strings on the wire — passing a `BoardId` where an
+ * `ItemId` is wanted becomes a compile error, which is the whole
+ * point.
  *
  * Monday's numeric IDs exceed `Number.MAX_SAFE_INTEGER` for older
  * accounts, so we keep them as decimal strings everywhere — argv
@@ -65,6 +66,15 @@ export const DocIdSchema = numericIdSchema.brand<'DocId'>();
 // compile time (an easy mistake to make against `team-add-members
 // <tid> --users <id,...>` where both args are numeric).
 export const TeamIdSchema = numericIdSchema.brand<'TeamId'>();
+// M35 (v0.5) — doc-level CRUD surface (`monday doc create-in-
+// workspace --folder <fid>`). Monday's `Document.doc_folder_id` is
+// `ID, nullable` on the wire (M32 probe) + `CreateDocWorkspaceInput.
+// folder_id` accepts the same `ID` shape. Brand keeps `DocFolderId`
+// distinct from `WorkspaceId` so the type system catches a slip at
+// the `create-in-workspace --workspace <wid> --folder <fid>` call
+// site at compile time (both args are numeric IDs but address
+// distinct Monday entities — workspace vs nested-folder).
+export const DocFolderIdSchema = numericIdSchema.brand<'DocFolderId'>();
 
 // Column and group IDs are stable lower-snake-case slugs ("status_4",
 // "topics") — not numeric. Validate as non-empty strings only.
@@ -81,3 +91,4 @@ export type UpdateId = z.infer<typeof UpdateIdSchema>;
 export type WebhookId = z.infer<typeof WebhookIdSchema>;
 export type DocId = z.infer<typeof DocIdSchema>;
 export type TeamId = z.infer<typeof TeamIdSchema>;
+export type DocFolderId = z.infer<typeof DocFolderIdSchema>;

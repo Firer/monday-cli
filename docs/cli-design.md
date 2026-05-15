@@ -2356,15 +2356,24 @@ monday webhook list <bid>                                                    v0.
 monday webhook create <bid> --url <u> --event <e> [--config <json>] [--dry-run]   v0.3
 monday webhook delete <wid> --yes [--dry-run]                                v0.3
 
-# === DOC (read-only in v0.4) ===
-# Workdocs read surface. v0.4-M32 ships the list + get verbs; full
-# docs CRUD (`create` / `update` / `delete` / `duplicate` /
-# `import_from_html` / `add_content_from_markdown` + per-block
-# verbs) defers to v0.5 — Monday's wire surfaces 9 doc-mutation
-# operations (empirical probe `scripts/probe/m32-docs.ts`
-# 2026-05-14) but each carries enough surface area to warrant its
-# own dedicated milestone cluster rather than a bundled
-# "doc CRUD" sweep.
+# === DOC (read + create/rename/delete/duplicate; v0.4 reads + v0.5 CRUD) ===
+# Workdocs read + doc-level CRUD surface. v0.4-M32 shipped the
+# `list` + `get` reads; v0.5-M35 ships 5 mutation verbs covering
+# `create_doc` (mutually-exclusive workspace vs board placement,
+# split into 2 CLI verbs per D7) + `update_doc_name` +
+# `delete_doc` + `duplicate_doc`. Per-block CRUD (`create_doc_block`
+# / `update_doc_block` / `delete_doc_block`) defers to v0.5-M36;
+# doc-content import (`import_doc_from_html` /
+# `add_content_to_doc_from_markdown`) defers to v0.5-M37 — each
+# milestone carries enough surface area to warrant its own
+# dedicated cluster rather than a bundled "doc CRUD" sweep.
+# Empirical probe at v0.5 kickoff
+# (`scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results.ts`
+# + `v0.5-nested-inputs.ts`, 2026-05-15, API `2026-01`) pinned the
+# 9 mutation operationNames + return-shape heterogeneity (full
+# Document on create; opaque JSON scalar on rename/delete/
+# duplicate; DocumentBlock on per-block ops; custom success/error
+# OBJECTs on the imports).
 monday doc list [--workspace <wid>,...] [--order-by <created_at|used_at>] [--limit <n>] [--page <n>]   v0.4
                                           # `Query.docs(workspace_ids: [ID],
                                           # order_by: DocsOrderBy, limit: Int,
@@ -2460,6 +2469,203 @@ monday doc get <did>                                                         v0.
                                           # per-block-type payload shape.
                                           # Live-only (no cache); `meta.source:
                                           # "live"`. Idempotent: yes.
+monday doc create-in-workspace --workspace <wid> --name <n> [--folder <fid>] [--kind public|private|share] [--dry-run]   v0.5
+                                          # `Mutation.create_doc(location:
+                                          # CreateDocInput!) → Document` with
+                                          # `location: { workspace:
+                                          # CreateDocWorkspaceInput }`. Pinned
+                                          # at M35 pre-flight via empirical
+                                          # probe (2026-05-15, API `2026-01`).
+                                          # Monday's `CreateDocInput` is
+                                          # mutually-exclusive between `board`
+                                          # (item-scoped) and `workspace`
+                                          # (workspace-scoped); the CLI splits
+                                          # into two verbs per D7 closure so
+                                          # the mutual-exclusion lives at the
+                                          # argv boundary rather than as
+                                          # `--workspace`/`--board` choosers
+                                          # on one verb. `--workspace <wid>`
+                                          # required (maps to wire
+                                          # `workspace_id: ID!`); brand-
+                                          # validated via WorkspaceIdSchema.
+                                          # `--name <n>` required (maps to
+                                          # wire `name: String!`); empty
+                                          # string rejects at parse.
+                                          # `--folder <fid>` optional (maps
+                                          # to wire `folder_id: ID`); absent
+                                          # → doc lands at workspace root;
+                                          # brand-validated via the new
+                                          # DocFolderIdSchema brand (11th
+                                          # numeric-ID kind). `--kind <k>`
+                                          # optional 3-value closed enum
+                                          # (`public`/`private`/`share`);
+                                          # maps to wire `kind: BoardKind`;
+                                          # absent → Monday's workspace-
+                                          # default kind applies. Envelope
+                                          # `data: <Document>` — direct
+                                          # unwrap (mirrors `doc get` shape
+                                          # sans `blocks` — Monday returns
+                                          # `blocks: null` on a fresh create;
+                                          # agents call `doc get <new-id>`
+                                          # if they need them).
+                                          # `operationName:
+                                          # 'CreateDocInWorkspace'` pinned
+                                          # at the fetcher boundary
+                                          # (R-NEW-37 W2). Live-only (no
+                                          # cache; mutations never cache);
+                                          # `meta.source: "live"`. Dry-run
+                                          # emits the planned `create_doc`
+                                          # operation + resolved input
+                                          # fields (`meta.source: "none"`).
+                                          # Permission-sensitive — tokens
+                                          # lacking workdoc-create scope
+                                          # surface `forbidden`.
+                                          # Idempotent: no (Monday allows
+                                          # duplicate doc names within a
+                                          # workspace).
+monday doc create-on-column --item <iid> --column <cid> [--dry-run]                                          v0.5
+                                          # `Mutation.create_doc(location:
+                                          # CreateDocInput!) → Document` with
+                                          # `location: { board:
+                                          # CreateDocBoardInput }`. Mirror of
+                                          # `create-in-workspace` for the
+                                          # item-scoped placement variant
+                                          # per D7 closure. `--item <iid>`
+                                          # + `--column <cid>` both required
+                                          # (Monday's `CreateDocBoardInput.
+                                          # item_id` + `column_id` are both
+                                          # `ID!`). The column must be a
+                                          # doc-typed column on the item's
+                                          # board; CLI does not pre-check
+                                          # column-type compatibility
+                                          # (mirrors M8's
+                                          # `change_column_value` cadence);
+                                          # incompatible columns surface
+                                          # `validation_failed` at the wire.
+                                          # Envelope `data: <Document>` —
+                                          # same shape as `create-in-
+                                          # workspace`. `operationName:
+                                          # 'CreateDocOnColumn'` pinned at
+                                          # the fetcher boundary (R-NEW-37
+                                          # W2). Live-only; dry-run emits
+                                          # planned operation + resolved
+                                          # input fields. Idempotent: no.
+monday doc rename <did> --name <n> [--dry-run]                                                               v0.5
+                                          # `Mutation.update_doc_name(docId:
+                                          # ID!, name: String!) → JSON`
+                                          # (opaque scalar). Pinned at M35
+                                          # pre-flight via empirical probe.
+                                          # **camelCase vs snake_case wire-
+                                          # arg asymmetry (Finding 7):**
+                                          # `update_doc_name` uses camelCase
+                                          # `docId` on the wire (distinct
+                                          # from snake_case `doc_id` Monday
+                                          # uses for `Document` field names
+                                          # elsewhere on the schema);
+                                          # fetcher boundary mirrors the
+                                          # wire verbatim; CLI argv stays
+                                          # kebab-case (`<did>` positional +
+                                          # `--name <n>`); error envelope
+                                          # `details.*` keys stay
+                                          # snake_case (`details.doc_id`).
+                                          # 4th supporting site for
+                                          # R-NEW-41; canonical asymmetry
+                                          # note at `src/api/documents.ts`
+                                          # module header. Envelope projects
+                                          # Monday's opaque JSON return
+                                          # into `data: { doc_id: <echoed>,
+                                          # success: true }` per D9
+                                          # closure. `operationName:
+                                          # 'UpdateDocName'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned operation
+                                          # + resolved input fields.
+                                          # Idempotent: yes (rename
+                                          # converges to a stable name;
+                                          # Monday's wire is no-op when
+                                          # name matches current value).
+monday doc delete <did> --yes [--dry-run]                                                                    v0.5
+                                          # `Mutation.delete_doc(docId: ID!)
+                                          # → JSON` (opaque scalar). Pinned
+                                          # at M35 pre-flight via empirical
+                                          # probe. Destructive — `--yes`
+                                          # required outside `--dry-run`
+                                          # per §3.1 #7; gate fires BEFORE
+                                          # `resolveClient` per M10 round-1
+                                          # P2 invariant (a missing token
+                                          # never masks
+                                          # `confirmation_required` as
+                                          # `config_error`). Envelope
+                                          # projects Monday's opaque JSON
+                                          # return into `data: { doc_id:
+                                          # <echoed>, success: true }` per
+                                          # D9. Null wire payload surfaces
+                                          # `not_found` (mirrors M14
+                                          # `workspace delete` / M34 `team
+                                          # delete` cadence — id was bogus
+                                          # or doc already deleted by a
+                                          # concurrent caller). camelCase
+                                          # wire-arg note (`docId`) carries
+                                          # over from `rename`.
+                                          # `operationName: 'DeleteDoc'`
+                                          # pinned (R-NEW-37 W2). Live-only;
+                                          # dry-run emits `{operation:
+                                          # "delete_doc", doc_id}` (mirrors
+                                          # destructive-no-read pattern of
+                                          # `workspace delete` / `team
+                                          # delete`). Idempotent: no
+                                          # (re-running surfaces
+                                          # `not_found` past the first
+                                          # call).
+monday doc duplicate <did> [--with-updates] [--dry-run]                                                      v0.5
+                                          # `Mutation.duplicate_doc(docId:
+                                          # ID!, duplicateType?:
+                                          # DuplicateType) → JSON` (opaque
+                                          # scalar). Pinned at M35 pre-
+                                          # flight via empirical probe.
+                                          # `duplicateType` is the closed
+                                          # 2-value enum
+                                          # (`duplicate_doc_with_content` /
+                                          # `duplicate_doc_with_content_
+                                          # and_updates`); the CLI surfaces
+                                          # a boolean `--with-updates`
+                                          # opt-in: absent → wire-side
+                                          # default
+                                          # `duplicate_doc_with_content`
+                                          # (content-only); present → wire
+                                          # `duplicate_doc_with_content_
+                                          # and_updates` (clone body +
+                                          # every comment / update thread).
+                                          # The 2-value enum stays
+                                          # internal to the fetcher.
+                                          # **No `--name <n>` slot per D8
+                                          # closure** — Monday's
+                                          # `duplicate_doc` mutation
+                                          # carries no rename-on-duplicate
+                                          # arg; the duplicate inherits
+                                          # Monday's auto-generated copy
+                                          # name. Agents needing a renamed
+                                          # duplicate pair with a follow-up
+                                          # `monday doc rename <new-id>
+                                          # --name <n>` call. Envelope
+                                          # projects Monday's opaque JSON
+                                          # return into `data: { doc_id:
+                                          # <NEW>, success: true }` per D9
+                                          # — the `doc_id` slot carries
+                                          # the **NEWLY-CREATED**
+                                          # duplicate's id, NOT the source-
+                                          # doc positional. camelCase wire-
+                                          # arg note (`docId`,
+                                          # `duplicateType`) carries over
+                                          # from `rename`/`delete`.
+                                          # `operationName: 'DuplicateDoc'`
+                                          # pinned (R-NEW-37 W2). Live-
+                                          # only; dry-run emits planned
+                                          # operation + resolved input
+                                          # fields (source `doc_id`
+                                          # echoed; new-id available only
+                                          # on live). Idempotent: no (each
+                                          # call mints a new DocId).
 
 # === NOTIFICATION ===
 monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]   v0.3
@@ -7852,13 +8058,35 @@ scoped idempotent changes, and post comments narrating its work.**
   `add_teams_to_workspace` / `delete_teams_from_workspace`)
   defer to v0.5.x candidate-selection. v0.5-M34 pre-flight
   stubs at this commit; runtime bodies land at M34 IMPL.
-- Workdocs CRUD mutations — 9 surfaces (`create_doc` /
-  `update_doc_name` / `delete_doc` / `duplicate_doc` /
-  `import_doc_from_html` / `add_content_to_doc_from_markdown` /
-  `create_doc_block` / `update_doc_block` / `delete_doc_block`).
-  Deferred from v0.4-M32 D8 closure — each mutation has enough
-  surface area to warrant its own milestone cluster; v0.5 likely
-  sequences them across 2-3 milestone clusters.
+- Workdocs CRUD mutations — 9 surfaces total split across 3 v0.5
+  milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
+  the doc-level CRUD surface (5 verbs)** at this pre-flight
+  commit: `monday doc create-in-workspace` (Monday's
+  `create_doc(location: {workspace: ...})`) + `monday doc
+  create-on-column` (`create_doc(location: {board: ...})`) +
+  `monday doc rename` (`update_doc_name`) + `monday doc delete
+  --yes` (`delete_doc`) + `monday doc duplicate [--with-updates]`
+  (`duplicate_doc`). D7 closure: two verbs over one with
+  placement choosers (mirrors `monday item upload` /
+  `monday update upload` split for the same multipart wire at
+  v0.4-M31). D8 closure: drop `--name <n>` from duplicate
+  (no wire-side rename slot on Monday's `duplicate_doc`). D9
+  closure: project opaque JSON returns (rename / delete /
+  duplicate) to flat `{ doc_id, success: true }` envelope at
+  the fetcher boundary. Per-block CRUD (`create_doc_block` /
+  `update_doc_block` / `delete_doc_block`) defers to v0.5-M36;
+  doc-content import (`import_doc_from_html` /
+  `add_content_to_doc_from_markdown`) defers to v0.5-M37.
+  Empirical probe at v0.5 kickoff
+  (`scripts/probe/v0.5-doc-mutations.ts` +
+  `v0.5-inputs-and-results.ts` + `v0.5-nested-inputs.ts`,
+  2026-05-15, API `2026-01`) pinned the 9 mutation signatures
+  + return-shape heterogeneity (full Document on create; opaque
+  JSON on rename/delete/duplicate; DocumentBlock on per-block
+  ops; custom `{success, error?}` OBJECT on the imports).
+  v0.5-M35 pre-flight stubs at this commit (argv schema + wire
+  mutation documents + envelope projection only); runtime
+  bodies land at M35 IMPL.
 - Files-shaped friendly `--set` translator + `--set-raw` form —
   the `monday item upload` verb shipped at v0.4-M31 covers the
   multipart wire path; the inline `--set` / `--set-raw` form
