@@ -4261,12 +4261,14 @@ two distinct CLI verbs per D7 closure — the mutual-exclusion
 lives at the argv boundary rather than as `--workspace`/
 `--board` choosers on one verb.
 
-**Status: v0.5-M35 pre-flight stub at this commit.** Argv
-parsing + schema + wire mutation document + envelope shape all
-ship at pre-flight (real shipped surface). Runtime body lands
-at v0.5-M35 IMPL — the IMPL cassette will pin the actual
-`Document` response shape Monday returns immediately
-post-create.
+**Runtime body landed at v0.5-M35 IMPL** (cluster
+`153458a..1629d9e`). Argv parsing + schema + wire mutation
+document + envelope shape all ship; the fetcher issues a
+single `client.raw` round-trip with operationName
+`CreateDocInWorkspace`, parses through `createDocResponseSchema`
++ `assertResponseFieldPresent`, then unwraps the per-Document
+payload via `documentSchema` (13-field base, no `blocks`
+slot).
 
 Envelope `data: <Document>` — direct unwrap matching the
 create-verb convention (`workspace create` / `board create` /
@@ -4280,7 +4282,7 @@ that need block hydration (rare on a fresh create — usually
 the next step is content authoring) call
 `monday doc get <new-id>` per the M32 read cadence.
 
-**Live success envelope** (target shape — IMPL cassette pins):
+**Live success envelope** (per-IMPL cassette-validated shape):
 
 ```json
 {
@@ -4315,18 +4317,22 @@ the next step is content authoring) call
   "planned_changes": [
     {
       "operation": "create_doc",
-      "location": {
-        "workspace": {
-          "workspace_id": "5555",
-          "name": "Q4 launch plan",
-          "kind": "private"
-        }
-      }
+      "workspace_id": "5555",
+      "name": "Q4 launch plan",
+      "kind": "private"
     }
   ],
   "warnings": []
 }
 ```
+
+Note the dry-run shape is **flat** — `workspace_id` / `name` /
+optional `folder_id` / optional `kind` ride at the
+`planned_changes[]` entry root rather than nesting inside a
+wire-shaped `location.workspace.*` slot. Mirrors M14 `workspace
+create` / M34 `team create` cadence; only-supplied fields land in
+the planned payload (matches the wire-side omit-vs-null
+discipline the live path uses).
 
 Idempotent: no (Monday allows duplicate doc names within a
 workspace).
@@ -4339,8 +4345,8 @@ item_id! } }) → Document` (operationName `CreateDocOnColumn`).
 Mirror of `create-in-workspace` for the board-scoped placement
 variant per D7 closure.
 
-**Status: v0.5-M35 pre-flight stub at this commit.** Runtime
-body lands at v0.5-M35 IMPL.
+**Runtime body landed at v0.5-M35 IMPL** (cluster
+`153458a..1629d9e`).
 
 Envelope `data: <Document>` — same shape as
 `create-in-workspace`. The column must be a doc-typed column
@@ -4366,17 +4372,17 @@ wire.
   "planned_changes": [
     {
       "operation": "create_doc",
-      "location": {
-        "board": {
-          "item_id": "12345",
-          "column_id": "doc_column_1"
-        }
-      }
+      "item_id": "12345",
+      "column_id": "doc_column_1"
     }
   ],
   "warnings": []
 }
 ```
+
+Same flat dry-run shape as `create-in-workspace` (slots ride at
+the `planned_changes[]` entry root rather than nesting inside a
+wire-shaped `location.board.*` slot).
 
 Idempotent: no (Monday allows multiple docs on the same
 item-column slot).
@@ -4395,10 +4401,16 @@ camelCase `docId` on the wire (Finding 7) — see the
 canonical asymmetry note at `src/api/documents.ts` module
 header (4th supporting site for R-NEW-41).
 
-**Status: v0.5-M35 pre-flight stub at this commit.** Runtime
-body lands at v0.5-M35 IMPL — IMPL cassette pins how Monday
-surfaces the opaque JSON return (current expectation: null or
-empty record; the projection layer extracts what's there).
+**Runtime body landed at v0.5-M35 IMPL** (cluster
+`153458a..1629d9e`). The v0.5 doc-CRUD probe was read-only —
+no live mutation response was captured; the runtime accepts
+any non-null `update_doc_name` payload and projects to
+`{doc_id: <input>, success: true}`. Round-1 P2-1 closure:
+present-but-null payload also projects to success (Monday's
+`update_doc_name` probe description carries NO return-shape
+promise — null is plausibly empty-success; typed errors for
+missing-doc bubble via GraphQL `errors[]` → typed `ApiError`
+upstream).
 
 **Live success envelope** (projected per D9):
 
@@ -4449,8 +4461,8 @@ round-1 P2 invariant (a missing token never masks
 `confirmation_required` as `config_error`). camelCase
 wire-arg note (`docId`) carries over from `rename`.
 
-**Status: v0.5-M35 pre-flight stub at this commit.** Runtime
-body lands at v0.5-M35 IMPL.
+**Runtime body landed at v0.5-M35 IMPL** (cluster
+`153458a..1629d9e`).
 
 **Live success envelope** (projected per D9):
 
@@ -4539,9 +4551,15 @@ needing a renamed duplicate pair with `monday doc rename
 camelCase wire-arg note (`docId`, `duplicateType`) carries
 over from `rename` / `delete`.
 
-**Status: v0.5-M35 pre-flight stub at this commit.** Runtime
-body lands at v0.5-M35 IMPL — IMPL cassette pins the new-id
-extraction shape from Monday's opaque JSON payload.
+**Runtime body landed at v0.5-M35 IMPL** (cluster
+`153458a..1629d9e`). The v0.5 doc-CRUD probe was read-only —
+no live mutation response was captured; the runtime extracts
+the new doc id via `extractDuplicateDocId`, which defensively
+accepts plausible wire shapes (bare string / number /
+record-with-`id` / `doc_id` / `new_doc_id`; string or number
+leaves). Unrecognised shapes surface `internal_error` with a
+re-probe hint. A future live wire response would let a
+follow-up commit narrow what the helper accepts.
 
 **Live success envelope** (projected per D9; new-id from
 wire JSON):
