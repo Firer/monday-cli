@@ -41,18 +41,20 @@
  * `--name <n>` produces the same end state; Monday's wire is a
  * no-op when the name matches the current value.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight. Runtime body lands at v0.5-M35
- * IMPL.
+ * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
+ * flags parse run BEFORE `resolveClient` so invalid argv surfaces
+ * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * path emits minimal planned changes (no wire call fires); live
+ * path dispatches {@link renameDoc} + projects via `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
-import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
-  UPDATE_DOC_NAME_MUTATION,
+  renameDoc,
   docRenameOutputSchema,
   type DocRenameOutput,
 } from '../../api/documents.js';
@@ -104,38 +106,46 @@ export const docRenameCommand: CommandModule<
           ...(opts as Readonly<Record<string, unknown>>),
         });
 
-        // Parse global flags BEFORE the c8-ignored stub throw so
-        // invalid global argv surfaces as `usage_error` from the
-        // parse boundary, not masked as `internal_error` from the
-        // stub. See `create-in-workspace.ts` for the canonical
-        // rationale.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        void globalFlags;
-
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // above is real-and-shipped; only the wire-call leg is
-        // deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void UPDATE_DOC_NAME_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc rename — runtime body lands at v0.5-M35 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M35 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + envelope ' +
-                'emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'update_doc_name',
+                doc_id: parsed.docId,
+                name: parsed.name,
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await renameDoc({
+          client,
+          docId: parsed.docId,
+          name: parsed.name,
+        });
+        emitMutation({
+          ctx,
+          data: result.result,
+          schema: docRenameCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

@@ -51,18 +51,21 @@
  * column types — permission failure precedes column-type
  * validation at Monday's wire.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight. Runtime body lands at v0.5-M35
- * IMPL.
+ * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
+ * flags parse run BEFORE `resolveClient` so invalid argv surfaces
+ * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * path emits minimal planned changes (no wire call fires); live
+ * path dispatches {@link createDocOnColumn} + projects via
+ * `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
-import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { ItemIdSchema, ColumnIdSchema } from '../../types/ids.js';
 import {
-  CREATE_DOC_ON_COLUMN_MUTATION,
+  createDocOnColumn,
   docCreateOnColumnOutputSchema,
   type DocCreateOnColumnOutput,
 } from '../../api/documents.js';
@@ -114,38 +117,46 @@ export const docCreateOnColumnCommand: CommandModule<
       .action(async (opts: unknown) => {
         const parsed = parseArgv(docCreateOnColumnCommand.inputSchema, opts);
 
-        // Parse global flags BEFORE the c8-ignored stub throw so
-        // invalid global argv surfaces as `usage_error` from the
-        // parse boundary, not masked as `internal_error` from the
-        // stub. See `create-in-workspace.ts` for the canonical
-        // rationale.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        void globalFlags;
-
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // above is real-and-shipped; only the wire-call leg is
-        // deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void CREATE_DOC_ON_COLUMN_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc create-on-column — runtime body lands at v0.5-M35 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M35 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + envelope ' +
-                'emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              {
+                operation: 'create_doc',
+                item_id: parsed.item,
+                column_id: parsed.column,
+              },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await createDocOnColumn({
+          client,
+          itemId: parsed.item,
+          columnId: parsed.column,
+        });
+        emitMutation({
+          ctx,
+          data: result.document,
+          schema: docCreateOnColumnCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

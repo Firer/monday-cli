@@ -51,20 +51,22 @@
  * — agents can't safely retry without verifying the id still
  * names the same record.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring + destructive-gate invariant all ship at pre-flight (real
- * shipped surface). The action body's wire-call dispatch +
- * dry-run emit + envelope emit land at v0.5-M35 IMPL.
+ * **Runtime body landed at v0.5-M35 IMPL.** Destructive gate fires
+ * BEFORE `resolveClient` (M10 round-1 P2 invariant); dry-run path
+ * emits minimal `{operation: "delete_doc", doc_id}` (no wire call);
+ * live path dispatches {@link deleteDoc} + projects via
+ * `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
-  DELETE_DOC_MUTATION,
+  deleteDoc,
   docDeleteOutputSchema,
   type DocDeleteOutput,
 } from '../../api/documents.js';
@@ -105,9 +107,9 @@ export const docDeleteCommand: CommandModule<
         // A missing `--yes` must surface as `confirmation_required`
         // per cli-design §3.1 #7's unconditional contract, never
         // masked by `config_error` when no token is configured.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        const preGateGlobalFlags = parseGlobalFlags(program.opts(), ctx.env);
         enforceDestructiveGate({
-          globalFlags,
+          globalFlags: preGateGlobalFlags,
           verb: 'doc delete',
           target: parsed.docId,
           detailKey: 'doc_id',
@@ -119,30 +121,41 @@ export const docDeleteCommand: CommandModule<
             'column` (lossy: new id, content must be re-imported).',
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // + destructive-gate invariant above are real-and-shipped;
-        // only the wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void DELETE_DOC_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc delete — runtime body lands at v0.5-M35 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M35 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + destructive-gate ' +
-                'invariant + wire mutation document only; the live dispatch ' +
-                '+ dry-run emit + envelope emit land at the IMPL session.',
-            },
-          },
-        );
-        /* c8 ignore stop */
+        if (preGateGlobalFlags.dryRun) {
+          // Minimal dry-run shape — no preflight read fires. Per
+          // cli-design §6.4 mutation-dry-run variant: `operation:
+          // "delete_doc"`, `doc_id`, nothing else. `meta.source:
+          // 'none'` because no API call fires; live surfaces
+          // `not_found` for missing ids on its own. Mirrors
+          // workspace-delete + team-delete cadence.
+          const { apiVersion } = resolveClient(ctx, program.opts());
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              { operation: 'delete_doc', doc_id: parsed.docId },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await deleteDoc({ client, docId: parsed.docId });
+        emitMutation({
+          ctx,
+          data: result.result,
+          schema: docDeleteCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

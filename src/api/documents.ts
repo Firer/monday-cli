@@ -213,26 +213,28 @@
  * "live"`. Dry-run paths emit `meta.source: "none"` per §6.4
  * mutation-dry-run discipline.
  *
- * **Status at v0.5-M35 pre-flight: STUB FETCHERS shipped at this
- * commit.** Runtime bodies land at v0.5-M35 IMPL — see each stub's
- * `c8 ignore start/stop` block-wrap. The argv parse boundary +
- * input/output schemas + GraphQL mutation documents + envelope
- * shapes are real-and-shipped; pre-flight Codex review covers
- * those surfaces. Stubs throw `internal_error` so a premature
- * invocation surfaces "not yet implemented" rather than a
- * misleading false-success envelope (M31 pre-flight round-1 P2-2
- * lesson — pre-flight stubs MUST NOT emit `ok: true` bogus
- * envelopes).
+ * **Runtime bodies landed at v0.5-M35 IMPL.** All five fetchers
+ * issue a single `client.raw` round-trip with their pinned
+ * `operationName`; responses parse through the wrapping schemas
+ * via `unwrapOrThrow` + `assertResponseFieldPresent`, then either
+ * unwrap the per-Document payload (create variants) or project
+ * the opaque JSON return to the flat `{ doc_id, success: true }`
+ * envelope (rename / delete / duplicate per D9). The
+ * `duplicate_doc` projection extracts the new doc id from the
+ * opaque JSON via {@link extractDuplicateDocId} — defensive
+ * across common wire shapes (bare string, `{id}`, `{doc_id}`,
+ * `{new_doc_id}`); unrecognised shapes surface `internal_error`
+ * with a re-probe hint.
  *
- * **R-NEW-76 discipline preserved** across all 5 M35 command stubs
- * — `parseArgv` plus applicable helpers (`parseGlobalFlags` on
- * all five; `enforceDestructiveGate` on `doc delete`) fire BEFORE
- * the `c8 ignore start` block-wrap on every verb so invalid argv
- * surfaces `usage_error` from the parse boundary, NOT
- * `internal_error` from the c8-ignored stub throw. M35 verbs do
- * not consume comma-separated brand-list flags (`parseBrandedList
- * Arg` is an M34 team-writer / M32 `doc list --workspace` helper);
- * the M35 surface doesn't need it.
+ * **R-NEW-76 discipline preserved** across all 5 M35 command
+ * action bodies — `parseArgv` plus applicable helpers
+ * (`parseGlobalFlags` on all five; `enforceDestructiveGate` on
+ * `doc delete`) fire BEFORE `resolveClient` so invalid argv +
+ * missing-`--yes` surface from the parse boundary, ahead of any
+ * `config_error` from a missing token. M35 verbs do not consume
+ * comma-separated brand-list flags (`parseBrandedListArg` is an
+ * M34 team-writer / M32 `doc list --workspace` helper); the M35
+ * surface doesn't need it.
  */
 
 import { z } from 'zod';
@@ -859,12 +861,12 @@ export const getDocument = async (
 // ===========================================================================
 // v0.5-M35 doc-level CRUD mutation surface
 // ===========================================================================
-// All five fetchers below ship as PRE-FLIGHT STUBS at v0.5-M35 — the argv
-// parse boundary, input/output schemas, GraphQL mutation documents, and
-// envelope shapes are real-and-shipped surfaces; the wire-call leg lands
-// at v0.5-M35 IMPL. Stubs throw `internal_error` so a premature invocation
-// surfaces "not yet implemented" rather than a misleading false-success
-// envelope (M31 pre-flight round-1 P2-2 lesson).
+// All five fetchers below landed runtime bodies at v0.5-M35 IMPL. Each
+// issues a single `client.raw` round-trip with its pinned `operationName`,
+// parses via the wrapping response schema + `assertResponseFieldPresent`,
+// and either unwraps the Document payload (create variants) or projects
+// the opaque JSON return into the flat `{ doc_id, success: true }`
+// envelope per D9 (rename / delete / duplicate).
 
 /**
  * Monday's `DuplicateType` enum vocabulary (empirical probe 2026-05-15,
@@ -1156,6 +1158,12 @@ export const DUPLICATE_DOC_MUTATION = `
  * surfaces side-band debug keys (`extensions`, `account_id`)
  * alongside the documented data root, and the loose mode lets
  * them pass without faulting the parse.
+ *
+ * The `create_doc` slot widens to `unknown` so the wrapping parse
+ * tolerates Monday's side-band keys and any rare `null` payload;
+ * the post-parse layer pins the value against {@link documentSchema}
+ * via `unwrapOrThrow` so per-field drift surfaces with structured
+ * `details.issues` (mirrors M34 createTeam's two-stage parse).
  */
 const createDocResponseSchema = z
   .object({
@@ -1237,36 +1245,65 @@ export interface CreateDocInWorkspaceResult {
  * `assertResponseFieldPresent`; a null payload surfaces
  * `internal_error` too — a successful `create_doc` mutation must
  * return the created Document per Monday's documented contract.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
- * IMPL — the stub throws `internal_error` so a premature
- * invocation surfaces "not yet implemented" rather than a
- * misleading false-success envelope.
  */
-/* c8 ignore start */
 export const createDocInWorkspace = async (
   inputs: CreateDocInWorkspaceInputs,
 ): Promise<CreateDocInWorkspaceResult> => {
-  void inputs;
-  void CREATE_DOC_IN_WORKSPACE_MUTATION;
-  void createDocResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'createDocInWorkspace stub — runtime body lands at v0.5-M35 IMPL.',
+  const workspaceInput: Record<string, unknown> = {
+    workspace_id: inputs.workspaceId,
+    name: inputs.name,
+  };
+  if (inputs.folderId !== undefined) {
+    workspaceInput.folder_id = inputs.folderId;
+  }
+  if (inputs.kind !== undefined) {
+    workspaceInput.kind = inputs.kind;
+  }
+  const response = await inputs.client.raw<unknown>(
+    CREATE_DOC_IN_WORKSPACE_MUTATION,
+    { input: { workspace: workspaceInput } },
+    { operationName: 'CreateDocInWorkspace' },
+  );
+  const data = unwrapOrThrow(
+    createDocResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M35 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed CreateDocInWorkspace response',
+      details: { workspace_id: inputs.workspaceId, name: inputs.name },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `createDocResponseSchema` if ' +
+        'Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'create_doc',
+    operationLabel: 'CreateDocInWorkspace',
+    details: { workspace_id: inputs.workspaceId, name: inputs.name },
+    nullHandling: 'caller_handles',
+  });
+  const rawDoc = data.create_doc;
+  if (rawDoc === null || rawDoc === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no document payload from create_doc(location: {workspace: ${inputs.workspaceId}}, name: ${JSON.stringify(inputs.name)}).`,
+      { details: { workspace_id: inputs.workspaceId, name: inputs.name } },
+    );
+  }
+  const document = unwrapOrThrow(
+    documentSchema.safeParse(rawDoc),
+    {
+      context: `Monday returned a malformed Document payload from create_doc (workspace ${inputs.workspaceId})`,
+      details: { workspace_id: inputs.workspaceId, name: inputs.name },
+    },
+  );
+  return {
+    document,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface CreateDocOnColumnInputs {
   readonly client: MondayClient;
@@ -1298,34 +1335,59 @@ export interface CreateDocOnColumnResult {
  * column not configured for docs → `validation_failed` (Monday-
  * side rejection — the CLI doesn't pre-check column-type
  * compatibility, mirroring M8's `change_column_value` cadence).
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
- * IMPL.
  */
-/* c8 ignore start */
 export const createDocOnColumn = async (
   inputs: CreateDocOnColumnInputs,
 ): Promise<CreateDocOnColumnResult> => {
-  void inputs;
-  void CREATE_DOC_ON_COLUMN_MUTATION;
-  void createDocResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'createDocOnColumn stub — runtime body lands at v0.5-M35 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    CREATE_DOC_ON_COLUMN_MUTATION,
     {
-      details: {
-        deferred_to: 'v0.5-M35 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      input: {
+        board: { item_id: inputs.itemId, column_id: inputs.columnId },
       },
     },
+    { operationName: 'CreateDocOnColumn' },
   );
+  const data = unwrapOrThrow(
+    createDocResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday returned a malformed CreateDocOnColumn response',
+      details: { item_id: inputs.itemId, column_id: inputs.columnId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `createDocResponseSchema` if ' +
+        'Monday\'s contract has changed.',
+    },
+  );
+  assertResponseFieldPresent({
+    data,
+    key: 'create_doc',
+    operationLabel: 'CreateDocOnColumn',
+    details: { item_id: inputs.itemId, column_id: inputs.columnId },
+    nullHandling: 'caller_handles',
+  });
+  const rawDoc = data.create_doc;
+  if (rawDoc === null || rawDoc === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no document payload from create_doc(location: {board: {item_id: ${inputs.itemId}, column_id: ${inputs.columnId}}}).`,
+      { details: { item_id: inputs.itemId, column_id: inputs.columnId } },
+    );
+  }
+  const document = unwrapOrThrow(
+    documentSchema.safeParse(rawDoc),
+    {
+      context: `Monday returned a malformed Document payload from create_doc (item ${inputs.itemId}, column ${inputs.columnId})`,
+      details: { item_id: inputs.itemId, column_id: inputs.columnId },
+    },
+  );
+  return {
+    document,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface RenameDocInputs {
   readonly client: MondayClient;
@@ -1356,34 +1418,53 @@ export interface RenameDocResult {
  * if Monday surfaces a typed error instead. The agent-facing
  * envelope shape (the projection contract) doesn't change either
  * way; only the error-code mapping is empirically pinned at IMPL.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
- * IMPL.
  */
-/* c8 ignore start */
 export const renameDoc = async (
   inputs: RenameDocInputs,
 ): Promise<RenameDocResult> => {
-  void inputs;
-  void UPDATE_DOC_NAME_MUTATION;
-  void updateDocNameResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'renameDoc stub — runtime body lands at v0.5-M35 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    UPDATE_DOC_NAME_MUTATION,
+    { docId: inputs.docId, name: inputs.name },
+    { operationName: 'UpdateDocName' },
+  );
+  const data = unwrapOrThrow(
+    updateDocNameResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M35 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed UpdateDocName response',
+      details: { doc_id: inputs.docId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `updateDocNameResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'update_doc_name',
+    operationLabel: 'UpdateDocName',
+    details: { doc_id: inputs.docId },
+    nullHandling: 'caller_handles',
+  });
+  const rawPayload = data.update_doc_name;
+  if (rawPayload === null || rawPayload === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from update_doc_name for doc ${inputs.docId}`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  // Project Monday's opaque JSON return per D9 — agents see a
+  // uniform `{ doc_id, success: true }` envelope regardless of
+  // what's inside `rawPayload`. The wire JSON's content is
+  // verified to be non-null + present above; its internal shape
+  // is documented as "opaque" + insulated from agents.
+  return {
+    result: { doc_id: inputs.docId, success: true },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface DeleteDocInputs {
   readonly client: MondayClient;
@@ -1412,34 +1493,48 @@ export interface DeleteDocResult {
  * M10 round-1 P2 invariant. A missing `--yes` surfaces as
  * `confirmation_required` from the action layer, never masked
  * by `config_error` when no token is configured.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
- * IMPL.
  */
-/* c8 ignore start */
 export const deleteDoc = async (
   inputs: DeleteDocInputs,
 ): Promise<DeleteDocResult> => {
-  void inputs;
-  void DELETE_DOC_MUTATION;
-  void deleteDocResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'deleteDoc stub — runtime body lands at v0.5-M35 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    DELETE_DOC_MUTATION,
+    { docId: inputs.docId },
+    { operationName: 'DeleteDoc' },
+  );
+  const data = unwrapOrThrow(
+    deleteDocResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M35 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed DeleteDoc response',
+      details: { doc_id: inputs.docId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `deleteDocResponseSchema` if ' +
+        'Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'delete_doc',
+    operationLabel: 'DeleteDoc',
+    details: { doc_id: inputs.docId },
+    nullHandling: 'caller_handles',
+  });
+  const rawPayload = data.delete_doc;
+  if (rawPayload === null || rawPayload === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from delete_doc for doc ${inputs.docId}`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  return {
+    result: { doc_id: inputs.docId, success: true },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface DuplicateDocInputs {
   readonly client: MondayClient;
@@ -1468,35 +1563,104 @@ export interface DuplicateDocResult {
  * applies (the M34 `team-create` omit-vs-null discipline). A
  * null `duplicate_doc` payload surfaces `not_found` (source
  * doc id bogus or inaccessible); missing key surfaces
- * `internal_error`. The new-id extraction from the opaque JSON
- * payload pins at IMPL cassette — `duplicate_doc` is the one
- * M35 mutation whose return JSON carries semantic content
- * (the new doc's id), and the projection layer needs to find it.
- *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M35
- * IMPL.
+ * `internal_error`. The new-id extraction tolerates several
+ * common shapes Monday's opaque JSON might carry (bare string,
+ * `{id}`, `{doc_id}`, `{new_doc_id}`) — anything else surfaces
+ * `internal_error` with a re-probe hint.
  */
-/* c8 ignore start */
-export const duplicateDoc = async (
-  inputs: DuplicateDocInputs,
-): Promise<DuplicateDocResult> => {
-  void inputs;
-  void DUPLICATE_DOC_MUTATION;
-  void duplicateDocResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
+/**
+ * Best-effort extractor for the new doc's id from
+ * `duplicate_doc`'s opaque JSON return. Monday's wire description
+ * says "Returns the new document's ID on success" but doesn't
+ * pin the wire shape; the schema introspection types the return
+ * as the opaque `JSON` scalar.
+ *
+ * Tries common shapes:
+ *
+ *   - Bare string → that's the new id.
+ *   - Numeric scalar → stringify (Monday's wire mixes ID + Int
+ *     types; the CLI's brand stays string-shaped).
+ *   - Record with `id` / `doc_id` / `new_doc_id` field carrying a
+ *     non-empty string or number → extract.
+ *
+ * Anything else surfaces `internal_error` with a hint pointing
+ * at the duplicate-cassette pin so a future operator can
+ * re-probe Monday's actual wire shape.
+ */
+const extractDuplicateDocId = (
+  raw: unknown,
+  sourceId: string,
+): string => {
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const rec = raw as Record<string, unknown>;
+    for (const key of ['id', 'doc_id', 'new_doc_id']) {
+      const value = rec[key];
+      if (typeof value === 'string' && value.length > 0) return value;
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+      }
+    }
+  }
   throw new ApiError(
     'internal_error',
-    'duplicateDoc stub — runtime body lands at v0.5-M35 IMPL.',
+    `duplicate_doc returned an opaque JSON payload the CLI could not extract a new doc id from (source ${sourceId})`,
     {
       details: {
-        deferred_to: 'v0.5-M35 IMPL',
+        doc_id: sourceId,
         hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
+          'Monday\'s `duplicate_doc` wire shape changed — re-probe via ' +
+          '`scripts/probe/` and extend `extractDuplicateDocId` to cover ' +
+          'the new shape.',
       },
     },
   );
 };
-/* c8 ignore stop */
+
+export const duplicateDoc = async (
+  inputs: DuplicateDocInputs,
+): Promise<DuplicateDocResult> => {
+  const variables: Record<string, unknown> = { docId: inputs.docId };
+  if (inputs.duplicateType !== undefined) {
+    variables.duplicateType = inputs.duplicateType;
+  }
+  const response = await inputs.client.raw<unknown>(
+    DUPLICATE_DOC_MUTATION,
+    variables,
+    { operationName: 'DuplicateDoc' },
+  );
+  const data = unwrapOrThrow(
+    duplicateDocResponseSchema.safeParse(response.data),
+    {
+      context: 'Monday returned a malformed DuplicateDoc response',
+      details: { doc_id: inputs.docId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `duplicateDocResponseSchema` ' +
+        'if Monday\'s contract has changed.',
+    },
+  );
+  assertResponseFieldPresent({
+    data,
+    key: 'duplicate_doc',
+    operationLabel: 'DuplicateDoc',
+    details: { doc_id: inputs.docId },
+    nullHandling: 'caller_handles',
+  });
+  const rawPayload = data.duplicate_doc;
+  if (rawPayload === null || rawPayload === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from duplicate_doc for source doc ${inputs.docId}`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  const newDocId = extractDuplicateDocId(rawPayload, inputs.docId);
+  return {
+    result: { doc_id: newDocId, success: true },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
+};

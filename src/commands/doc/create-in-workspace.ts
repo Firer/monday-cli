@@ -50,19 +50,21 @@
  * on the target workspace surface `forbidden` (mapped from
  * Monday's PERMISSION_DENIED extension).
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight (real shipped surface). The
- * action body's wire-call dispatch + dry-run emit + envelope
- * emit land at v0.5-M35 IMPL.
+ * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
+ * flags parse run BEFORE `resolveClient` so invalid argv surfaces
+ * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * path emits minimal planned changes (no wire call fires); live
+ * path dispatches {@link createDocInWorkspace} + projects via
+ * `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
-import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema, DocFolderIdSchema } from '../../types/ids.js';
 import {
-  CREATE_DOC_IN_WORKSPACE_MUTATION,
+  createDocInWorkspace,
   DOC_KIND_VALUES,
   docCreateInWorkspaceOutputSchema,
   type DocCreateInWorkspaceOutput,
@@ -124,40 +126,59 @@ export const docCreateInWorkspaceCommand: CommandModule<
       .action(async (opts: unknown) => {
         const parsed = parseArgv(docCreateInWorkspaceCommand.inputSchema, opts);
 
-        // Parse global flags BEFORE the c8-ignored stub throw so
-        // invalid global argv (e.g. `--json --table` conflict,
-        // unknown `--output` value) surfaces as `usage_error` from
-        // the parse boundary rather than masked as `internal_error`
-        // from the stub. R-NEW-76 extends to global-flag parsing,
-        // not just `parseArgv`. The parsed value is `void`ed until
-        // the IMPL session wires it through `resolveClient`.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        void globalFlags;
-
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // above is real-and-shipped; only the wire-call leg is
-        // deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void CREATE_DOC_IN_WORKSPACE_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc create-in-workspace — runtime body lands at v0.5-M35 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M35 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + envelope ' +
-                'emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          // Minimal dry-run shape per cli-design §6.4 mutation-
+          // dry-run variant — argv-derived, no preflight read.
+          // Only supplied input slots land in the planned payload
+          // (mirrors the wire-side omit-vs-null discipline the live
+          // path uses; agents see exactly what the live mutation
+          // would send).
+          const planned: Record<string, unknown> = {
+            operation: 'create_doc',
+            workspace_id: parsed.workspace,
+            name: parsed.name,
+          };
+          if (parsed.folder !== undefined) {
+            planned.folder_id = parsed.folder;
+          }
+          if (parsed.kind !== undefined) {
+            planned.kind = parsed.kind;
+          }
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [planned],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await createDocInWorkspace({
+          client,
+          workspaceId: parsed.workspace,
+          name: parsed.name,
+          ...(parsed.folder === undefined ? {} : { folderId: parsed.folder }),
+          ...(parsed.kind === undefined ? {} : { kind: parsed.kind }),
+        });
+        emitMutation({
+          ctx,
+          data: result.document,
+          schema: docCreateInWorkspaceCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

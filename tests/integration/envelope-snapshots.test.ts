@@ -3603,3 +3603,217 @@ describe('envelope snapshot — team (v0.5-M34)', () => {
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 });
+
+describe('envelope snapshot — doc CRUD (v0.5-M35)', () => {
+  // M35 wraps `create_doc` (2 CLI verbs per D7 — workspace vs board
+  // placement), `update_doc_name`, `delete_doc`, `duplicate_doc`.
+  // Doc mutations are live-only (outside cli-design §8 cache scope);
+  // 3 of 4 wire mutations return Monday's opaque `JSON` scalar +
+  // project to the flat `{doc_id, success: true}` envelope per D9
+  // (rename / delete echo input id; duplicate carries the NEW id).
+  const wireDoc = (
+    overrides: Partial<Record<string, unknown>> = {},
+  ): Record<string, unknown> => ({
+    id: '88010',
+    object_id: '99010',
+    name: 'Q4 launch plan',
+    doc_kind: 'public',
+    url: 'https://example.monday.com/docs/88010',
+    relative_url: '/docs/88010',
+    workspace_id: '5555',
+    workspace: { id: '5555', name: 'Engineering' },
+    doc_folder_id: null,
+    created_at: '2026-05-15T12:00:00Z',
+    created_by: { id: '7', name: 'Nick Webster' },
+    updated_at: '2026-05-15T12:00:00Z',
+    settings: null,
+    ...overrides,
+  });
+
+  it('doc create-in-workspace (live mutation envelope — Document with blocks omitted)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'create-in-workspace',
+        '--workspace',
+        '5555',
+        '--name',
+        'Q4 launch plan',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'CreateDocInWorkspace',
+            response: { data: { create_doc: wireDoc() } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc create-in-workspace --dry-run (argv-derived planned with all optional fields)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'create-in-workspace',
+        '--workspace',
+        '5555',
+        '--name',
+        'Confidential plan',
+        '--folder',
+        '12345',
+        '--kind',
+        'private',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc create-on-column (live mutation envelope)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'create-on-column',
+        '--item',
+        '12345',
+        '--column',
+        'doc_column_1',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'CreateDocOnColumn',
+            response: { data: { create_doc: wireDoc({ id: '88020' }) } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc create-on-column --dry-run (argv-derived minimal planned envelope)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'create-on-column',
+        '--item',
+        '12345',
+        '--column',
+        'doc_column_1',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc rename (live opaque-JSON projection echoes input doc_id)', async () => {
+    const out = await drive(
+      ['doc', 'rename', '88010', '--name', 'Revised plan', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'UpdateDocName',
+            response: { data: { update_doc_name: {} } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc rename --dry-run (argv-derived planned envelope)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'rename',
+        '88010',
+        '--name',
+        'Revised plan',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc delete (confirmation_required without --yes / --dry-run)', async () => {
+    const out = await drive(
+      ['doc', 'delete', '88010', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc delete --dry-run (argv-derived minimal planned envelope)', async () => {
+    const out = await drive(
+      ['doc', 'delete', '88010', '--dry-run', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc delete --yes (live opaque-JSON projection echoes input doc_id)', async () => {
+    const out = await drive(
+      ['doc', 'delete', '88010', '--yes', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'DeleteDoc',
+            response: { data: { delete_doc: { success: true } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc duplicate (live opaque-JSON projection carries NEW doc_id)', async () => {
+    const out = await drive(
+      ['doc', 'duplicate', '88010', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'DuplicateDoc',
+            response: { data: { duplicate_doc: { id: '88099' } } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc duplicate --with-updates --dry-run (argv-derived planned with duplicate_type)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'duplicate',
+        '88010',
+        '--with-updates',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+});

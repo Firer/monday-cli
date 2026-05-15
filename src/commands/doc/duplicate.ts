@@ -76,18 +76,23 @@
  * (Monday's wire does NOT dedupe by source-id). The source-doc's
  * `id` stays addressable; the duplicates accrete.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring all ship at pre-flight. Runtime body lands at v0.5-M35
- * IMPL.
+ * **Runtime body landed at v0.5-M35 IMPL.** Argv parsing + global-
+ * flags parse run BEFORE `resolveClient` so invalid argv surfaces
+ * `usage_error` ahead of any missing-token `config_error`. Dry-run
+ * path emits minimal planned changes (no wire call fires); live
+ * path dispatches {@link duplicateDoc} + projects via
+ * `emitMutation`. The `--with-updates` boolean maps to wire
+ * `duplicateType` per the M34 omit-vs-null discipline (absent →
+ * omit; present → `duplicate_doc_with_content_and_updates`).
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
-import { parseGlobalFlags } from '../../types/global-flags.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema } from '../../types/ids.js';
 import {
-  DUPLICATE_DOC_MUTATION,
+  duplicateDoc,
   docDuplicateOutputSchema,
   type DocDuplicateOutput,
 } from '../../api/documents.js';
@@ -144,38 +149,61 @@ export const docDuplicateCommand: CommandModule<
           ...(opts as Readonly<Record<string, unknown>>),
         });
 
-        // Parse global flags BEFORE the c8-ignored stub throw so
-        // invalid global argv surfaces as `usage_error` from the
-        // parse boundary, not masked as `internal_error` from the
-        // stub. See `create-in-workspace.ts` for the canonical
-        // rationale.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
-        void globalFlags;
-
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // above is real-and-shipped; only the wire-call leg is
-        // deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void DUPLICATE_DOC_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc duplicate — runtime body lands at v0.5-M35 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M35 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + wire mutation ' +
-                'document only; the live dispatch + dry-run emit + envelope ' +
-                'emit land at the IMPL session.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        // Map the CLI's boolean `--with-updates` flag to Monday's
+        // 2-value `DuplicateType` enum: absent → omit the wire
+        // variable (Monday's wire-side default content-only applies);
+        // present → opt into the with-updates variant.
+        const duplicateType =
+          parsed.withUpdates === true
+            ? 'duplicate_doc_with_content_and_updates'
+            : undefined;
+
+        if (globalFlags.dryRun) {
+          const planned: Record<string, unknown> = {
+            operation: 'duplicate_doc',
+            // Dry-run echoes the SOURCE id (the new-id is wire-only
+            // — only Monday can mint it). Live envelope swaps in
+            // the new-id; dry-run + live envelopes' `doc_id` slots
+            // are intentionally different per D9 prose at
+            // `src/api/documents.ts`.
+            doc_id: parsed.docId,
+          };
+          if (duplicateType !== undefined) {
+            planned.duplicate_type = duplicateType;
+          }
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [planned],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const result = await duplicateDoc({
+          client,
+          docId: parsed.docId,
+          ...(duplicateType === undefined ? {} : { duplicateType }),
+        });
+        emitMutation({
+          ctx,
+          data: result.result,
+          schema: docDuplicateCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };
