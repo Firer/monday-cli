@@ -2337,6 +2337,16 @@ monday user team-remove-members <tid> --users <id>,... [--dry-run]           v0.
                                           # Same envelope shape as team-add-
                                           # members with `operation:
                                           # "remove_users_from_team"`.
+                                          # Same wire-vs-CLI asymmetry as
+                                          # team-add-members (Monday's
+                                          # `failed_users[]` carries User
+                                          # objects but NO per-user reason —
+                                          # CLI emits generic
+                                          # `membership_failed` error.code
+                                          # per failed-user); canonical note
+                                          # at `teamMembershipResultSchema`
+                                          # JSDoc in `src/api/teams.ts` +
+                                          # `docs/architecture.md`.
                                           # `operationName:
                                           # 'RemoveUsersFromTeam'` pinned.
                                           # Idempotent: yes.
