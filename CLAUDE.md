@@ -38,7 +38,17 @@ fix). Round 4 ratified clean (0 P1 + 0 P2 + 0 P3 across W1-W14).
 **Cumulative pre-flight findings: 0 P1 + 3 P2 + 3 P3 across 3
 fix-up rounds** — within the M22 / M27 / M30 / M31 / M32 read-
 or-write surface precedent for pre-flight Codex convergence.
-**Pushed to `origin/main`** at close-docs.
+**Pushed to `origin/main`** at close-docs. **Post-close
+refactor-audit** filed R-v0.5-NEW-4 (wire-vs-output schema
+split at sub-field granularity; 2 supporting instances —
+v0.3-M22 full-schema + v0.5-M34 sub-field; watch-item) +
+R-v0.5-NEW-5 (codex template W{N} audit-point for paired-verb
+cli-design row consistency; 1 supporting instance from
+round-3 P3-1; template-stable candidate, fires at 2nd
+consumer) + swept 6 drift sites annotating M34 negative-case
+outcomes for the carried-forward R-NEW-31 / R-NEW-68 /
+R-NEW-71 / R-NEW-73 / R-NEW-84 v0.4→v0.5 watch-items + the
+post-M32 historical-snapshot R-NEW-70 pointer.
 
 **v0.4.0 published — release complete.** The v0.4 release-prep
 cluster mirrored v0.3-M28's `d9ad757..5e8c210` shape verbatim
@@ -689,15 +699,23 @@ entries at v0.4-plan §22):
   `src/utils/parse-boundary.ts` at the 2nd module consumer
   (likely v0.5 doc-mutation `update_doc_block.content`).
 - **R-NEW-70 — Comma-separated brand-list argv parser
-  pattern** (2 consumers; MEDIUM priority watch-item, code
-  lift at 3rd consumer per R7/R8 threshold). `parseUsersArg`
-  at `src/commands/workspace/add-users.ts:144` (M14) +
+  pattern** (2 consumers AT M32; MEDIUM priority watch-item,
+  code lift at 3rd consumer per R7/R8 threshold). **Since
+  shipped at v0.5-M34 pre-flight close (`17c1a54`)** —
+  ahead-of-feat per R-NEW-29's M25 cadence; 4 consumers
+  post-lift; lifted to `src/utils/parse-brand-list.ts:
+  parseBrandedListArg`. See the post-v0.5-M34 R-class state
+  block above for the full close-docs note + the
+  parseUsersArg-stays-separate rationale. M32-snapshot
+  pre-lift state: `parseUsersArg` at
+  `src/commands/workspace/add-users.ts:144` (M14) +
   `parseWorkspaceListArg` at `src/commands/doc/list.ts:244`
-  (M32) share the outer split + trim + empty-entry +
+  (M32) shared the outer split + trim + empty-entry +
   per-entry brand-validation outline; the per-call sites
-  carry distinct error-context strings so a lift today
-  would over-fit. Fires at 3rd consumer (likely v0.5 team
-  writers `team create --users` or board-relation verbs).
+  carried distinct error-context strings so a lift at M32
+  would have over-fit. Lift fired at the 3rd consumer (v0.5
+  team writers `team-create --users` + team-add-members +
+  team-remove-members `--users` sites).
 - **R-NEW-71 — Pagination-invariant `.superRefine` with
   dirty-input early-return guard** (1 consumer; LOW
   priority watch-item, code lift at 2nd consumer).
