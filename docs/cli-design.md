@@ -2212,13 +2212,124 @@ monday user list [--name <n>] [--email <e>] [--kind all|guests|non_guests]   v0.
 monday user get <uid>                                                        v0.1
 monday user me                            # alias for `account whoami`       v0.1
 
-# Teams (nested under user)
-monday user team-list                                                        v0.4
-monday user team-get <tid>                                                   v0.4
-monday user team-create --name <n> [--description <d>] [--users <id>,...]    v0.4
-monday user team-delete <tid> --yes                                          v0.4
-monday user team-add-members <tid> --users <id|email>,...                    v0.4
-monday user team-remove-members <tid> --users <id|email>,...                 v0.4
+# Teams (nested under user). v0.5-M34 pre-flight stubs at this
+# commit; runtime bodies land at M34 IMPL. Empirical probe
+# `scripts/probe/v0.5-team-mutations.ts` (2026-05-15, API
+# `2026-01`) pinned the wire shape: `Team` is 6 fields (id,
+# name, picture_url, is_guest, users, owners; NO `description`
+# field — D1 drops the --description flag the v0.4 row
+# speculatively pencilled), `create_team(input:
+# CreateTeamAttributesInput!, options: CreateTeamOptionsInput)
+# → Team`, `delete_team(team_id) → Team`,
+# `add_users_to_team(team_id, user_ids: [ID!]!) →
+# ChangeTeamMembershipsResult {failed_users, successful_users}`
+# (per-user partial-success wire envelope; CLI wraps into §6.1
+# `data.results: [{user_id, ok, ...}]` per D5),
+# `remove_users_from_team(...)` same shape.
+# **No `update_team` mutation exists** on Monday's wire at API
+# `2026-01` — D2 drops a `team-update` verb from v0.5 scope; no
+# rename / re-describe surface. `Query.teams` exposes neither
+# pagination (no `limit:` / `page:` / cursor — D6) nor a search
+# slot; account-size natural cap is the only limit.
+# Six tangential team-shaped mutations beyond the 4 core
+# (`assign_team_owners` / `remove_team_owners` /
+# `add_teams_to_board` / `delete_teams_from_board` /
+# `add_teams_to_workspace` / `delete_teams_from_workspace`)
+# defer per D4 to a v0.5.x candidate-selection round.
+# Hierarchical-team `--parent <ptid>` flag deferred per D3
+# (wire slot exists via `CreateTeamAttributesInput.parent_
+# team_id` but agent-UX semantics unclear today).
+# `--users <id,...>` is **numeric user IDs only** for the team
+# verbs (numeric brand via `UserIdSchema`); email tokens are
+# NOT resolved through `userByEmail` here (Monday's team
+# mutations take wire IDs directly, and the fan-out resolver
+# path lifts into the multi-target dispatch helper at IMPL).
+# Distinct from `workspace add-users` / `workspace remove-
+# users` / `board add-users` which accept mixed numeric-or-
+# email tokens via `parseUsersArg`.
+monday user team-list                                                        v0.5
+                                          # `Query.teams { id name picture_url
+                                          # is_guest users { id name email }
+                                          # owners { id name email } }`. No
+                                          # pagination at the wire — every
+                                          # visible team in one shot.
+                                          # `operationName: 'ListTeams'`
+                                          # pinned literally. Idempotent: yes.
+                                          # `meta.source: 'live'`; no cache.
+monday user team-get <tid>                                                   v0.5
+                                          # `Query.teams(ids: [<tid>])`;
+                                          # empty array → `not_found` with
+                                          # `details.team_id` (Monday wire
+                                          # collapses doesn't-exist + not-
+                                          # accessible). `operationName:
+                                          # 'GetTeam'` pinned. Idempotent: yes.
+monday user team-create --name <n> [--users <id>,...] [--guest-team] [--allow-empty]   v0.5
+                                          # `create_team(input:
+                                          # CreateTeamAttributesInput!,
+                                          # options: CreateTeamOptionsInput)
+                                          # → Team`. `--name <n>` required
+                                          # (wire `name: String!`). `--users`
+                                          # optional, comma-separated numeric
+                                          # IDs (wire `subscriber_ids: [ID!]`
+                                          # — "must not be empty unless
+                                          # allow_empty_team is set").
+                                          # `--guest-team` maps to wire
+                                          # `is_guest_team: true`;
+                                          # `--allow-empty` maps to wire
+                                          # `options.allow_empty_team: true`.
+                                          # `operationName: 'CreateTeam'`
+                                          # pinned. Idempotent: NO —
+                                          # Monday allows duplicate names.
+                                          # Admin-permission-sensitive.
+                                          # `meta.source: 'live'`.
+monday user team-delete <tid> --yes [--dry-run]                              v0.5
+                                          # `delete_team(team_id) → Team`.
+                                          # Destructive gate per §3.1 #7 —
+                                          # `--yes` mandatory outside CI;
+                                          # missing surfaces
+                                          # `confirmation_required` with
+                                          # `details.team_id`. Gate fires
+                                          # BEFORE `resolveClient` per M10
+                                          # round-1 P2 invariant.
+                                          # `operationName: 'DeleteTeam'`
+                                          # pinned. Idempotent: NO —
+                                          # re-running surfaces `not_found`
+                                          # past first call. Dry-run per §6.4
+                                          # mutation variant; `meta.source:
+                                          # 'none'`. Admin-permission-
+                                          # sensitive.
+monday user team-add-members <tid> --users <id>,... [--dry-run]              v0.5
+                                          # `add_users_to_team(team_id,
+                                          # user_ids: [ID!]!) →
+                                          # ChangeTeamMembershipsResult
+                                          # {failed_users, successful_users}`.
+                                          # `--users` required numeric brand
+                                          # list. Universal partial-success
+                                          # envelope per §6.1: `data:
+                                          # {operation: "add_users_to_team",
+                                          # team_id, results: [{user_id, ok,
+                                          # user?, error?}]}`. Wire-vs-CLI
+                                          # asymmetry: Monday's
+                                          # `failed_users[]` carries User
+                                          # objects but NO per-user reason on
+                                          # the wire — CLI emits generic
+                                          # `membership_failed` error.code
+                                          # per failed-user (R-NEW-41 4th
+                                          # consumer; documented in
+                                          # `docs/architecture.md`).
+                                          # `operationName: 'AddUsersToTeam'`
+                                          # pinned. Idempotent: yes — re-add
+                                          # is wire-side no-op. Admin-
+                                          # permission-sensitive.
+monday user team-remove-members <tid> --users <id>,... [--dry-run]           v0.5
+                                          # `remove_users_from_team(...) →
+                                          # ChangeTeamMembershipsResult`.
+                                          # Same envelope shape as team-add-
+                                          # members with `operation:
+                                          # "remove_users_from_team"`.
+                                          # `operationName:
+                                          # 'RemoveUsersFromTeam'` pinned.
+                                          # Idempotent: yes.
 
 # === WEBHOOK (board-scoped; CLI never *receives*) ===
 monday webhook list <bid>                                                    v0.3
@@ -7705,11 +7816,22 @@ scoped idempotent changes, and post comments narrating its work.**
 
 ### v0.5 (next — team writers + workdocs CRUD mutations)
 
-- `team` create / update / delete / add-users / remove-users
-  (Monday's `create_team` + `update_team` + `delete_team` +
-  `add_users_to_team` + `remove_users_from_team` mutations).
-  Deferred from v0.4-M34 at the post-v0.4-M33 candidate-selection
-  session (see above).
+- `team` create / delete / add-members / remove-members + the
+  two read complements (`team-list` / `team-get`) — Monday's
+  `create_team` + `delete_team` + `add_users_to_team` +
+  `remove_users_from_team` mutations + `Query.teams` reads.
+  Deferred from v0.4-M34 at the post-v0.4-M33 candidate-
+  selection session (see above). **No `update_team` mutation
+  exists on Monday's wire at API `2026-01`** — empirical probe
+  `scripts/probe/v0.5-team-mutations.ts` (2026-05-15) confirmed
+  the gap; v0.5 ships no `team-update` verb. **No
+  `--description` flag** — `Team` object carries no description
+  field on the wire. Six tangential team-shaped mutations
+  (`assign_team_owners` / `remove_team_owners` /
+  `add_teams_to_board` / `delete_teams_from_board` /
+  `add_teams_to_workspace` / `delete_teams_from_workspace`)
+  defer to v0.5.x candidate-selection. v0.5-M34 pre-flight
+  stubs at this commit; runtime bodies land at M34 IMPL.
 - Workdocs CRUD mutations — 9 surfaces (`create_doc` /
   `update_doc_name` / `delete_doc` / `duplicate_doc` /
   `import_doc_from_html` / `add_content_to_doc_from_markdown` /

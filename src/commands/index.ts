@@ -211,6 +211,26 @@ import { updateUploadCommand } from './update/upload.js';
 // shape + the `DocsOrderBy` 2-value enum.
 import { docListCommand } from './doc/list.js';
 import { docGetCommand } from './doc/get.js';
+// M34 (v0.5) — team writer surface (`user team-list` / `team-get` /
+// `team-create` / `team-delete` / `team-add-members` /
+// `team-remove-members`). 6 new verbs under the existing `user`
+// namespace; first v0.5 milestone. Pre-flight stubs at this commit
+// (argv schema + wire query/mutation documents only); runtime bodies
+// + integration tests land at M34 IMPL. Empirical probe at
+// `scripts/probe/v0.5-team-mutations.ts` (2026-05-15, API `2026-01`)
+// pinned Monday's `Query.teams` signature + the 6-field `Team`
+// projection + the `CreateTeamAttributesInput` 4-field input + the
+// `ChangeTeamMembershipsResult` partial-success wire envelope. No
+// `update_team` mutation exists (D1 drop --description; D2 no
+// team-update verb); 6 tangential team-shaped mutations
+// (assign_team_owners + add_teams_to_board etc.) deferred to v0.5.x
+// per D4 closure.
+import { teamListCommand } from './user/team-list.js';
+import { teamGetCommand } from './user/team-get.js';
+import { teamCreateCommand } from './user/team-create.js';
+import { teamDeleteCommand } from './user/team-delete.js';
+import { teamAddMembersCommand } from './user/team-add-members.js';
+import { teamRemoveMembersCommand } from './user/team-remove-members.js';
 // M33 (v0.4) — `monday completion <bash|zsh|fish>`. Shell-completion
 // script emitter; first non-envelope stdout surface in the CLI
 // (cli-design §3.1 raw-bytes carve-out). Empirical-probe finding at
@@ -276,6 +296,12 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     userListCommand,
     userGetCommand,
     userMeCommand,
+    teamListCommand,
+    teamGetCommand,
+    teamCreateCommand,
+    teamDeleteCommand,
+    teamAddMembersCommand,
+    teamRemoveMembersCommand,
     updateListCommand,
     updateGetCommand,
     itemGetCommand,
