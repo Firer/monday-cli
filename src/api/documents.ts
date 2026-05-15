@@ -1585,25 +1585,6 @@ export interface DuplicateDocResult {
 }
 
 /**
- * Duplicates a workdoc by ID via `duplicate_doc(docId,
- * duplicateType?)` with `operationName: 'DuplicateDoc'`
- * (R-NEW-37 W2). Projects Monday's opaque JSON return into the
- * flat `{ doc_id: <NEW>, success: true }` envelope per D9 — the
- * `doc_id` slot carries the **newly-created duplicate's id**,
- * NOT the input source-doc id (the source id stays accessible
- * via the verb's positional argv).
- *
- * The fetcher omits the `duplicateType` variable entirely when
- * `inputs.duplicateType` is unset so Monday's wire-side default
- * applies (the M34 `team-create` omit-vs-null discipline). A
- * null `duplicate_doc` payload surfaces `not_found` (source
- * doc id bogus or inaccessible); missing key surfaces
- * `internal_error`. The new-id extraction tolerates several
- * common shapes Monday's opaque JSON might carry (bare string,
- * `{id}`, `{doc_id}`, `{new_doc_id}`) — anything else surfaces
- * `internal_error` with a re-probe hint.
- */
-/**
  * Best-effort extractor for the new doc's id from
  * `duplicate_doc`'s opaque JSON return. Monday's wire description
  * says "Returns the new document's ID on success" but doesn't
@@ -1653,6 +1634,25 @@ const extractDuplicateDocId = (
   );
 };
 
+/**
+ * Duplicates a workdoc by ID via `duplicate_doc(docId,
+ * duplicateType?)` with `operationName: 'DuplicateDoc'`
+ * (R-NEW-37 W2). Projects Monday's opaque JSON return into the
+ * flat `{ doc_id: <NEW>, success: true }` envelope per D9 — the
+ * `doc_id` slot carries the **newly-created duplicate's id**,
+ * NOT the input source-doc id (the source id stays accessible
+ * via the verb's positional argv).
+ *
+ * The fetcher omits the `duplicateType` variable entirely when
+ * `inputs.duplicateType` is unset so Monday's wire-side default
+ * applies (the M34 `team-create` omit-vs-null discipline). A
+ * null `duplicate_doc` payload surfaces `not_found` (source
+ * doc id bogus or inaccessible); missing key surfaces
+ * `internal_error`. The new-id extraction tolerates several
+ * common shapes Monday's opaque JSON might carry (bare string,
+ * `{id}`, `{doc_id}`, `{new_doc_id}`) — anything else surfaces
+ * `internal_error` with a re-probe hint.
+ */
 export const duplicateDoc = async (
   inputs: DuplicateDocInputs,
 ): Promise<DuplicateDocResult> => {

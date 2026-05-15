@@ -284,6 +284,7 @@ describe('monday doc create-in-workspace (M35)', () => {
     };
     expect(env.error?.code).toBe('internal_error');
     expect(env.error?.details?.workspace_id).toBe('5555');
+    expect(env.error?.details?.name).toBe('X');
   });
 
   it('internal_error on schema drift in returned Document', async () => {
