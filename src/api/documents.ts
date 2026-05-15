@@ -1616,8 +1616,8 @@ export interface DuplicateDocResult {
  *     non-empty string or number → extract.
  *
  * Anything else surfaces `internal_error` with a hint pointing
- * at the duplicate-cassette pin so a future operator can
- * re-probe Monday's actual wire shape.
+ * at re-probing `duplicate_doc` live so a future commit can
+ * narrow the helper to Monday's actual wire shape.
  */
 const extractDuplicateDocId = (
   raw: unknown,
