@@ -228,10 +228,12 @@ import { docGetCommand } from './doc/get.js';
 // placement choosers. D8 closure: drop `--name <n>` from
 // duplicate (no wire-side rename slot). D9 closure: project
 // opaque JSON returns to `{ doc_id, success: true }` envelope.
-// 4 doc-content / per-block mutations (`create_doc_block` /
-// `update_doc_block` / `delete_doc_block` / `import_doc_from_html` /
-// `add_content_to_doc_from_markdown`) defer to M36 / M37
-// per the v0.5 doc-CRUD-mutation backlog sequencing.
+// 5 doc-content / per-block mutations defer across M36 and M37
+// per the v0.5 doc-CRUD-mutation backlog sequencing: M36
+// covers per-block CRUD (3 wire mutations — `create_doc_block` /
+// `update_doc_block` / `delete_doc_block`); M37 covers doc-
+// content import (2 wire mutations — `import_doc_from_html` /
+// `add_content_to_doc_from_markdown`).
 import { docCreateInWorkspaceCommand } from './doc/create-in-workspace.js';
 import { docCreateOnColumnCommand } from './doc/create-on-column.js';
 import { docRenameCommand } from './doc/rename.js';

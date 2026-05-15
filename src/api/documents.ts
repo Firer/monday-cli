@@ -108,12 +108,13 @@
  * "doesn't exist" + "not visible to token" into the same shape).
  *
  * **v0.5-M35 mutation surface (empirical probe 2026-05-15, API
- * `2026-01`; v0.5 kickoff rounds 1-3).** Five Monday GraphQL
- * mutations land here at v0.5-M35 — `create_doc` (2 CLI verbs
- * because Monday's `CreateDocInput` is mutually-exclusive `board`
- * vs `workspace` per D7) + `update_doc_name` + `delete_doc` +
- * `duplicate_doc`. All four are synchronous on Monday's wire —
- * the v0.4-W1 `dispatchPollingLoop` watch-item DOES NOT fire here.
+ * `2026-01`; v0.5 kickoff rounds 1-3).** Five CLI verbs land here
+ * at v0.5-M35, backed by four Monday GraphQL mutations —
+ * `create_doc` (2 CLI verbs because Monday's `CreateDocInput` is
+ * mutually-exclusive `board` vs `workspace` per D7) +
+ * `update_doc_name` + `delete_doc` + `duplicate_doc`. All four
+ * wire mutations are synchronous on Monday's wire — the v0.4-W1
+ * `dispatchPollingLoop` watch-item DOES NOT fire here.
  *
  *   - **Create-in-workspace variant** — `create_doc(location:
  *     CreateDocInput!) → Document` with `location: { workspace:
