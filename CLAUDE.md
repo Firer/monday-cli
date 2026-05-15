@@ -519,29 +519,59 @@ live in `docs/v0.4-plan.md` §3 M33 entry + §9 M33 preconditions
 + §15 M33 post-mortem + §22 R-NEW-76/77/78 entries. Do not
 duplicate here.
 
-**v0.5-M35 pre-flight closed at `f911fbd..a4763a2`** (feat commit
-`f911fbd` + 5 Codex fix-up rounds + 1 ratification). 5 CLI verbs
-land under the existing `monday doc` namespace, backed by 4
-Monday GraphQL mutations: `doc create-in-workspace` /
-`create-on-column` (both back `create_doc` per D7's mutually-
-exclusive `board` vs `workspace` split) + `rename`
+**v0.5-M35 IMPL closed at `153458a..e7c5e50`.** 5 doc-level
+CRUD verbs shipped end-to-end under the existing `monday doc`
+namespace, backed by 4 Monday GraphQL mutations: `doc create-
+in-workspace` / `create-on-column` (both back `create_doc` per
+D7's mutually-exclusive `board` vs `workspace` split) + `rename`
 (`update_doc_name`) + `delete --yes` (`delete_doc`) +
-`duplicate [--with-updates]` (`duplicate_doc`). Cluster shape
-mirrors M32 read-side `05c5988` + M34 write-side `e0eb7f9`
-pre-flight cadence: feat commit lands 5 stub fetcher functions
-(all c8-ignored; runtime lands at IMPL) + 5 GraphQL mutation
-documents + 4 wrapping response schemas (both create variants
-share `createDocResponseSchema`) + opaque-JSON projection
-schema `docMutationResultSchema` pinning `success:
-z.literal(true)` per D9 + `DUPLICATE_TYPE_VALUES` 2-value enum
-+ 5 command stubs (argv parsing + `parseGlobalFlags` on all 5
-+ `enforceDestructiveGate` on `doc delete` fire BEFORE the
-`c8 ignore start` block-wrap per R-NEW-76) + new
-`DocFolderIdSchema` brand at `src/types/ids.ts` (11th numeric-
-ID kind) + cli-design §4.3 DOC extension (5 new rows) +
-cli-design §13 v0.5 entry update + output-shapes.md M35
-entries (5 envelope shapes + ToC update) + 54 new argv-parser
-unit tests + command_count envelope-snapshot bump 107 → 112.
+`duplicate [--with-updates]` (`duplicate_doc`). IMPL cluster:
+`153458a` feat (5 runtime fetcher bodies in `src/api/documents.ts`
+swap c8-ignored stubs for live `client.raw` round-trips against
+the pinned operationNames; new `extractDuplicateDocId` helper
+for the opaque-JSON new-doc-id extraction defensively across
+bare-string / number / record-with-`id` / `doc_id` /
+`new_doc_id` shapes; 5 runtime action bodies wired via
+`resolveClient` + dry-run via `emitDryRun` + live via
+`emitMutation`; `doc delete`'s destructive gate preserved
+BEFORE `resolveClient` per M10 round-1 P2 invariant; 42 new
+integration tests across 5 new files + 11 envelope snapshots) +
+6 Codex IMPL fix-up rounds (`930cbc8` round-1: 0 P1 + 1 P2 + 2
+P3 — `renameDoc` null-payload contract decision per the
+per-fetcher probe-description asymmetry + module-header prose
+flip + detail-slot test assertions across all 5 verbs;
+`465bfd3` round-2: 0 P1 + 0 P2 + 1 P3 — 4 downstream JSDoc
+"cassette pins" sites flipped to forward-looking framing;
+`a1e7a46` round-3: 0 P1 + 0 P2 + 1 P3 — 1 remaining
+"duplicate-cassette pin" hint in `extractDuplicateDocId`'s
+JSDoc; `a671e01` round-4: 0 P1 + 0 P2 + 1 P3 — 6 remaining
+forward-looking "cassette" mentions uniformly removed to
+match W11 audit-point's noun-stem grep; `c26fd31` round-5: 0
+P1 + 0 P2 + 1 P3 — 5 module headers' stale `parseGlobalFlags`-
+vs-`resolveClient` ordering prose flipped post-IMPL-collapse
+(`parseGlobalFlags` now nests inside `resolveClient` for the
+4 non-delete verbs); `e7c5e50` round-6: 0 P1 + 0 P2 + 2 P3 —
+null-payload test `details.name` assertion + `duplicateDoc`
+JSDoc proximity to its function declaration). Round-7
+ratified clean across all 16 audit points (W1–W14 + W15 +
+W16). **Cumulative IMPL findings: 0 P1 + 1 P2 + 8 P3 across
+6 fix-up rounds** — 1-2 rounds above the M22 / M27 / M30 /
+M31 / M32 / M34 write-surface IMPL precedent, driven by the
+opaque-JSON cassette-prose sweep surfacing incrementally as
+the post-fix-up R-NEW-72 grep pattern broadened across rounds
+2-4.
+
+**Pre-flight cluster** (prior session) closed at
+`f911fbd..a4763a2`: 5 Codex fix-up rounds + 1 ratification;
+0 P1 + 1 P2 + 10 P3 cumulative. Lands the contract surface:
+5 stub fetcher functions + 5 GraphQL mutation documents + 4
+wrapping response schemas (both create variants share
+`createDocResponseSchema`) + opaque-JSON projection schema
+`docMutationResultSchema` pinning `success: z.literal(true)`
+per D9 + `DUPLICATE_TYPE_VALUES` 2-value enum + 5 command
+stubs + new `DocFolderIdSchema` brand at `src/types/ids.ts`
+(11th numeric-ID kind) + cli-design §4.3 DOC extension + 54
+argv-parser unit tests.
 
 **Codex pre-flight review converged in 6 rounds** across
 `c99cf95..a4763a2` — round 1 `c99cf95` (0 P1 + 1 P2 + 5 P3:
@@ -577,64 +607,139 @@ record envelope — `success` pinned literal-`true` because
 Monday surfaces failure via GraphQL `errors[]` upstream, not
 via a wire-side success flag.
 
-**R-class state (post-M35 pre-flight close).** R-v0.5-NEW-1
-lift (introspect-helper `inputFields` widening to
-`scripts/probe/_lib.ts`) **evaluated and DEFERRED** — all M35
-input-object shapes were pinned at v0.5 kickoff rounds 2+3
-probes via the inline `introspectRich` workaround; no re-probe
-was needed at pre-flight; the watch-item defers to the next
-probe consumer (likely M36 doc-block CRUD if its input-shape
-pre-flight needs a fresh probe). **R-NEW-72** (post-fix-up
-cross-doc grep) ratified for the 4th time — discipline
-triggered after every contract-flipping fix-up across rounds
-1-4; round 5 was a single-paragraph precision tweak that
-didn't fan out. **R-NEW-76** (parseArgv-before-c8) consumer-7
-applied across 5 new M35 stubs preserving the ordering
-invariant; rule stable post-graduation at M34 close-docs.
-**R-NEW-37 W2** (operationName parity) safely-by-construction
-across 5 new fetchers — operationName slots not caller-
-overridable; round-1 + round-6 W2 audits returned "nothing
-flagged" against both stub fetchers and stub argv schemas.
+**R-class state (post-M35 IMPL close).** No code-lift R-class
+movement at M35 IMPL — the 6-round Codex IMPL cluster's
+findings (1 P2 + 8 P3) were a single runtime correctness
+issue (per-fetcher null-payload asymmetry derived from probe
+descriptions) + prose-precision fix-ups + one test detail-slot
+assertion + one JSDoc proximity fix. No 3-consumer threshold
+crystallised.
 
-**Live numbers (post-M35 pre-flight close):**
+**Two new R-class candidates filed at M35 IMPL close** (full
+entries at v0.5-plan §22):
 
-- Test count: **3806 + 1 skipped** across **157** test files
-  (+54 net vs 3752 + 1 skipped at M34 IMPL close: 52 new
-  argv-parser unit tests at feat `f911fbd` + 2 wrong-slot
-  strict-rejection tests added at round-1 P3-4 fix `c99cf95`).
-- Coverage: **99.18 / 96.29 / 99.04 / 99.45** (stmts /
+- **R-v0.5-NEW-11 — Per-fetcher null-payload contract
+  decision discipline at pre-flight, derived from probe-
+  description return-shape promises.** Surfaced at M35 IMPL
+  round-1 P2-1 — pre-flight pinned all 3 opaque-JSON fetchers
+  (`renameDoc` / `deleteDoc` / `duplicateDoc`) as `null →
+  not_found` by analogy with M14 + M34, but IMPL surfaced the
+  per-fetcher asymmetry: `update_doc_name`'s probe description
+  carries NO return-shape prose (null plausibly empty-success);
+  `delete_doc` + `duplicate_doc` descriptions BOTH promise
+  non-null payloads on success (null = missing record).
+  1 supporting instance; LOW priority watch-item — process
+  discipline, NOT a code lift. Graduates to a pre-flight
+  Codex template audit-point at 3rd supporting instance.
+- **R-v0.5-NEW-12 — Pre-IMPL cross-doc grep extension for
+  call-ordering claims in module-header prose.** Surfaced at
+  M35 IMPL round-5 P3-1 — 5 module headers still claimed the
+  pre-flight `parseGlobalFlags`-vs-`resolveClient` ordering
+  after the IMPL had collapsed it (the 4 non-delete verbs now
+  nest `parseGlobalFlags` inside `resolveClient`). The
+  R-NEW-56 IMPL-kickoff grep catches "stub" / "PRE-FLIGHT" /
+  "deferred_to" patterns but DOESN'T catch "BEFORE
+  resolveClient" / call-ordering claims. 1 supporting
+  instance; LOW priority watch-item. Folds into R-NEW-56's
+  IMPL-kickoff checklist at 2nd supporting instance.
+
+**Two R-class disciplines ratified at M35 IMPL** (full
+context at v0.5-plan §12):
+
+- **R-NEW-72** (post-fix-up cross-doc grep) ratified for the
+  **5th time** — discipline fired after every contract-
+  flipping fix-up across rounds 1-4 + after rounds 5-6.
+  **Lesson surfaced at rounds 3-4:** grep patterns benefit
+  from matching noun stems (`cassette` / `cassette pin` /
+  `cassette pins` / `cassette pinned`) not just the literal
+  substring — the round-2 grep with the narrower pattern
+  missed the singular "cassette pin" stem (caught at round
+  3); the round-3 grep missed the bare noun `cassette`
+  (caught at round 4). When R-NEW-72 fires post-fix-up, use
+  `\b<noun>\b` regex matching rather than literal-substring
+  matching to catch all inflections in a single pass.
+- **R-NEW-37 W2** (operationName parity) safely-by-
+  construction across all 5 fetchers — verified clean at
+  IMPL rounds 1+7.
+- **R-NEW-76** (parseArgv-before-c8 / parseArgv-before-
+  resolveClient) consumer-7 applied across all 5 M35 action
+  bodies post-IMPL — rule stable post-graduation at M34
+  close-docs.
+
+**Live numbers (post-M35 IMPL close):**
+
+- Test count: **3858 + 1 skipped** across **162** test files
+  (+52 net vs 3806 + 1 skipped at M35 pre-flight close: 42
+  new integration tests across 5 new files
+  (`tests/integration/commands/doc-{create-in-workspace,
+  create-on-column,rename,delete,duplicate}.test.ts`; 9 + 6
+  + 7 + 7 + 13 per file) + 11 envelope snapshots in
+  `tests/integration/envelope-snapshots.test.ts` − 1 wrong-
+  slot stub test collapsed at IMPL (the pre-flight stub's
+  `parseGlobalFlags`-before-c8 test became redundant once
+  the c8 block was dropped). Round-1 fix flipped 1 test's
+  expected outcome (rename null → success vs not_found);
+  round-6 fixes added an assertion + reordered a JSDoc
+  block (test count unchanged on rounds 2-6).
+- Coverage: **99.29 / 96.36 / 99.44 / 99.55** (stmts /
   branches / fns / lines) at the **95 / 95.45 / 95 / 95**
-  floor. **Branches margin 0.84pp** (unchanged from M34 IMPL
-  close at 0.84pp — new stub modules + new schemas are
-  c8-ignored or covered by the new argv-parser unit tests;
-  standard pre-flight cadence — branches typically shuffle
-  ±0.05pp at pre-flight; M35 happened to land byte-identical).
+  floor. **Branches margin recovered 0.91pp** (was 0.84pp at
+  M35 pre-flight close; +0.07pp from runtime-body branches
+  covered by integration tests vs the 5 c8-ignored stub
+  drops). All 4 metrics improved at IMPL close vs pre-flight
+  (stmts +0.11pp / branches +0.07pp / fns +0.40pp / lines
+  +0.10pp) — same cadence as M32 + M34 IMPL closes.
 - ERROR_CODES count: **29** (unchanged; M35 reuses existing
-  codes per D-decisions — no new code surfaces).
-- Command count: **112** (was 107 at M34 IMPL close — 5 new
-  doc-mutation verbs).
+  codes per D-decisions).
+- Command count: **112** (unchanged from pre-flight; IMPL
+  adds no verbs).
 - `package.json` version: **0.4.0** (stays through v0.5
   milestones; bumps to `0.5.0` at v0.5 release-prep).
 
-**Next session — v0.5-M35 IMPL.** Lands runtime bodies for the
-5 stub fetchers in `src/api/documents.ts`
-(`createDocInWorkspace` / `createDocOnColumn` / `renameDoc` /
-`deleteDoc` / `duplicateDoc`) + 5 runtime action bodies wiring
-`resolveClient` + fetcher + emit (create variants use
-`emitMutation` returning the full Document envelope; rename /
-delete use `emitMutation` with the projected
-`{doc_id, success: true}` envelope; duplicate uses
-`emitMutation` extracting the new-doc-id from Monday's opaque
-JSON payload per the IMPL cassette pin). Dry-run paths emit
-the canonical planned-operation envelope per cli-design §6.4.
-New integration test files at
-`tests/integration/commands/doc-*.test.ts` (5 new files)
-covering happy + error + dry-run + destructive-gate (delete)
-+ opaque-JSON projection outcomes. Envelope-shape snapshots
-refreshed for the 5 new surfaces. Codex IMPL review estimate
-2-3 rounds per the M22 / M27 / M32 / M34 write-surface IMPL
-precedent. R-NEW-72 cross-doc grep runs at IMPL kickoff +
-after every contract-flipping fix-up.
+**Next session — post-M35 IMPL candidate-selection.** Per the
+R-NEW-75 5-dimension framework, run a dedicated candidate-
+selection session for the next v0.5 milestone before any
+pre-flight contract diff. Open candidates (from cli-design §13
+v0.5 backlog):
+
+- **M36 doc-block CRUD** (`create_doc_block` /
+  `update_doc_block` / `delete_doc_block`) — 3 verbs against
+  Monday's per-block wire surface; probe already ran at v0.5
+  kickoff (`DocBlockContentType` is a 16-value closed enum).
+  D10 + D11 tentative-closed at planning; pre-flight will
+  ratify. R-v0.5-NEW-1 (input-shape introspect-helper
+  widening) MAY fire if the pre-flight needs a fresh
+  `CreateDocBlockInput` probe.
+- **M37 doc-content import** (`import_doc_from_html` /
+  `add_content_to_doc_from_markdown`) — 2 verbs; both wire
+  surfaces return `{ success, error? }` discriminated unions
+  (D12 — first M37-style success/error result pattern in v0.5
+  scope). D13 (empirical size-limit probe at M37 pre-flight)
+  fires.
+- **v0.5.x cleanup bundle / tangential team mutations** —
+  M34-deferred surfaces (`assign_team_owners` /
+  `remove_team_owners` / `add_teams_to_board` / etc.);
+  agent-UX hierarchical-team semantics unclear today.
+
+Codex round estimate for each: M36 = 3-5 IMPL rounds (16-value
+enum on `--type` may surface contract drift; per-block-type
+payload shapes ship across 16 cassettes); M37 = 4-6 IMPL
+rounds (first success/error discriminated union per D12 + the
+size-limit probe per D13). Estimated 3-4 sessions through
+the chosen milestone's pre-flight + IMPL.
+
+R-class state to carry forward at next session:
+
+- R-v0.5-NEW-1 (introspect-helper `inputFields` widening) —
+  still DEFERRED; fires at next probe consumer with novel
+  input-object shapes.
+- R-v0.5-NEW-11 + R-v0.5-NEW-12 (M35 IMPL surfaces) — both
+  LOW priority watch-items at 1 supporting instance each;
+  graduate to permanent Codex template audit-points or
+  CLAUDE.md "Workflow rules" entries at 3-consumer cadence.
+- R-NEW-72 (post-fix-up cross-doc grep) — 5-instance ratified
+  + a noun-stem grep-pattern refinement lesson from rounds
+  3-4 (M35 post-mortem §12 Contract drift findings #2).
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
