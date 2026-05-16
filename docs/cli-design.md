@@ -2694,9 +2694,13 @@ monday doc block-create <did> --type <DocBlockContentType> --content <json>
                                           # `parseJsonArg` (R-NEW-42, 4th
                                           # consumer); per-type content
                                           # shape varies per Monday's
-                                          # `JSON` scalar — the 16 shapes
-                                          # are pinned at M36 IMPL
-                                          # cassettes per D11. `--after`
+                                          # `JSON` scalar — per-variant
+                                          # shapes documented in
+                                          # `docs/output-shapes.md`
+                                          # "Per-block content shapes"
+                                          # reference table (D11 closure;
+                                          # cassette-pinned + TBD rows).
+                                          # `--after`
                                           # / `--parent` are optional
                                           # opaque-string block IDs
                                           # (`DocBlockIdSchema`; non-
@@ -8193,11 +8197,11 @@ scoped idempotent changes, and post comments narrating its work.**
   stubs at this commit; runtime bodies land at M34 IMPL.
 - Workdocs CRUD mutations — 9 surfaces total split across 3 v0.5
   milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
-  the doc-level CRUD surface (5 verbs)** + **v0.5-M36 pre-flight
-  ships the per-block CRUD surface (3 verbs)** at this commit;
-  M37 doc-content import opens at its own pre-flight after M36
-  IMPL closes. v0.5-M35 verbs (closed): `monday doc create-in-
-  workspace` (`create_doc(location: {workspace: ...})`) +
+  the doc-level CRUD surface (5 verbs)** + **v0.5-M36 ships the
+  per-block CRUD surface (3 verbs)** end-to-end; M37 doc-content
+  import opens at its own pre-flight after M36 IMPL closes.
+  v0.5-M35 verbs (closed): `monday doc create-in-workspace`
+  (`create_doc(location: {workspace: ...})`) +
   `monday doc create-on-column` (`create_doc(location: {board:
   ...})`) + `monday doc rename` (`update_doc_name`) +
   `monday doc delete --yes` (`delete_doc`) +
@@ -8209,18 +8213,20 @@ scoped idempotent changes, and post comments narrating its work.**
   Monday's `duplicate_doc`). D9 closure: project opaque JSON
   returns (rename / delete / duplicate) to flat `{ doc_id,
   success: true }` envelope at the fetcher boundary.
-  **v0.5-M36 pre-flight stubs at this commit (argv schema +
-  wire mutation documents + output schemas only — OBJECT-return
-  direct-unwrap envelope shapes, distinct from M35's opaque-JSON
-  projection cadence); runtime bodies land at M36 IMPL.** v0.5-M36 verbs: `monday doc
-  block-create <did> --type <DocBlockContentType> --content
-  <json> [--after <bid>] [--parent <bid>]` (`create_doc_block`)
-  + `monday doc block-update <bid> --content <json>`
-  (`update_doc_block`) + `monday doc block-delete <bid> --yes`
-  (`delete_doc_block`). 16-value closed enum
-  `DocBlockContentType` on `--type` per D10 closure. Per-block
-  content payload structure (D11) deferred to M36 IMPL
-  cassettes for 16-shape breadth. OBJECT-return cadence
+  **v0.5-M36 closed end-to-end (cluster `ef37b44..d95d5e9` —
+  feat + 2 Codex fix-up rounds + 1 ratification round + close-
+  docs; 0 P1 + 0 P2 + 4 P3 cumulative IMPL findings).** v0.5-M36
+  verbs: `monday doc block-create <did> --type
+  <DocBlockContentType> --content <json> [--after <bid>]
+  [--parent <bid>]` (`create_doc_block`) + `monday doc
+  block-update <bid> --content <json>` (`update_doc_block`) +
+  `monday doc block-delete <bid> --yes` (`delete_doc_block`).
+  16-value closed enum `DocBlockContentType` on `--type` per D10
+  closure. Per-block content payload structure (D11) documented
+  in `docs/output-shapes.md` "Per-block content shapes" reference
+  table — cassette-pinned shapes for variants the M36 IMPL
+  integration tests exercise live + TBD / inferred rows for
+  variants awaiting follow-up cassettes. OBJECT-return cadence
   (distinct from M35's opaque-JSON projection — `create_doc_
   block` + `update_doc_block` return full 9-field
   `DocumentBlock`; `delete_doc_block` returns single-field

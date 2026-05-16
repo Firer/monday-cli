@@ -895,7 +895,18 @@ R-class state carried forward at M36 IMPL close:
   reference table. Graduates to a Codex pre-flight template
   audit-point at the 3rd supporting instance (likely M37).
 - R-v0.5-NEW-16 (count-agnostic prose discipline) — newly
-  filed; 1 supporting instance; LOW priority.
+  filed at M36 IMPL close-docs; 1 supporting instance; LOW
+  priority.
+- **R-v0.5-NEW-17 (OBJECT-shape null-payload guard pattern;
+  sibling to R-NEW-73 for arrays) — newly filed at the post-
+  M36-IMPL refactor-audit** with 9 consumers across M34/M35/
+  M36 mutation fetchers (createTeam + deleteTeam + 4 doc
+  mutations + 3 doc-block mutations). UNFILED-as-helper today
+  per the same per-consumer divergence rationale as R-NEW-73
+  (error code + message template + details shape differ per
+  consumer; helper signature ≈ inline line-count at 9
+  consumers). LOW priority watch-item; lift fires when
+  divergence shrinks OR consumer count crosses ~12-15.
 - R-NEW-72 (post-fix-up cross-doc grep) — **7th instance**
   ratified at M36 IMPL round 1 (caught 3 parallel-site drifts
   inline). Discipline stable.
