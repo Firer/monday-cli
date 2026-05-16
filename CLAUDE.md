@@ -824,11 +824,24 @@ reuse it); no R-class lift fires ahead of feat.
 - `package.json` version: **0.4.0** (stays through v0.5
   milestones; bumps to `0.5.0` at v0.5 release-prep).
 
-**No R-class movement at M36 pre-flight close.** The 4+3 P3
-findings across the 2 fix-up rounds were all prose drift;
-neither crystallised a new R-class trigger. R-NEW-58
-2-consumer scan returned NEGATIVE. The three v0.5 watch-items
-all stay at their pre-M36 consumer counts:
+**R-class movement at M36 pre-flight close + post-pre-flight
+refactor-audit:** The 4+3 P3 findings across the 2 fix-up
+rounds were all prose drift; none crystallised a new R-class
+trigger AT review-rounds. The post-pre-flight refactor-audit
+filed **R-v0.5-NEW-15** (pre-flight per-variant payload-shape
+deferral to IMPL cassettes when wire variant count exceeds what
+a single probe can enumerate; 2 supporting instances — M35
+pre-flight's 3 opaque-JSON-returning fetchers + M36 pre-flight's
+16-value `DocBlockContentType` enum where per-type content
+payload varies; LOW priority watch-item, graduates to a Codex
+pre-flight template audit-point at the 3rd supporting
+instance — likely v0.5-M37 pre-flight where the doc-content
+import mutations' per-source error message strings aren't
+introspectable). Full entry at v0.5-plan §22 R-v0.5-NEW-15.
+
+R-NEW-58 2-consumer scan at pre-flight kickoff returned
+NEGATIVE. The three v0.5 watch-items all stay at their pre-M36
+consumer counts:
 - R-v0.5-NEW-1 (introspect-helper `inputFields` widening) —
   still DEFERRED; M36 didn't add a new probe consumer.
 - R-v0.5-NEW-11 + R-v0.5-NEW-12 (M35 IMPL surfaces) — both
