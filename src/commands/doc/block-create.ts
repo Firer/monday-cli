@@ -41,12 +41,12 @@
  *     `JSON` scalar unmodified. **Per-type content payload
  *     structure** varies across the 16 `DocBlockContentType`
  *     variants per D11 — `docs/output-shapes.md` "Per-block content
- *     shapes" reference table pins the cassette-sourced shapes for
- *     10 of 16 variants; the remaining 6 are marked TBD pending
- *     live-probe cassettes. The CLI accepts every variant + dispatches
- *     unmodified; a shape-incompatible `--content` for the chosen
- *     `--type` surfaces `validation_failed` from Monday at the live
- *     path. The CLI doesn't pre-validate the inner content shape.
+ *     shapes" reference table marks cassette-pinned shapes and
+ *     TBD / inferred variants pending live-probe cassettes. The CLI
+ *     accepts every variant + dispatches unmodified; a shape-
+ *     incompatible `--content` for the chosen `--type` surfaces
+ *     `validation_failed` from Monday at the live path. The CLI
+ *     doesn't pre-validate the inner content shape.
  *   - `--after <bid>` — optional opaque-string block id (maps to
  *     wire `after_block_id: String`). Brand-validated via
  *     {@link DocBlockIdSchema}. Absent → block inserted at the

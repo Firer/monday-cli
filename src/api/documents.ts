@@ -1762,11 +1762,13 @@ export const duplicateDoc = async (
 // unmodified (parsed once at the argv boundary via `parseJsonArg`;
 // R-NEW-42's 4th + 5th consumers) and passes the resulting JS value to
 // Monday's wire `JSON` scalar verbatim. Per-block-type content payload
-// shapes (the 16 distinct shapes Monday accepts — one per
-// `DocBlockContentType` value) are documented at `docs/output-shapes.md`
-// from M36 IMPL cassettes; Monday's wire stays the source of truth, and
-// agents that pass a shape-incompatible `--content` for the chosen
-// `--type` surface `validation_failed` from Monday at the live path.
+// shapes (one per `DocBlockContentType` value) are documented at
+// `docs/output-shapes.md` "Per-block content shapes" reference table —
+// cassette-sourced rows for the variants M36 IMPL exercises live, plus
+// TBD / inferred rows pending follow-up cassettes. Monday's wire stays
+// the source of truth, and agents that pass a shape-incompatible
+// `--content` for the chosen `--type` surface `validation_failed` from
+// Monday at the live path.
 //
 // **R-NEW-76 discipline preserved across all three M36 action bodies.**
 // `parseArgv` (+ `parseJsonArg` for `--content` consumers, +
@@ -1784,9 +1786,9 @@ export const duplicateDoc = async (
  * Adding a 17th value to Monday's enum is a minor (additive) bump
  * for the CLI — extend this list + the per-command flag help; the
  * per-block content schema documentation in `docs/output-shapes.md`
- * "Per-block content shapes" reference table gains a new shape for
- * the new variant (cassette pinned at M36 IMPL; extending the table
- * is additive at any future v0.5.x patch).
+ * "Per-block content shapes" reference table gains a new row for
+ * the new variant once a live cassette pins its shape (extending
+ * the table is additive at any future v0.5.x patch).
  */
 export const DOC_BLOCK_CONTENT_TYPE_VALUES = [
   'bulleted_list',
@@ -2007,8 +2009,8 @@ export interface CreateDocBlockInputs {
    * of truth for what each variant accepts; the CLI passes the JS
    * value through to the wire `JSON` scalar unmodified. Per-type
    * structure pinned by `docs/output-shapes.md` "Per-block content
-   * shapes" reference table from M36 IMPL cassettes (10 of 16
-   * variants documented; 6 marked TBD pending live-probe cassettes).
+   * shapes" reference table (cassette-sourced rows + TBD / inferred
+   * rows pending live-probe cassettes).
    */
   readonly content: unknown;
   /**
