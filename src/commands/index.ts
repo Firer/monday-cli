@@ -243,8 +243,10 @@ import { docDuplicateCommand } from './doc/duplicate.js';
 // `block-update` / `block-delete`). 3 new mutation verbs under the
 // existing `doc` namespace; third v0.5 milestone after M34 team
 // writers + M35 doc-level CRUD. Pre-flight stubs at this commit
-// (argv schema + wire mutation documents + envelope projection
-// only); runtime bodies + integration tests land at M36 IMPL.
+// (argv schema + wire mutation documents + output schemas only —
+// OBJECT-return direct-unwrap envelope shapes, distinct from M35's
+// opaque-JSON projection cadence); runtime bodies + integration
+// tests land at M36 IMPL.
 // Empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
 // `v0.5-inputs-and-results.ts` (2026-05-15, API `2026-01`) pinned
 // Monday's `Mutation.create_doc_block` / `update_doc_block` /

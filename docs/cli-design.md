@@ -8210,8 +8210,9 @@ scoped idempotent changes, and post comments narrating its work.**
   returns (rename / delete / duplicate) to flat `{ doc_id,
   success: true }` envelope at the fetcher boundary.
   **v0.5-M36 pre-flight stubs at this commit (argv schema +
-  wire mutation documents + envelope projection only); runtime
-  bodies land at M36 IMPL.** v0.5-M36 verbs: `monday doc
+  wire mutation documents + output schemas only — OBJECT-return
+  direct-unwrap envelope shapes, distinct from M35's opaque-JSON
+  projection cadence); runtime bodies land at M36 IMPL.** v0.5-M36 verbs: `monday doc
   block-create <did> --type <DocBlockContentType> --content
   <json> [--after <bid>] [--parent <bid>]` (`create_doc_block`)
   + `monday doc block-update <bid> --content <json>`

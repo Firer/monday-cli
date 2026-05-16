@@ -1725,7 +1725,7 @@ export const duplicateDoc = async (
 //     (NON_NULL/OBJECT with a single `id: String!` field). Operation
 //     name `DeleteDocBlock`.
 //
-// **Snake_case wire arg names (Finding 8).** M36's three wire mutations
+// **Snake_case wire arg names (Finding 7).** M36's three wire mutations
 // use SNAKE_CASE arg names (`doc_id`, `block_id`, `after_block_id`,
 // `parent_block_id`) — back to Monday's standard cadence after the
 // M35 camelCase asymmetry (`docId` / `duplicateType` on `update_doc_name`
@@ -1866,7 +1866,7 @@ export type DocBlockDeleteOutput = DocumentBlockIdOnly;
  * content, after_block_id?, parent_block_id?) → DocumentBlock`.
  * Operation name pinned literally to `CreateDocBlock` (R-NEW-37
  * W2 audit-point — operationNames NOT caller-overridable). Wire
- * args are snake_case (Finding 8); variable names are camelCase
+ * args are snake_case (Finding 7); variable names are camelCase
  * (TS convention).
  *
  * Selects every `DocumentBlock` field per the M32 probe. The 9-
