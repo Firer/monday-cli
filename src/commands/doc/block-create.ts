@@ -39,12 +39,14 @@
  *     `board column-create --settings` / `webhook create --config`
  *     use). The parsed JS value is passed through to Monday's wire
  *     `JSON` scalar unmodified. **Per-type content payload
- *     structure** is opaque at v0.5-M36 pre-flight — the 16 distinct
- *     shapes Monday accepts (one per `DocBlockContentType` variant)
- *     are documented at v0.5-M36 IMPL cassettes per D11. A shape-
- *     incompatible `--content` for the chosen `--type` surfaces
- *     `validation_failed` from Monday at the live path; the CLI
- *     doesn't pre-validate the inner content shape.
+ *     structure** varies across the 16 `DocBlockContentType`
+ *     variants per D11 — `docs/output-shapes.md` "Per-block content
+ *     shapes" reference table pins the cassette-sourced shapes for
+ *     10 of 16 variants; the remaining 6 are marked TBD pending
+ *     live-probe cassettes. The CLI accepts every variant + dispatches
+ *     unmodified; a shape-incompatible `--content` for the chosen
+ *     `--type` surfaces `validation_failed` from Monday at the live
+ *     path. The CLI doesn't pre-validate the inner content shape.
  *   - `--after <bid>` — optional opaque-string block id (maps to
  *     wire `after_block_id: String`). Brand-validated via
  *     {@link DocBlockIdSchema}. Absent → block inserted at the
@@ -151,7 +153,7 @@ export const docBlockCreateCommand: CommandModule<
           ...docBlockCreateCommand.examples.map((e) => `  ${e}`),
           '',
           'Notes:',
-          '  - `--content` must be a valid JSON string; per-block content shapes are documented in `output-shapes.md` (pinned at v0.5-M36 IMPL cassettes).',
+          '  - `--content` must be a valid JSON string; per-block content shapes are documented in `output-shapes.md` "Per-block content shapes" reference table.',
           '  - Monday allows duplicate blocks at the same anchor; this verb is non-idempotent.',
           '  - `--dry-run` emits the planned `create_doc_block` operation + resolved input fields (no wire call fires; `meta.source: "none"`).',
           '',

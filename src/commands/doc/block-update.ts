@@ -116,7 +116,7 @@ export const docBlockUpdateCommand: CommandModule<
           '',
           'Notes:',
           '  - Monday\'s wire has no `type` arg on `update_doc_block`; content type is fixed at block creation. Agents needing to change type use `doc block-delete` + `doc block-create` (lossy: new id, new position).',
-          '  - Per-block content shapes are documented in `output-shapes.md` (pinned at v0.5-M36 IMPL cassettes).',
+          '  - Per-block content shapes are documented in `output-shapes.md` "Per-block content shapes" reference table.',
           '  - `--dry-run` emits the planned `update_doc_block` operation + resolved input fields (no wire call fires; `meta.source: "none"`).',
           '',
         ].join('\n'),

@@ -4810,7 +4810,7 @@ narrow-envelope rationale.
   "ok": false,
   "error": {
     "code": "confirmation_required",
-    "message": "doc block-delete requires --yes to delete the doc block 'blk_abc123'",
+    "message": "monday doc block-delete blk_abc123 would delete the doc block. Re-run with --yes to confirm, or --dry-run to preview.",
     "details": { "block_id": "blk_abc123", "hint": "..." }
   },
   "meta": { /* source: "none" */ }
@@ -4843,15 +4843,15 @@ post-create shape).
 |----------|---------------------|------------------------------------|
 | `normal_text` | yes | `{ "alignment": "left", "content": "Hello" }` (also `"center"` / `"right"`) |
 | `large_title` | yes | `{ "alignment": "left", "content": "Title" }` |
-| `medium_title` | follow `large_title` | `{ "alignment": "left", "content": "Subtitle" }` |
-| `small_title` | follow `large_title` | `{ "alignment": "left", "content": "Caption" }` |
+| `medium_title` | TBD | likely `{ alignment, content }` (inferred from `large_title` sibling — not yet cassette-pinned) |
+| `small_title` | TBD | likely `{ alignment, content }` (inferred from `large_title` sibling — not yet cassette-pinned) |
 | `quote` | yes | `{ "content": "A quotation." }` |
 | `bulleted_list` | yes | `{ "items": ["a", "b"] }` |
-| `numbered_list` | follow `bulleted_list` | `{ "items": ["first", "second"] }` |
+| `numbered_list` | TBD | likely `{ items: [...] }` (inferred from `bulleted_list` sibling — not yet cassette-pinned) |
 | `check_list` | yes | `{ "items": [{ "text": "a", "checked": false }, { "text": "b", "checked": true }] }` |
 | `code` | yes | `{ "language": "ts", "code": "console.log(1)" }` |
 | `divider` | yes | `{}` (no payload required) |
-| `page_break` | follow `divider` | `{}` (no payload required) |
+| `page_break` | TBD | likely `{}` (inferred from `divider` sibling — not yet cassette-pinned) |
 | `notice_box` | TBD | wire-pinned (introspect via a probe) |
 | `image` | TBD | URL + alt-text shape (introspect via a probe) |
 | `video` | TBD | URL + caption shape (introspect via a probe) |

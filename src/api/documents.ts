@@ -1783,8 +1783,10 @@ export const duplicateDoc = async (
  *
  * Adding a 17th value to Monday's enum is a minor (additive) bump
  * for the CLI — extend this list + the per-command flag help; the
- * per-block content schema documentation (deferred to v0.5-M36 IMPL
- * cassettes per D11) gains a new shape for the new variant.
+ * per-block content schema documentation in `docs/output-shapes.md`
+ * "Per-block content shapes" reference table gains a new shape for
+ * the new variant (cassette pinned at M36 IMPL; extending the table
+ * is additive at any future v0.5.x patch).
  */
 export const DOC_BLOCK_CONTENT_TYPE_VALUES = [
   'bulleted_list',
@@ -2003,9 +2005,10 @@ export interface CreateDocBlockInputs {
    * Per-block content payload. Shape varies per
    * {@link DocBlockContentType} value — Monday's wire is the source
    * of truth for what each variant accepts; the CLI passes the JS
-   * value through to the wire `JSON` scalar unmodified. Pre-flight
-   * surface keeps the shape unconstrained; per-type structure pins
-   * land at v0.5-M36 IMPL cassettes per D11.
+   * value through to the wire `JSON` scalar unmodified. Per-type
+   * structure pinned by `docs/output-shapes.md` "Per-block content
+   * shapes" reference table from M36 IMPL cassettes (10 of 16
+   * variants documented; 6 marked TBD pending live-probe cassettes).
    */
   readonly content: unknown;
   /**
@@ -2129,7 +2132,8 @@ export interface UpdateDocBlockInputs {
    * Per-block content payload. Same shape contract as
    * {@link CreateDocBlockInputs.content} — opaque JS value passed
    * through to Monday's wire `JSON` scalar. Per-type structure
-   * pins land at v0.5-M36 IMPL cassettes per D11.
+   * pinned by `docs/output-shapes.md` "Per-block content shapes"
+   * reference table from M36 IMPL cassettes.
    */
   readonly content: unknown;
 }
