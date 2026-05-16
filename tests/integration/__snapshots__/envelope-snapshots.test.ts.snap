@@ -3911,36 +3911,38 @@ exports[`envelope snapshot — notification (M27) > notification send --dry-run 
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create dry-run envelope (planned_changes shape) 1`] = `
 {
-  "error": {
-    "code": "internal_error",
-    "details": {
-      "deferred_to": "v0.5-M36 IMPL",
-      "hint": "pre-flight ships argv parsing + schema + JSON-content parse + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
-    },
-    "http_status": null,
-    "message": "monday doc block-create — runtime body lands at v0.5-M36 IMPL.",
-    "monday_code": null,
-    "request_id": "fixed-req-id",
-    "retry_after_seconds": null,
-    "retryable": false,
-  },
+  "data": null,
   "meta": {
     "api_version": "2026-01",
     "cache_age_seconds": null,
     "cli_version": "0.0.0-test",
     "complexity": null,
+    "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
   },
-  "ok": false,
+  "ok": true,
+  "planned_changes": [
+    {
+      "after_block_id": "blk_anchor",
+      "content": {
+        "alignment": "left",
+        "content": "Hello",
+      },
+      "doc_id": "88010",
+      "operation": "create_doc_block",
+      "type": "normal_text",
+    },
+  ],
+  "warnings": [],
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create rejects malformed --content JSON at parse boundary 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create rejects malformed --content JSON at parse boundary 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -3970,7 +3972,7 @@ exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc 
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create rejects unknown --type at parse boundary (D10) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create rejects unknown --type at parse boundary (D10) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4003,7 +4005,7 @@ exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc 
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-delete (confirmation_required without --yes / --dry-run) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete (confirmation_required without --yes / --dry-run) 1`] = `
 {
   "error": {
     "code": "confirmation_required",
@@ -4032,61 +4034,57 @@ exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc 
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-delete --yes (PRE-FLIGHT STUB: action body throws internal_error after destructive gate) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete dry-run envelope (planned_changes shape) 1`] = `
 {
-  "error": {
-    "code": "internal_error",
-    "details": {
-      "deferred_to": "v0.5-M36 IMPL",
-      "hint": "pre-flight ships argv parsing + schema + destructive-gate invariant + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
-    },
-    "http_status": null,
-    "message": "monday doc block-delete — runtime body lands at v0.5-M36 IMPL.",
-    "monday_code": null,
-    "request_id": "fixed-req-id",
-    "retry_after_seconds": null,
-    "retryable": false,
-  },
+  "data": null,
   "meta": {
     "api_version": "2026-01",
     "cache_age_seconds": null,
     "cli_version": "0.0.0-test",
     "complexity": null,
+    "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
   },
-  "ok": false,
+  "ok": true,
+  "planned_changes": [
+    {
+      "block_id": "blk_abc123",
+      "operation": "delete_doc_block",
+    },
+  ],
+  "warnings": [],
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-update (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-update dry-run envelope (planned_changes shape) 1`] = `
 {
-  "error": {
-    "code": "internal_error",
-    "details": {
-      "deferred_to": "v0.5-M36 IMPL",
-      "hint": "pre-flight ships argv parsing + schema + JSON-content parse + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
-    },
-    "http_status": null,
-    "message": "monday doc block-update — runtime body lands at v0.5-M36 IMPL.",
-    "monday_code": null,
-    "request_id": "fixed-req-id",
-    "retry_after_seconds": null,
-    "retryable": false,
-  },
+  "data": null,
   "meta": {
     "api_version": "2026-01",
     "cache_age_seconds": null,
     "cli_version": "0.0.0-test",
     "complexity": null,
+    "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
   },
-  "ok": false,
+  "ok": true,
+  "planned_changes": [
+    {
+      "block_id": "blk_abc123",
+      "content": {
+        "alignment": "center",
+        "content": "Hi",
+      },
+      "operation": "update_doc_block",
+    },
+  ],
+  "warnings": [],
 }
 `;
 

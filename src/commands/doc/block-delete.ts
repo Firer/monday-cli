@@ -55,26 +55,22 @@
  * can't safely retry without verifying the id still names the
  * same record.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring + destructive-gate invariant + wire mutation document
- * all ship at pre-flight. Runtime body lands at v0.5-M36 IMPL —
- * the stub throws `internal_error` so a premature invocation
- * surfaces "not yet implemented" rather than a misleading false-
- * success envelope. `parseArgv` + `enforceDestructiveGate` fire
- * BEFORE the c8-ignored stub body so invalid argv surfaces
- * `usage_error` and missing-`--yes` surfaces
- * `confirmation_required` from the parse / gate boundaries
- * (R-NEW-76 graduated discipline + M10 round-1 P2 invariant).
+ * **Runtime body landed at v0.5-M36 IMPL.** Destructive gate fires
+ * BEFORE `resolveClient` (M10 round-1 P2 invariant); dry-run path
+ * emits minimal `{operation: "delete_doc_block", block_id}` (no wire
+ * call); live path dispatches {@link deleteDocBlock} + projects via
+ * `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseGlobalFlags } from '../../types/global-flags.js';
 import { enforceDestructiveGate } from '../../api/destructive-gate.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocBlockIdSchema } from '../../types/ids.js';
 import {
-  DELETE_DOC_BLOCK_MUTATION,
+  deleteDocBlock,
   docBlockDeleteOutputSchema,
   type DocBlockDeleteOutput,
 } from '../../api/documents.js';
@@ -127,9 +123,9 @@ export const docBlockDeleteCommand: CommandModule<
         // A missing `--yes` must surface as `confirmation_required`
         // per cli-design §3.1 #7's unconditional contract, never
         // masked by `config_error` when no token is configured.
-        const globalFlags = parseGlobalFlags(program.opts(), ctx.env);
+        const preGateGlobalFlags = parseGlobalFlags(program.opts(), ctx.env);
         enforceDestructiveGate({
-          globalFlags,
+          globalFlags: preGateGlobalFlags,
           verb: 'doc block-delete',
           target: parsed.blockId,
           detailKey: 'block_id',
@@ -141,30 +137,40 @@ export const docBlockDeleteCommand: CommandModule<
             'new position; content must be re-supplied).',
         });
 
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + live
-        // wire-call dispatch + envelope emit. Argv parsing + schema
-        // + destructive-gate invariant above are real-and-shipped;
-        // only the wire-call leg is deferred.
-        void ctx;
-        void program;
-        void parsed;
-        void DELETE_DOC_BLOCK_MUTATION;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc block-delete — runtime body lands at v0.5-M36 IMPL.',
-          {
-            details: {
-              deferred_to: 'v0.5-M36 IMPL',
-              hint:
-                'pre-flight ships argv parsing + schema + destructive-gate ' +
-                'invariant + wire mutation document only; the live dispatch ' +
-                '+ dry-run emit + envelope emit land at the IMPL session.',
-            },
-          },
-        );
-        /* c8 ignore stop */
+        if (preGateGlobalFlags.dryRun) {
+          // Minimal dry-run shape — no preflight read fires. Mirrors
+          // `doc delete` / `team delete` / `workspace delete` cadence.
+          const { apiVersion } = resolveClient(ctx, program.opts());
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [
+              { operation: 'delete_doc_block', block_id: parsed.blockId },
+            ],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const { client, apiVersion } = resolveClient(ctx, program.opts());
+        const result = await deleteDocBlock({
+          client,
+          blockId: parsed.blockId,
+        });
+        emitMutation({
+          ctx,
+          data: result.block,
+          schema: docBlockDeleteCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

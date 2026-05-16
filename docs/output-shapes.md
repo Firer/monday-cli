@@ -67,7 +67,7 @@ no `data`); see the **Errors** section at the bottom.
 | [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
 | [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
 | [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
-| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35), block-create (v0.5-M36 PRE-FLIGHT STUB), block-update (v0.5-M36 PRE-FLIGHT STUB), block-delete (v0.5-M36 PRE-FLIGHT STUB) |
+| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35), block-create (v0.5-M36), block-update (v0.5-M36), block-delete (v0.5-M36) |
 | [completion](#monday-completion-bashzshfish-v04-m33) | completion (v0.4-M33) |
 | [Errors](#errors) | error envelope shape |
 
@@ -4599,12 +4599,6 @@ Idempotent: no (each call mints a new DocId).
 
 ### `monday doc block-create <did> --type <DocBlockContentType> --content <json> [--after <bid>] [--parent <bid>]` (v0.5-M36)
 
-> **Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire
-> mutation document + envelope shape ship at v0.5-M36 pre-flight.
-> Runtime body lands at v0.5-M36 IMPL — a premature invocation
-> surfaces `internal_error` with `details.deferred_to: "v0.5-M36
-> IMPL"` rather than a misleading false-success envelope.
-
 Create a new rich-text block inside an existing workdoc via
 Monday's `Mutation.create_doc_block(doc_id: ID!, type:
 DocBlockContentType!, content: JSON!, after_block_id: String,
@@ -4623,11 +4617,8 @@ parent_block_id: String) → DocumentBlock` (operationName
   the argv boundary via `parseJsonArg` (R-NEW-42's 4th consumer);
   the parsed JS value passes through to Monday's wire `JSON`
   scalar unmodified. **Per-type content shape varies across the
-  16 `DocBlockContentType` variants** (D11 closure). At pre-flight
-  the inner content shape is documented only as
-  "required, JSON-shaped" — the 16 per-type structures are
-  enumerated at v0.5-M36 IMPL cassettes (live wire responses
-  pin the exact shape Monday accepts per variant). A shape-
+  16 `DocBlockContentType` variants** (D11 closure) — see the
+  "Per-block content shapes" reference table below. A shape-
   incompatible `--content` for the chosen `--type` surfaces
   `validation_failed` from Monday at the live path.
 - `--after <bid>` — optional opaque-string block ID (maps to
@@ -4644,8 +4635,8 @@ M35 camelCase asymmetry. NOT a new R-NEW-41 supporting site.
 **Live success envelope** (direct unwrap of the created
 DocumentBlock — full 9-field shape per the M32 probe).
 *Per-block content shape varies per `--type`; the example below
-uses `normal_text` shape — the 16 per-type shapes are pinned at
-v0.5-M36 IMPL cassettes:*
+uses `normal_text` shape — see "Per-block content shapes" below
+for the broader cassette-pinned reference.*
 
 ```json
 {
@@ -4689,9 +4680,6 @@ Idempotent: no (Monday allows duplicate blocks at the same
 anchor).
 
 ### `monday doc block-update <bid> --content <json>` (v0.5-M36)
-
-> **Status: PRE-FLIGHT STUB.** Same deferral framing as
-> `block-create` — runtime body lands at v0.5-M36 IMPL.
 
 Replace the content payload of an existing rich-text block via
 Monday's `Mutation.update_doc_block(block_id: String!, content:
@@ -4758,9 +4746,6 @@ Idempotent: yes (re-running with the same `<block-id>` and
 when the content value matches).
 
 ### `monday doc block-delete <bid> --yes` (v0.5-M36)
-
-> **Status: PRE-FLIGHT STUB.** Same deferral framing as
-> `block-create` — runtime body lands at v0.5-M36 IMPL.
 
 Delete an existing rich-text block from a workdoc via Monday's
 `Mutation.delete_doc_block(block_id: String!) →
@@ -4836,6 +4821,49 @@ Idempotent: no (re-running surfaces `not_found` past the first
 call — null payload on wire's `delete_doc_block` rewraps to
 `not_found` per the standard delete cadence mirroring M14 /
 M34 / M35).
+
+### Per-block content shapes (v0.5-M36 IMPL reference)
+
+Monday's `Mutation.create_doc_block` + `Mutation.update_doc_block`
+accept a `content: JSON!` payload whose shape varies across the
+16 `DocBlockContentType` enum values (D11 closure). The CLI passes
+the JS value parsed from `--content <json>` to Monday's wire
+`JSON` scalar verbatim — no per-type shape validation runs CLI-
+side; Monday rejects shape-incompatible payloads with
+`validation_failed`.
+
+The table below pins the shapes covered by M36 IMPL integration-
+test cassettes. The remaining variants follow the same opaque-
+pass-through cadence — agents introspect Monday's wire response
+to discover the exact shape per variant (the `data.content` slot
+on a successful `create_doc_block` echo carries the canonical
+post-create shape).
+
+| `--type` | Pinned by cassette? | Documented shape (cassette-source) |
+|----------|---------------------|------------------------------------|
+| `normal_text` | yes | `{ "alignment": "left", "content": "Hello" }` (also `"center"` / `"right"`) |
+| `large_title` | yes | `{ "alignment": "left", "content": "Title" }` |
+| `medium_title` | follow `large_title` | `{ "alignment": "left", "content": "Subtitle" }` |
+| `small_title` | follow `large_title` | `{ "alignment": "left", "content": "Caption" }` |
+| `quote` | yes | `{ "content": "A quotation." }` |
+| `bulleted_list` | yes | `{ "items": ["a", "b"] }` |
+| `numbered_list` | follow `bulleted_list` | `{ "items": ["first", "second"] }` |
+| `check_list` | yes | `{ "items": [{ "text": "a", "checked": false }, { "text": "b", "checked": true }] }` |
+| `code` | yes | `{ "language": "ts", "code": "console.log(1)" }` |
+| `divider` | yes | `{}` (no payload required) |
+| `page_break` | follow `divider` | `{}` (no payload required) |
+| `notice_box` | TBD | wire-pinned (introspect via a probe) |
+| `image` | TBD | URL + alt-text shape (introspect via a probe) |
+| `video` | TBD | URL + caption shape (introspect via a probe) |
+| `layout` | TBD | nested-block shape (introspect via a probe) |
+| `table` | TBD | rows/cells shape (introspect via a probe) |
+
+Cells marked `TBD` are NOT cassette-pinned at v0.5-M36 IMPL —
+they're variants whose live shapes await a real-world cassette
+(post-`--content` validation via a sandbox account). The CLI's
+`--type` enum still accepts them and the wire round-trip still
+fires; only the documented `--content` shape is pending.
+Extending the table is additive at any future v0.5.x patch.
 
 ---
 

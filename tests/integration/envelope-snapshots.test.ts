@@ -3818,36 +3818,13 @@ describe('envelope snapshot — doc CRUD (v0.5-M35)', () => {
   });
 });
 
-describe('envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36)', () => {
+describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
   // M36 wraps `create_doc_block` + `update_doc_block` +
-  // `delete_doc_block`. All three are LIVE-PATH STUBS at pre-flight
-  // — the action body parses argv (+ parseJsonArg for --content + the
-  // destructive gate on block-delete) BEFORE the c8-ignored stub
-  // throw, so the snapshots below cover the surfaces that ARE
-  // shipped at pre-flight: usage_error rejections at the parse
-  // boundary + confirmation_required for the destructive gate. Live
-  // mutation envelopes + dry-run envelopes land at v0.5-M36 IMPL
-  // when the runtime body dispatches the wire call (the dry-run
-  // path currently throws from inside the c8-ignored stub block;
-  // IMPL lifts the dry-run leg out from behind the stub).
-
-  it('doc block-create (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg)', async () => {
-    const out = await drive(
-      [
-        'doc',
-        'block-create',
-        '88010',
-        '--type',
-        'normal_text',
-        '--content',
-        '{"alignment":"left","content":"Hello"}',
-        '--json',
-      ],
-      { interactions: [] },
-    );
-    expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
-  });
+  // `delete_doc_block`. Snapshots cover the parse-boundary
+  // usage_error rejections + destructive-gate confirmation_required
+  // + dry-run envelopes; live-mutation envelopes are pinned in the
+  // per-verb integration test files (doc-block-create / update /
+  // delete) where cassettes thread the wire response shape.
 
   it('doc block-create rejects unknown --type at parse boundary (D10)', async () => {
     const out = await drive(
@@ -3885,7 +3862,28 @@ describe('envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36)', () 
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
   });
 
-  it('doc block-update (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg)', async () => {
+  it('doc block-create dry-run envelope (planned_changes shape)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'block-create',
+        '88010',
+        '--type',
+        'normal_text',
+        '--content',
+        '{"alignment":"left","content":"Hello"}',
+        '--after',
+        'blk_anchor',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  it('doc block-update dry-run envelope (planned_changes shape)', async () => {
     const out = await drive(
       [
         'doc',
@@ -3893,12 +3891,13 @@ describe('envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36)', () 
         'blk_abc123',
         '--content',
         '{"alignment":"center","content":"Hi"}',
+        '--dry-run',
         '--json',
       ],
       { interactions: [] },
     );
-    expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 
   it('doc block-delete (confirmation_required without --yes / --dry-run)', async () => {
@@ -3910,12 +3909,12 @@ describe('envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36)', () 
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
   });
 
-  it('doc block-delete --yes (PRE-FLIGHT STUB: action body throws internal_error after destructive gate)', async () => {
+  it('doc block-delete dry-run envelope (planned_changes shape)', async () => {
     const out = await drive(
-      ['doc', 'block-delete', 'blk_abc123', '--yes', '--json'],
+      ['doc', 'block-delete', 'blk_abc123', '--dry-run', '--json'],
       { interactions: [] },
     );
-    expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 });

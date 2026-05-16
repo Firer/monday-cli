@@ -73,23 +73,22 @@
  * idempotency must pair with a `doc get <doc-id>` lookup first to
  * verify the block doesn't already exist.
  *
- * **Status: PRE-FLIGHT STUB.** Argv parsing + schema + commander
- * wiring + wire mutation document all ship at pre-flight. Runtime
- * body lands at v0.5-M36 IMPL — the stub throws `internal_error`
- * so a premature invocation surfaces "not yet implemented" rather
- * than a misleading false-success envelope. `parseArgv` +
- * `parseJsonArg` fire BEFORE the c8-ignored stub body so invalid
- * argv surfaces `usage_error` from the parse boundary
- * (R-NEW-76 graduated discipline).
+ * **Runtime body landed at v0.5-M36 IMPL.** `parseArgv` +
+ * `parseJsonArg` fire BEFORE `resolveClient` so invalid argv
+ * surfaces `usage_error` ahead of any missing-token `config_error`
+ * (R-NEW-76 graduated discipline). Dry-run path emits minimal
+ * planned changes (no wire call fires); live path dispatches
+ * {@link createDocBlock} + projects via `emitMutation`.
  */
 import { z } from 'zod';
-import { ApiError } from '../../utils/errors.js';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { parseJsonArg } from '../../utils/json.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema, DocBlockIdSchema } from '../../types/ids.js';
 import {
-  CREATE_DOC_BLOCK_MUTATION,
+  createDocBlock,
   DOC_BLOCK_CONTENT_TYPE_VALUES,
   docBlockCreateOutputSchema,
   type DocBlockCreateOutput,
@@ -180,10 +179,7 @@ export const docBlockCreateCommand: CommandModule<
           // boundary. Threading the raw string to Monday's `JSON`
           // scalar would double-encode (Monday sees a JSON-string-of-
           // a-string); parsing to a JS value first sends the intended
-          // shape. R-NEW-42 lift: shared `parseJsonArg` helper
-          // (4th consumer post-M36 pre-flight; same shape `monday raw
-          // --vars` + `board column-create --settings` +
-          // `webhook create --config` use).
+          // shape. R-NEW-42 lift: shared `parseJsonArg` helper.
           const parsedContent = parseJsonArg(parsed.content, {
             context: '--content must be a valid JSON-encoded string',
             details: {
@@ -195,31 +191,55 @@ export const docBlockCreateCommand: CommandModule<
             },
           });
 
-          /* c8 ignore start */
-          // Stub body — IMPL session lands the dry-run emit + live
-          // wire-call dispatch + envelope emit. Argv parsing + schema
-          // + JSON-content parse above are real-and-shipped; only the
-          // wire-call leg is deferred.
-          void ctx;
-          void program;
-          void parsed;
-          void parsedContent;
-          void CREATE_DOC_BLOCK_MUTATION;
-          await Promise.resolve();
-          throw new ApiError(
-            'internal_error',
-            'monday doc block-create — runtime body lands at v0.5-M36 IMPL.',
-            {
-              details: {
-                deferred_to: 'v0.5-M36 IMPL',
-                hint:
-                  'pre-flight ships argv parsing + schema + JSON-content ' +
-                  'parse + wire mutation document only; the live dispatch ' +
-                  '+ dry-run emit + envelope emit land at the IMPL session.',
-              },
-            },
+          const { client, globalFlags, apiVersion } = resolveClient(
+            ctx,
+            program.opts(),
           );
-          /* c8 ignore stop */
+
+          if (globalFlags.dryRun) {
+            const planned: Record<string, unknown> = {
+              operation: 'create_doc_block',
+              doc_id: parsed.docId,
+              type: parsed.type,
+              content: parsedContent,
+            };
+            if (parsed.after !== undefined) {
+              planned.after_block_id = parsed.after;
+            }
+            if (parsed.parent !== undefined) {
+              planned.parent_block_id = parsed.parent;
+            }
+            emitDryRun({
+              ctx,
+              programOpts: program.opts(),
+              plannedChanges: [planned],
+              source: 'none',
+              cacheAgeSeconds: null,
+              warnings: [],
+              apiVersion,
+            });
+            return;
+          }
+
+          const result = await createDocBlock({
+            client,
+            docId: parsed.docId,
+            type: parsed.type,
+            content: parsedContent,
+            ...(parsed.after === undefined ? {} : { afterBlockId: parsed.after }),
+            ...(parsed.parent === undefined ? {} : { parentBlockId: parsed.parent }),
+          });
+          emitMutation({
+            ctx,
+            data: result.block,
+            schema: docBlockCreateCommand.outputSchema,
+            programOpts: program.opts(),
+            warnings: [],
+            source: result.source,
+            cacheAgeSeconds: result.cacheAgeSeconds,
+            complexity: result.complexity,
+            apiVersion,
+          });
         },
       );
   },

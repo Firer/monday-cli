@@ -1702,21 +1702,22 @@ export const duplicateDoc = async (
 };
 
 // ===========================================================================
-// v0.5-M36 doc-block CRUD mutation surface (PRE-FLIGHT STUBS)
+// v0.5-M36 doc-block CRUD mutation surface
 // ===========================================================================
-// The three fetchers below ship as `c8 ignore`-wrapped stubs at v0.5-M36
-// pre-flight — the stub bodies throw `internal_error` to flag the deferred
-// runtime, but they're never reached at pre-flight because each command
-// action body runs `parseArgv` (+ `parseJsonArg` for `--content` consumers
-// + `enforceDestructiveGate` on `block-delete --yes`) BEFORE its own
-// c8-ignored stub block, so invalid argv surfaces `usage_error` from the
-// parse boundary per R-NEW-76 (the action-body parse boundary, NOT the
-// fetcher boundary — the layered discipline). Runtime fetcher bodies
-// (single `client.raw` round-trip + wrapping-schema parse +
-// `assertResponseFieldPresent` + per-fetcher null-payload handling +
-// projection) land at v0.5-M36 IMPL alongside integration tests; the
-// command stubs' c8-ignored blocks lift too so the dry-run + live emit
-// paths fire post-IMPL.
+// Three fetchers land the per-block CRUD wire surface against Monday's
+// `create_doc_block` / `update_doc_block` / `delete_doc_block` mutations.
+// Each issues a single `client.raw` round-trip with a literal-pinned
+// `operationName` (R-NEW-37 W2 safely-by-construction), parses the
+// wrapping response shape via a loose `z.object({...}).loose()` schema,
+// asserts the field presence via `assertResponseFieldPresent`, applies
+// the per-fetcher null-payload contract (per R-v0.5-NEW-11 — see
+// per-fetcher JSDoc), and unwraps the inner OBJECT via the shared
+// {@link documentBlockSchema} (create + update) or the new
+// {@link documentBlockIdOnlySchema} (delete). Each command action body
+// runs `parseArgv` (+ `parseJsonArg` for `--content` consumers +
+// `enforceDestructiveGate` on `block-delete --yes`) BEFORE
+// `resolveClient` so invalid argv surfaces `usage_error` from the parse
+// boundary (R-NEW-76 graduated discipline).
 //
 // Wire summary (empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
 // `v0.5-inputs-and-results.ts`, 2026-05-15, API `2026-01`):
@@ -1757,28 +1758,21 @@ export const duplicateDoc = async (
 //
 // **Per-block `content` shape (D11 closure).** Wire `content: JSON!` —
 // an opaque per-`DocBlockContentType` shape varying across the 16 enum
-// values. At v0.5-M36 pre-flight the CLI accepts user-supplied
-// `--content <json>` strings unmodified (parsed once at the argv
-// boundary via `parseJsonArg`; R-NEW-42's 4th + 5th consumers) and
-// passes the resulting JS value to Monday's wire `JSON` scalar
-// verbatim. Per-block-type content payload structure documentation
-// (the 16 distinct shapes Monday accepts) defers to v0.5-M36 IMPL
-// where live cassettes pin the exact shape per `DocBlockContentType`
-// value. Today's pre-flight surface treats `content` as
-// `requiredJsonValueSchema` shape-wise — required at the parse
-// boundary, but the inner value isn't shape-checked by the CLI.
-// Monday's wire is the source of truth; agents that pass a
-// shape-incompatible `--content` for the chosen `--type` surface
-// `validation_failed` from Monday at the live path.
+// values. The CLI accepts user-supplied `--content <json>` strings
+// unmodified (parsed once at the argv boundary via `parseJsonArg`;
+// R-NEW-42's 4th + 5th consumers) and passes the resulting JS value to
+// Monday's wire `JSON` scalar verbatim. Per-block-type content payload
+// shapes (the 16 distinct shapes Monday accepts — one per
+// `DocBlockContentType` value) are documented at `docs/output-shapes.md`
+// from M36 IMPL cassettes; Monday's wire stays the source of truth, and
+// agents that pass a shape-incompatible `--content` for the chosen
+// `--type` surface `validation_failed` from Monday at the live path.
 //
-// **R-NEW-76 discipline preserved on all three M36 stubs.**
+// **R-NEW-76 discipline preserved across all three M36 action bodies.**
 // `parseArgv` (+ `parseJsonArg` for `--content` consumers, +
 // `enforceDestructiveGate` on `block-delete --yes`) fires BEFORE
-// the `c8 ignore start` block-wrap on every verb so invalid argv
-// surfaces `usage_error` from the parse boundary, NOT
-// `internal_error` from the c8-ignored stub throw (the pre-flight
-// ARGV surface is the shipped agent contract; only the wire-call
-// leg lives behind the c8-ignore).
+// `resolveClient` so invalid argv surfaces `usage_error` from the parse
+// boundary, NOT `internal_error` from a later wire-call leg.
 
 /**
  * Monday's `DocBlockContentType` enum vocabulary (empirical probe
@@ -2042,46 +2036,91 @@ export interface CreateDocBlockResult {
 /**
  * Creates a per-doc rich-text block via `create_doc_block(doc_id,
  * type, content, after_block_id?, parent_block_id?)` with
- * `operationName: 'CreateDocBlock'` (R-NEW-37 W2).
+ * `operationName: 'CreateDocBlock'` (R-NEW-37 W2). Two-stage parse
+ * mirrors M34 / M35 cadence: the loose wrapping schema tolerates
+ * Monday's side-band debug keys, then the inner OBJECT pins via
+ * {@link documentBlockSchema} so per-field drift surfaces with
+ * structured `details.issues`.
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
- * IMPL — the stub throws `internal_error` so a premature
- * invocation surfaces "not yet implemented" rather than a
- * misleading false-success envelope. IMPL: parse via
- * {@link createDocBlockResponseSchema} +
- * `assertResponseFieldPresent`, unwrap the inner OBJECT via
- * {@link documentBlockSchema} (two-stage parse — mirrors M34 /
- * M35 cadence), null payload → `internal_error` (a successful
- * `create_doc_block` mutation must return the created block per
- * Monday's documented contract — null indicates a wire-shape
- * regression worth surfacing loudly). Omits `afterBlockId` /
- * `parentBlockId` variables when unset so Monday's wire-side
- * defaults apply (the M34 / M35 omit-vs-null discipline).
+ * Failure modes:
+ *
+ *   - **Missing `create_doc_block` key** → `internal_error` via
+ *     `assertResponseFieldPresent` (Monday's response shape
+ *     regressed).
+ *   - **Present-but-null payload** → `internal_error` (a successful
+ *     `create_doc_block` mutation must return the created block per
+ *     Monday's documented contract — null indicates a wire-shape
+ *     regression worth surfacing loudly; distinct from
+ *     {@link updateDocBlock} / {@link deleteDocBlock} which treat
+ *     null as `not_found` per their probe-description-derived
+ *     contracts at R-v0.5-NEW-11).
+ *   - **Inner OBJECT drift** → `internal_error` via `unwrapOrThrow`
+ *     on {@link documentBlockSchema} (per-field shape regression).
+ *
+ * Omits `afterBlockId` / `parentBlockId` variables when unset so
+ * Monday's wire-side defaults apply (the M34 / M35 omit-vs-null
+ * discipline — undefined-keyed JSON serialises to a missing key,
+ * NOT `null`).
  */
-/* c8 ignore start */
 export const createDocBlock = async (
   inputs: CreateDocBlockInputs,
 ): Promise<CreateDocBlockResult> => {
-  void inputs;
-  void CREATE_DOC_BLOCK_MUTATION;
-  void createDocBlockResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'createDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+  const variables: Record<string, unknown> = {
+    docId: inputs.docId,
+    type: inputs.type,
+    content: inputs.content,
+  };
+  if (inputs.afterBlockId !== undefined) {
+    variables.afterBlockId = inputs.afterBlockId;
+  }
+  if (inputs.parentBlockId !== undefined) {
+    variables.parentBlockId = inputs.parentBlockId;
+  }
+  const response = await inputs.client.raw<unknown>(
+    CREATE_DOC_BLOCK_MUTATION,
+    variables,
+    { operationName: 'CreateDocBlock' },
+  );
+  const data = unwrapOrThrow(
+    createDocBlockResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M36 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed CreateDocBlock response',
+      details: { doc_id: inputs.docId, type: inputs.type },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `createDocBlockResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'create_doc_block',
+    operationLabel: 'CreateDocBlock',
+    details: { doc_id: inputs.docId, type: inputs.type },
+    nullHandling: 'caller_handles',
+  });
+  const rawBlock = data.create_doc_block;
+  if (rawBlock === null || rawBlock === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no block payload from create_doc_block(doc_id: ${inputs.docId}, type: ${inputs.type}).`,
+      { details: { doc_id: inputs.docId, type: inputs.type } },
+    );
+  }
+  const block = unwrapOrThrow(
+    documentBlockSchema.safeParse(rawBlock),
+    {
+      context: `Monday returned a malformed DocumentBlock payload from create_doc_block (doc ${inputs.docId}, type ${inputs.type})`,
+      details: { doc_id: inputs.docId, type: inputs.type },
+    },
+  );
+  return {
+    block,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface UpdateDocBlockInputs {
   readonly client: MondayClient;
@@ -2109,41 +2148,66 @@ export interface UpdateDocBlockResult {
  * wire — agents needing to change a block's content type
  * `block-delete` + `block-create` (lossy: new id, new position).
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
- * IMPL — the stub throws `internal_error` so a premature
- * invocation surfaces "not yet implemented" rather than a
- * misleading false-success envelope. IMPL: same two-stage parse
- * cadence as {@link createDocBlock}; null payload → `not_found`
- * (consistent with M14 / M34 / M35 delete cadence — a present-
- * null payload means the source block doesn't exist or isn't
- * visible to the token; the probe description "Update a document
- * block" promises the updated block on success, so null reads as
- * missing-record rather than empty-success).
+ * Failure modes:
+ *
+ *   - **Missing `update_doc_block` key** → `internal_error` via
+ *     `assertResponseFieldPresent` (schema drift).
+ *   - **Present-but-null payload** → `not_found` (the probe
+ *     description "Update a document block" promises the updated
+ *     block on success, so null reads as missing-record — block
+ *     bogus or not visible to the token; per R-v0.5-NEW-11
+ *     per-fetcher null-payload discipline).
+ *   - **Inner OBJECT drift** → `internal_error` via `unwrapOrThrow`
+ *     on {@link documentBlockSchema}.
  */
-/* c8 ignore start */
 export const updateDocBlock = async (
   inputs: UpdateDocBlockInputs,
 ): Promise<UpdateDocBlockResult> => {
-  void inputs;
-  void UPDATE_DOC_BLOCK_MUTATION;
-  void updateDocBlockResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'updateDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    UPDATE_DOC_BLOCK_MUTATION,
+    { blockId: inputs.blockId, content: inputs.content },
+    { operationName: 'UpdateDocBlock' },
+  );
+  const data = unwrapOrThrow(
+    updateDocBlockResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M36 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed UpdateDocBlock response',
+      details: { block_id: inputs.blockId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `updateDocBlockResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'update_doc_block',
+    operationLabel: 'UpdateDocBlock',
+    details: { block_id: inputs.blockId },
+    nullHandling: 'caller_handles',
+  });
+  const rawBlock = data.update_doc_block;
+  if (rawBlock === null || rawBlock === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no block payload from update_doc_block for block ${inputs.blockId}`,
+      { details: { block_id: inputs.blockId } },
+    );
+  }
+  const block = unwrapOrThrow(
+    documentBlockSchema.safeParse(rawBlock),
+    {
+      context: `Monday returned a malformed DocumentBlock payload from update_doc_block (block ${inputs.blockId})`,
+      details: { block_id: inputs.blockId },
+    },
+  );
+  return {
+    block,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface DeleteDocBlockInputs {
   readonly client: MondayClient;
@@ -2162,39 +2226,66 @@ export interface DeleteDocBlockResult {
  * with `operationName: 'DeleteDocBlock'` (R-NEW-37 W2). Wire return
  * is `DocumentBlockIdOnly` (`{id: String!}`).
  *
- * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
- * IMPL — the stub throws `internal_error` so a premature
- * invocation surfaces "not yet implemented" rather than a
- * misleading false-success envelope. IMPL: parse via
- * {@link deleteDocBlockResponseSchema} +
- * `assertResponseFieldPresent`, unwrap the inner OBJECT via
- * {@link documentBlockIdOnlySchema}; null payload → `not_found`
- * (mirrors M14 / M34 / M35 delete cadence — id bogus / block
- * already deleted by a concurrent caller). The action body's
- * destructive gate fires BEFORE this fetcher per the M10 round-1
- * P2 invariant.
+ * Failure modes:
+ *
+ *   - **Missing `delete_doc_block` key** → `internal_error` via
+ *     `assertResponseFieldPresent` (schema drift).
+ *   - **Present-but-null payload** → `not_found` (id bogus or
+ *     block already deleted by a concurrent caller; mirrors M14
+ *     workspace-delete + M34 team-delete + M35 doc-delete cadence;
+ *     `delete_doc_block`'s probe description "Delete a document
+ *     block" promises confirmation on success).
+ *   - **Inner OBJECT drift** → `internal_error` via `unwrapOrThrow`
+ *     on {@link documentBlockIdOnlySchema}.
+ *
+ * The action body's destructive gate fires BEFORE this fetcher per
+ * the M10 round-1 P2 invariant.
  */
-/* c8 ignore start */
 export const deleteDocBlock = async (
   inputs: DeleteDocBlockInputs,
 ): Promise<DeleteDocBlockResult> => {
-  void inputs;
-  void DELETE_DOC_BLOCK_MUTATION;
-  void deleteDocBlockResponseSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'deleteDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+  const response = await inputs.client.raw<unknown>(
+    DELETE_DOC_BLOCK_MUTATION,
+    { blockId: inputs.blockId },
+    { operationName: 'DeleteDocBlock' },
+  );
+  const data = unwrapOrThrow(
+    deleteDocBlockResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M36 IMPL',
-        hint:
-          'pre-flight ships argv + schema + GraphQL document only; ' +
-          'IMPL swaps this stub for a live `client.raw` round-trip.',
-      },
+      context: 'Monday returned a malformed DeleteDocBlock response',
+      details: { block_id: inputs.blockId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `deleteDocBlockResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'delete_doc_block',
+    operationLabel: 'DeleteDocBlock',
+    details: { block_id: inputs.blockId },
+    nullHandling: 'caller_handles',
+  });
+  const rawBlock = data.delete_doc_block;
+  if (rawBlock === null || rawBlock === undefined) {
+    throw new ApiError(
+      'not_found',
+      `Monday returned no payload from delete_doc_block for block ${inputs.blockId}`,
+      { details: { block_id: inputs.blockId } },
+    );
+  }
+  const block = unwrapOrThrow(
+    documentBlockIdOnlySchema.safeParse(rawBlock),
+    {
+      context: `Monday returned a malformed DocumentBlockIdOnly payload from delete_doc_block (block ${inputs.blockId})`,
+      details: { block_id: inputs.blockId },
+    },
+  );
+  return {
+    block,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
