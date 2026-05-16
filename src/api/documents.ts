@@ -1705,12 +1705,18 @@ export const duplicateDoc = async (
 // v0.5-M36 doc-block CRUD mutation surface (PRE-FLIGHT STUBS)
 // ===========================================================================
 // The three fetchers below ship as `c8 ignore`-wrapped stubs at v0.5-M36
-// pre-flight — they parse argv ahead of any wire dispatch (so invalid argv
-// surfaces `usage_error` from the parse boundary per R-NEW-76) and then
-// throw `internal_error` to flag the deferred runtime. Runtime bodies
+// pre-flight — the stub bodies throw `internal_error` to flag the deferred
+// runtime, but they're never reached at pre-flight because each command
+// action body runs `parseArgv` (+ `parseJsonArg` for `--content` consumers
+// + `enforceDestructiveGate` on `block-delete --yes`) BEFORE its own
+// c8-ignored stub block, so invalid argv surfaces `usage_error` from the
+// parse boundary per R-NEW-76 (the action-body parse boundary, NOT the
+// fetcher boundary — the layered discipline). Runtime fetcher bodies
 // (single `client.raw` round-trip + wrapping-schema parse +
 // `assertResponseFieldPresent` + per-fetcher null-payload handling +
-// projection) land at v0.5-M36 IMPL alongside integration tests.
+// projection) land at v0.5-M36 IMPL alongside integration tests; the
+// command stubs' c8-ignored blocks lift too so the dry-run + live emit
+// paths fire post-IMPL.
 //
 // Wire summary (empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
 // `v0.5-inputs-and-results.ts`, 2026-05-15, API `2026-01`):

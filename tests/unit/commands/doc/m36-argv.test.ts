@@ -7,12 +7,21 @@
  * — required-flag absence, optional-flag presence/absence, brand-
  * validation (DocId numeric / DocBlockId opaque non-empty string),
  * 16-value `DocBlockContentType` closed-enum rejection at parse,
- * JSON-content parse via `parseJsonArg` (success + invalid JSON),
- * and the destructive-gate path on `block-delete`. Schema-level
- * branch-rejection is the agent contract surface per cli-design
- * §6.5 (`usage_error.details.issues[]`); the runtime body (wire
- * dispatch + envelope emit) lands at v0.5-M36 IMPL with
+ * JSON-content parse via `parseJsonArg` (success + invalid JSON).
+ * Schema-level branch-rejection is the agent contract surface per
+ * cli-design §6.5 (`usage_error.details.issues[]`); the runtime
+ * body (wire dispatch + envelope emit) lands at v0.5-M36 IMPL with
  * integration tests there.
+ *
+ * **Destructive-gate path on `block-delete`** is covered by the
+ * `confirmation_required` envelope snapshot at
+ * `tests/integration/envelope-snapshots.test.ts:"doc block-delete
+ * (confirmation_required without --yes / --dry-run)"`, NOT by
+ * this file — the gate lives in the action body's pre-c8 prelude
+ * (after `parseArgv`, before the c8-ignored stub throw), not in
+ * the input schema. The schema-only tests below cover the parse-
+ * boundary surface; the action-body gate ordering is exercised by
+ * the integration runner.
  */
 import { describe, expect, it } from 'vitest';
 import { docBlockCreateCommand } from '../../../../src/commands/doc/block-create.js';
