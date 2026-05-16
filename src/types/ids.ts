@@ -1,18 +1,27 @@
 import { z } from 'zod';
 
 /**
- * Branded zod schemas for the eleven ID kinds Monday surfaces
- * (v0.5-M35 adds `DocFolderId` alongside the v0.5-M34 `TeamId` +
- * nine v0.1+M27+M32 brands). Brands make `BoardId`/`ItemId`/etc.
- * nominally distinct at the type level even though they're all
- * numeric strings on the wire — passing a `BoardId` where an
- * `ItemId` is wanted becomes a compile error, which is the whole
- * point.
+ * Branded zod schemas for the twelve ID kinds Monday surfaces
+ * (v0.5-M36 adds `DocBlockId` alongside the v0.5-M35 `DocFolderId`,
+ * the v0.5-M34 `TeamId`, and nine v0.1+M27+M32 brands). Brands make
+ * `BoardId`/`ItemId`/etc. nominally distinct at the type level even
+ * though most are numeric strings on the wire — passing a `BoardId`
+ * where an `ItemId` is wanted becomes a compile error, which is the
+ * whole point.
  *
  * Monday's numeric IDs exceed `Number.MAX_SAFE_INTEGER` for older
  * accounts, so we keep them as decimal strings everywhere — argv
  * already arrives as strings, GraphQL responses already arrive as
  * strings, and the wire format stays stable through the CLI.
+ *
+ * Three ID kinds are non-numeric (opaque string IDs): `ColumnId`,
+ * `GroupId`, and `DocBlockId`. These use a non-empty-string base
+ * regex (`slugIdSchema`) rather than the numeric `^\d+$` regex.
+ * Column IDs and group IDs are lower-snake-case slugs (`status_4`,
+ * `topics`); doc-block IDs are opaque strings minted by Monday's
+ * workdocs surface — pin only "non-empty" at the brand boundary so
+ * the type system catches absence without mis-matching Monday's
+ * actual character class (UUID, base62, or any other future shape).
  */
 const numericIdSchema = z
   .string()
@@ -80,6 +89,20 @@ export const DocFolderIdSchema = numericIdSchema.brand<'DocFolderId'>();
 // "topics") — not numeric. Validate as non-empty strings only.
 export const ColumnIdSchema = slugIdSchema.brand<'ColumnId'>();
 export const GroupIdSchema = slugIdSchema.brand<'GroupId'>();
+// M36 (v0.5) — per-block CRUD surface (`monday doc block-create` /
+// `block-update` / `block-delete`). Monday's `DocumentBlock.id` is
+// `String!` on the wire (NOT `ID` — empirical probe at
+// `scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results.ts`
+// 2026-05-15; the same `String!` shape applies to the `block_id`
+// arg slot on `update_doc_block` / `delete_doc_block` and to
+// `DocumentBlockIdOnly.id`). The block IDs Monday mints are opaque
+// — UUID-shaped in practice today, but the wire contract pins only
+// "non-empty string", so the brand uses `slugIdSchema` like
+// `ColumnId` / `GroupId` rather than the numeric `^\d+$` regex.
+// Distinct from `DocId` (numeric — wire `ID!`) so the type system
+// catches a `--parent <did>` slip at compile time (e.g.
+// `block-create <docId> --parent <bidNotDid>`).
+export const DocBlockIdSchema = slugIdSchema.brand<'DocBlockId'>();
 
 export type BoardId = z.infer<typeof BoardIdSchema>;
 export type ItemId = z.infer<typeof ItemIdSchema>;
@@ -92,3 +115,4 @@ export type WebhookId = z.infer<typeof WebhookIdSchema>;
 export type DocId = z.infer<typeof DocIdSchema>;
 export type TeamId = z.infer<typeof TeamIdSchema>;
 export type DocFolderId = z.infer<typeof DocFolderIdSchema>;
+export type DocBlockId = z.infer<typeof DocBlockIdSchema>;

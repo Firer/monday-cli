@@ -239,6 +239,24 @@ import { docCreateOnColumnCommand } from './doc/create-on-column.js';
 import { docRenameCommand } from './doc/rename.js';
 import { docDeleteCommand } from './doc/delete.js';
 import { docDuplicateCommand } from './doc/duplicate.js';
+// M36 (v0.5) — per-block CRUD mutation surface (`doc block-create` /
+// `block-update` / `block-delete`). 3 new mutation verbs under the
+// existing `doc` namespace; third v0.5 milestone after M34 team
+// writers + M35 doc-level CRUD. Pre-flight stubs at this commit
+// (argv schema + wire mutation documents + envelope projection
+// only); runtime bodies + integration tests land at M36 IMPL.
+// Empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
+// `v0.5-inputs-and-results.ts` (2026-05-15, API `2026-01`) pinned
+// Monday's `Mutation.create_doc_block` / `update_doc_block` /
+// `delete_doc_block` signatures + the 16-value
+// `DocBlockContentType` closed enum + the `DocumentBlockIdOnly`
+// single-field delete return shape. D10 closure: reject unknown
+// `--type` values at parse boundary. D11 closure: per-block
+// content payload structure deferred to IMPL cassettes for 16-
+// shape breadth.
+import { docBlockCreateCommand } from './doc/block-create.js';
+import { docBlockUpdateCommand } from './doc/block-update.js';
+import { docBlockDeleteCommand } from './doc/block-delete.js';
 // M34 (v0.5) — team writer surface (`user team-list` / `team-get` /
 // `team-create` / `team-delete` / `team-add-members` /
 // `team-remove-members`). 6 new verbs under the existing `user`
@@ -389,6 +407,9 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     docRenameCommand,
     docDeleteCommand,
     docDuplicateCommand,
+    docBlockCreateCommand,
+    docBlockUpdateCommand,
+    docBlockDeleteCommand,
     completionCommand,
     rawCommand,
     boardDoctorCommand,

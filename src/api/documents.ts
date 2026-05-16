@@ -1,8 +1,9 @@
 /**
  * Workdocs read + mutation surface for the v0.4-M32 `monday doc
- * list/get` verbs + the v0.5-M35 doc-level CRUD verbs
- * (`cli-design.md` §2.7 + §4.3 + §13 v0.4/v0.5 entries;
- * `v0.4-plan.md` §3 M32; `v0.5-plan.md` §3 M35 + §8 D7-D9).
+ * list/get` verbs, the v0.5-M35 doc-level CRUD verbs, and the
+ * v0.5-M36 per-block CRUD verbs (`cli-design.md` §2.7 + §4.3 +
+ * §13 v0.4/v0.5 entries; `v0.4-plan.md` §3 M32; `v0.5-plan.md` §3
+ * M35 + §8 D7-D9; `v0.5-plan.md` §3 M36 + §8 D10-D11).
  *
  * **Wire surface (empirical probe 2026-05-14, API `2026-01`).** Two
  * Monday GraphQL operations land here, both against `Query.docs(...)`:
@@ -1699,3 +1700,495 @@ export const duplicateDoc = async (
     complexity: response.complexity,
   };
 };
+
+// ===========================================================================
+// v0.5-M36 doc-block CRUD mutation surface (PRE-FLIGHT STUBS)
+// ===========================================================================
+// The three fetchers below ship as `c8 ignore`-wrapped stubs at v0.5-M36
+// pre-flight — they parse argv ahead of any wire dispatch (so invalid argv
+// surfaces `usage_error` from the parse boundary per R-NEW-76) and then
+// throw `internal_error` to flag the deferred runtime. Runtime bodies
+// (single `client.raw` round-trip + wrapping-schema parse +
+// `assertResponseFieldPresent` + per-fetcher null-payload handling +
+// projection) land at v0.5-M36 IMPL alongside integration tests.
+//
+// Wire summary (empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
+// `v0.5-inputs-and-results.ts`, 2026-05-15, API `2026-01`):
+//
+//   - `create_doc_block(doc_id: ID!, type: DocBlockContentType!,
+//     content: JSON!, after_block_id: String, parent_block_id: String) →
+//     DocumentBlock` (NON_NULL/OBJECT). Operation name `CreateDocBlock`
+//     pinned literally per R-NEW-37 W2.
+//   - `update_doc_block(block_id: String!, content: JSON!) →
+//     DocumentBlock` (NON_NULL/OBJECT). Operation name `UpdateDocBlock`.
+//   - `delete_doc_block(block_id: String!) → DocumentBlockIdOnly`
+//     (NON_NULL/OBJECT with a single `id: String!` field). Operation
+//     name `DeleteDocBlock`.
+//
+// **Snake_case wire arg names (Finding 8).** M36's three wire mutations
+// use SNAKE_CASE arg names (`doc_id`, `block_id`, `after_block_id`,
+// `parent_block_id`) — back to Monday's standard cadence after the
+// M35 camelCase asymmetry (`docId` / `duplicateType` on `update_doc_name`
+// / `delete_doc` / `duplicate_doc`). The GraphQL operation documents
+// below use camelCase variable names + snake_case wire arg names
+// (`doc_id: $docId`), matching the `Query.docs(workspace_ids:
+// $workspaceIds)` M32 cadence. Not a new R-NEW-41 supporting site —
+// M36 is the symmetric path; M35 was the asymmetric one.
+//
+// **OBJECT-return cadence (distinct from M35 opaque-JSON).** Unlike
+// M35's `update_doc_name` / `delete_doc` / `duplicate_doc` (3 of 4
+// returned the opaque `JSON` scalar driving the {@link extractDuplicateDocId}
+// helper + the `{doc_id, success: true}` projection per D9), all three
+// M36 wire mutations return typed OBJECT shapes. `create_doc_block` +
+// `update_doc_block` both return the full `DocumentBlock` (9 fields per
+// the M32 probe — id / type / content / position / parent_block_id /
+// doc_id / created_at / created_by / updated_at); the fetchers parse via
+// {@link documentBlockSchema} (reused from M32's `doc get` blocks-
+// hydration leg) and unwrap. `delete_doc_block` returns `DocumentBlockIdOnly`
+// — a single `{id: String!}` field — and the fetcher parses via the
+// new {@link documentBlockIdOnlySchema}. No opaque-JSON projection
+// helper needed; the OBJECT-return shape is pinned by schema.
+//
+// **Per-block `content` shape (D11 closure).** Wire `content: JSON!` —
+// an opaque per-`DocBlockContentType` shape varying across the 16 enum
+// values. At v0.5-M36 pre-flight the CLI accepts user-supplied
+// `--content <json>` strings unmodified (parsed once at the argv
+// boundary via `parseJsonArg`; R-NEW-42's 4th + 5th consumers) and
+// passes the resulting JS value to Monday's wire `JSON` scalar
+// verbatim. Per-block-type content payload structure documentation
+// (the 16 distinct shapes Monday accepts) defers to v0.5-M36 IMPL
+// where live cassettes pin the exact shape per `DocBlockContentType`
+// value. Today's pre-flight surface treats `content` as
+// `requiredJsonValueSchema` shape-wise — required at the parse
+// boundary, but the inner value isn't shape-checked by the CLI.
+// Monday's wire is the source of truth; agents that pass a
+// shape-incompatible `--content` for the chosen `--type` surface
+// `validation_failed` from Monday at the live path.
+//
+// **R-NEW-76 discipline preserved on all three M36 stubs.**
+// `parseArgv` (+ `parseJsonArg` for `--content` consumers, +
+// `enforceDestructiveGate` on `block-delete --yes`) fires BEFORE
+// the `c8 ignore start` block-wrap on every verb so invalid argv
+// surfaces `usage_error` from the parse boundary, NOT
+// `internal_error` from the c8-ignored stub throw (the pre-flight
+// ARGV surface is the shipped agent contract; only the wire-call
+// leg lives behind the c8-ignore).
+
+/**
+ * Monday's `DocBlockContentType` enum vocabulary (empirical probe
+ * 2026-05-15, API `2026-01`; 16 closed values per Finding 8). Pinned
+ * at M36 pre-flight as a closed literal-union enum so unknown
+ * `--type` values reject at the argv-parse boundary with
+ * `usage_error.details.issues[]` (D10 closure).
+ *
+ * Adding a 17th value to Monday's enum is a minor (additive) bump
+ * for the CLI — extend this list + the per-command flag help; the
+ * per-block content schema documentation (deferred to v0.5-M36 IMPL
+ * cassettes per D11) gains a new shape for the new variant.
+ */
+export const DOC_BLOCK_CONTENT_TYPE_VALUES = [
+  'bulleted_list',
+  'check_list',
+  'code',
+  'divider',
+  'image',
+  'large_title',
+  'layout',
+  'medium_title',
+  'normal_text',
+  'notice_box',
+  'numbered_list',
+  'page_break',
+  'quote',
+  'small_title',
+  'table',
+  'video',
+] as const;
+
+export type DocBlockContentType = (typeof DOC_BLOCK_CONTENT_TYPE_VALUES)[number];
+
+export const docBlockContentTypeSchema = z.enum(DOC_BLOCK_CONTENT_TYPE_VALUES);
+
+/**
+ * `DocumentBlockIdOnly` projection — Monday's `delete_doc_block`
+ * mutation return shape per the v0.5 empirical probe. Single-field
+ * OBJECT carrying only the deleted block's id; the wire description
+ * is "A monday.com doc block" but introspection pins exactly one
+ * field. Mirrors `DocumentBlock.id`'s `String!` shape (non-empty,
+ * opaque).
+ */
+export const documentBlockIdOnlySchema = z
+  .object({
+    id: z.string().min(1),
+  })
+  .strict();
+
+export type DocumentBlockIdOnly = z.infer<typeof documentBlockIdOnlySchema>;
+
+/**
+ * Output shape for `monday doc block-create <doc-id> --type <t>
+ * --content <json> [--after <bid>] [--parent <bid>]`. Direct unwrap
+ * of the created DocumentBlock — `data: <DocumentBlock>` per cli-
+ * design §6.1 single-record convention. The 9-field `DocumentBlock`
+ * schema reused from {@link documentBlockSchema} (M32's `doc get`
+ * blocks-hydration leg).
+ */
+export const docBlockCreateOutputSchema = documentBlockSchema;
+
+export type DocBlockCreateOutput = DocumentBlock;
+
+/**
+ * Output shape for `monday doc block-update <block-id> --content
+ * <json>`. Same 9-field `DocumentBlock` shape as block-create —
+ * Monday's wire returns the updated block with content / type /
+ * position / parent_block_id all reflecting post-update state.
+ */
+export const docBlockUpdateOutputSchema = documentBlockSchema;
+
+export type DocBlockUpdateOutput = DocumentBlock;
+
+/**
+ * Output shape for `monday doc block-delete <block-id> --yes`.
+ * Single-field `{id: <echoed-block-id>}` projection from Monday's
+ * `DocumentBlockIdOnly` wire return — agents key off the echoed id
+ * for retry/idempotency reasoning. Envelope is intentionally
+ * narrower than the create/update variants because Monday's
+ * `delete_doc_block` wire only returns the id (NOT the full
+ * pre-delete block); the agent contract doesn't gain from
+ * speculatively rehydrating the block on the way out.
+ */
+export const docBlockDeleteOutputSchema = documentBlockIdOnlySchema;
+
+export type DocBlockDeleteOutput = DocumentBlockIdOnly;
+
+/**
+ * GraphQL mutation document for `create_doc_block(doc_id, type,
+ * content, after_block_id?, parent_block_id?) → DocumentBlock`.
+ * Operation name pinned literally to `CreateDocBlock` (R-NEW-37
+ * W2 audit-point — operationNames NOT caller-overridable). Wire
+ * args are snake_case (Finding 8); variable names are camelCase
+ * (TS convention).
+ *
+ * Selects every `DocumentBlock` field per the M32 probe. The 9-
+ * field selection matches the `doc get` blocks-hydration leg so a
+ * future create-then-get pipeline can compare envelopes byte-for-
+ * byte.
+ */
+export const CREATE_DOC_BLOCK_MUTATION = `
+  mutation CreateDocBlock(
+    $docId: ID!,
+    $type: DocBlockContentType!,
+    $content: JSON!,
+    $afterBlockId: String,
+    $parentBlockId: String
+  ) {
+    create_doc_block(
+      doc_id: $docId,
+      type: $type,
+      content: $content,
+      after_block_id: $afterBlockId,
+      parent_block_id: $parentBlockId
+    ) {
+      id
+      type
+      content
+      position
+      parent_block_id
+      doc_id
+      created_at
+      created_by { id name }
+      updated_at
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation document for `update_doc_block(block_id,
+ * content) → DocumentBlock`. Operation name pinned to
+ * `UpdateDocBlock` (R-NEW-37 W2). Same 9-field `DocumentBlock`
+ * selection as the create variant — Monday's wire returns the
+ * full post-update block, not just a delta.
+ *
+ * No `--type` slot on `update_doc_block` (Monday's wire signature
+ * has no `type` arg); agents that need to switch a block's content
+ * type must `block-delete` + `block-create` (lossy: new id, new
+ * position). The CLI surface mirrors the wire constraint exactly
+ * — no client-side "change type" shim that papers over the
+ * destructive recreate.
+ */
+export const UPDATE_DOC_BLOCK_MUTATION = `
+  mutation UpdateDocBlock($blockId: String!, $content: JSON!) {
+    update_doc_block(block_id: $blockId, content: $content) {
+      id
+      type
+      content
+      position
+      parent_block_id
+      doc_id
+      created_at
+      created_by { id name }
+      updated_at
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation document for `delete_doc_block(block_id) →
+ * DocumentBlockIdOnly`. Operation name pinned to `DeleteDocBlock`
+ * (R-NEW-37 W2). Single-field selection — Monday's wire return is
+ * `DocumentBlockIdOnly` (`{id: String!}`).
+ *
+ * **Destructive-gate ordering.** The verb's action body MUST call
+ * `enforceDestructiveGate` BEFORE this fetcher per the M10 round-1
+ * P2 invariant. A missing `--yes` surfaces as
+ * `confirmation_required` from the action layer, never masked by
+ * `config_error` when no token is configured.
+ */
+export const DELETE_DOC_BLOCK_MUTATION = `
+  mutation DeleteDocBlock($blockId: String!) {
+    delete_doc_block(block_id: $blockId) {
+      id
+    }
+  }
+`;
+
+/**
+ * Wrapping response schema for the `CreateDocBlock` mutation. The
+ * `create_doc_block` slot widens to `unknown` so the wrapping
+ * parse tolerates Monday's side-band debug keys (the `.loose()`
+ * mode mirrors M27 / M32 / M34 / M35); the post-parse layer pins
+ * the value against {@link documentBlockSchema} via
+ * `unwrapOrThrow` so per-field drift surfaces with structured
+ * `details.issues` (two-stage parse, mirrors M34 / M35 cadence).
+ * Null payload semantics handled at the fetcher boundary (IMPL).
+ */
+const createDocBlockResponseSchema = z
+  .object({
+    create_doc_block: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `UpdateDocBlock` mutation. Same
+ * shape as {@link createDocBlockResponseSchema} — Monday's wire
+ * returns the updated `DocumentBlock` under the
+ * `update_doc_block` root.
+ */
+const updateDocBlockResponseSchema = z
+  .object({
+    update_doc_block: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `DeleteDocBlock` mutation. The
+ * `delete_doc_block` slot returns `DocumentBlockIdOnly` (`{id:
+ * String!}`); the post-parse layer pins via
+ * {@link documentBlockIdOnlySchema}. Null payload semantics
+ * (treat as `not_found` per the standard delete cadence mirroring
+ * M14 workspace-delete + M34 team-delete + M35 doc-delete) handled
+ * at the fetcher boundary (IMPL).
+ */
+const deleteDocBlockResponseSchema = z
+  .object({
+    delete_doc_block: z.unknown(),
+  })
+  .loose();
+
+export interface CreateDocBlockInputs {
+  readonly client: MondayClient;
+  readonly docId: string;
+  readonly type: DocBlockContentType;
+  /**
+   * Per-block content payload. Shape varies per
+   * {@link DocBlockContentType} value — Monday's wire is the source
+   * of truth for what each variant accepts; the CLI passes the JS
+   * value through to the wire `JSON` scalar unmodified. Pre-flight
+   * surface keeps the shape unconstrained; per-type structure pins
+   * land at v0.5-M36 IMPL cassettes per D11.
+   */
+  readonly content: unknown;
+  /**
+   * Optional anchor block — newly-created block lands immediately
+   * after `afterBlockId` in the doc body order. Absent → block
+   * inserted at the document head (Monday's `create_doc_block`
+   * default per probe description: "If not provided, will be
+   * inserted first in the document").
+   */
+  readonly afterBlockId?: string;
+  /**
+   * Optional parent block — newly-created block nests under
+   * `parentBlockId` (for layout / nested-list variants where
+   * Monday supports parent/child block relationships per
+   * `DocumentBlock.parent_block_id`). Absent → block lands at the
+   * document root level.
+   */
+  readonly parentBlockId?: string;
+}
+
+export interface CreateDocBlockResult {
+  readonly block: DocumentBlock;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Creates a per-doc rich-text block via `create_doc_block(doc_id,
+ * type, content, after_block_id?, parent_block_id?)` with
+ * `operationName: 'CreateDocBlock'` (R-NEW-37 W2).
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
+ * IMPL — the stub throws `internal_error` so a premature
+ * invocation surfaces "not yet implemented" rather than a
+ * misleading false-success envelope. IMPL: parse via
+ * {@link createDocBlockResponseSchema} +
+ * `assertResponseFieldPresent`, unwrap the inner OBJECT via
+ * {@link documentBlockSchema} (two-stage parse — mirrors M34 /
+ * M35 cadence), null payload → `internal_error` (a successful
+ * `create_doc_block` mutation must return the created block per
+ * Monday's documented contract — null indicates a wire-shape
+ * regression worth surfacing loudly). Omits `afterBlockId` /
+ * `parentBlockId` variables when unset so Monday's wire-side
+ * defaults apply (the M34 / M35 omit-vs-null discipline).
+ */
+/* c8 ignore start */
+export const createDocBlock = async (
+  inputs: CreateDocBlockInputs,
+): Promise<CreateDocBlockResult> => {
+  void inputs;
+  void CREATE_DOC_BLOCK_MUTATION;
+  void createDocBlockResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'createDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M36 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface UpdateDocBlockInputs {
+  readonly client: MondayClient;
+  readonly blockId: string;
+  /**
+   * Per-block content payload. Same shape contract as
+   * {@link CreateDocBlockInputs.content} — opaque JS value passed
+   * through to Monday's wire `JSON` scalar. Per-type structure
+   * pins land at v0.5-M36 IMPL cassettes per D11.
+   */
+  readonly content: unknown;
+}
+
+export interface UpdateDocBlockResult {
+  readonly block: DocumentBlock;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Updates a per-doc rich-text block's content via
+ * `update_doc_block(block_id, content)` with `operationName:
+ * 'UpdateDocBlock'` (R-NEW-37 W2). No type-switching slot on the
+ * wire — agents needing to change a block's content type
+ * `block-delete` + `block-create` (lossy: new id, new position).
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
+ * IMPL — the stub throws `internal_error` so a premature
+ * invocation surfaces "not yet implemented" rather than a
+ * misleading false-success envelope. IMPL: same two-stage parse
+ * cadence as {@link createDocBlock}; null payload → `not_found`
+ * (consistent with M14 / M34 / M35 delete cadence — a present-
+ * null payload means the source block doesn't exist or isn't
+ * visible to the token; the probe description "Update a document
+ * block" promises the updated block on success, so null reads as
+ * missing-record rather than empty-success).
+ */
+/* c8 ignore start */
+export const updateDocBlock = async (
+  inputs: UpdateDocBlockInputs,
+): Promise<UpdateDocBlockResult> => {
+  void inputs;
+  void UPDATE_DOC_BLOCK_MUTATION;
+  void updateDocBlockResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'updateDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M36 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface DeleteDocBlockInputs {
+  readonly client: MondayClient;
+  readonly blockId: string;
+}
+
+export interface DeleteDocBlockResult {
+  readonly block: DocumentBlockIdOnly;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * Deletes a per-doc rich-text block via `delete_doc_block(block_id)`
+ * with `operationName: 'DeleteDocBlock'` (R-NEW-37 W2). Wire return
+ * is `DocumentBlockIdOnly` (`{id: String!}`).
+ *
+ * **Status: PRE-FLIGHT STUB.** Runtime body lands at v0.5-M36
+ * IMPL — the stub throws `internal_error` so a premature
+ * invocation surfaces "not yet implemented" rather than a
+ * misleading false-success envelope. IMPL: parse via
+ * {@link deleteDocBlockResponseSchema} +
+ * `assertResponseFieldPresent`, unwrap the inner OBJECT via
+ * {@link documentBlockIdOnlySchema}; null payload → `not_found`
+ * (mirrors M14 / M34 / M35 delete cadence — id bogus / block
+ * already deleted by a concurrent caller). The action body's
+ * destructive gate fires BEFORE this fetcher per the M10 round-1
+ * P2 invariant.
+ */
+/* c8 ignore start */
+export const deleteDocBlock = async (
+  inputs: DeleteDocBlockInputs,
+): Promise<DeleteDocBlockResult> => {
+  void inputs;
+  void DELETE_DOC_BLOCK_MUTATION;
+  void deleteDocBlockResponseSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'deleteDocBlock stub — runtime body lands at v0.5-M36 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M36 IMPL',
+        hint:
+          'pre-flight ships argv + schema + GraphQL document only; ' +
+          'IMPL swaps this stub for a live `client.raw` round-trip.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */

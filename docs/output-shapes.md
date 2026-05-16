@@ -67,7 +67,7 @@ no `data`); see the **Errors** section at the bottom.
 | [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
 | [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
 | [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
-| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35) |
+| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35), block-create (v0.5-M36 PRE-FLIGHT STUB), block-update (v0.5-M36 PRE-FLIGHT STUB), block-delete (v0.5-M36 PRE-FLIGHT STUB) |
 | [completion](#monday-completion-bashzshfish-v04-m33) | completion (v0.4-M33) |
 | [Errors](#errors) | error envelope shape |
 
@@ -4596,6 +4596,246 @@ available on live):
 ```
 
 Idempotent: no (each call mints a new DocId).
+
+### `monday doc block-create <did> --type <DocBlockContentType> --content <json> [--after <bid>] [--parent <bid>]` (v0.5-M36)
+
+> **Status: PRE-FLIGHT STUB.** Argv parsing + schema + wire
+> mutation document + envelope shape ship at v0.5-M36 pre-flight.
+> Runtime body lands at v0.5-M36 IMPL — a premature invocation
+> surfaces `internal_error` with `details.deferred_to: "v0.5-M36
+> IMPL"` rather than a misleading false-success envelope.
+
+Create a new rich-text block inside an existing workdoc via
+Monday's `Mutation.create_doc_block(doc_id: ID!, type:
+DocBlockContentType!, content: JSON!, after_block_id: String,
+parent_block_id: String) → DocumentBlock` (operationName
+`CreateDocBlock` pinned literally per R-NEW-37 W2).
+
+**Argv shape.**
+
+- `<doc-id>` — required positional, brand-validated via
+  `DocIdSchema` (numeric).
+- `--type <t>` — required closed enum (16 values; see
+  `DOC_BLOCK_CONTENT_TYPE_VALUES`). Unknown values reject at the
+  parse boundary with `usage_error.details.issues[]` per D10
+  closure.
+- `--content <json>` — required JSON-string slot. Parsed once at
+  the argv boundary via `parseJsonArg` (R-NEW-42's 4th consumer);
+  the parsed JS value passes through to Monday's wire `JSON`
+  scalar unmodified. **Per-type content shape varies across the
+  16 `DocBlockContentType` variants** (D11 closure). At pre-flight
+  the inner content shape is documented only as
+  "required, JSON-shaped" — the 16 per-type structures are
+  enumerated at v0.5-M36 IMPL cassettes (live wire responses
+  pin the exact shape Monday accepts per variant). A shape-
+  incompatible `--content` for the chosen `--type` surfaces
+  `validation_failed` from Monday at the live path.
+- `--after <bid>` — optional opaque-string block ID (maps to
+  wire `after_block_id: String`); brand-validated via
+  `DocBlockIdSchema`. Absent → block inserted at document head.
+- `--parent <bid>` — optional opaque-string block ID (maps to
+  wire `parent_block_id: String`). Absent → block lands at
+  document root level (no nesting).
+
+**Snake_case wire arg names** (`doc_id` / `after_block_id` /
+`parent_block_id`) — back to Monday's standard cadence after the
+M35 camelCase asymmetry. NOT a new R-NEW-41 supporting site.
+
+**Live success envelope** (direct unwrap of the created
+DocumentBlock — full 9-field shape per the M32 probe).
+*Per-block content shape varies per `--type`; the example below
+uses `normal_text` shape — the 16 per-type shapes are pinned at
+v0.5-M36 IMPL cassettes:*
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "blk_abc123",
+    "type": "normal_text",
+    "content": { "alignment": "left", "content": "Hello world" },
+    "position": 1.5,
+    "parent_block_id": null,
+    "doc_id": "88010",
+    "created_at": "2026-05-16T10:00:00Z",
+    "created_by": { "id": "7", "name": "Nick Webster" },
+    "updated_at": "2026-05-16T10:00:00Z"
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+**Dry-run envelope** (argv-derived; no preflight read):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { /* source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "create_doc_block",
+      "doc_id": "88010",
+      "type": "normal_text",
+      "content": { "alignment": "left", "content": "Hello world" }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Idempotent: no (Monday allows duplicate blocks at the same
+anchor).
+
+### `monday doc block-update <bid> --content <json>` (v0.5-M36)
+
+> **Status: PRE-FLIGHT STUB.** Same deferral framing as
+> `block-create` — runtime body lands at v0.5-M36 IMPL.
+
+Replace the content payload of an existing rich-text block via
+Monday's `Mutation.update_doc_block(block_id: String!, content:
+JSON!) → DocumentBlock` (operationName `UpdateDocBlock`).
+
+**No `--type` slot on Monday's wire** — content type is fixed at
+block creation. Agents needing to change a block's content type
+must `block-delete` + `block-create` (lossy: new id, new
+position). The CLI surface mirrors the wire constraint exactly —
+no client-side "change type" shim.
+
+**Argv shape.**
+
+- `<block-id>` — required positional, brand-validated via
+  `DocBlockIdSchema` (opaque non-empty string).
+- `--content <json>` — required JSON-string slot. Parsed via
+  `parseJsonArg` (R-NEW-42's 5th consumer). New payload MUST
+  match the existing block's `DocBlockContentType` shape (Monday
+  rejects shape-incompatible payloads with `validation_failed`;
+  CLI doesn't pre-validate).
+
+**Live success envelope** (direct unwrap of the updated
+DocumentBlock — same 9-field shape as `block-create`'s output):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "blk_abc123",
+    "type": "normal_text",
+    "content": { "alignment": "center", "content": "Updated" },
+    "position": 1.5,
+    "parent_block_id": null,
+    "doc_id": "88010",
+    "created_at": "2026-05-16T10:00:00Z",
+    "created_by": { "id": "7", "name": "Nick Webster" },
+    "updated_at": "2026-05-16T11:00:00Z"
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+**Dry-run envelope** (argv-derived; no preflight read):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { /* source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "update_doc_block",
+      "block_id": "blk_abc123",
+      "content": { "alignment": "center", "content": "Updated" }
+    }
+  ],
+  "warnings": []
+}
+```
+
+Idempotent: yes (re-running with the same `<block-id>` and
+`--content` produces the same end state; Monday's wire is a no-op
+when the content value matches).
+
+### `monday doc block-delete <bid> --yes` (v0.5-M36)
+
+> **Status: PRE-FLIGHT STUB.** Same deferral framing as
+> `block-create` — runtime body lands at v0.5-M36 IMPL.
+
+Delete an existing rich-text block from a workdoc via Monday's
+`Mutation.delete_doc_block(block_id: String!) →
+DocumentBlockIdOnly` (operationName `DeleteDocBlock`).
+
+**Confirmation gate** per cli-design §3.1 #7 + §10.2 + M10
+round-1 P2 invariant. `--yes` is mandatory for the live path;
+without `--yes` (and without `--dry-run`) the command fails fast
+with `confirmation_required` (exit 1) carrying
+`details.block_id`. The gate fires BEFORE `resolveClient()` so a
+missing token doesn't mask `confirmation_required` as
+`config_error` (same shape — and same gate-before-resolve
+ordering — as M14 `workspace delete` / M10 `item delete` /
+`update delete` / `team delete` / `doc delete`).
+
+**Argv shape.**
+
+- `<block-id>` — required positional, brand-validated via
+  `DocBlockIdSchema` (opaque non-empty string).
+
+**Live success envelope** (direct unwrap of the
+`DocumentBlockIdOnly` wire return — single-field `{id}`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "blk_abc123"
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+The envelope is intentionally narrower than the create/update
+variants — Monday's `delete_doc_block` wire only echoes the id,
+not the pre-delete block content. Mirrors the M35 `doc delete`
+narrow-envelope rationale.
+
+**Dry-run envelope** (argv-derived; no preflight read):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { /* source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "delete_doc_block",
+      "block_id": "blk_abc123"
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Confirmation-required envelope** (when `--yes` is absent and
+`--dry-run` is absent):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "confirmation_required",
+    "message": "doc block-delete requires --yes to delete the doc block 'blk_abc123'",
+    "details": { "block_id": "blk_abc123", "hint": "..." }
+  },
+  "meta": { /* source: "none" */ }
+}
+```
+
+Idempotent: no (re-running surfaces `not_found` past the first
+call — null payload on wire's `delete_doc_block` rewraps to
+`not_found` per the standard delete cadence mirroring M14 /
+M34 / M35).
 
 ---
 

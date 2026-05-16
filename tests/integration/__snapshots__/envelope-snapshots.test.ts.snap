@@ -3911,6 +3911,185 @@ exports[`envelope snapshot — notification (M27) > notification send --dry-run 
 }
 `;
 
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg) 1`] = `
+{
+  "error": {
+    "code": "internal_error",
+    "details": {
+      "deferred_to": "v0.5-M36 IMPL",
+      "hint": "pre-flight ships argv parsing + schema + JSON-content parse + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
+    },
+    "http_status": null,
+    "message": "monday doc block-create — runtime body lands at v0.5-M36 IMPL.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create rejects malformed --content JSON at parse boundary 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "doc_id": "88010",
+      "hint": "check the JSON syntax — strings need double-quotes; the shell may consume quotes if --content is not single-quoted",
+      "type": "normal_text",
+    },
+    "http_status": null,
+    "message": "--content must be a valid JSON-encoded string (Expected property name or '}' in JSON at position 1 (line 1 column 2))",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-create rejects unknown --type at parse boundary (D10) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "Invalid option: expected one of "bulleted_list"|"check_list"|"code"|"divider"|"image"|"large_title"|"layout"|"medium_title"|"normal_text"|"notice_box"|"numbered_list"|"page_break"|"quote"|"small_title"|"table"|"video"",
+          "path": "type",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: type: Invalid option: expected one of "bulleted_list"|"check_list"|"code"|"divider"|"image"|"large_title"|"layout"|"medium_title"|"normal_text"|"notice_box"|"numbered_list"|"page_break"|"quote"|"small_title"|"table"|"video"",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-delete (confirmation_required without --yes / --dry-run) 1`] = `
+{
+  "error": {
+    "code": "confirmation_required",
+    "details": {
+      "block_id": "blk_abc123",
+      "hint": "block-delete is destructive — Monday's wire surface offers no restore mutation for doc blocks; agents needing reversal must recreate via \`monday doc block-create\` (lossy: new id, new position; content must be re-supplied).",
+    },
+    "http_status": null,
+    "message": "monday doc block-delete blk_abc123 would delete the doc block. Re-run with --yes to confirm, or --dry-run to preview.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-delete --yes (PRE-FLIGHT STUB: action body throws internal_error after destructive gate) 1`] = `
+{
+  "error": {
+    "code": "internal_error",
+    "details": {
+      "deferred_to": "v0.5-M36 IMPL",
+      "hint": "pre-flight ships argv parsing + schema + destructive-gate invariant + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
+    },
+    "http_status": null,
+    "message": "monday doc block-delete — runtime body lands at v0.5-M36 IMPL.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD pre-flight stubs (v0.5-M36) > doc block-update (PRE-FLIGHT STUB: action body throws internal_error after parseArgv + parseJsonArg) 1`] = `
+{
+  "error": {
+    "code": "internal_error",
+    "details": {
+      "deferred_to": "v0.5-M36 IMPL",
+      "hint": "pre-flight ships argv parsing + schema + JSON-content parse + wire mutation document only; the live dispatch + dry-run emit + envelope emit land at the IMPL session.",
+    },
+    "http_status": null,
+    "message": "monday doc block-update — runtime body lands at v0.5-M36 IMPL.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — raw > raw inline query 1`] = `
 {
   "data": {
@@ -3940,7 +4119,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 112,
+    "command_count": 115,
     "error_codes": [
       {
         "code": "usage_error",

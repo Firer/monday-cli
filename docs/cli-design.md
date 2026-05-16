@@ -2669,6 +2669,136 @@ monday doc duplicate <did> [--with-updates] [--dry-run]                         
                                           # echoed; new-id available only
                                           # on live). Idempotent: no (each
                                           # call mints a new DocId).
+monday doc block-create <did> --type <DocBlockContentType> --content <json>
+                          [--after <bid>] [--parent <bid>] [--dry-run]      v0.5
+                                          # `Mutation.create_doc_block(
+                                          # doc_id: ID!, type:
+                                          # DocBlockContentType!,
+                                          # content: JSON!,
+                                          # after_block_id: String,
+                                          # parent_block_id: String) →
+                                          # DocumentBlock`. Pinned at M36
+                                          # pre-flight via empirical
+                                          # probe (`scripts/probe/v0.5-
+                                          # doc-mutations.ts` + `v0.5-
+                                          # inputs-and-results.ts` 2026-
+                                          # 05-15). 16-value closed enum
+                                          # `DocBlockContentType` on
+                                          # `--type` (per D10 closure;
+                                          # unknown values reject at
+                                          # parse boundary with
+                                          # `usage_error.details.issues
+                                          # []`). `--content <json>` is
+                                          # the required opaque JSON
+                                          # payload parsed via
+                                          # `parseJsonArg` (R-NEW-42, 4th
+                                          # consumer); per-type content
+                                          # shape varies per Monday's
+                                          # `JSON` scalar — the 16 shapes
+                                          # are pinned at M36 IMPL
+                                          # cassettes per D11. `--after`
+                                          # / `--parent` are optional
+                                          # opaque-string block IDs
+                                          # (`DocBlockIdSchema`; non-
+                                          # empty string, NOT numeric).
+                                          # Snake_case wire arg names
+                                          # (`doc_id`, `after_block_id`,
+                                          # `parent_block_id`) — back to
+                                          # Monday's standard cadence
+                                          # after the M35 camelCase
+                                          # asymmetry; NOT a new
+                                          # R-NEW-41 supporting site.
+                                          # OBJECT-return cadence (full
+                                          # 9-field `DocumentBlock` —
+                                          # distinct from M35's opaque-
+                                          # JSON projection). Envelope:
+                                          # direct unwrap `data:
+                                          # <DocumentBlock>` per §6.1.
+                                          # `operationName:
+                                          # 'CreateDocBlock'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned
+                                          # operation + resolved input
+                                          # fields. Idempotent: no
+                                          # (Monday allows duplicate
+                                          # blocks at the same anchor).
+monday doc block-update <bid> --content <json> [--dry-run]                  v0.5
+                                          # `Mutation.update_doc_block(
+                                          # block_id: String!, content:
+                                          # JSON!) → DocumentBlock`. No
+                                          # `--type` slot on the wire —
+                                          # content type is fixed at
+                                          # creation; agents needing to
+                                          # change type use `block-
+                                          # delete` + `block-create`
+                                          # (lossy: new id, new
+                                          # position). `<bid>` is the
+                                          # opaque-string block ID
+                                          # (`DocBlockIdSchema`).
+                                          # `--content <json>` parsed
+                                          # via `parseJsonArg` (R-NEW-42,
+                                          # 5th consumer); new payload
+                                          # MUST match the existing
+                                          # block's `DocBlockContentType`
+                                          # shape (Monday rejects
+                                          # shape-incompatible payloads
+                                          # with `validation_failed`;
+                                          # CLI doesn't pre-validate).
+                                          # Snake_case wire arg name
+                                          # (`block_id`). OBJECT-return
+                                          # cadence (full 9-field
+                                          # `DocumentBlock`). Envelope:
+                                          # direct unwrap `data:
+                                          # <DocumentBlock>` per §6.1.
+                                          # `operationName:
+                                          # 'UpdateDocBlock'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned
+                                          # operation + resolved input
+                                          # fields. Idempotent: yes
+                                          # (re-running with same content
+                                          # is a no-op on wire).
+monday doc block-delete <bid> --yes [--dry-run]                             v0.5
+                                          # `Mutation.delete_doc_block(
+                                          # block_id: String!) →
+                                          # DocumentBlockIdOnly` (single-
+                                          # field OBJECT carrying only
+                                          # `id: String!`). `--yes`
+                                          # required for live; without
+                                          # `--yes` (and without
+                                          # `--dry-run`) returns
+                                          # `confirmation_required`
+                                          # (exit 1) per §3.1 #7 + M10
+                                          # round-1 P2 invariant —
+                                          # destructive gate fires
+                                          # BEFORE `resolveClient()` so
+                                          # missing token doesn't mask
+                                          # the gate as `config_error`.
+                                          # `<bid>` is the opaque-string
+                                          # block ID (`DocBlockIdSchema`).
+                                          # Snake_case wire arg name
+                                          # (`block_id`). Envelope:
+                                          # direct unwrap `data: { id }`
+                                          # — narrower than create/
+                                          # update because Monday's
+                                          # `delete_doc_block` wire only
+                                          # echoes the id (NOT pre-
+                                          # delete block content);
+                                          # mirrors the M35 `doc delete`
+                                          # narrow-envelope rationale.
+                                          # `operationName:
+                                          # 'DeleteDocBlock'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned
+                                          # operation + resolved input
+                                          # fields. Idempotent: no
+                                          # (re-running surfaces
+                                          # `not_found` past the first
+                                          # call — null payload on
+                                          # wire's `delete_doc_block`
+                                          # rewraps to `not_found` per
+                                          # the standard delete cadence
+                                          # mirroring M14 / M34 / M35).
 
 # === NOTIFICATION ===
 monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]   v0.3
@@ -8063,22 +8193,40 @@ scoped idempotent changes, and post comments narrating its work.**
   stubs at this commit; runtime bodies land at M34 IMPL.
 - Workdocs CRUD mutations — 9 surfaces total split across 3 v0.5
   milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
-  the doc-level CRUD surface (5 verbs)** at this pre-flight
-  commit: `monday doc create-in-workspace` (Monday's
-  `create_doc(location: {workspace: ...})`) + `monday doc
-  create-on-column` (`create_doc(location: {board: ...})`) +
-  `monday doc rename` (`update_doc_name`) + `monday doc delete
-  --yes` (`delete_doc`) + `monday doc duplicate [--with-updates]`
-  (`duplicate_doc`). D7 closure: two verbs over one with
-  placement choosers (mirrors `monday item upload` /
-  `monday update upload` split for the same multipart wire at
-  v0.4-M31). D8 closure: drop `--name <n>` from duplicate
-  (no wire-side rename slot on Monday's `duplicate_doc`). D9
-  closure: project opaque JSON returns (rename / delete /
-  duplicate) to flat `{ doc_id, success: true }` envelope at
-  the fetcher boundary. Per-block CRUD (`create_doc_block` /
-  `update_doc_block` / `delete_doc_block`) defers to v0.5-M36;
-  doc-content import (`import_doc_from_html` /
+  the doc-level CRUD surface (5 verbs)** + **v0.5-M36 pre-flight
+  ships the per-block CRUD surface (3 verbs)** at this commit;
+  M37 doc-content import opens at its own pre-flight after M36
+  IMPL closes. v0.5-M35 verbs (closed): `monday doc create-in-
+  workspace` (`create_doc(location: {workspace: ...})`) +
+  `monday doc create-on-column` (`create_doc(location: {board:
+  ...})`) + `monday doc rename` (`update_doc_name`) +
+  `monday doc delete --yes` (`delete_doc`) +
+  `monday doc duplicate [--with-updates]` (`duplicate_doc`).
+  D7 closure: two verbs over one with placement choosers
+  (mirrors `monday item upload` / `monday update upload` split
+  for the same multipart wire at v0.4-M31). D8 closure: drop
+  `--name <n>` from duplicate (no wire-side rename slot on
+  Monday's `duplicate_doc`). D9 closure: project opaque JSON
+  returns (rename / delete / duplicate) to flat `{ doc_id,
+  success: true }` envelope at the fetcher boundary.
+  **v0.5-M36 pre-flight stubs at this commit (argv schema +
+  wire mutation documents + envelope projection only); runtime
+  bodies land at M36 IMPL.** v0.5-M36 verbs: `monday doc
+  block-create <did> --type <DocBlockContentType> --content
+  <json> [--after <bid>] [--parent <bid>]` (`create_doc_block`)
+  + `monday doc block-update <bid> --content <json>`
+  (`update_doc_block`) + `monday doc block-delete <bid> --yes`
+  (`delete_doc_block`). 16-value closed enum
+  `DocBlockContentType` on `--type` per D10 closure. Per-block
+  content payload structure (D11) deferred to M36 IMPL
+  cassettes for 16-shape breadth. OBJECT-return cadence
+  (distinct from M35's opaque-JSON projection — `create_doc_
+  block` + `update_doc_block` return full 9-field
+  `DocumentBlock`; `delete_doc_block` returns single-field
+  `DocumentBlockIdOnly`). Snake_case wire arg names (`doc_id`,
+  `block_id`, `after_block_id`, `parent_block_id`) — back to
+  Monday's standard cadence after M35's camelCase asymmetry.
+  Doc-content import (`import_doc_from_html` /
   `add_content_to_doc_from_markdown`) defers to v0.5-M37.
   Empirical probe at v0.5 kickoff
   (`scripts/probe/v0.5-doc-mutations.ts` +
@@ -8086,10 +8234,8 @@ scoped idempotent changes, and post comments narrating its work.**
   2026-05-15, API `2026-01`) pinned the 9 mutation signatures
   + return-shape heterogeneity (full Document on create; opaque
   JSON on rename/delete/duplicate; DocumentBlock on per-block
-  ops; custom `{success, error?}` OBJECT on the imports).
-  v0.5-M35 pre-flight stubs at this commit (argv schema + wire
-  mutation documents + envelope projection only); runtime
-  bodies land at M35 IMPL.
+  create/update; DocumentBlockIdOnly on per-block delete;
+  custom `{success, error?}` OBJECT on the imports).
 - Files-shaped friendly `--set` translator + `--set-raw` form —
   the `monday item upload` verb shipped at v0.4-M31 covers the
   multipart wire path; the inline `--set` / `--set-raw` form
