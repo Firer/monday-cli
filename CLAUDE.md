@@ -725,21 +725,150 @@ axis (all M36 probes already settled vs M37's still-tentative
 D13). M37 + v0.5.x cleanup open at their own candidate-
 selection sessions per the framework's per-milestone cadence.
 
-**Next session — M36 doc-block CRUD pre-flight.** Lands the
-contract surface: 3 stub fetcher functions in
-`src/api/documents.ts` (`createDocBlock` / `updateDocBlock` /
-`deleteDocBlock`) + 3 GraphQL mutation documents + wrapping
-response schemas + new `DocBlockIdSchema` brand at
-`src/types/ids.ts` (12th brand) + 3 command stubs at
-`src/commands/doc/block-{create,update,delete}.ts` + 16-value
-`DOC_BLOCK_CONTENT_TYPE_VALUES` closed enum (per D10
-tentative-closure) + cli-design §4.3 DOC extension + argv-
-parser unit tests. Per-block content payload structure (D11)
-documented in output-shapes.md as deferred to IMPL cassettes
-for 16-shape breadth. Single destructive gate on
-`block-delete --yes` per the M10 round-1 P2 invariant
-(parseArgv + enforceDestructiveGate BEFORE the c8-ignored
-stub throw per R-NEW-76).
+**v0.5-M36 pre-flight closed at `19e1fa2..7633a23`.** 3-commit
+cluster lands the contract surface for per-block CRUD: 3 new
+verbs (`monday doc block-create` / `block-update` /
+`block-delete`) under the existing `doc` namespace, backed by
+Monday's `Mutation.create_doc_block` / `update_doc_block` /
+`delete_doc_block` wire surface. Pre-flight cluster:
+`19e1fa2` feat (3 stub fetcher functions in
+`src/api/documents.ts` with `c8 ignore`-wrapped bodies + 3
+GraphQL mutation documents with literal-pinned operationNames
+`CreateDocBlock` / `UpdateDocBlock` / `DeleteDocBlock` per
+R-NEW-37 W2 + 3 wrapping response schemas + new
+`documentBlockIdOnlySchema` for the single-field
+`delete_doc_block` return + 16-value
+`DOC_BLOCK_CONTENT_TYPE_VALUES` closed enum + new
+`DocBlockIdSchema` brand at `src/types/ids.ts` (12th brand —
+string-shape via `slugIdSchema`, NOT numeric, because Monday's
+`DocumentBlock.id` is wire `String!`, distinct from `DocId`'s
+`ID!` numeric brand) + 3 command stubs with `parseArgv` +
+`parseJsonArg` (R-NEW-42's 4th + 5th consumers) +
+`enforceDestructiveGate` (on `block-delete`) firing BEFORE the
+c8-ignored stub block per R-NEW-76; cli-design §4.3 DOC
+extension with 3 verb rows + §13 v0.5 backlog folded M36
+alongside M35; v0.5-plan §3 M36 flipped from outline → detailed
+scope + D10/D11 flipped from "Tentative closure" → "Closed at
+M36 pre-flight"; output-shapes.md M36 section with stub-status
+banner + per-type content payload structure deferral per D11;
+55 argv-parser unit tests at
+`tests/unit/commands/doc/m36-argv.test.ts` + 6 envelope-
+snapshot tests for parse-boundary rejections + post-parse stub
++ confirmation_required) + `ced7420` Codex round-1 fix-up (0
+P1 + 0 P2 + 4 P3 — D10 prose drift on `details.issues[]`
+shape + "envelope projection" M35 language reapplied to M36
+OBJECT-return cadence + M36 §3 exit-criteria test inventory
++ "Finding 8" / "Finding 7" mislabel on snake_case wire
+arg-name convention sites) + `7633a23` Codex round-2 fix-up
+(0 P1 + 0 P2 + 3 P3 — residual drift the round-1 grep
+missed: §9 M36 preconditions test-count bullet parallel to
+the §3 exit-criteria entry + `m36-argv.test.ts` file-header
+gate-coverage claim + API fetcher-header layer confusion
+between fetcher boundary vs command-action-body parse
+boundary). Round-3 ratified clean (0 P1 + 0 P2 + 0 P3 across
+W1-W10). **Cumulative pre-flight findings: 0 P1 + 0 P2 + 7 P3
+across 2 fix-up rounds** — at the LOWER bound of the M22 /
+M27 / M30 / M31 / M32 / M34 / M35 write-surface pre-flight
+precedent (M35 pre-flight: 1 P2 + 10 P3 / 5 rounds; M36 ran
+lighter because the OBJECT-return cadence avoids M35's
+opaque-JSON projection prose surface). All 7 P3 findings
+were docs-only prose drift; ZERO contract-shape findings.
+
+**M36 pre-flight highlights.** 3 new verbs under the existing
+`doc` namespace; OBJECT-return cadence (distinct from M35's
+opaque-JSON D9 projection — M36's `create_doc_block` +
+`update_doc_block` return full 9-field `DocumentBlock`;
+`delete_doc_block` returns single-field `DocumentBlockIdOnly`).
+Snake_case wire arg names (`doc_id` / `block_id` /
+`after_block_id` / `parent_block_id`) — back to Monday's
+standard cadence after M35's camelCase asymmetry; NOT a new
+R-NEW-41 supporting site. `DocBlockIdSchema` brand uses
+`slugIdSchema` (non-empty-string base; same shape as
+`ColumnId` / `GroupId`) because Monday's `DocumentBlock.id` is
+wire `String!`, NOT `ID!` — load-bearing distinction from
+`DocId`'s numeric brand. **D10 + D11 closed** at this pre-flight
+(D10: unknown `--type` values reject at parse with
+`details.issues[{path: 'type', message: '...'}]` per
+`parseArgv`'s `SummarisedIssue` shape; D11: per-type content
+payload structure deferred to M36 IMPL cassettes for 16-shape
+breadth). **R-NEW-58 2-consumer scan at pre-flight kickoff
+returned NEGATIVE** — `parseJsonArg` already 3-consumer-lifted
+at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
+`documentBlockSchema` already exists at M32 (M36 fetchers
+reuse it); no R-class lift fires ahead of feat.
+
+**Live numbers (post-M36 pre-flight close):**
+
+- Test count: **3919 + 1 skipped** across **163** test files
+  (+61 net vs 3858 + 1 skipped at M35 IMPL close: 55 argv tests
+  at `tests/unit/commands/doc/m36-argv.test.ts` covering brand
+  validation + 16-value enum positive/negative + JSON-content
+  parse + strict-mode unknown-key rejection + 6 envelope
+  snapshots in `tests/integration/envelope-snapshots.test.ts`
+  covering parse-boundary `usage_error` rejections + post-parse
+  stub `internal_error` envelopes + destructive-gate
+  `confirmation_required`). 2 Codex fix-up rounds added 0
+  tests — both rounds were prose-only.
+- Coverage: **99.29 / 96.31 / 99.45 / 99.55** (stmts /
+  branches / fns / lines) at the **95 / 95.45 / 95 / 95**
+  floor. **Branches margin 0.86pp** (was 0.91pp at M35 IMPL
+  close; −0.05pp expected drop from the 3 new c8-ignored stub
+  fetcher bodies + 3 c8-ignored stub action bodies dropping in
+  with parse-boundary-only coverage — IMPL recovers when the
+  runtime bodies land + the dry-run / live emit paths fire).
+- ERROR_CODES count: **29** (unchanged per D10/D11 closures —
+  M36 reuses `usage_error` / `internal_error` / `not_found` /
+  `validation_failed` / `confirmation_required`).
+- Command count: **115** (was 112 — 3 new doc-block-mutation
+  verbs).
+- `package.json` version: **0.4.0** (stays through v0.5
+  milestones; bumps to `0.5.0` at v0.5 release-prep).
+
+**No R-class movement at M36 pre-flight close.** The 4+3 P3
+findings across the 2 fix-up rounds were all prose drift;
+neither crystallised a new R-class trigger. R-NEW-58
+2-consumer scan returned NEGATIVE. The three v0.5 watch-items
+all stay at their pre-M36 consumer counts:
+- R-v0.5-NEW-1 (introspect-helper `inputFields` widening) —
+  still DEFERRED; M36 didn't add a new probe consumer.
+- R-v0.5-NEW-11 + R-v0.5-NEW-12 (M35 IMPL surfaces) — both
+  LOW priority watch-items at 1 supporting instance each;
+  M36 pre-flight didn't fire either.
+- R-NEW-72 (post-fix-up cross-doc grep) — 6th instance
+  ratified at M36 pre-flight rounds 1+2. Round 1 caught 4
+  prose drift sites; the post-round-1 grep ran but missed
+  3 residual sites (parallel test-inventory at §9, file-
+  header at the unit-test, fetcher-header layer confusion).
+  Round 2 caught those. **Lesson for future fix-up grep:**
+  enumerate PARALLEL sites that share the same shape (e.g.
+  §3 exit-criteria ↔ §9 preconditions ↔ test-file header
+  ↔ module-header status banners) at the same time, NOT just
+  the originally-flagged site — same test-count claim or
+  layer claim at multiple sites is exactly the R-NEW-72
+  R-NEW-56 extension target.
+
+**Next session — M36 IMPL.** Swaps the 3 c8-ignored stub
+fetcher bodies for live `client.raw` round-trips with
+literal-pinned `operationName: 'CreateDocBlock'` /
+`'UpdateDocBlock'` / `'DeleteDocBlock'` (R-NEW-37 W2 safely-
+by-construction); two-stage parse cadence (wrapping schema
+→ `assertResponseFieldPresent` → unwrap inner OBJECT via
+`documentBlockSchema` for create+update or
+`documentBlockIdOnlySchema` for delete); per-fetcher
+null-payload handling (create-null → `internal_error` per
+the "must return created block" contract; update-null +
+delete-null → `not_found` per the standard delete/update
+cadence + the per-fetcher probe-description-derived
+discipline at R-v0.5-NEW-11). 3 runtime action bodies wire
+`resolveClient` + fetcher + `emitDryRun` / `emitMutation`
+per the M35 cadence. Per-block content payload structure
+documented in `docs/output-shapes.md` from live IMPL
+cassettes (16 shapes per `DocBlockContentType` value per
+D11). Integration test files per verb (`tests/integration/
+commands/doc-block-{create,update,delete}.test.ts`) + 6
+live-mutation envelope snapshots refreshed. Codex IMPL
+round estimate 3-5 rounds per the M22 / M27 / M30 / M31 /
+M32 / M34 OBJECT-return mutation-surface precedent.
 
 R-class state to carry forward at next session:
 
@@ -750,9 +879,11 @@ R-class state to carry forward at next session:
   LOW priority watch-items at 1 supporting instance each;
   graduate to permanent Codex template audit-points or
   CLAUDE.md "Workflow rules" entries at 3-consumer cadence.
-- R-NEW-72 (post-fix-up cross-doc grep) — 5-instance ratified
-  + a noun-stem grep-pattern refinement lesson from rounds
-  3-4 (M35 post-mortem §12 Contract drift findings #2).
+- R-NEW-72 (post-fix-up cross-doc grep) — 6-instance ratified
+  with the noun-stem grep-pattern refinement lesson (M35 IMPL
+  rounds 3-4) + the parallel-sites grep-enumeration lesson
+  (M36 pre-flight rounds 1-2; see "Lesson for future fix-up
+  grep" above).
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
