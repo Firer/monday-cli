@@ -11,10 +11,39 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.5-M37 IMPL closed at `c431d96..25e1204`.** LAST v0.5
-feature milestone shipped end-to-end — doc-content import
-surface (2 new verbs under the existing `monday doc` namespace:
-`import-html` + `append-markdown`) backed by Monday's
+**v0.5.0 ready for publish — pending user push authorization +
+npm publish.** The v0.5 release-prep cluster (this session)
+mirrored v0.4 release-prep's `c193f21..b8e4cd0` shape verbatim
+across 5 commits with diff + 1 zero-diff envelope-snapshot probe
+(skipped because every v0.5 milestone refreshed its own snapshots
+in lockstep at IMPL close — Commit 1 ran clean with zero diff,
+folded into close-docs prose instead of a separate commit):
+`9129c67` ToC audit + slip stale `deferred_to: "v0.5"` slots to
+`"v0.6"` (4 production sites in `src/api/{column-types,
+column-values,raw-write}.ts` + `src/commands/item/create.ts` + 5
+test sites + 5 doc prose sites + 1 ToC user-row update closing a
+v0.5-M34 close-docs gap caught at release-prep ToC audit per
+R-NEW-82's 3rd-consecutive-consumer graduation) + `665c46e`
+README v0.5 quickstart + scope refresh + `ae7b074` version bump
+0.4.0 → 0.5.0 in `package.json` + `package-lock.json` + `5afa3fe`
+CHANGELOG `[0.5.0]` entry + this close-docs sweep commit.
+Annotated `v0.5.0` git tag created locally pointing at this
+cluster's HEAD; push to `origin/main`, `gh release create`, and
+`npm publish` pending user authorization (mirroring v0.3-M28 +
+v0.4 release-prep wait-for-authorization cadence).
+
+**No code-surface change in the release-prep cluster** — only
+docs, tests, the deferral-slip string-literal updates, and the
+version bump. ERROR_CODES count stays at 29; command count stays
+at 117; the 95.45 branches floor + 95 stmts/fns/lines floor
+unchanged. Coverage at the cluster close: 99.29 / 96.45 / 99.45 /
+99.55 (branches margin 1.00pp — held from M37 IMPL close, first
+v0.5 IMPL milestone to cross the 1.00pp threshold).
+
+**v0.5-M37 IMPL closed at `c431d96..25e1204`** (prior session) —
+LAST v0.5 feature milestone shipped end-to-end — doc-content
+import surface (2 new verbs under the existing `monday doc`
+namespace: `import-html` + `append-markdown`) backed by Monday's
 `import_doc_from_html` + `add_content_to_doc_from_markdown`
 custom-OBJECT mutations. IMPL cluster: R-v0.5-NEW-18 lift
 `c431d96` (ahead-of-feat per R-NEW-58 cadence — generic
@@ -248,7 +277,39 @@ flagged"). ERROR_CODES count stays at 29 per D4 closure.
 - npm registry version: **0.4.0** (`latest` dist-tag,
   published 2026-05-14T22:46:28Z).
 
-**R-class state (post-v0.5-M34 IMPL close):**
+**R-class state (post-v0.5 release-prep close):**
+
+- **R-NEW-82 GRADUATED at v0.5 release-prep close** (3rd
+  consecutive release-prep cluster firing the "release-prep
+  cross-doc grep for `deferred_to: '<currently-releasing-
+  version>'`" audit step). M28 caught 2 sites at v0.3.0
+  (`f2600fa`); v0.4 release-prep caught 3 production sites + 5
+  prose sites at `eb9e7a9`; v0.5 release-prep caught 4
+  production sites + 5 test sites + 5 doc prose sites + 1 ToC
+  user-row drift at `9129c67` (the ToC user-row drift is a new
+  sub-class — a v0.5-M34 close-docs gap where the team-writer
+  verbs were added to `cli-design.md` §4.3 but not to
+  `output-shapes.md`'s ToC; the release-prep ToC audit caught
+  it). Discipline promotes to a permanent CLAUDE.md "Workflow
+  rules" entry under the release-prep cadence section below.
+  Full entry stays at v0.4-plan §22 R-NEW-82 marked "graduated
+  at v0.5 release-prep close".
+- **R-NEW-84 ratified at v0.5 release-prep close** (5th
+  supporting instance — graduated at v0.5-M34 pre-flight close
+  per the 4-instance graduation trigger; the v0.5 release-prep
+  cluster IS the symmetric application of the rule). Zero
+  production `src/**/*.ts` changes → Codex review skipped;
+  gates (`npm run typecheck && npm run lint && npm test`) alone
+  verified. Cluster shipped cleanly across 5 commits + 1
+  zero-diff probe with no Codex pass; rule application
+  confirmed.
+- **No code-lift R-class movement at v0.5 release-prep.** The
+  cluster shipped only string-literal pins (deferral slips),
+  doc prose, README + CHANGELOG additions, and the
+  package.json + package-lock.json version bump. No new helper
+  crystallized; no 3-consumer threshold fired.
+
+**R-class state (post-v0.5-M34 IMPL close — carried for context):**
 
 - **`_team-membership.ts:projectMembershipResults` lifted at
   IMPL kickoff** (2-consumer inline lift mirroring M26b
@@ -875,7 +936,35 @@ at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
 `documentBlockSchema` already exists at M32 (M36 fetchers
 reuse it); no R-class lift fires ahead of feat.
 
-**Live numbers (post-v0.5-M37 IMPL close):**
+**Live numbers (v0.5.0 ready for publish):**
+
+- Test count: **4054 + 1 skipped** across **170** test files
+  (unchanged from M37 IMPL close — the release-prep cluster adds
+  no tests; the envelope-snapshot refresh probe at "Commit 1"
+  returned zero diff because every v0.5 milestone refreshed its
+  own snapshots in lockstep at IMPL close, so no separate
+  snapshot commit landed).
+- Coverage: **99.29 / 96.45 / 99.45 / 99.55** (stmts / branches
+  / fns / lines) at the **95 / 95.45 / 95 / 95** floor.
+  **Branches margin 1.00pp** (unchanged from M37 IMPL close —
+  the deferral slip changes only string literals; the README +
+  CHANGELOG + ToC additions are doc-only; the version bump is
+  package.json + package-lock.json only). The release-prep
+  cluster matched v0.4 release-prep's "no coverage residual
+  sweep needed" branch (margin ≥ 0.5pp baseline + no per-file
+  100%-residual gap surfaced).
+- ERROR_CODES count: **29** (unchanged — release-prep adds no
+  new codes).
+- Command count: **117** (unchanged — release-prep adds no
+  verbs).
+- `package.json` version: **0.5.0** (bumped at `ae7b074`).
+- `v0.5.0` annotated tag points at the cluster's final commit
+  (created locally; **pushed to `origin/main` + GitHub release
+  + npm publish pending user authorization**, mirroring the
+  v0.3-M28 + v0.4 release-prep cadences). v0.4.0's tag remains
+  live at `b8e4cd0`.
+
+**Live numbers (post-v0.5-M37 IMPL close — carried for context):**
 
 - Test count: **4054 + 1 skipped** across **170** test files
   (+56 net vs 3998 + 1 skipped at M37 pre-flight close: 20
@@ -900,15 +989,6 @@ reuse it); no R-class lift fires ahead of feat.
   vs pre-flight (the R-v0.5-NEW-18 lift adds the helper file
   outside the M37 src surface; the round-1 P2-1 `.refine()`
   adds minor branch surface).
-- ERROR_CODES count: **29** (unchanged per D12 closure — M37
-  reuses existing codes; `validation_failed` covers `success:
-  false + error`; `internal_error` covers wire-regression
-  branches; `usage_error` covers parse-boundary + runtime
-  size-guard rejections).
-- Command count: **117** (unchanged from pre-flight; IMPL adds
-  no verbs).
-- `package.json` version: **0.4.0** (stays through v0.5
-  release-prep, then bumps to `0.5.0`).
 
 **Live numbers (post-M36 IMPL close):**
 
@@ -1147,27 +1227,30 @@ load-bearing lesson: noun-stem matching must extend to ALL
 sibling sites; round-N fixes commonly introduce round-N+1
 catches when the grep pattern is too narrow.
 
-**Next session — v0.5 release-prep candidate-selection.** Per
-the R-NEW-75 5-dimension framework, release-prep is a process-
-only candidate (mirrors v0.4 release-prep cadence verbatim:
-returns zero on 4 of 5 axes — wire-shape novelty / transport
-seam / destructive gate / R-class triggers — fires only on the
-Codex round estimate axis). The R-NEW-84 carve-out applies:
-test-only / mechanical / process-only clusters with zero
-production `src/**/*.ts` changes skip the Codex pass; gates
-verify. Expected cluster shape (6 commits mirroring v0.4
-release-prep `c193f21..b8e4cd0`): envelope-snapshot refresh +
-ToC audit + slip stale `deferred_to: "v0.5"` slots (R-NEW-82
-2nd-instance graduation check) + README v0.5 quickstart + v0.5
-scope refresh + version bump 0.4.0 → 0.5.0 in `package.json` +
-`package-lock.json` + CHANGELOG `[0.5.0]` entry (M34 + M35 +
-M36 + M37 surfaces) + close-docs sweep + `v0.5.0` annotated git
-tag + push to `origin/main` + GitHub release + `npm publish`.
-v0.5 feature scope shipped end-to-end across M34 (team writers,
-6 verbs) + M35 (doc-level CRUD, 5 verbs) + M36 (doc-block CRUD,
-3 verbs) + M37 (doc-content import, 2 verbs) = **16 new CLI
-verbs / 9 wire mutations**. No breaking changes vs v0.4.0;
-every v0.5 surface is additive.
+**Next session — v0.6 kickoff (externally-blocked on user
+authorization for v0.5.0 push + publish first).** Once `v0.5.0`
+has been pushed + published, v0.6 opens with a candidate-
+selection session per the R-NEW-75 5-dimension framework.
+Carried-forward backlog candidates from v0.5 (slipped from v0.5
+→ v0.6 at v0.5 release-prep): files-shaped friendly column
+writes (`--set <file-col>=<path>` + `--set-raw <file-col>=<json>`
+— `monday item upload` from v0.4-M31 is the verb-shaped
+alternative agents use today); multi-level subitem creation
+(still conditional on Monday's `sub_items_board` surfacing a
+`subtasks` column at a future API version); cross-board `item
+move` value-overrides (Monday's `ColumnMappingInput` still
+carries no value slot); resumable cross-board cursor pagination
+(per-board cursor-lifetime under aggregation needs design work).
+Plus any unspecified v0.6 wishlist items the user prioritises.
+**R-NEW-82 graduated at this v0.5 release-prep cluster** —
+3rd consecutive release-prep that caught ≥ 1 stale `deferred_to`
+site (M28 caught 2; v0.4 caught 3; v0.5 caught 4 production + 5
+test + 5 doc prose sites + 1 ToC user-row drift); promoted to a
+permanent CLAUDE.md "Workflow rules" entry under the existing
+release-prep cadence. **R-NEW-84 ratified** — the v0.5 release-
+prep cluster IS the symmetric application of the rule (zero
+production `src/**/*.ts` changes → Codex review skipped; gates
+alone verified).
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
@@ -2666,7 +2749,39 @@ v0.1-plan.md / v0.2-plan.md. **Don't restate them here.**
   session); the negative-case validation at the M34 pre-flight
   cluster (production code changed → Codex review applied →
   rule correctly did NOT fire the skip) confirms the rule's
-  scope.
+  scope. Re-ratified at v0.5 release-prep cluster (5th
+  supporting instance — zero production `src/**/*.ts` changes
+  → Codex review skipped; gates alone verified).
+- **Release-prep cross-doc grep for stale
+  `deferred_to: '<currently-releasing-version>'` slots**
+  (R-NEW-82, v0.5 release-prep graduation). Every release-prep
+  cluster runs a cross-doc grep at the ToC-audit step for
+  `deferred_to: "v<current>"` across `src/` + `docs/` + `tests/`
+  to catch deferral slots that would tell agents reading the
+  released envelope to "wait for the version they're already
+  running" (e.g., v0.5.0 shipping `deferred_to: "v0.5"` is a
+  contract bug). Each stale site gets ONE of three
+  resolutions: (a) **slip** the slot to the next version
+  (when the deferred feature has a clear forward home —
+  Monday's data model still ungated, friendly translator still
+  unrouted, etc.); (b) **drop the slot** (when the deferral
+  was resolved during the released cycle — the feature
+  shipped); (c) **drop the rejection altogether** (when the
+  feature is no longer planned and the slot is dead code).
+  Matching test pins + doc prose + module docstrings update
+  in lockstep with the runtime slot. Three ratifying instances
+  ahead of graduation (v0.3-M28 audit caught 2 sites at
+  `f2600fa`; v0.4 release-prep caught 3 production sites + 5
+  prose sites at `eb9e7a9`; v0.5 release-prep caught 4
+  production + 5 test + 5 doc prose + 1 ToC user-row drift at
+  `9129c67`). The ToC user-row drift is a sub-class — a
+  prior-milestone close-docs gap where a verb cluster was
+  added to `cli-design.md` §4.3 but not to `output-shapes.md`
+  ToC; the release-prep ToC audit catches it. Pair with the
+  envelope-snapshot refresh probe (Commit 1) + README
+  quickstart refresh (Commit 3): release-prep is a 6-commit
+  baseline (5 with diff + 1 probe) per the v0.4 release-prep
+  cluster shape verbatim.
 - **Atomic, incremental commits.** One self-contained unit per commit:
   small enough to revert cleanly, large enough to stand alone. Never
   commit broken `main`.
