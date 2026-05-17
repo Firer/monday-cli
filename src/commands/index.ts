@@ -262,10 +262,14 @@ import { docBlockDeleteCommand } from './doc/block-delete.js';
 // M37 (v0.5) — doc-content import mutation surface (`doc import-html` /
 // `append-markdown`). 2 new mutation verbs under the existing `doc`
 // namespace; fourth v0.5 milestone after M34 team writers + M35 doc-
-// level CRUD + M36 per-block CRUD. Pre-flight stubs at this commit
+// level CRUD + M36 per-block CRUD. **Shipped at v0.5-M37 IMPL**
 // (argv schema + wire mutation documents + custom-OBJECT projection
-// schemas + parse-boundary size guard per D13 — runtime bodies + file/
-// stdin source reading + integration tests land at M37 IMPL).
+// schemas + parse-boundary size guard per D13 + runtime bodies +
+// file/stdin source reading via the lifted `readSourceContent`
+// helper [R-v0.5-NEW-18; src/utils/source-content.ts] + runtime
+// size guard at the read boundary defense-in-depth with the schema
+// `.refine()` for inline + 36 integration tests across
+// `tests/integration/commands/doc-{import-html,append-markdown}.test.ts`).
 // Empirical probes:
 //   - `scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results
 //     .ts` (2026-05-15, API `2026-01`) pinned Monday's `Mutation.import_

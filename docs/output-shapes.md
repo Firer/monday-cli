@@ -5201,7 +5201,7 @@ display purposes.
 | `add_content_to_doc_from_markdown` | Token lacks workdoc-write scope | TBD (v0.5.x real-wire probe) | `forbidden` per transport-layer mapping |
 | `add_content_to_doc_from_markdown` | Wire regression: `success: false + null/empty error` | cassette-pinned via `doc-append-markdown.test.ts` | `internal_error.details: {doc_id, hint: 'wire-shape regression — ...'}` |
 | `add_content_to_doc_from_markdown` | Wire regression: `success: true + null block_ids` | cassette-pinned via `doc-append-markdown.test.ts` | `internal_error.details: {doc_id, hint: 'wire-shape regression — ...'}` |
-| `add_content_to_doc_from_markdown` | Empty markdown parses to zero convertible blocks | n/a (success path) | `success: true` envelope WITH `block_ids: []` (NOT a failure — markdown's "no convertible content" semantics) |
+| `add_content_to_doc_from_markdown` | Non-empty markdown that Monday parses to zero convertible blocks (e.g. comments-only) | n/a (success path) | `success: true` envelope WITH `block_ids: []` (NOT a failure — Monday's "no convertible content" semantics; empty / whitespace-only payload rejects at parse / read boundary as `usage_error` and never reaches this branch) |
 
 Cells marked `cassette-pinned` carry the structural projection
 contract from M37 IMPL integration tests; cells marked

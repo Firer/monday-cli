@@ -8372,10 +8372,9 @@ scoped idempotent changes, and post comments narrating its work.**
 - Workdocs CRUD mutations — 9 surfaces total split across 3 v0.5
   milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
   the doc-level CRUD surface (5 verbs)** + **v0.5-M36 ships the
-  per-block CRUD surface (3 verbs)** end-to-end; **v0.5-M37
-  pre-flight closed at `8eb6da7..35868fc` ships the doc-content
-  import surface (2 verbs)** as stubs — runtime bodies land at
-  M37 IMPL.
+  per-block CRUD surface (3 verbs)** + **v0.5-M37 ships the
+  doc-content import surface (2 verbs)** end-to-end (M37 IMPL
+  cluster `c431d96..<final>`).
   v0.5-M35 verbs (closed): `monday doc create-in-workspace`
   (`create_doc(location: {workspace: ...})`) +
   `monday doc create-on-column` (`create_doc(location: {board:
@@ -8409,7 +8408,7 @@ scoped idempotent changes, and post comments narrating its work.**
   `DocumentBlockIdOnly`). Snake_case wire arg names (`doc_id`,
   `block_id`, `after_block_id`, `parent_block_id`) — back to
   Monday's standard cadence after M35's camelCase asymmetry.
-  **v0.5-M37 pre-flight stubs at this commit.** v0.5-M37 verbs:
+  **v0.5-M37 shipped at IMPL.** v0.5-M37 verbs:
   `monday doc import-html --workspace <wid> (--html <file|-> |
   --html-string <s>) [--folder <fid>] [--kind <k>] [--title <t>]`
   (`import_doc_from_html`) + `monday doc append-markdown <did>
@@ -8442,9 +8441,11 @@ scoped idempotent changes, and post comments narrating its work.**
   `success: false + populated error` → `validation_failed.details.
   error: <wire-error>`; `success: false + empty error` →
   `internal_error` (wire-regression hint). Runtime bodies (file/
-  stdin source reading + size guard at runtime read boundary +
-  wire dispatch + projection) + integration tests land at M37
-  IMPL. **9 doc-mutation surfaces total now sequenced across M35
+  stdin source reading via the lifted `readSourceContent` helper +
+  runtime size guard at the read boundary defense-in-depth with
+  the schema `.refine()` for inline + wire dispatch + projection)
+  + 36 integration tests covering all 5 D12 branches per fetcher
+  + per-source variants shipped at v0.5-M37 IMPL. **9 doc-mutation surfaces total now sequenced across M35
   (4 wire / 5 CLI verbs) + M36 (3 wire / 3 CLI) + M37 (2 wire /
   2 CLI) — closes the v0.4-M32 doc-mutation deferral.**
   Empirical probe at v0.5 kickoff

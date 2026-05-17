@@ -2893,8 +2893,11 @@ export interface AddContentToDocFromMarkdownActionResult {
  *   - `success: true + block_ids present (incl. EMPTY array)` →
  *     success envelope `{doc_id (echoed), block_ids, success: true}`.
  *     Empty `block_ids: []` IS a valid success shape per probe
- *     finding — Monday's "no convertible blocks in markdown"
- *     semantics is plausible (e.g. an empty file).
+ *     finding — for non-empty markdown that Monday parses to zero
+ *     convertible blocks (e.g. comments-only payload Monday
+ *     collapses to zero structural blocks). Empty / whitespace-only
+ *     input is rejected at the parse / read boundary by
+ *     {@link readSourceContent}, so it can never reach this fetcher.
  *   - `success: false + populated error` → throw `validation_failed`
  *     with `details: {doc_id, error, hint}`.
  *   - `success: false + empty/null error` → throw `internal_error`
