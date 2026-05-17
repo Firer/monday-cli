@@ -45,9 +45,14 @@
  * `monday doc get <doc-id>` keep the parent doc context inline.
  * `block_ids` is the wire's full list of NEWLY-CREATED block ids
  * preserved in markdown-source order. **Empty `block_ids: []` IS a
- * valid success shape** (markdown payload contained no convertible
- * blocks — e.g. an empty file or markdown that parsed to zero
- * blocks); the CLI does not rewrap empty-blocks as failure.
+ * valid success shape** (non-empty markdown that Monday parses to
+ * zero convertible blocks — e.g. comments-only or whitespace-only
+ * post-Monday-parse); the CLI does not rewrap empty-blocks as
+ * failure. (Note: empty / whitespace-only `--markdown-string` is
+ * rejected at the parse boundary by the schema's `.refine()` so it
+ * can never reach the wire — the empty-`block_ids` success path is
+ * only reachable for non-empty input that Monday's parser collapses
+ * to zero structural blocks.)
  *
  * **Failure mapping** per D12 closure:
  *
@@ -132,6 +137,10 @@ const inputSchema = z
     markdownString: z
       .string()
       .min(1, '--markdown-string must not be empty')
+      .refine((s) => s.trim().length > 0, {
+        message:
+          '--markdown-string must not be whitespace-only (zero non-whitespace bytes after trim). Pass markdown content.',
+      })
       .refine(
         (s) => Buffer.byteLength(s, 'utf8') <= MAX_DOC_IMPORT_PAYLOAD_BYTES,
         {
@@ -199,7 +208,7 @@ export const docAppendMarkdownCommand: CommandModule<
           'Notes:',
           `  - Inline --markdown-string is capped at ${MAX_DOC_IMPORT_PAYLOAD_BYTES.toString()} bytes (~250KB) at parse boundary per D13 closure; file path / stdin forms apply the same cap at runtime.`,
           '  - Re-running creates duplicate blocks; this verb is non-idempotent. For fine-grained per-block control use `monday doc block-create` (M36).',
-          '  - Empty markdown payload (zero convertible blocks) returns a success envelope with `block_ids: []`.',
+          '  - Non-empty markdown that Monday parses to zero convertible blocks returns a success envelope with `block_ids: []`. Empty / whitespace-only `--markdown-string` rejects at the parse boundary (cannot reach the wire).',
           '  - `--dry-run` emits the planned `add_content_to_doc_from_markdown` operation + resolved input slots (markdown payload omitted; only its source descriptor is logged).',
           '',
         ].join('\n'),

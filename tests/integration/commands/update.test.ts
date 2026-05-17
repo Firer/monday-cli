@@ -621,8 +621,16 @@ describe('monday update create (integration, M5b)', () => {
         { stdin },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { source?: string } };
+      };
       expect(env.error?.code).toBe('usage_error');
+      // Post-R-v0.5-NEW-18 lift contract pin: empty stdin surfaces
+      // `details.source: 'stdin'` (universal naming across the lifted
+      // helper's source paths — was `details.body_file: '-'` pre-lift).
+      // Pinned per Codex IMPL round-1 P2-2 to make the contract drift
+      // visible to gates rather than waiting for a future audit pass.
+      expect(env.error?.details?.source).toBe('stdin');
     });
 
     it('rejects --body and --body-file together as usage_error', async () => {
@@ -631,8 +639,20 @@ describe('monday update create (integration, M5b)', () => {
         { interactions: [] },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { has_inline_value?: boolean; file_path?: string };
+        };
+      };
       expect(env.error?.code).toBe('usage_error');
+      // Post-R-v0.5-NEW-18 lift contract pin: mutex rejection surfaces
+      // `details.has_inline_value: true` + `details.file_path: <path>`
+      // (universal naming — was `details.has_inline_body: true` +
+      // `details.body_file: <path>` pre-lift). Pinned per Codex IMPL
+      // round-1 P2-2 to make the contract drift visible to gates.
+      expect(env.error?.details?.has_inline_value).toBe(true);
+      expect(env.error?.details?.file_path).toBe('nonexistent');
     });
 
     it('surfaces a clear usage_error when --body-file path does not exist', async () => {

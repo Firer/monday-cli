@@ -142,6 +142,10 @@ const inputSchema = z
     htmlString: z
       .string()
       .min(1, '--html-string must not be empty')
+      .refine((s) => s.trim().length > 0, {
+        message:
+          '--html-string must not be whitespace-only (zero non-whitespace bytes after trim). Pass HTML content.',
+      })
       .refine(
         (s) => Buffer.byteLength(s, 'utf8') <= MAX_DOC_IMPORT_PAYLOAD_BYTES,
         {

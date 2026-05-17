@@ -4865,20 +4865,17 @@ they're variants whose live shapes await a real-world cassette
 fires; only the documented `--content` shape is pending.
 Extending the table is additive at any future v0.5.x patch.
 
-### `monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>) [--folder <fid>] [--kind public|private|share] [--title <t>]` (v0.5-M37 pre-flight)
+### `monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>) [--folder <fid>] [--kind public|private|share] [--title <t>]` (v0.5-M37)
 
-> **STATUS: pre-flight stub at this commit.** Argv schema +
-> commander wiring + custom-OBJECT projection contract ship as the
-> agent contract surface. Runtime body (file/stdin source reading +
-> size guard at runtime + `import_doc_from_html` dispatch + custom-
-> OBJECT projection per D12) lands at v0.5-M37 IMPL alongside
-> integration tests. The wire-call leg is `c8 ignore`-wrapped at
-> the action body — the post-parse stub surface throws
-> `internal_error.details.deferred_to: 'v0.5-M37 IMPL'` for any
-> live invocation while the parse-boundary surface (mutual-
-> exclusion of `--html` / `--html-string`, oversized
-> `--html-string` rejection per D13, malformed `WorkspaceId` /
-> `DocFolderId` brands, unknown `--kind`) ships verbatim.
+> **STATUS: shipped at v0.5-M37 IMPL.** Argv schema +
+> commander wiring + custom-OBJECT projection per D12 + runtime
+> body (file/stdin/inline source reading via the lifted
+> `readSourceContent` helper + size guard at runtime read boundary
+> for file/stdin paths defense-in-depth with the schema `.refine()`
+> for inline + `import_doc_from_html` dispatch + projection)
+> shipped end-to-end with 19 integration tests at
+> `tests/integration/commands/doc-import-html.test.ts` covering all
+> 5 D12 branches per fetcher + per-source variants.
 
 Import an HTML payload as a new workdoc via Monday's
 `Mutation.import_doc_from_html(html: String!, workspaceId: ID!,
@@ -5043,12 +5040,15 @@ agents see WHAT would be sent without the bytes):
 Idempotent: no (re-running creates a fresh duplicate doc; Monday's
 wire does not dedupe by HTML content or title).
 
-### `monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>) [--after <bid>]` (v0.5-M37 pre-flight)
+### `monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>) [--after <bid>]` (v0.5-M37)
 
-> **STATUS: pre-flight stub at this commit.** Same shape as
-> `import-html` — argv parse-boundary surface ships verbatim; the
-> wire-call leg + file/stdin reading + size guard at runtime land
-> at M37 IMPL.
+> **STATUS: shipped at v0.5-M37 IMPL.** Same shape as
+> `import-html` — argv parse-boundary surface + wire-call leg +
+> file/stdin reading + size guard at runtime + custom-OBJECT
+> projection per D12 all shipped end-to-end with 17 integration
+> tests at `tests/integration/commands/doc-append-markdown.test.ts`
+> covering all 5 D12 branches per fetcher + per-source variants +
+> empty `block_ids: []` success path.
 
 Append a parsed-markdown payload as new blocks to an existing
 workdoc via Monday's `Mutation.add_content_to_doc_from_markdown
@@ -5090,9 +5090,14 @@ echoes input `doc_id` for follow-up pipeline ergonomics):
 }
 ```
 
-**Empty `block_ids` IS valid success** (markdown payload contained
-zero convertible blocks — e.g. empty file, or markdown that parsed
-to comments only):
+**Empty `block_ids` IS valid success** (non-empty markdown payload
+that Monday parses to zero convertible blocks — e.g. markdown that
+contains only comments or only whitespace post-Monday-parse).
+**Empty / whitespace-only `--markdown-string` is rejected at the
+parse boundary by the schema's `.refine((s) => s.trim().length >
+0)`** (added at Codex IMPL round-1 P2-1) so it can never reach the
+wire — agents see `usage_error` from the parse boundary, NOT a
+spurious "success" envelope:
 
 ```json
 {

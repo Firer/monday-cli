@@ -198,21 +198,12 @@ describe('monday doc append-markdown (M37 IMPL)', () => {
       expect(env.data.block_ids).toEqual(['blk_new']);
     });
 
-    it('empty block_ids: [] on success IS a valid success shape (no convertible blocks)', async () => {
-      const cassette: Cassette = {
-        interactions: [
-          {
-            operation_name: 'AddContentToDocFromMarkdown',
-            response: {
-              data: {
-                add_content_to_doc_from_markdown: wireSuccess({
-                  block_ids: [],
-                }),
-              },
-            },
-          },
-        ],
-      };
+    it('whitespace-only --markdown-string rejects at parse boundary (usage_error)', async () => {
+      // The schema's `.refine((s) => s.trim().length > 0, ...)` (added
+      // at Codex IMPL round-1 P2-1) rejects whitespace-only inline
+      // payloads at the parse boundary BEFORE dry-run early return,
+      // so dry-run + live agree (dry-run can't accept content the
+      // live path would reject downstream). No wire dispatch fires.
       const out = await drive(
         [
           'doc',
@@ -222,22 +213,22 @@ describe('monday doc append-markdown (M37 IMPL)', () => {
           '   ',
           '--json',
         ],
-        cassette,
+        { interactions: [] },
       );
-      // Note: `--markdown-string '   '` would normally fail the
-      // helper's whitespace-only check, so this case uses a payload
-      // that survives helper rejection. In production, empty-blocks
-      // typically come from markdown that lexes to no convertible
-      // structure (e.g., only whitespace post-parse on Monday's side).
-      // The CLI accepts the wire's empty-array success faithfully.
       expect(out.exitCode).toBe(1);
       const env = parseEnvelope(out.stderr);
       expect(env.error?.code).toBe('usage_error');
+      expect(out.requests).toBe(0);
     });
 
-    it('empty block_ids: [] on success is preserved when input markdown is realistic', async () => {
-      // Force the empty-blocks success path with a benign payload
-      // (Monday returns block_ids: [] for some markdown shapes).
+    it('non-empty markdown that Monday parses to zero blocks: success WITH empty block_ids', async () => {
+      // Force the empty-blocks success path with a non-empty payload
+      // that parses to zero convertible structure on Monday's side
+      // (e.g. HTML/markdown comments only). The CLI accepts the
+      // wire's `block_ids: []` on `success: true` as a valid success
+      // shape per R-v0.5-NEW-11 per-fetcher null-payload discipline:
+      // null `block_ids` = wire-regression (`internal_error`); empty
+      // array = "no convertible blocks" success path.
       const cassette: Cassette = {
         interactions: [
           {

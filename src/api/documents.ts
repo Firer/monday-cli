@@ -2391,8 +2391,11 @@ export const deleteDocBlock = async (
 //     the IDs of the newly created blocks on success" → null
 //     `block_ids` on `success: true` IS a wire-regression signal
 //     (`internal_error`). An EMPTY (`[]`) `block_ids` array on
-//     success is plausible (markdown payload contains no convertible
-//     blocks); the schema accepts empty arrays as success.
+//     success is plausible for non-empty markdown that Monday's
+//     parser collapses to zero structural blocks (comments-only,
+//     whitespace post-parse, etc.); the schema accepts empty arrays
+//     as success. Empty / whitespace-only `--markdown-string` is
+//     rejected at the parse boundary so it can never reach the wire.
 //
 // **D13 closure: empirical wire-side payload-size threshold.** The
 // pre-flight `scripts/probe/v0.5-m37-size-limits.ts` probe (2026-05-17,
@@ -2442,10 +2445,10 @@ export const deleteDocBlock = async (
 // append-markdown` are content-creation surfaces — no `--yes`
 // destructive gate fires (M10 round-1 P2 invariant doesn't apply).
 //
-// **R-NEW-76 discipline preserved.** Both pre-flight stub action
-// bodies run `parseArgv` BEFORE the `c8 ignore start` block-wrap so
-// invalid argv surfaces `usage_error` from the parse boundary, NOT
-// `internal_error` from the c8-ignored stub throw.
+// **R-NEW-76 discipline preserved post-IMPL.** Both action bodies
+// run `parseArgv` BEFORE `resolveClient` so invalid argv surfaces
+// `usage_error` from the parse boundary, NOT `config_error` from
+// `loadConfig` when no token is configured.
 
 /**
  * Maximum byte-size for the inline `--html-string` / `--markdown-string`
