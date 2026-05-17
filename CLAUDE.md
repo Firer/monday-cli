@@ -1243,8 +1243,20 @@ surfacing a `subtasks` column at a future API version);
 cross-board `item move` value-overrides (Monday's
 `ColumnMappingInput` still carries no value slot); resumable
 cross-board cursor pagination (per-board cursor-lifetime under
-aggregation needs design work). Plus any unspecified v0.6
-wishlist items the user prioritises. **R-NEW-82 graduated at
+aggregation needs design work). **Plus one new candidate filed
+at the v0.6 kickoff candidate-selection session** (this
+session): profile-scoped argument defaults — extends
+`~/.monday-cli/config.toml` with a `[profiles.<name>.defaults]`
+table carrying scoping args (`board` / `workspace` / `output` /
+`concurrency` at initial scope) + optional companion
+`monday config set/get/unset` helper; coexists with the M26
+`[profiles.<name>.dev]` table; **requires a prerequisite §13
+carve-out Decision at pre-flight** distinguishing aliases-as-
+stored-command-strings (still non-goal) from defaults-as-
+stored-flag-values (carve-out). Filed at cli-design.md §13 v0.5
+slipped-candidates list to track ahead of M38 candidate
+selection. Plus any other unspecified v0.6 wishlist items the
+user prioritises. **R-NEW-82 graduated at
 this v0.5 release-prep cluster** — 3rd consecutive release-prep
 that caught ≥ 1 stale `deferred_to` site (M28 caught 2; v0.4
 caught 3; v0.5 caught 4 production + 5 test + 5 doc prose sites

@@ -8484,6 +8484,33 @@ scoped idempotent changes, and post comments narrating its work.**
 - Multi-level subitem creation — slipped from v0.4 release-prep;
   conditional on Monday's data model surfacing `subtasks` on
   `sub_items_board` at API `2026-01`+.
+- Profile-scoped argument defaults — filed at v0.6 kickoff
+  candidate-selection session as a new feature candidate (NOT a
+  v0.5 slip). Extends `~/.monday-cli/config.toml` (M19/M21) with
+  a new `[profiles.<name>.defaults]` table carrying scoping
+  args (initial scope: `board`, `workspace`, `output`,
+  `concurrency`; per-noun extension to other flags defers to
+  v0.6.x / v0.7). Precedence is the standard CLI shape — CLI
+  flag > env var > profile default > unset. Optional companion
+  `monday config set/get/unset <key> <value>` helper to edit
+  the profile file from the CLI rather than hand-editing TOML
+  (avoids fixture-coverage gaps + adds 3 verbs but no new wire
+  surface). Coexists cleanly with the M26 `[profiles.<name>.dev]`
+  table (the dev namespace continues to carry named-noun board
+  slots; the generic `[defaults]` table carries scoping args
+  shared across noun namespaces). **Prerequisite §13 carve-out
+  Decision required at pre-flight kickoff** — the current
+  "Saved queries / aliases" non-goal copy (this section, below)
+  reads as forbidding stateful command-shape mutation across
+  machines; profile-scoped defaults are adjacent enough that
+  the non-goal needs amending to distinguish aliases-as-stored-
+  command-strings (still non-goal) from defaults-as-stored-
+  flag-values (carve-out). Without that Decision, the milestone
+  can't ship cleanly. Zero new wire surface, zero new transport
+  seam; 3-4 IMPL rounds estimated. Agent-facing docs MUST pin
+  the discipline: agents should set no defaults and pass every
+  scoping arg in argv for reproducibility-across-machines;
+  defaults are a human-ergonomics feature.
 
 ### Explicitly deferred from v0.1's stable contract
 
