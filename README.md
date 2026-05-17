@@ -49,7 +49,7 @@ Requires **Node.js ≥ 22**.
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
 #
 #    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.4.0 — the verb surfaces a clear `usage_error.details.reason:
+#    v0.5.0 — the verb surfaces a clear `usage_error.details.reason:
 #    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
@@ -97,23 +97,43 @@ monday item update --where status=Backlog --set status='Working on it' \
 monday doc list --workspace 5 --order-by used_at --limit 10 --json
 monday doc get 88001 --json                # full Document with blocks
 
-# 11. Find-or-create with idempotent matching (v0.2)
+# 11. Workdocs CRUD (v0.5-M35 + v0.5-M36 + v0.5-M37 — the full
+#     mutation surface deferred at v0.4-M32 D8 closure).
+#     Doc-level CRUD (M35): create / rename / delete / duplicate.
+monday doc create-in-workspace --workspace 5 --name "Design notes" --json
+monday doc rename 88001 --name "Design notes (v2)" --json
+monday doc duplicate 88001 --with-updates --json
+monday doc delete 88001 --yes --json
+#     Doc-block CRUD (M36): block-create / block-update / block-delete.
+#     16-value `DocBlockContentType` enum for `--type`.
+monday doc block-create 88001 --type normal_text --content '{"text":"hi"}' --json
+#     Bulk import from HTML / markdown (M37): no per-block round-trips.
+monday doc import-html --workspace 5 --html ./page.html --title "Imported" --json
+monday doc append-markdown 88001 --markdown ./notes.md --json
+
+# 12. Team writers (v0.5-M34 — deferred from v0.4 at the post-M33
+#     candidate-selection session). Six new verbs under `monday user`.
+monday user team-list --json
+monday user team-create --name "Platform" --users 7,9 --json
+monday user team-add-members <tid> --users 11,13 --json
+
+# 13. Find-or-create with idempotent matching (v0.2)
 #     Re-running with the same args is safe — 0/1/2+ matches route to
 #     create / update / `ambiguous_match` (one of the 29 stable error codes).
 monday item upsert --board 12345 --name "Refactor login" \
   --match-by name --set status='Working on it' --json
 
-# 12. Move a ticket forward, then comment on it
+# 14. Move a ticket forward, then comment on it
 monday item set 67890 status=Done --json
 monday update create 67890 --body "Shipped in PR #1234" --json
 
-# 13. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
+# 15. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
 #     First-time setup auto-detects boards by Monday's stock template names.
 monday dev discover --apply --json         # writes ~/.monday-cli/config.toml
 monday dev sprint current --json           # the active sprint
 monday dev task list --mine --json         # my open tasks
 
-# 14. Outbound writes (v0.3 — webhooks + notifications)
+# 16. Outbound writes (v0.3 — webhooks + notifications)
 monday webhook list 12345 --json
 monday notification send --user 7 --target 67890 \
   --target-type item --text "PTAL" --json
@@ -182,7 +202,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.4.0",
+    "cli_version": "0.5.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -282,27 +302,38 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.4.0 (current — `monday-cli@0.4.0` on npm):**
+**v0.5.0 (current — `monday-cli@0.5.0` on npm):**
+the v0.4 surface PLUS the full team-writer surface
+(`monday user team-list/get/create/delete/add-members/remove-members`),
+the full Monday workdocs CRUD mutation surface — doc-level
+(`monday doc create-in-workspace/create-on-column/rename/delete/duplicate`),
+doc-block (`monday doc block-create/block-update/block-delete`),
+and doc-content import (`monday doc import-html/append-markdown`) —
+closing the v0.4-M32 workdocs-mutation deferral. **16 new CLI
+verbs across 9 wire mutations.** **No breaking changes vs v0.4.0**
+— every v0.5 surface is additive. Built incrementally across
+M34–M37. See [CHANGELOG.md](./CHANGELOG.md) for the full
+per-milestone release notes.
+
+**OAuth deferral (unchanged from v0.4.0).** `monday auth login` is
+registered but the canonical Monday OAuth app is not registered in
+v0.5.0; the verb surfaces a clear `usage_error.details.reason:
+oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
+config + per-profile credentials cache work fully against API
+tokens; OAuth registration revisits in v0.5.x / v0.6 contingent on
+user demand.
+
+**v0.4.0 (the previous release):**
 the v0.3 surface PLUS long-poll item activity streaming
 (`monday item watch <iid>` — NDJSON), parallel bulk dispatch
 (`monday item update --where ... --concurrency <N>`), asset uploads
 (`monday item upload` / `monday update upload` — multipart wire),
 Monday workdocs reads (`monday doc list` / `monday doc get` — full
-workdocs CRUD mutation surface deferred to v0.5), and shell
-completion (`monday completion bash|zsh|fish`). **No breaking
-changes vs v0.3.0** — every v0.4 surface is additive. Built
-incrementally across M29–M33. See [CHANGELOG.md](./CHANGELOG.md)
-for the full per-milestone release notes.
+workdocs CRUD mutation surface deferred to v0.5; shipped at v0.5),
+and shell completion (`monday completion bash|zsh|fish`). Built
+incrementally across M29–M33.
 
-**OAuth deferral (unchanged from v0.3.0).** `monday auth login` is
-registered but the canonical Monday OAuth app is not registered in
-v0.4.0; the verb surfaces a clear `usage_error.details.reason:
-oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
-config + per-profile credentials cache work fully against API
-tokens; OAuth registration revisits in v0.4.x / v0.5 contingent on
-user demand.
-
-**v0.3.0 (the previous release):**
+**v0.3.0 (the prior release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -317,7 +348,7 @@ outbound writes (`monday webhook list/create/delete` +
 tentative-row carryover. **No breaking changes vs v0.2.0** — every
 v0.3 surface is additive. Built incrementally across M19–M28.
 
-**v0.2.0 (the prior release):**
+**v0.2.0 (the foundation-of-mutations release):**
 the v0.1 read-only core + safe-mutations surface PLUS the full
 mutation surface (item lifecycle, update mutations, workspace
 lifecycle, board lifecycle, board columns + groups). Built
@@ -548,20 +579,67 @@ row `tags`, `board_relation`, `dependency`.
   templates (commander 14.0.3 ships no built-in completion
   machinery, verified by empirical probe at M33 pre-flight).
 
-**v0.5 (next):** `team` writers (deferred from v0.4-M34 at the
-post-v0.4-M33 candidate-selection session), Monday workdocs CRUD
-mutation surface (9 mutations deferred at v0.4-M32 D8 closure),
-multi-level subitems remain conditional on Monday's data model
-surfacing them, cross-board `item move` value-overrides (slipped
-from v0.4 at v0.4 release-prep — Monday's `ColumnMappingInput`
-carries no value slot), and resumable cross-board cursor pagination
-(slipped from v0.4 — per-board cursor-lifetime under aggregation
-needs design work).
+**What v0.5 added (M34–M37; full per-milestone narrative in
+[CHANGELOG.md](./CHANGELOG.md)):**
+
+- **M34** — `monday user team-list/get/create/delete/add-members/
+  remove-members` ship the full team-writer surface. The two read
+  verbs (`team-list` / `team-get`) close the v0.4-M33 candidate-
+  selection deferral; the four mutations introduce a new partial-
+  success projection for `team-add-members` / `team-remove-members`
+  (Monday's `change_team_memberships` returns `failed_users` +
+  `successful_users` lists; the CLI projects to the universal §6.1
+  `results: [{user_id, ok, ...}]` shape with input-order preserved
+  + failed-bucket-priority discipline).
+- **M35** — `monday doc create-in-workspace/create-on-column/rename/
+  delete/duplicate` ship the doc-level CRUD writer surface. Two
+  create variants (per D7) — `create-in-workspace` (`--workspace`
+  required + optional `--folder` / `--kind`) vs `create-on-column`
+  (`--item` + `--column` against an existing file-shaped column).
+  `rename` (`update_doc_name`), `delete --yes` (`delete_doc` — the
+  destructive verb in the cluster), and `duplicate [--with-updates]`
+  (`duplicate_doc`) round out the lifecycle. Backed by 4 Monday
+  wire mutations.
+- **M36** — `monday doc block-create/block-update/block-delete`
+  ship the doc-block CRUD surface. `--type <DocBlockContentType>`
+  takes one of 16 enum values (`normal_text` / `large_title` /
+  `quote` / `bulleted_list` / `check_list` / `code` / `divider` /
+  …) per D10 closure. `--content <json>` (parsed via the M27-lifted
+  `parseJsonArg` helper). Per-type content payload shapes
+  documented in `docs/output-shapes.md` "Per-block content shapes"
+  reference table — 7 cassette-pinned variants + 9 TBD / inferred
+  variants awaiting follow-up cassettes per D11.
+- **M37** — `monday doc import-html/append-markdown` ship bulk
+  doc-content import in a single wire round-trip (no per-block
+  loop). `import-html` creates a new doc from an HTML payload;
+  `append-markdown` appends blocks to an existing doc from a
+  markdown payload. Both surface mutex argv sources
+  (`--html <file|-> | --html-string <s>` /
+  `--markdown <file|-> | --markdown-string <s>`) backed by the new
+  generic `readSourceContent` helper at `src/utils/source-content.ts`
+  (R-v0.5-NEW-18 lifted ahead-of-feat from M13's `readUpdateBody`
+  — 5 consumers post-lift). Wire-side payload cap pre-empted at
+  parse boundary via `MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000` per
+  D13 empirical-probe pinning (rejected at 500KB, OK at 250KB on
+  both surfaces).
+
+**v0.6 (next):** multi-level subitems remain conditional on
+Monday's data model surfacing them (slipped from v0.4 → v0.5 →
+v0.6 across two consecutive release-preps — Monday's
+`sub_items_board` still carries no `subtasks` column at API
+`2026-01`); cross-board `item move` value-overrides (Monday's
+`ColumnMappingInput` still carries no value slot — slipped twice
+for the same reason); resumable cross-board cursor pagination
+(per-board cursor-lifetime under aggregation needs design work);
+files-shaped friendly column writes (`--set <file-col>=<path>` and
+`--set-raw <file-col>=<json>` — `monday item upload` from v0.4-M31
+is the verb-shaped alternative path agents should use today).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
-full roadmap, [`docs/v0.4-plan.md`](./docs/v0.4-plan.md) for the
-v0.4 milestone history, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md)
-for v0.3, and [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for v0.2.
+full roadmap, [`docs/v0.5-plan.md`](./docs/v0.5-plan.md) for the
+v0.5 milestone history, [`docs/v0.4-plan.md`](./docs/v0.4-plan.md)
+for v0.4, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for v0.3, and
+[`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for v0.2.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
 
