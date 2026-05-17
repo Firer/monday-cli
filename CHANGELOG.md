@@ -7,6 +7,374 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.5.0] - 2026-05-17 — Team writers + full Monday workdocs CRUD mutation surface
+
+The "agents can write to teams + drive the full workdocs surface"
+milestone — v0.4's read-only workdocs + asset-upload foundation
+gains the six team-writer verbs deferred at the post-v0.4-M33
+candidate-selection session and the full Monday workdocs CRUD
+mutation surface deferred at v0.4-M32 D8 closure (10 new doc-
+namespace verbs across doc-level + doc-block + doc-content-import
+clusters). **16 new CLI verbs across 9 wire mutations.** **No
+breaking changes vs `0.4.0` — every v0.5 surface is additive.**
+Built incrementally across M34–M37.
+
+### Breaking changes vs `0.4.0`
+
+**None.** Every command, error code, envelope key, and warning
+shape shipped in v0.4.0 is preserved byte-for-byte. v0.5 only adds.
+
+### Surface
+
+**~117 commands shipped (was ~101 in v0.4).** 16 new verbs.
+The new noun namespaces are extensions of existing ones — no new
+top-level noun lands at v0.5 (team writers extend `monday user`;
+doc-level + doc-block + doc-content-import extend `monday doc`).
+
+**Team writers (M34) — `monday user team-list/get/create/delete/
+add-members/remove-members`.** Six new verbs closing the v0.4-M33
+candidate-selection deferral. The two read verbs (`team-list` /
+`team-get`) project Monday's `Team` shape (`id`, `name`, `picture_url`,
+`users[]`, `owners[]`). The four mutations:
+
+- `team-create --name <n> [--users <id>,...] [--guest-team]
+  [--allow-empty] [--dry-run]` — backed by `create_team`.
+  `--users` resolves to Monday `UserId` list at the parse boundary
+  via the new lifted `parseBrandedListArg<T>(raw, brandSchema,
+  options)` helper (R-NEW-70 shipped ahead-of-feat at M34
+  pre-flight — 4 consumers post-lift).
+- `team-delete <tid> --yes [--dry-run]` — backed by `delete_team`.
+  The destructive verb in the cluster; `--yes` gate fires BEFORE
+  `resolveClient` per the M10 round-1 P2 invariant.
+- `team-add-members <tid> --users <id>,... [--dry-run]` +
+  `team-remove-members <tid> --users <id>,...` — backed by
+  `change_team_memberships`. Monday's mutation returns
+  `failed_users` + `successful_users` lists (asymmetric — failed
+  users carry a User object but no per-user failure reason, so
+  the CLI surfaces a generic `membership_failed` message per
+  failed record). The new shared `_team-membership.ts:
+  projectMembershipResults` helper projects to the universal
+  §6.1 `data.results: [{user_id, ok, ...}]` shape with input-
+  order preserved + failed-bucket-priority discipline + an
+  `internal_error` surface for input users that land in neither
+  bucket (wire-shape regression defensive). Lifted at IMPL
+  kickoff as a 2-consumer inline lift mirroring M26b's
+  `_shared.ts:requireDevBoard` cadence.
+
+`team-list` ships flat (Monday's `teams(...)` has no pagination
+on the wire); the two-read-without-pagination shape mirrors
+`monday user list`. The four mutations all surface `--dry-run`
+for planned-change envelopes.
+
+**Doc-level CRUD (M35) — `monday doc create-in-workspace/
+create-on-column/rename/delete/duplicate`.** Five verbs, four
+wire mutations (both create variants share `create_doc` per D7's
+mutually-exclusive `board` vs `workspace` split):
+
+- `create-in-workspace --workspace <wid> --name <n> [--folder
+  <fid>] [--kind public|private|share]` — creates a workspace-
+  level doc. Brand: new `DocFolderIdSchema` joins
+  `src/types/ids.ts` as the 11th numeric brand.
+- `create-on-column --item <iid> --column <cid>` — creates a
+  column-level doc against an existing file-shaped column.
+- `rename <did> --name <n>` — `update_doc_name`.
+- `delete <did> --yes [--dry-run]` — `delete_doc`. Destructive
+  gate fires BEFORE `resolveClient` per the M10 invariant.
+- `duplicate <did> [--with-updates] [--dry-run]` — `duplicate_doc`
+  (D8 closure dropped `--name <n>` because the wire side has no
+  rename slot on duplicate). `--with-updates` copies the source
+  doc's comments to the duplicate; new `extractDuplicateDocId`
+  helper defensively unwraps the opaque-JSON new-doc-id across
+  bare-string / number / record-with-`id` / `doc_id` /
+  `new_doc_id` shapes per D9 closure (Monday's `duplicate_doc`
+  returns a flat `{ doc_id, success: true }` projection with
+  `success` pinned literal-`true` because failure surfaces via
+  GraphQL `errors[]` upstream, NOT via a wire-side success flag).
+  `--dry-run` previews the planned change envelope without firing
+  the wire.
+
+D7 / D8 / D9 closures pinned at pre-flight: D7 two CLI verbs over
+one with placement choosers (mirrors v0.4-M31's `monday item
+upload` / `monday update upload` split for the same multipart
+wire path). D8 drops `--name <n>` from duplicate. D9 opaque-JSON
+returns project to flat `{ doc_id, success: true }` per §6.1
+single-record envelope.
+
+**Doc-block CRUD (M36) — `monday doc block-create/block-update/
+block-delete`.** Three verbs / three wire mutations. `--type
+<DocBlockContentType>` takes one of 16 enum values (`normal_text`
+/ `large_title` / `medium_title` / `small_title` / `quote` /
+`bulleted_list` / `numbered_list` / `check_list` / `code` /
+`divider` / `image` / `video` / `file` / `table` / `layout` /
+`column`) per D10 closure (unknown values reject at the parse
+boundary with `usage_error.details.issues[]` carrying `{path:
+'type', message}`). `--content <json>` parses via the M27-lifted
+`parseJsonArg` helper (4th + 5th consumers of the helper).
+`block-create` accepts optional `--after <bid>` / `--parent <bid>`
+positioning slots; `block-update` updates the named block's
+content payload; `block-delete --yes` deletes the named block.
+Per-type content payload shapes documented in `docs/output-
+shapes.md` "Per-block content shapes" reference table — 7
+cassette-pinned variants + 9 TBD / inferred variants awaiting
+follow-up cassettes per D11 closure (per-variant payload-shape
+deferral to IMPL cassettes — R-v0.5-NEW-15 watch-item supporting
+instance 2 of 3 ahead of graduation).
+
+`DocBlockIdSchema` brand uses `slugIdSchema` (non-empty-string
+base; same shape as `ColumnId` / `GroupId`) because Monday's
+`DocumentBlock.id` is wire `String!`, NOT `ID!` — load-bearing
+distinction from `DocId`'s numeric brand. Snake_case wire arg
+names (`doc_id` / `block_id` / `after_block_id` / `parent_block_id`)
+— Monday's standard cadence, not a new R-NEW-41 supporting site.
+
+**Doc-content import (M37) — `monday doc import-html/append-
+markdown`.** Two verbs / two wire mutations. Bulk doc-content
+import in a single wire round-trip (no per-block loop):
+
+- `import-html --workspace <wid> (--html <file|-> | --html-string
+  <s>) [--folder <fid>] [--kind public|private|share] [--title
+  <t>]` — creates a new doc from an HTML payload.
+- `append-markdown <did> (--markdown <file|-> | --markdown-string
+  <s>) [--after <bid>]` — appends blocks to an existing doc from
+  a markdown payload.
+
+Both surface mutex argv sources (file / stdin / inline string)
+backed by the new generic `readSourceContent` helper at
+`src/utils/source-content.ts` (R-v0.5-NEW-18 lifted ahead-of-
+feat at M37 IMPL — widens M13's `readUpdateBody` to parameterise
+on `inlineFlagName` / `fileFlagName` / `verbHint?` / `maxBytes?` /
+`trimTrailingWhitespace?`; 5 consumers post-lift: 3 M13 update
+verbs + 2 M37 doc verbs). 20 unit tests pin the helper's branch
+matrix.
+
+D12 closure pins the custom-OBJECT projection (5 branches):
+success → flat envelope; `success: false + populated error` →
+`validation_failed`; `success: false + empty/null error` →
+`internal_error` (wire-regression hint); `success: true +
+missing payload` → `internal_error` (probe descriptions promise
+non-null); EMPTY `block_ids: []` on success → success WITH empty
+array. D13 empirical-probe ran at M37 pre-flight kickoff
+(`scripts/probe/v0.5-m37-size-limits.ts`, 2026-05-17, API
+`2026-01`) + pinned the wire-side rejection threshold between
+250KB-OK and 500KB-rejected on both surfaces — rejection shape
+is generic `INTERNAL_SERVER_ERROR` (NOT the documented
+`{success: false, error}` envelope path), so the CLI pre-empts
+at parse boundary via `MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000`
+on the `.refine()` for inline `--html-string` / `--markdown-
+string`.
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** Every v0.5
+milestone closed the new-error-code question NEGATIVE: M34
+team mutations route per-user partial-success failures through
+the generic `membership_failed` message (envelope-level per-record
+discriminator, not a top-level code); M35 / M36 / M37 route
+deletes through the existing `not_found`, validation failures
+through the existing `validation_failed`, wire-shape regressions
+through the existing `internal_error`, and parse-boundary
+rejections through the existing `usage_error`.
+
+**New per-record partial-success projection** (M34 —
+`team-add-members` + `team-remove-members`). The
+`change_team_memberships` wire mutation returns asymmetric
+`failed_users` + `successful_users` lists; the shared
+`_team-membership.ts:projectMembershipResults` helper projects
+to the universal §6.1 `data.results: [{user_id, ok, ...}]`
+shape with input-order preserved + failed-bucket-priority
+discipline + an `internal_error` surface for input users that
+land in neither bucket (wire-shape regression defensive).
+Mirrors M13's `update clear-all` partial-success cadence but
+with the wire-side asymmetry pinned in the projection.
+
+**New custom-OBJECT 5-branch projection** (M37 — `import-html`
++ `append-markdown`). Monday's two new mutations return a
+custom `{success: bool, error?: string}` shape (NOT the
+standard OBJECT-with-id pattern). The CLI projects through the
+5-branch dispatch pinned at D12 closure (success → flat
+envelope; `success: false + populated error` →
+`validation_failed`; `success: false + empty error` →
+`internal_error` wire-regression hint; `success: true + missing
+payload` → `internal_error`; EMPTY `block_ids: []` on success →
+success WITH empty array). The projection is per-fetcher (no
+shared helper at 2 consumers; R-v0.5-NEW-17 watch-item tracks
+the OBJECT-shape null-payload guard pattern at 9 consumers
+across M34/M35/M36 mutation fetchers but stays UNFILED today
+per the per-consumer divergence rationale).
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.5"` slips to
+  `"v0.6"`** for the files-shaped category (`file` column type
+  via `--set` / `--set-raw`). Originally slipped from v0.4 →
+  v0.5 at v0.4 release-prep; v0.5 didn't pick up the friendly /
+  raw forms either (the translator boundary still doesn't
+  dispatch into the multipart wire). Slipped from v0.5 → v0.6
+  at v0.5 release-prep. `monday item upload` (v0.4-M31)
+  continues to be the verb-shaped alternative path agents
+  should use today; the hint pointing at `monday item upload`
+  is unchanged. **The hint is the load-bearing routing surface
+  — agents key off the hint, not the `deferred_to` value.**
+- **Multi-level subitem creation slips from `"v0.5"` → `"v0.6"`.**
+  Originally slipped from v0.3 → v0.4 → v0.5 across two prior
+  release-preps. v0.5 didn't pick it up — Monday's
+  `sub_items_board` still carries no `subtasks` column at API
+  `2026-01`, so depth-2 subitems still have no data-model home.
+  Single-level subitems (`item create --parent <iid>` against
+  classic boards) continue to work byte-identically. The
+  `error.code: "usage_error"` + `details.hierarchy_type:
+  "multi_level"` keys are unchanged.
+- **Cross-board `item move` value-overrides slip from `"v0.5"`
+  → `"v0.6"`.** Originally v0.3-M11-targeted, slipped to v0.4
+  at v0.3-M28 audit, slipped to v0.5 at v0.4 release-prep,
+  slipped to v0.6 at v0.5 release-prep. Monday's
+  `ColumnMappingInput` still carries no value slot; supporting
+  it would need a non-atomic post-move `change_multiple_column_
+  values` with cross-leg partial-failure envelope shapes that
+  have no precedent at v0.5 close. Agents needing overrides
+  continue to fire `monday item set <iid> <target>=<value>`
+  post-move.
+- **Cross-board resumable cursor slips from `"v0.5"` →
+  `"v0.6"`.** The `cross_board_truncated` warning's
+  `details.hint` continues to recommend narrowing via
+  `--workspace` / `--favorites` / `--max-boards`; v0.6 may pick
+  the resumable surface up if per-board cursor-lifetime under
+  aggregation gets a clean design.
+- **Stable error-code registry stays at 29.** Existing codes'
+  shapes are unchanged across v0.4 → v0.5.
+- **Snake_case wire arg names on M36 doc-block surfaces**
+  (`doc_id` / `block_id` / `after_block_id` / `parent_block_id`).
+  Monday's standard cadence — NOT a new R-NEW-41 supporting
+  site. M37 camelCase wire arg names (`workspaceId` / `folderId`
+  / `docId` / `afterBlockId`) ARE a 5th R-NEW-41 supporting
+  site for the wire-vs-CLI semantics asymmetry section in
+  `docs/architecture.md`.
+- **`monday auth login` placeholder-guard unchanged.** The verb
+  is still registered and still surfaces `usage_error.details.
+  reason: oauth_unregistered` pointing at `MONDAY_API_TOKEN`
+  (unchanged from v0.4.0). The OAuth deferral revisits in
+  v0.5.x / v0.6 contingent on user demand.
+
+### Internals worth highlighting
+
+- **R-class refactors shipped during v0.5.** R-NEW-70
+  (`parseBrandedListArg<T>`) shipped ahead-of-feat at v0.5-M34
+  pre-flight close (`17c1a54`) — 4 consumers post-lift (doc/list
+  `--workspace` + team-create `--users` + team-add-members
+  `--users` + team-remove-members `--users`). 18 unit tests pin
+  the helper's branch matrix. R-v0.5-NEW-18 (`readSourceContent`)
+  shipped at M37 IMPL kickoff (`c431d96`) — widens M13's
+  `readUpdateBody` to parameterise on inline / file flag names +
+  optional size cap / trim-whitespace; 5 consumers post-lift
+  (3 M13 update verbs + 2 M37 doc verbs).
+- **R-class disciplines graduated during v0.5.** R-v0.5-NEW-11
+  (per-fetcher null-payload contract decision discipline derived
+  from probe-description return-shape promises) graduated at
+  M37 pre-flight close (3rd supporting instance — to a permanent
+  Codex pre-flight template W{N} audit-point). R-v0.5-NEW-15
+  (pre-flight per-variant payload-shape deferral to IMPL
+  cassettes) graduated at M37 pre-flight close (3rd supporting
+  instance — to a permanent Codex pre-flight template W{N}
+  audit-point). R-v0.5-NEW-19 (post-fix-up cross-doc grep
+  extension to `src/commands/index.ts` module-import block prose)
+  graduated at M37 IMPL close (2nd supporting instance — folded
+  into the CLAUDE.md R-NEW-72 "Workflow rules" entry as the
+  fourth search path alongside `src/api/*.ts` + `src/commands/
+  **/*.ts` + `docs/*.md`). R-v0.5-NEW-9 (round-N parallel-
+  fetcher fix-up test parity discipline) graduated at the
+  post-M37-close audit (2nd supporting instance — to a
+  permanent IMPL-review / pre-flight template W{N} audit-point).
+- **Noun-stem matching for R-NEW-72 grep patterns** ratified at
+  v0.5-M37 IMPL rounds 3-5 — use `\b<noun>\b` regex matching
+  rather than literal-substring matching to catch all
+  inflections in a single pass. Lesson folded into CLAUDE.md
+  R-NEW-72 entry: enumerate sibling-site noun-stems before
+  grepping; use regex word-boundary matching to catch all
+  inflections (e.g., `cassette` / `cassette pin` / `cassette
+  pinned` / `cassette pins` collapse under `\bcassette\b`).
+- **Empirical probes** ratified across the v0.5 surface
+  introducing novel wire shapes: M34 `change_team_memberships`
+  asymmetric bucket containers (probe round-2 surfaced the
+  outer-LIST nullability + the missing per-user failure reason
+  pinned at IMPL round-1 P2-1); M35 opaque-JSON `duplicate_doc`
+  return-shape variance probe (pinned the defensive 5-shape
+  unwrap in `extractDuplicateDocId`); M37 `MAX_DOC_IMPORT_
+  PAYLOAD_BYTES` size-limit probe at M37 pre-flight (pinned
+  the wire-side rejection threshold between 250KB-OK and
+  500KB-rejected on both surfaces). R-NEW-37 W2 (operation-
+  name parity) safely-by-construction across all v0.5
+  fetchers — verified clean at every Codex IMPL round.
+- **Two-AI review** (cli-design pre-flight + implementation
+  review) ran for every v0.5 milestone M34–M37 + skipped on
+  the v0.5 release-prep cluster per the **R-NEW-84 carve-out**
+  graduated at v0.5-M34 pre-flight (skip Codex review on
+  mechanical / process-only / test-side housekeeping clusters
+  with zero production `src/**/*.ts` changes). M34 IMPL
+  converged in 3 rounds; M35 IMPL converged in 6 rounds (one
+  round above the OBJECT-return precedent — driven by the
+  opaque-JSON cassette-prose sweep surfacing incrementally as
+  the post-fix-up R-NEW-72 grep pattern broadened);
+  M36 IMPL converged in 2 rounds (at the LOWER bound of the
+  precedent); M37 IMPL converged in 5 rounds (~1 round above
+  M36's clean cadence, driven by the custom-OBJECT shape's
+  prose surface). The cumulative finding count + per-milestone
+  Codex-round breakdown lives in the per-milestone post-
+  mortems in [`docs/v0.5-plan.md`](./docs/v0.5-plan.md)
+  §11–§14.
+
+### Tests + quality gates
+
+- **4054 unit/integration + E2E tests** at v0.5.0 (+1 skipped;
+  was 3634+1 at v0.4.0; ~420 new tests across M34–M37). All
+  green on Node 22 + 24.
+- **Coverage at 99.29 / 96.45 / 99.45 / 99.55** (statements /
+  branches / functions / lines) against the floor 95 / 95.45 /
+  95 / 95. Branches margin **1.00pp** at v0.5.0 (was 0.88pp at
+  v0.4.0; +0.12pp recovery — the v0.5 surface's runtime-body
+  branches integration-test-cover the c8-ignored stub drops at
+  IMPL close cleanly, first v0.5 IMPL milestone (M37) to cross
+  the 1.00pp branches margin threshold; the release-prep
+  cluster adds no production branches). Floor unchanged across
+  v0.4.0 → v0.5.0.
+- **Envelope-snapshot suite** — no refresh needed at release-
+  prep; per-milestone close-docs sweeps refreshed snapshots in
+  lockstep at each IMPL close (M34 +12 snapshots, M35 +11,
+  M36 +6, M37 +0 net — describe-block widening swap only).
+- **Five test layers held**: unit, integration (in-process
+  `FixtureTransport` + `MultipartFixtureTransport`), E2E
+  (subprocess against fixture server), envelope-shape snapshot
+  suite, published-tarball E2E.
+
+### Documentation
+
+- **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** new — the v0.5
+  active plan with M34–M37 milestones, decisions log
+  (D1-D13), R-class register (R-v0.5-NEW-1 through
+  R-v0.5-NEW-22), per-milestone post-mortems (§11–§14 + §22).
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3 grew
+  16 new verb entries (6 USER team-* rows + 10 DOC rows for
+  M35/M36/M37); §13 v0.4 entry's v0.5 deferral list closed
+  out + the v0.6 frame pinned (files-shaped friendly + multi-
+  level subitems + cross-board move value-overrides + cross-
+  board resumable cursor).
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** —
+  M35/M36/M37 verb sections snapshot-backed; M34 team-writer
+  sections deferred to v0.5.x as a documentation backfill
+  (caught at v0.5 release-prep ToC audit as a v0.5-M34
+  close-docs gap; ToC row updated to enumerate the team-*
+  verbs, a minimal cross-pointer section landed under
+  `### user me` pointing agents at `cli-design.md` §4.3 +
+  the per-verb integration tests + envelope-snapshot
+  regression suite that pin the team-writer contract surface
+  today).
+- **README.md** quickstart expanded with v0.5 examples
+  (workdocs CRUD steps demonstrating M35/M36/M37 verbs;
+  team-writer steps demonstrating M34). Scope section
+  reshaped around v0.5.0 / v0.4.0 / v0.3.0 / v0.2.0 / v0.1.0
+  per-version layout.
+
+[0.5.0]: https://github.com/Firer/monday-cli/releases/tag/v0.5.0
+
 ## [0.4.0] - 2026-05-14 — Operational features: long-poll watch, parallel bulk, asset upload, workdocs reads, shell completion
 
 The "agents can drive long-running workflows + multipart wire +
