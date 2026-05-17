@@ -2831,7 +2831,8 @@ monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>)
                                           # boundary with
                                           # `usage_error.details.issues
                                           # []`. **Empirical size cap
-                                          # at 256KB** (per D13 closure
+                                          # at 256_000 bytes** (per D13
+                                          # closure
                                           # — `scripts/probe/v0.5-m37-
                                           # size-limits.ts` 2026-05-17
                                           # pinned the wire-side
@@ -2840,9 +2841,15 @@ monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>)
                                           # CLI pre-empts at parse
                                           # boundary on inline
                                           # `--html-string` via
-                                          # `usage_error.details.reason:
-                                          # 'payload_too_large'`; file/
-                                          # stdin path applies the
+                                          # `usage_error.details.issues
+                                          # [{path: 'htmlString',
+                                          # message: '...exceeds the
+                                          # 256000-byte wire-side
+                                          # limit...'}]` (standard
+                                          # `parseArgv` zod-issues
+                                          # envelope, NOT a top-level
+                                          # `details.reason` slot);
+                                          # file/stdin path applies the
                                           # same cap at runtime). The
                                           # wire rejection shape for
                                           # oversized payloads is a
@@ -2858,17 +2865,25 @@ monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>)
                                           # site for R-NEW-41 asymmetric
                                           # wire-vs-CLI documentation.
                                           # Custom-OBJECT projection per
-                                          # D12 closure: `success: true
-                                          # + doc_id` → success envelope
+                                          # D12 closure (5 branches):
+                                          # (1) `success: true + doc_id
+                                          # present` → success envelope
                                           # `data: { doc_id, success:
                                           # true }` (mirrors M35's
-                                          # cadence); `success: false +
-                                          # populated error` →
+                                          # cadence); (2) `success:
+                                          # false + populated error` →
                                           # `validation_failed.details.
                                           # error: <wire-error>`;
-                                          # `success: false + empty
-                                          # error` → `internal_error`
-                                          # (wire-regression hint).
+                                          # (3) `success: false + empty/
+                                          # null error` → `internal_
+                                          # error` (wire-regression
+                                          # hint); (4) `success: true +
+                                          # missing doc_id` → `internal_
+                                          # error` (Monday's probe
+                                          # description promises a non-
+                                          # null doc_id on success).
+                                          # Full per-branch projection
+                                          # matrix at v0.5-plan §8 D12.
                                           # `operationName:
                                           # 'ImportDocFromHtml'` pinned
                                           # (R-NEW-37 W2). Live-only;
@@ -2897,8 +2912,9 @@ monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>)
                                           # custom-OBJECT cadence as
                                           # `import-html`; same D12
                                           # projection contract; same
-                                          # D13 256KB parse-boundary cap
-                                          # on inline `--markdown-string`
+                                          # D13 256_000-byte parse-
+                                          # boundary cap on inline
+                                          # `--markdown-string`
                                           # (transport-layer cap is
                                           # surface-wide). Mutually-
                                           # exclusive content source
@@ -2919,21 +2935,35 @@ monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>)
                                           # wire arg names (`docId`,
                                           # `afterBlockId`) — 5th
                                           # supporting site for R-NEW-41.
-                                          # Envelope per D12: `success:
-                                          # true + block_ids` → success
-                                          # envelope `data: { doc_id
-                                          # (echoed), block_ids,
+                                          # Envelope per D12 (5
+                                          # branches): (1) `success:
+                                          # true + block_ids present`
+                                          # → success envelope `data: {
+                                          # doc_id (echoed), block_ids,
                                           # success: true }` (echoes
                                           # input doc id for follow-up
                                           # pipeline ergonomics);
-                                          # **empty `block_ids: []` IS
-                                          # a valid success shape**
-                                          # (markdown payload had zero
-                                          # convertible blocks). Failure
-                                          # mapping mirrors `import-html`
-                                          # (`success: false + error` →
-                                          # `validation_failed`; empty
-                                          # error → `internal_error`).
+                                          # (2) `success: false +
+                                          # populated error` →
+                                          # `validation_failed.details.
+                                          # error: <wire-error>`;
+                                          # (3) `success: false + empty/
+                                          # null error` → `internal_
+                                          # error` (wire-regression
+                                          # hint); (4) `success: true +
+                                          # missing block_ids` →
+                                          # `internal_error` (Monday's
+                                          # probe description promises
+                                          # a non-null block_ids list
+                                          # on success); (5) `success:
+                                          # true + EMPTY block_ids: []`
+                                          # → success envelope WITH
+                                          # empty block_ids (markdown
+                                          # payload had zero convertible
+                                          # blocks; plausible "no
+                                          # blocks" semantics). Full
+                                          # per-branch projection
+                                          # matrix at v0.5-plan §8 D12.
                                           # `operationName: 'AddContent
                                           # ToDocFromMarkdown'` pinned
                                           # (R-NEW-37 W2). Live-only;
@@ -8394,14 +8424,17 @@ scoped idempotent changes, and post comments narrating its work.**
   (`--html`/`--html-string`, `--markdown`/`--markdown-string`) —
   file path / stdin / inline-string per §3.1 stdin discipline;
   pre-flight ships parse-boundary mutual-exclusion + the D13
-  empirical 256KB payload-size cap on inline `--*-string` forms
-  (`MAX_DOC_IMPORT_PAYLOAD_BYTES`). D13 closure pinned the wire-
+  empirical 256_000-byte payload-size cap on inline `--*-string`
+  forms (`MAX_DOC_IMPORT_PAYLOAD_BYTES`). D13 closure pinned the wire-
   side rejection threshold between 250KB-OK and 500KB-rejected
   via `scripts/probe/v0.5-m37-size-limits.ts` (2026-05-17);
   rejection shape is generic `INTERNAL_SERVER_ERROR` (NOT the
   documented `{success: false, error}` envelope), so the CLI
-  pre-empts at parse boundary with `usage_error.details.reason:
-  'payload_too_large'` on oversized `--*-string` payloads. D12
+  pre-empts at parse boundary with `usage_error.details.issues
+  [{path: 'htmlString'|'markdownString', message: '...exceeds
+  the 256000-byte wire-side limit...'}]` (standard `parseArgv`
+  zod-issues envelope shape) on oversized `--*-string`
+  payloads. D12
   closure pins the custom-OBJECT projection: `success: true +
   payload` → flat `{doc_id, success: true}` (import-html) or
   `{doc_id (echoed), block_ids, success: true}` (append-markdown);

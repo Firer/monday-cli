@@ -2420,10 +2420,13 @@ export const deleteDocBlock = async (
 // fundamentally a payload-size issue. The CLI pre-empts this by
 // rejecting oversized `--html-string` / `--markdown-string` payloads
 // at the argv-parse boundary via {@link MAX_DOC_IMPORT_PAYLOAD_BYTES}
-// (the parse-time string-length check fires `usage_error.details.
-// reason: 'payload_too_large'` ahead of any wire dispatch). The file-
-// read path (`--html <file>` / `--markdown <file>`) lands the same
-// size guard at the runtime read boundary (IMPL).
+// (the parse-time string-length `.refine()` fires `usage_error.
+// details.issues[{path: 'htmlString'|'markdownString', message:
+// '--html-string exceeds the 256000-byte wire-side limit ...'}]`
+// ahead of any wire dispatch — standard zod-issues envelope shape
+// emitted by `parseArgv`). The file-read path (`--html <file>` /
+// `--markdown <file>`) lands the same size guard at the runtime read
+// boundary (IMPL).
 //
 // **No new ERROR_CODES at M37.** Existing codes route doc-content-
 // import failures: `usage_error` (argv-parse rejections — mutual-

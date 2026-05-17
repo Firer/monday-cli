@@ -4897,8 +4897,10 @@ JSON, NOT M36's typed-OBJECT direct-unwrap).
   cli-design §3.1 stdin discipline. **Inline `--html-string` is
   capped at 256_000 bytes UTF-8** (`MAX_DOC_IMPORT_PAYLOAD_BYTES`)
   at the parse boundary per D13 closure — oversized payloads
-  reject with `usage_error.details.reason: 'payload_too_large'`
-  ahead of any wire call. File / stdin path applies the same cap
+  reject with `usage_error.details.issues[{path: 'htmlString',
+  message: '...exceeds the 256000-byte wire-side limit...'}]`
+  (standard `parseArgv` zod-issues envelope; NOT a top-level
+  `details.reason` slot) ahead of any wire call. File / stdin path applies the same cap
   at the runtime read boundary (IMPL).
 - `--folder <fid>` — optional, brand-validated via
   `DocFolderIdSchema` (numeric). Absent → doc lands at workspace
@@ -4929,7 +4931,8 @@ flat `{doc_id, success: true}` mirroring M35 cadence):
 }
 ```
 
-**Validation-failed envelope** (D12 — `success: false + populated error`):
+**Validation-failed envelope** (D12 branch 2 — `success: false +
+populated error`):
 
 ```json
 {
@@ -4946,6 +4949,29 @@ flat `{doc_id, success: true}` mirroring M35 cadence):
   "meta": { /* source: "live" */ }
 }
 ```
+
+**Wire-regression envelopes** (D12 branches 3 + 4 — both surface
+as `internal_error` with a hint pointing at the wire-shape
+regression that should be re-probed):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "internal_error",
+    "message": "import_doc_from_html returned success: false with no error message (wire-shape regression)",
+    "details": {
+      "workspace_id": "5555",
+      "hint": "Monday's `ImportDocFromHtmlResult.error` is documented as populated when `success: false`; the empty error indicates Monday's wire shape regressed — re-probe via `scripts/probe/v0.5-doc-mutations.ts` and surface the new shape via a follow-up commit"
+    }
+  },
+  "meta": { /* source: "live" */ }
+}
+```
+
+(D12 branch 4 — `success: true + missing doc_id` — surfaces the
+same `internal_error` shape with a `hint` calling out the missing
+`doc_id` slot.)
 
 **Payload-too-large envelope** (D13 — parse-boundary check on
 inline `--html-string` AHEAD of any wire call):
@@ -5036,8 +5062,8 @@ DocBlocksFromMarkdownResult` (operationName
   `DocIdSchema`.
 - `--markdown <file|->` OR `--markdown-string <s>` — mutually
   exclusive, exactly one required. Same file / stdin / inline shape
-  as `import-html` (`-` for stdin per §3.1; 256KB cap on inline
-  per D13).
+  as `import-html` (`-` for stdin per §3.1; 256_000-byte cap on
+  inline per D13).
 - `--after <bid>` — optional opaque-string block ID anchor (maps
   to wire `afterBlockId: String`); brand-validated via
   `DocBlockIdSchema`. Absent → markdown blocks land at the
@@ -5081,7 +5107,8 @@ to comments only):
 }
 ```
 
-**Validation-failed envelope** (D12 — `success: false + populated error`):
+**Validation-failed envelope** (D12 branch 2 — `success: false +
+populated error`):
 
 ```json
 {
@@ -5098,6 +5125,15 @@ to comments only):
   "meta": { /* source: "live" */ }
 }
 ```
+
+**Wire-regression envelopes** (D12 branches 3 + 4 — both surface
+as `internal_error`): the same shape as `import-html` above (see
+the "Wire-regression envelopes" block at
+`monday doc import-html` section earlier), with `details.doc_id`
+echoing the input and the `hint` pointing at the missing
+`error` slot (branch 3) or the missing `block_ids` list (branch
+4). Both indicate a wire-shape regression worth re-probing via
+`scripts/probe/v0.5-doc-mutations.ts`.
 
 **Dry-run envelope** (argv-derived; markdown payload omitted):
 
@@ -5146,7 +5182,7 @@ evidence + the CLI projection (D12) maps each row's
 |----------|----------------|---------------------|---------------------|
 | `import_doc_from_html` | Invalid HTML payload (malformed tags / broken structure) | TBD (cassette-pin at M37 IMPL) | `validation_failed.details.error: <verbatim>` |
 | `import_doc_from_html` | Workspace lacks doc-create permission | TBD | `validation_failed.details.error: <verbatim>` OR `forbidden` per transport-layer mapping |
-| `import_doc_from_html` | Oversized payload that slipped past parse-boundary check | `Internal Server Error` (extensions.code: `INTERNAL_SERVER_ERROR`) | `internal_error` (transport-layer; CLI parse-boundary pre-empts at 256KB) |
+| `import_doc_from_html` | Oversized payload that slipped past parse-boundary check | `Internal Server Error` (extensions.code: `INTERNAL_SERVER_ERROR`) | `internal_error` (transport-layer; CLI parse-boundary pre-empts at `MAX_DOC_IMPORT_PAYLOAD_BYTES` = 256_000 bytes) |
 | `add_content_to_doc_from_markdown` | Invalid markdown payload (rare — markdown is permissive) | TBD | `validation_failed.details.error: <verbatim>` |
 | `add_content_to_doc_from_markdown` | Non-existent / inaccessible `<doc-id>` | TBD | `not_found` (likely; transport-layer mapping) OR `validation_failed` per wire shape |
 | `add_content_to_doc_from_markdown` | `afterBlockId` references a block in a different doc | TBD | `validation_failed.details.error: <verbatim>` |

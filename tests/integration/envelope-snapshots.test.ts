@@ -3976,6 +3976,48 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
   });
 
+  it('doc import-html rejects oversized --html-string at parse boundary (D13)', async () => {
+    // 256_001 bytes — one byte over MAX_DOC_IMPORT_PAYLOAD_BYTES.
+    // Surfaces as `usage_error.details.issues[{path: 'htmlString',
+    // message: '...exceeds the 256000-byte wire-side limit...'}]`
+    // from `parseArgv`'s zod-issues envelope (D13 closure prose
+    // ratified at Codex pre-flight round 1 P2-1 — the prose claim
+    // is the actual `details.issues[]` envelope shape, NOT a
+    // top-level `details.reason: 'payload_too_large'` slot).
+    const oversized = 'x'.repeat(256_001);
+    const out = await drive(
+      [
+        'doc',
+        'import-html',
+        '--workspace',
+        '5555',
+        '--html-string',
+        oversized,
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    // Trim the issue message to a sentinel before snapshotting so
+    // the 256_001-byte literal doesn't bloat the snapshot file; the
+    // shape (path/message envelope) is what we pin.
+    const env = parseEnvelope(out.stderr);
+    if (
+      !env.ok
+      && typeof env.error?.details === 'object'
+      && env.error.details !== null
+      && Array.isArray((env.error.details as Record<string, unknown>).issues)
+    ) {
+      const issues = (env.error.details as { issues: { message?: unknown }[] }).issues;
+      for (const issue of issues) {
+        if (typeof issue.message === 'string') {
+          issue.message = '<oversized-string-rejection-message>';
+        }
+      }
+    }
+    expect(env).toMatchSnapshot();
+  });
+
   it('doc import-html dry-run envelope (planned_changes shape)', async () => {
     const out = await drive(
       [

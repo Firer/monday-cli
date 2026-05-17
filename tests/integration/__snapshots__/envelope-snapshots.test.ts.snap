@@ -4311,6 +4311,39 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejec
 }
 `;
 
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects oversized --html-string at parse boundary (D13) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "<oversized-string-rejection-message>",
+          "path": "htmlString",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: htmlString: --html-string exceeds the 256000-byte wire-side limit (empirical probe pinned the threshold between 250KB OK and 500KB rejected; pass --html <file> with a smaller payload, or split the import across multiple calls)",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects unknown --kind at parse boundary 1`] = `
 {
   "error": {

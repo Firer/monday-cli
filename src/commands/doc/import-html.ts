@@ -73,11 +73,14 @@
  *     wire-regression hint.
  *   - `success: true + missing doc_id` → `internal_error` (Monday
  *     promises a non-null `doc_id` on success).
- *   - Oversized inline payload at parse boundary → `usage_error.
- *     details.reason: 'payload_too_large'` (D13 closure).
- *   - Oversized file payload at runtime → `usage_error.details.
- *     reason: 'payload_too_large'` from the runtime read boundary
- *     (IMPL).
+ *   - Oversized inline `--html-string` at parse boundary →
+ *     `usage_error.details.issues[{path: 'htmlString', message:
+ *     '--html-string exceeds the 256000-byte wire-side limit ...'}]`
+ *     from `parseArgv`'s zod-issues envelope (D13 closure). The
+ *     `usage_error` rejection surfaces ahead of any wire dispatch.
+ *   - Oversized file payload at runtime → IMPL applies the same
+ *     {@link MAX_DOC_IMPORT_PAYLOAD_BYTES} guard at the runtime
+ *     read boundary; rejection shape lands at IMPL.
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run variant.
  * Minimal envelope listing the planned `import_doc_from_html`

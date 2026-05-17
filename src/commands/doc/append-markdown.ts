@@ -63,11 +63,15 @@
  *     wire-regression hint.
  *   - `success: true + missing block_ids` → `internal_error` (Monday
  *     promises a non-null `block_ids` list on success).
- *   - Oversized inline payload at parse boundary → `usage_error.
- *     details.reason: 'payload_too_large'` (D13 closure).
- *   - Oversized file payload at runtime → `usage_error.details.
- *     reason: 'payload_too_large'` from the runtime read boundary
- *     (IMPL).
+ *   - Oversized inline `--markdown-string` at parse boundary →
+ *     `usage_error.details.issues[{path: 'markdownString', message:
+ *     '--markdown-string exceeds the 256000-byte wire-side limit
+ *     ...'}]` from `parseArgv`'s zod-issues envelope (D13 closure).
+ *     The `usage_error` rejection surfaces ahead of any wire
+ *     dispatch.
+ *   - Oversized file payload at runtime → IMPL applies the same
+ *     {@link MAX_DOC_IMPORT_PAYLOAD_BYTES} guard at the runtime
+ *     read boundary; rejection shape lands at IMPL.
  *   - Non-existent / inaccessible `<doc-id>` → bubbles via Monday's
  *     wire-side `errors[]` → typed `ApiError` (`not_found` or
  *     `forbidden`).
