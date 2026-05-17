@@ -2358,14 +2358,14 @@ monday webhook delete <wid> --yes [--dry-run]                                v0.
 
 # === DOC (read + create/rename/delete/duplicate; v0.4 reads + v0.5 CRUD) ===
 # Workdocs read + doc-level CRUD surface. v0.4-M32 shipped the
-# `list` + `get` reads; v0.5-M35 ships 5 mutation verbs covering
+# `list` + `get` reads; v0.5-M35 shipped 5 mutation verbs covering
 # `create_doc` (mutually-exclusive workspace vs board placement,
 # split into 2 CLI verbs per D7) + `update_doc_name` +
 # `delete_doc` + `duplicate_doc`. Per-block CRUD (`create_doc_block`
-# / `update_doc_block` / `delete_doc_block`) defers to v0.5-M36;
+# / `update_doc_block` / `delete_doc_block`) shipped at v0.5-M36;
 # doc-content import (`import_doc_from_html` /
-# `add_content_to_doc_from_markdown`) defers to v0.5-M37 — each
-# milestone carries enough surface area to warrant its own
+# `add_content_to_doc_from_markdown`) shipped at v0.5-M37 — each
+# milestone carried enough surface area to warrant its own
 # dedicated cluster rather than a bundled "doc CRUD" sweep.
 # Empirical probe at v0.5 kickoff
 # (`scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results.ts`
