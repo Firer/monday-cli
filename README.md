@@ -623,17 +623,30 @@ row `tags`, `board_relation`, `dependency`.
   D13 empirical-probe pinning (rejected at 500KB, OK at 250KB on
   both surfaces).
 
-**v0.6 (next):** multi-level subitems remain conditional on
-Monday's data model surfacing them (slipped from v0.4 → v0.5 →
-v0.6 across two consecutive release-preps — Monday's
-`sub_items_board` still carries no `subtasks` column at API
-`2026-01`); cross-board `item move` value-overrides (Monday's
-`ColumnMappingInput` still carries no value slot — slipped twice
-for the same reason); resumable cross-board cursor pagination
-(per-board cursor-lifetime under aggregation needs design work);
-files-shaped friendly column writes (`--set <file-col>=<path>` and
-`--set-raw <file-col>=<json>` — `monday item upload` from v0.4-M31
-is the verb-shaped alternative path agents should use today).
+**v0.6 (next):** **M38 picked at the v0.6 kickoff
+candidate-selection session = files-shaped friendly column
+writes** (`--set <file-col>=<path>` and `--set-raw
+<file-col>=<json>` — inline translator-boundary dispatch into
+the v0.4-M31 multipart wire; closes the v0.4 → v0.5 → v0.6
+carry-over of the inline form; `monday item upload` from
+v0.4-M31 remains the verb-shaped alternative path agents use
+today until M38 ships). **Carry-forward backlog** (unpicked
+candidates remain in cli-design.md §13 v0.5 slipped-candidates
+list pending future candidate-selection sessions): multi-level
+subitems remain conditional on Monday's data model surfacing
+them (slipped from v0.4 → v0.5 → v0.6 across two consecutive
+release-preps — Monday's `sub_items_board` still carries no
+`subtasks` column at API `2026-01`); cross-board `item move`
+value-overrides (Monday's `ColumnMappingInput` still carries
+no value slot — slipped twice for the same reason); resumable
+cross-board cursor pagination (per-board cursor-lifetime
+under aggregation needs design work); profile-scoped argument
+defaults (newly filed at the v0.6 kickoff candidate-selection
+session — extends `~/.monday-cli/config.toml` with a
+`[profiles.<name>.defaults]` table carrying scoping args;
+requires a prerequisite §13 carve-out Decision at pre-flight
+distinguishing aliases-as-stored-command-strings (still
+non-goal) from defaults-as-stored-flag-values (carve-out)).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.5-plan.md`](./docs/v0.5-plan.md) for the
