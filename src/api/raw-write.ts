@@ -22,7 +22,7 @@
  *         from CLI-time to Monday-time with no new information.
  *       * **`files`-shaped** (`file`, anything else where Monday
  *         uses `add_file_to_column` rather than `change_column_value`)
- *         → `unsupported_column_type` with `deferred_to: "v0.5"`.
+ *         → `unsupported_column_type` with `deferred_to: "v0.6"`.
  *         The `--set-raw` payload reaches `change_column_value` /
  *         `change_multiple_column_values` only; files-shaped types
  *         can't be written through that wire surface. Hint points
@@ -174,15 +174,16 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *     `read_only: true`. Monday computes these server-side; no
  *     payload (raw or friendly) is ever accepted.
  *   - **`files`-shaped** → `unsupported_column_type` with
- *     `deferred_to: "v0.5"`. Monday writes via `add_file_to_column`
+ *     `deferred_to: "v0.6"`. Monday writes via `add_file_to_column`
  *     (multipart upload), not `change_column_value`; the raw
  *     payload can't reach the right wire surface. Hint points at
  *     `monday item upload` (shipped v0.4-M31; multipart wire — the
  *     alternative path agents should use today). The `deferred_to`
  *     slot tracks the `--set-raw <file-col>=<json>` form
- *     specifically; v0.4 shipped the verb-shaped path but not the
- *     raw-payload-into-multipart-wire wiring, which would need a
- *     separate dispatch from the escape-hatch boundary.
+ *     specifically; v0.4 shipped the verb-shaped path; v0.5 didn't
+ *     pick up the raw-payload-into-multipart-wire wiring either
+ *     (no escape-hatch-to-multipart dispatch landed); slot slipped
+ *     from v0.5 to v0.6 at v0.5 release-prep.
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the
@@ -243,7 +244,7 @@ export const translateRawColumnValue = (
         details: {
           column_id: column.id,
           type: column.type,
-          deferred_to: 'v0.5',
+          deferred_to: 'v0.6',
           hint:
             'use `monday item upload <iid> --column <col> <file>` ' +
             '(shipped v0.4-M31; multipart wire). --set-raw rejects ' +

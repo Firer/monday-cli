@@ -289,7 +289,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     },
   );
 
-  it('files-shaped type (file) → unsupported_column_type with deferred_to: v0.5', () => {
+  it('files-shaped type (file) → unsupported_column_type with deferred_to: v0.6', () => {
     expect(() =>
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -309,7 +309,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       expect(err.details).toMatchObject({
         column_id: 'attachments',
         type: 'file',
-        deferred_to: 'v0.5',
+        deferred_to: 'v0.6',
       });
       expect(err.details).not.toHaveProperty('read_only');
     }
@@ -320,11 +320,12 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     // verb name (`monday item upload`) instead of the underlying
     // wire mutation (`add_file_to_column`). The error MESSAGE
     // still names the wire mutation for the curious agent. The
-    // `details.deferred_to` slot slipped to `"v0.5"` at v0.4
-    // release-prep because v0.4 shipped the verb-shaped path but
-    // not the raw-payload-into-multipart-wire form; agents reading
-    // the v0.4.0 envelope key off the alternative-path hint
-    // pointing at `monday item upload`.
+    // `details.deferred_to` slot slipped from "v0.4" → "v0.5" at
+    // v0.4 release-prep, then "v0.5" → "v0.6" at v0.5 release-prep
+    // because neither v0.4 nor v0.5 picked up the raw-payload-
+    // into-multipart-wire form; agents reading the v0.5.0 envelope
+    // key off the alternative-path hint pointing at
+    // `monday item upload`.
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },

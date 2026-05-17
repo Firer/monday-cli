@@ -1623,13 +1623,14 @@ export const bundleColumnValues = (
  *     `add_file_to_column` (multipart upload) rather than
  *     `change_column_value`, so neither friendly translator nor
  *     `--set-raw` can reach the wire surface. Carry
- *     `deferred_to: "v0.5"`; hint points at `monday item upload`
+ *     `deferred_to: "v0.6"`; hint points at `monday item upload`
  *     (shipped v0.4-M31; multipart wire — the alternative path
  *     agents should use today). The `deferred_to` slot tracks the
  *     friendly `--set <file-col>=<path>` form specifically; v0.4
- *     shipped the verb-shaped path (`monday item upload`) but not
- *     the inline-`--set` translator, which would need to dispatch
- *     from the friendly-translator boundary into the multipart wire.
+ *     shipped the verb-shaped path (`monday item upload`); v0.5
+ *     didn't pick up the inline-`--set` translator either (the
+ *     translator boundary still doesn't dispatch into the multipart
+ *     wire); slot slipped from v0.5 to v0.6 at v0.5 release-prep.
  *   - **`time_tracking`** — verb-shaped extension (start/stop, not
  *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
  *     hint points at the upcoming verb surface.
@@ -1728,7 +1729,7 @@ const UNSUPPORTED_TABLE: Readonly<
       `Use \`monday item upload <iid> --column <col> <file>\` ` +
       `(v0.4-M31, multipart wire) for file columns.`,
     details: () => ({
-      deferred_to: 'v0.5',
+      deferred_to: 'v0.6',
       hint:
         'use `monday item upload <iid> --column <col> <file>` ' +
         '(shipped v0.4-M31, multipart wire) — the friendly ' +

@@ -3431,15 +3431,17 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `change_column_value` / `change_multiple_column_values`.
    - **`files`-shaped types** (`file`, anything else where Monday
      uses `add_file_to_column` rather than `change_column_value`)
-     carry `deferred_to: "v0.5"`. The verb-shaped path
+     carry `deferred_to: "v0.6"`. The verb-shaped path
      (`monday item upload`) shipped at v0.4-M31 — that's the
      alternative agents should use today; the friendly `--set`
      form for file columns (which would need a dispatch from the
-     translator boundary into the multipart wire) slipped to v0.5
-     at v0.4 release-prep. `--set-raw` rejects these too —
-     the underlying mutation isn't `change_column_value` so a raw
-     payload can't reach the right wire surface; hint points at
-     `monday item upload`.
+     translator boundary into the multipart wire) slipped from
+     v0.4 → v0.5 → v0.6 across two consecutive release-preps
+     because neither v0.4 nor v0.5 picked up the
+     translator-to-multipart dispatch. `--set-raw` rejects these
+     too — the underlying mutation isn't `change_column_value` so
+     a raw payload can't reach the right wire surface; hint points
+     at `monday item upload`.
    No silent partial support — every translator either lands
    end-to-end or surfaces `unsupported_column_type` with a
    hint that points at `--set-raw` or the type's roadmap slot.
@@ -3516,7 +3518,7 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
   - **`files`-shaped** (`file`, anything else where Monday's
     write path is `add_file_to_column` rather than
     `change_column_value`) → surfaces `unsupported_column_type`
-    with `deferred_to: "v0.5"`. The friendly translator and
+    with `deferred_to: "v0.6"`. The friendly translator and
     `--set-raw` both go through column-value mutations
     (`change_column_value` / `change_multiple_column_values`
     on `item set` / `item update`; `create_item` /
@@ -3526,8 +3528,10 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
     payload can't reach the right wire surface for these
     types. Asset upload itself shipped at v0.4-M31 as the
     verb-shaped `monday item upload`; the friendly `--set` /
-    `--set-raw` forms for files slipped to v0.5 at v0.4
-    release-prep.
+    `--set-raw` forms for files slipped from v0.4 → v0.5 →
+    v0.6 across two consecutive release-preps because neither
+    v0.4 nor v0.5 picked up the translator-to-multipart
+    dispatch.
   Every other type (writable + tentative-slipped + future where
   the API accepts `change_column_value`) is accepted by
   `--set-raw`; the user owns wire-shape correctness.
