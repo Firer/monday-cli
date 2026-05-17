@@ -9,8 +9,10 @@
  * the parent update.
  *
  * **Body sources** (mutually exclusive — same shape as `update
- * create`'s plumbing, lifted into `body-source.ts` per the v0.1-plan
- * §17 R-timing rule when the third consumer arrived):
+ * create`'s plumbing, lifted into the universal `readSourceContent`
+ * helper at `src/utils/source-content.ts` per R-v0.5-NEW-18 at
+ * v0.5-M37 IMPL kickoff; the M13-specific `readUpdateBody` shape
+ * lived at `src/commands/update/body-source.ts` until the lift):
  *   - `--body <md>` — inline markdown.
  *   - `--body-file <path>` — read from disk.
  *   - `--body-file -` — read from stdin.

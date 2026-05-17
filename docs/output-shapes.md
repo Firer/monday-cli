@@ -4873,7 +4873,7 @@ Extending the table is additive at any future v0.5.x patch.
 > `readSourceContent` helper + size guard at runtime read boundary
 > for file/stdin paths defense-in-depth with the schema `.refine()`
 > for inline + `import_doc_from_html` dispatch + projection)
-> shipped end-to-end with 19 integration tests at
+> shipped end-to-end with 17 integration tests at
 > `tests/integration/commands/doc-import-html.test.ts` covering all
 > 5 D12 branches per fetcher + per-source variants.
 
@@ -5045,7 +5045,7 @@ wire does not dedupe by HTML content or title).
 > **STATUS: shipped at v0.5-M37 IMPL.** Same shape as
 > `import-html` — argv parse-boundary surface + wire-call leg +
 > file/stdin reading + size guard at runtime + custom-OBJECT
-> projection per D12 all shipped end-to-end with 17 integration
+> projection per D12 all shipped end-to-end with 19 integration
 > tests at `tests/integration/commands/doc-append-markdown.test.ts`
 > covering all 5 D12 branches per fetcher + per-source variants +
 > empty `block_ids: []` success path.

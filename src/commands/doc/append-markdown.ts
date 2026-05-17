@@ -48,11 +48,13 @@
  * valid success shape** (non-empty markdown that Monday parses to
  * zero convertible blocks — e.g. comments-only or whitespace-only
  * post-Monday-parse); the CLI does not rewrap empty-blocks as
- * failure. (Note: empty / whitespace-only `--markdown-string` is
- * rejected at the parse boundary by the schema's `.refine()` so it
- * can never reach the wire — the empty-`block_ids` success path is
- * only reachable for non-empty input that Monday's parser collapses
- * to zero structural blocks.)
+ * failure. (Note: empty / whitespace-only input is rejected at the
+ * parse / read boundary — `--markdown-string` rejects at parse via
+ * the schema's `.refine()`; file / stdin rejects at the runtime
+ * read boundary via {@link readSourceContent}'s empty-after-trim
+ * check — so the empty-`block_ids` success path is only reachable
+ * for non-empty input that Monday's parser collapses to zero
+ * structural blocks.)
  *
  * **Failure mapping** per D12 closure:
  *
@@ -208,7 +210,7 @@ export const docAppendMarkdownCommand: CommandModule<
           'Notes:',
           `  - Inline --markdown-string is capped at ${MAX_DOC_IMPORT_PAYLOAD_BYTES.toString()} bytes (~250KB) at parse boundary per D13 closure; file path / stdin forms apply the same cap at runtime.`,
           '  - Re-running creates duplicate blocks; this verb is non-idempotent. For fine-grained per-block control use `monday doc block-create` (M36).',
-          '  - Non-empty markdown that Monday parses to zero convertible blocks returns a success envelope with `block_ids: []`. Empty / whitespace-only `--markdown-string` rejects at the parse boundary (cannot reach the wire).',
+          '  - Non-empty markdown that Monday parses to zero convertible blocks returns a success envelope with `block_ids: []`. Empty / whitespace-only input rejects at the parse / read boundary as `usage_error` (`--markdown-string` rejects at parse; file / stdin rejects at runtime read) and never reaches the wire.',
           '  - `--dry-run` emits the planned `add_content_to_doc_from_markdown` operation + resolved input slots (markdown payload omitted; only its source descriptor is logged).',
           '',
         ].join('\n'),

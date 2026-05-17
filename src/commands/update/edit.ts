@@ -4,8 +4,10 @@
  * `v0.2-plan.md` §3 M13).
  *
  * Mutates via Monday's `edit_update(id, body)`. Body sources match
- * `update create` / `update reply` — the shared `readUpdateBody`
- * helper handles --body / --body-file / `--body-file -` for stdin.
+ * `update create` / `update reply` — the shared `readSourceContent`
+ * helper (lifted at v0.5-M37 IMPL kickoff per R-v0.5-NEW-18 from
+ * the prior M13-specific `readUpdateBody`) handles --body /
+ * --body-file / `--body-file -` for stdin.
  *
  * Idempotent: yes — re-running with the same body is a server-side
  * no-op (Monday's edit_update writes the new body verbatim).
