@@ -918,14 +918,61 @@ R-class state carried forward at M36 IMPL close:
   action bodies post-IMPL; rule stable post-graduation at
   M34 close-docs.
 
-**Next session — M37 candidate-selection (or M37 pre-flight if
-no other candidates remain).** M37 candidate-selection runs per
-the R-NEW-75 framework; alternatives: doc-content import
-(`import_doc_from_html` + `add_content_to_doc_from_markdown` per
-D13's still-tentative size-limit probe) OR v0.5.x cleanup bundle
-OR another v0.5 backlog candidate. With M34 + M35 + M36 closed,
-v0.5 is approaching release-prep readiness; M37 may be the last
-feature milestone before v0.5 release-prep.
+**Candidate-selection closed: M37 = doc-content import** per the
+R-NEW-75 5-dimension framework (this session). Decision pinned
+across 3 candidates evaluated (M37 doc-content import vs v0.5.x
+cleanup bundle vs skip to v0.5 release-prep). M37 won on neutral
+trade-offs: empirical probes already ran at v0.5 kickoff for the
+2 mutation signatures + custom `{success, error?}` return shape
+(no fresh probe needed for the contract diff — D13's empirical
+size-limit probe runs AT M37 pre-flight per its tentative
+closure); JSON `client.raw` transport seam verbatim (mirrors
+M22 / M27 / M32 / M35 / M36 — R-v0.4-W2 does NOT fire); 0
+destructive verbs (both `doc import-html` + `doc append-
+markdown` are content-creation); R-v0.5-NEW-15 graduates at 3rd
+supporting instance (per-variant payload-shape deferral to IMPL
+cassettes — M37's HTML / markdown payload variability mirrors
+M36's 16-shape DocBlockContentType breadth); R-v0.5-NEW-11 likely
+fires at 3 supporting instances (per-fetcher null-payload
+contract decision discipline — both M37 mutations carry the
+custom `{success, error?}` shape where `error` empty vs populated
+splits into `internal_error` vs `validation_failed`). Codex round
+estimate 3-5 IMPL rounds per the M22 / M27 / M30 / M31 / M32 /
+M34 / M35 / M36 OBJECT-return mutation-surface precedent (M35's
+7-round outlier was opaque-JSON-driven; M37's custom-OBJECT
+shape may add ~1 round vs M36's clean 3-round cadence). Trade-
+offs surfaced at the AskUserQuestion: cleanup bundle would close
+in 1-2 sessions vs M37's 3-4 sessions but defers the last v0.5
+feature milestone to v0.5.x; skip-to-release-prep would publish
+v0.5.0 with M34 + M35 + M36 only but leaves doc-content-import
+unshipped in v0.5. User picked M37 on the v0.5-scope-completion
+axis (M37 is the last feature milestone in v0.5 scope; release-
+prep opens cleanly after M37 IMPL close-docs). After M37 closes,
+v0.5 release-prep opens at its own candidate-selection-or-direct
+session per the framework's per-milestone cadence.
+
+**Next session — M37 pre-flight (doc-content import contract
+diff).** Lands the contract surface: 2 new stub fetchers at
+`src/api/documents.ts` (`importDocFromHtml` +
+`addContentToDocFromMarkdown` with `c8 ignore` wraps + JSDoc
+pinning the custom `{success, error?}` shape) + 2 GraphQL
+mutation documents pinned at literal operationNames
+(`ImportDocFromHtml` + `AddContentToDocFromMarkdown` per
+R-NEW-37 W2 safely-by-construction); 2 wrapping response
+schemas + the shared custom-OBJECT projection contract per D12
+closure (`success: false` + populated `error` →
+`validation_failed`; empty `error` → `internal_error` with
+wire-regression hint); 2 command stubs at
+`src/commands/doc/import-html.ts` + `src/commands/doc/append-
+markdown.ts` (argv parsing BEFORE c8-ignore per R-NEW-76
+graduated discipline); cli-design §4.3 DOC extension; D13
+empirical size-limit probe runs at pre-flight kickoff
+(`scripts/probe/v0.5-m37-size-limits.ts` or similar) to find
+Monday's wire-side rejection threshold + map to a typed error
+code. Codex pre-flight review 2-4 rounds per the M35 / M36
+write-surface precedent (cumulative 0-3 P2 + 3-10 P3
+typical). v0.5-M37 closes M37 D12 + D13 + lights the
+remaining feature milestone in v0.5 scope before release-prep.
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
