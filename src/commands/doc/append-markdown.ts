@@ -5,12 +5,6 @@
  * workdoc (`cli-design.md` §4.3 DOC section + §13 v0.5 entry;
  * `v0.5-plan.md` §3 M37 + §8 D12-D13).
  *
- * **PRE-FLIGHT STUB at v0.5-M37 pre-flight.** Argv parsing + schema +
- * commander wiring + post-parse stub `internal_error` ship as the
- * agent contract surface; the wire-call leg (file/stdin read + size
- * guard at runtime + `addContentToDocFromMarkdown` dispatch +
- * custom-OBJECT projection per D12) lands at v0.5-M37 IMPL.
- *
  * **Wire shape.** Single `add_content_to_doc_from_markdown(docId,
  * markdown, afterBlockId?) → DocBlocksFromMarkdownResult` round-trip
  * via {@link addContentToDocFromMarkdown} against `mutation
@@ -61,7 +55,7 @@
  *     `details: { doc_id, error, hint }`.
  *   - `success: false + empty/null error` → `internal_error` with
  *     wire-regression hint.
- *   - `success: true + missing block_ids` → `internal_error` (Monday
+ *   - `success: true + null block_ids` → `internal_error` (Monday
  *     promises a non-null `block_ids` list on success).
  *   - Oversized inline `--markdown-string` at parse boundary →
  *     `usage_error.details.issues[{path: 'markdownString', message:
@@ -69,9 +63,10 @@
  *     ...'}]` from `parseArgv`'s zod-issues envelope (D13 closure).
  *     The `usage_error` rejection surfaces ahead of any wire
  *     dispatch.
- *   - Oversized file payload at runtime → IMPL applies the same
- *     {@link MAX_DOC_IMPORT_PAYLOAD_BYTES} guard at the runtime
- *     read boundary; rejection shape lands at IMPL.
+ *   - Oversized file payload at runtime →
+ *     `readSourceContent` rejects with `usage_error` carrying
+ *     `details: { source: 'file' | 'stdin', size_bytes, limit_bytes,
+ *     file_path? }`.
  *   - Non-existent / inaccessible `<doc-id>` → bubbles via Monday's
  *     wire-side `errors[]` → typed `ApiError` (`not_found` or
  *     `forbidden`).
@@ -95,19 +90,25 @@
  * **Permission-sensitive.** Tokens lacking workdoc-write scope on
  * the target doc surface `forbidden`.
  *
- * **R-NEW-76 discipline.** `parseArgv` fires BEFORE the c8-ignored
- * stub body — 12th post-graduation consumer at v0.5-M37 pre-flight.
+ * **Runtime body landed at v0.5-M37 IMPL.** Same shape as
+ * `import-html.ts` — `parseArgv` BEFORE `resolveClient`; lifted
+ * {@link readSourceContent} for file/stdin/inline with runtime size
+ * guard; dry-run emits minimal planned changes; live path dispatches
+ * {@link addContentToDocFromMarkdown} + projects via `emitMutation`.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { DocIdSchema, DocBlockIdSchema } from '../../types/ids.js';
 import {
   MAX_DOC_IMPORT_PAYLOAD_BYTES,
   docAppendMarkdownOutputSchema,
+  addContentToDocFromMarkdown,
   type DocAppendMarkdownOutput,
 } from '../../api/documents.js';
-import { ApiError } from '../../utils/errors.js';
+import { readSourceContent } from '../../utils/source-content.js';
 
 const inputSchema = z
   .object({
@@ -116,7 +117,8 @@ const inputSchema = z
      * File path for the markdown content (`-` reads from stdin).
      * Mutually exclusive with `markdownString` — exactly one
      * required, enforced by the cross-field `.refine()` below. Size
-     * guard at runtime read boundary (IMPL).
+     * guard at runtime read boundary via {@link readSourceContent}'s
+     * `maxBytes` slot.
      */
     markdown: z
       .string()
@@ -149,6 +151,19 @@ const inputSchema = z
     },
   );
 
+const describeMarkdownSource = (
+  markdown: string | undefined,
+  markdownString: string | undefined,
+): string => {
+  if (markdownString !== undefined) return '(inline)';
+  if (markdown === '-') return '(stdin)';
+  if (markdown === undefined) {
+    // Defensive — schema's `.refine()` prevents this in production.
+    throw new Error('describeMarkdownSource: invariant violated — neither markdown nor markdownString set after refine');
+  }
+  return markdown;
+};
+
 export const docAppendMarkdownCommand: CommandModule<
   z.infer<typeof inputSchema>,
   DocAppendMarkdownOutput
@@ -167,12 +182,6 @@ export const docAppendMarkdownCommand: CommandModule<
   inputSchema,
   outputSchema: docAppendMarkdownOutputSchema,
   attach: (program, ctx) => {
-    // `ctx` reserved for IMPL — runtime body lands here at v0.5-M37
-    // IMPL alongside `resolveClient(ctx, ...)` + `emitDryRun(...)` /
-    // `emitMutation(...)`. Pre-flight stub doesn't use ctx; the void
-    // statement keeps `noUnusedParameters` from rejecting the slot
-    // before IMPL fills it.
-    void ctx;
     const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
     noun
       .command('append-markdown <docId>')
@@ -201,30 +210,63 @@ export const docAppendMarkdownCommand: CommandModule<
           ...(opts as Readonly<Record<string, unknown>>),
         });
 
-        // R-NEW-76 graduated discipline: `parseArgv` fires BEFORE the
-        // c8-ignored stub body so invalid argv surfaces `usage_error`
-        // from the parse boundary (mutual-exclusion of --markdown /
-        // --markdown-string, oversized --markdown-string, malformed
-        // <doc-id> / --after brands) — NOT `internal_error` from the
-        // c8-ignored stub throw. Runtime body lands at v0.5-M37 IMPL.
-        /* c8 ignore start */
-        // Stub body — same shape as `import-html.ts`.
-        void parsed;
-        void program;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc append-markdown runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.',
-          {
-            details: {
-              deferred_to: 'v0.5-M37 IMPL',
-              hint:
-                'agent contract surface (argv schema + parse-boundary rejections + ' +
-                'dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          const planned: Record<string, unknown> = {
+            operation: 'add_content_to_doc_from_markdown',
+            doc_id: parsed.docId,
+            markdown_source: describeMarkdownSource(parsed.markdown, parsed.markdownString),
+          };
+          if (parsed.after !== undefined) {
+            planned.after_block_id = parsed.after;
+          }
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [planned],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const markdown = await readSourceContent({
+          inline: parsed.markdownString,
+          file: parsed.markdown,
+          stdin: ctx.stdin,
+          inlineFlagName: '--markdown-string',
+          fileFlagName: '--markdown',
+          verbHint:
+            'monday doc append-markdown requires either --markdown <file|-> ' +
+            'or --markdown-string <s>. Use --markdown - to read from stdin.',
+          maxBytes: MAX_DOC_IMPORT_PAYLOAD_BYTES,
+        });
+
+        const result = await addContentToDocFromMarkdown({
+          client,
+          docId: parsed.docId,
+          markdown,
+          ...(parsed.after === undefined
+            ? {}
+            : { afterBlockId: parsed.after }),
+        });
+        emitMutation({
+          ctx,
+          data: result.result,
+          schema: docAppendMarkdownCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

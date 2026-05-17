@@ -5,12 +5,6 @@
  * (`cli-design.md` §4.3 DOC section + §13 v0.5 entry;
  * `v0.5-plan.md` §3 M37 + §8 D12-D13).
  *
- * **PRE-FLIGHT STUB at v0.5-M37 pre-flight.** Argv parsing + schema +
- * commander wiring + post-parse stub `internal_error` ship as the agent
- * contract surface; the wire-call leg (file/stdin read + size guard at
- * runtime layer + `importDocFromHtml` dispatch + custom-OBJECT projection
- * per D12) lands at v0.5-M37 IMPL.
- *
  * **Wire shape.** Single `import_doc_from_html(html, workspaceId,
  * kind?, folderId?, title?) → ImportDocFromHtmlResult` round-trip via
  * {@link importDocFromHtml} against `mutation ImportDocFromHtml` with
@@ -45,7 +39,8 @@
  *     boundary per D13 closure (empirical wire threshold sits
  *     between 250KB-OK and 500KB-rejected). The file/stdin form
  *     applies the same size guard at the runtime read boundary
- *     (IMPL).
+ *     (defense-in-depth via the lifted {@link readSourceContent}
+ *     helper's `maxBytes` slot).
  *   - `--folder <fid>` — optional (maps to wire `folderId: ID`).
  *     Numeric folder ID; brand-validated via {@link DocFolderIdSchema}.
  *     Absent → doc lands at workspace root.
@@ -71,16 +66,17 @@
  *     `details: { workspace_id, error, hint }`.
  *   - `success: false + empty/null error` → `internal_error` with
  *     wire-regression hint.
- *   - `success: true + missing doc_id` → `internal_error` (Monday
- *     promises a non-null `doc_id` on success).
+ *   - `success: true + missing/null doc_id` → `internal_error`
+ *     (Monday promises a non-null `doc_id` on success).
  *   - Oversized inline `--html-string` at parse boundary →
  *     `usage_error.details.issues[{path: 'htmlString', message:
  *     '--html-string exceeds the 256000-byte wire-side limit ...'}]`
  *     from `parseArgv`'s zod-issues envelope (D13 closure). The
  *     `usage_error` rejection surfaces ahead of any wire dispatch.
- *   - Oversized file payload at runtime → IMPL applies the same
- *     {@link MAX_DOC_IMPORT_PAYLOAD_BYTES} guard at the runtime
- *     read boundary; rejection shape lands at IMPL.
+ *   - Oversized file payload at runtime →
+ *     `readSourceContent` rejects with `usage_error` carrying
+ *     `details: { source: 'file' | 'stdin', size_bytes, limit_bytes,
+ *     file_path? }`.
  *
  * **Dry-run shape** per cli-design §6.4 mutation-dry-run variant.
  * Minimal envelope listing the planned `import_doc_from_html`
@@ -100,23 +96,29 @@
  * the target workspace surface `forbidden` (mapped from Monday's
  * PERMISSION_DENIED extension).
  *
- * **R-NEW-76 discipline.** `parseArgv` (+ the mutex/length refines
- * baked into the schema) fires BEFORE the `c8 ignore start`
- * block-wrap so invalid argv surfaces `usage_error` from the parse
- * boundary, NOT `internal_error` from the c8-ignored stub throw
- * (the 11th post-graduation consumer at v0.5-M37 pre-flight).
+ * **Runtime body landed at v0.5-M37 IMPL.** `parseArgv` runs BEFORE
+ * `resolveClient` so invalid argv surfaces `usage_error` ahead of any
+ * missing-token `config_error`; the lifted {@link readSourceContent}
+ * helper applies the same size guard at the runtime read boundary
+ * (file/stdin path) that the schema's `.refine()` applies at parse
+ * boundary (inline path). Dry-run emits minimal planned changes with
+ * the source descriptor; live path dispatches
+ * {@link importDocFromHtml} + projects via `emitMutation`.
  */
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
+import { emitDryRun, emitMutation } from '../emit.js';
+import { resolveClient } from '../../api/resolve-client.js';
 import { WorkspaceIdSchema, DocFolderIdSchema } from '../../types/ids.js';
 import {
   DOC_KIND_VALUES,
   MAX_DOC_IMPORT_PAYLOAD_BYTES,
   docImportHtmlOutputSchema,
+  importDocFromHtml,
   type DocImportHtmlOutput,
 } from '../../api/documents.js';
-import { ApiError } from '../../utils/errors.js';
+import { readSourceContent } from '../../utils/source-content.js';
 
 const inputSchema = z
   .object({
@@ -126,8 +128,8 @@ const inputSchema = z
      * exclusive with `htmlString` — exactly one required, enforced by
      * the cross-field `.refine()` below. The size guard against
      * {@link MAX_DOC_IMPORT_PAYLOAD_BYTES} applies at the runtime
-     * read boundary (IMPL) — file content size isn't known at argv-
-     * parse time.
+     * read boundary via {@link readSourceContent}'s `maxBytes` slot
+     * — file content size isn't known at argv-parse time.
      */
     html: z.string().min(1, '--html must be a non-empty file path (use `-` for stdin)').optional(),
     /**
@@ -161,6 +163,24 @@ const inputSchema = z
     },
   );
 
+const describeHtmlSource = (
+  html: string | undefined,
+  htmlString: string | undefined,
+): string => {
+  if (htmlString !== undefined) return '(inline)';
+  if (html === '-') return '(stdin)';
+  // The cross-field `.refine()` guarantees exactly one of `html` /
+  // `htmlString` is set at this point; the fallthrough only reaches
+  // a string-valued `html`.
+  if (html === undefined) {
+    // Defensive — the schema's `.refine()` prevents this branch from
+    // firing in production. Surface a clear internal error if a future
+    // refactor weakens the invariant.
+    throw new Error('describeHtmlSource: invariant violated — neither html nor htmlString set after refine');
+  }
+  return html;
+};
+
 export const docImportHtmlCommand: CommandModule<
   z.infer<typeof inputSchema>,
   DocImportHtmlOutput
@@ -180,12 +200,6 @@ export const docImportHtmlCommand: CommandModule<
   inputSchema,
   outputSchema: docImportHtmlOutputSchema,
   attach: (program, ctx) => {
-    // `ctx` reserved for IMPL — runtime body lands here at v0.5-M37
-    // IMPL alongside `resolveClient(ctx, ...)` + `emitDryRun(...)` /
-    // `emitMutation(...)`. Pre-flight stub doesn't use ctx; the void
-    // statement keeps `noUnusedParameters` from rejecting the slot
-    // before IMPL fills it.
-    void ctx;
     const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
     noun
       .command('import-html')
@@ -216,36 +230,74 @@ export const docImportHtmlCommand: CommandModule<
       .action(async (opts: unknown) => {
         const parsed = parseArgv(docImportHtmlCommand.inputSchema, opts);
 
-        // R-NEW-76 graduated discipline: `parseArgv` fires BEFORE the
-        // c8-ignored stub body so invalid argv surfaces `usage_error`
-        // from the parse boundary (mutual-exclusion of --html /
-        // --html-string, oversized --html-string, malformed brand on
-        // --workspace / --folder, unknown --kind) — NOT
-        // `internal_error` from the c8-ignored stub throw. Runtime
-        // body (file/stdin read + size guard + wire dispatch +
-        // projection per D12) lands at v0.5-M37 IMPL.
-        /* c8 ignore start */
-        // Stub body — IMPL session lands the dry-run emit + file/stdin
-        // read leg + size-guard at runtime + `importDocFromHtml`
-        // dispatch + custom-OBJECT projection. Argv parsing + schema +
-        // mutex `.refine()` + byte-length `.refine()` above are real-
-        // and-shipped; only the wire-call leg is deferred.
-        void parsed;
-        void program;
-        await Promise.resolve();
-        throw new ApiError(
-          'internal_error',
-          'monday doc import-html runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.',
-          {
-            details: {
-              deferred_to: 'v0.5-M37 IMPL',
-              hint:
-                'agent contract surface (argv schema + parse-boundary rejections + ' +
-                'dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.',
-            },
-          },
+        const { client, globalFlags, apiVersion } = resolveClient(
+          ctx,
+          program.opts(),
         );
-        /* c8 ignore stop */
+
+        if (globalFlags.dryRun) {
+          // Minimal dry-run shape per cli-design §6.4 mutation-
+          // dry-run variant — argv-derived, no preflight read. The
+          // HTML payload itself is omitted (potentially hundreds of
+          // KB); agents see WHAT would be sent + the source it would
+          // come from via `html_source: '(inline)' | '(stdin)' | <path>`.
+          const planned: Record<string, unknown> = {
+            operation: 'import_doc_from_html',
+            workspace_id: parsed.workspace,
+            html_source: describeHtmlSource(parsed.html, parsed.htmlString),
+          };
+          if (parsed.folder !== undefined) {
+            planned.folder_id = parsed.folder;
+          }
+          if (parsed.kind !== undefined) {
+            planned.kind = parsed.kind;
+          }
+          if (parsed.title !== undefined) {
+            planned.title = parsed.title;
+          }
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: [planned],
+            source: 'none',
+            cacheAgeSeconds: null,
+            warnings: [],
+            apiVersion,
+          });
+          return;
+        }
+
+        const html = await readSourceContent({
+          inline: parsed.htmlString,
+          file: parsed.html,
+          stdin: ctx.stdin,
+          inlineFlagName: '--html-string',
+          fileFlagName: '--html',
+          verbHint:
+            'monday doc import-html requires either --html <file|-> or ' +
+            '--html-string <s>. Use --html - to read from stdin.',
+          maxBytes: MAX_DOC_IMPORT_PAYLOAD_BYTES,
+        });
+
+        const result = await importDocFromHtml({
+          client,
+          html,
+          workspaceId: parsed.workspace,
+          ...(parsed.kind === undefined ? {} : { kind: parsed.kind }),
+          ...(parsed.folder === undefined ? {} : { folderId: parsed.folder }),
+          ...(parsed.title === undefined ? {} : { title: parsed.title }),
+        });
+        emitMutation({
+          ctx,
+          data: result.result,
+          schema: docImportHtmlCommand.outputSchema,
+          programOpts: program.opts(),
+          warnings: [],
+          source: result.source,
+          cacheAgeSeconds: result.cacheAgeSeconds,
+          complexity: result.complexity,
+          apiVersion,
+        });
       });
   },
 };

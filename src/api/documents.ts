@@ -2299,7 +2299,7 @@ export const deleteDocBlock = async (
 };
 
 // ===========================================================================
-// v0.5-M37 doc-content import mutation surface (PRE-FLIGHT STUBS)
+// v0.5-M37 doc-content import mutation surface
 // ===========================================================================
 // Two fetchers land the doc-content import wire surface against Monday's
 // `import_doc_from_html` + `add_content_to_doc_from_markdown` mutations.
@@ -2309,10 +2309,9 @@ export const deleteDocBlock = async (
 // opaque-JSON M35 cadence and NOT the typed-OBJECT M36 cadence — distinct
 // third return shape on the doc-mutation surface).
 //
-// **Pre-flight ships stubs only.** Both fetcher bodies are `c8 ignore`-
-// wrapped; runtime bodies (two-stage parse + custom-OBJECT projection +
-// success/failure routing per D12) land at v0.5-M37 IMPL alongside
-// integration tests.
+// **Runtime bodies landed at v0.5-M37 IMPL** (two-stage parse + custom-
+// OBJECT projection + success/failure routing per D12 + integration test
+// cassettes covering all 5 D12 branches per fetcher).
 //
 // Wire summary (empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
 // `v0.5-inputs-and-results.ts`, 2026-05-15, API `2026-01`):
@@ -2713,70 +2712,147 @@ export interface ImportDocFromHtmlActionResult {
 }
 
 /**
- * **PRE-FLIGHT STUB** — imports an HTML payload as a new workdoc via
- * `import_doc_from_html(...)` with `operationName: 'ImportDocFromHtml'`
- * (R-NEW-37 W2). The runtime body lands at v0.5-M37 IMPL alongside
- * integration tests; today's body is a `c8 ignore`-wrapped
- * `internal_error` throw so the parse-boundary surface
- * (`MAX_DOC_IMPORT_PAYLOAD_BYTES` + mutual-exclusion + required-slot
- * presence) ships as the agent contract while the wire-call leg
- * stays out of the coverage scope.
+ * Imports an HTML payload as a new workdoc via
+ * `import_doc_from_html(html, workspaceId, kind?, folderId?, title?)`
+ * with `operationName: 'ImportDocFromHtml'` (R-NEW-37 W2 — pinned
+ * literally at the call site; NOT a caller-overridable input slot).
  *
- * **At IMPL the runtime body will:**
+ * Two-stage parse: the loose {@link importDocFromHtmlResponseSchema}
+ * wrapping schema tolerates side-band keys at the response root;
+ * `assertResponseFieldPresent` rewraps a missing key as
+ * `internal_error`; the inner OBJECT pins via
+ * {@link importDocFromHtmlResultSchema} (`.strict()` — drift surfaces
+ * `internal_error` with structured `details.issues`).
  *
- *   1. Dispatch `import_doc_from_html` via `client.raw` with the
- *      camelCase variable shape (`workspaceId`, `folderId`, etc.);
- *      omit optional variables when their input slot is undefined
- *      (Monday's omit-vs-null discipline — undefined-keyed JSON
- *      serialises to a missing key, NOT `null`).
- *   2. Two-stage parse: loose wrapping schema tolerates side-band
- *      keys; `assertResponseFieldPresent` rewraps missing-key as
- *      `internal_error`; the inner OBJECT pins via
- *      {@link importDocFromHtmlResultSchema}.
- *   3. Project the result OBJECT per D12 closure:
- *      - `success: true + doc_id present` → success envelope
- *        `{doc_id, success: true}`.
- *      - `success: false + populated error` → throw
- *        `validation_failed` with
- *        `details: {workspace_id, error, hint}`.
- *      - `success: false + empty/null error` → throw
- *        `internal_error` with wire-regression hint.
- *      - `success: true + missing doc_id` → throw `internal_error`
- *        (Monday promises a non-null doc_id on success per probe
- *        description).
+ * Custom-OBJECT projection per D12 (5 branches):
+ *
+ *   - `success: true + doc_id present` → flat envelope
+ *     `{doc_id, success: true}` (mirrors M35
+ *     {@link docMutationResultSchema} cadence).
+ *   - `success: false + populated error` → throw `validation_failed`
+ *     with `details: {workspace_id, error, hint}` (Monday-side
+ *     rejection — invalid HTML, payload too large, etc.).
+ *   - `success: false + empty/null error` → throw `internal_error`
+ *     with a wire-regression hint (Monday's contract: `error` is
+ *     populated when `success: false`).
+ *   - `success: true + missing doc_id` → throw `internal_error`
+ *     (per-fetcher null-payload contract derived from Monday's probe
+ *     description "Returns the ID of the newly created document on
+ *     success" per R-v0.5-NEW-11).
+ *   - `success: true + null doc_id` → same as missing — wire-side
+ *     regression on the documented payload promise.
+ *
+ * Omits optional variables (`kind` / `folderId` / `title`) entirely
+ * when unset so Monday's per-arg server-side defaults apply (the M34 /
+ * M35 / M36 omit-vs-null discipline — undefined-keyed JSON serialises
+ * to a missing key, NOT `null`).
  */
-/* c8 ignore start */
 export const importDocFromHtml = async (
   inputs: ImportDocFromHtmlInputs,
 ): Promise<ImportDocFromHtmlActionResult> => {
-  // Pre-flight stub body — IMPL session swaps for the live `client.raw`
-  // round-trip + two-stage parse via the loose wrapping schema +
-  // `assertResponseFieldPresent` + inner OBJECT pin via
-  // `importDocFromHtmlResultSchema` + projection per D12. The `void`
-  // statements pre-pin the deferred-use symbols so they don't show as
-  // unused at pre-flight; IMPL drops them when the symbols start
-  // showing up in real expressions.
-  void inputs;
-  void IMPORT_DOC_FROM_HTML_MUTATION;
-  void importDocFromHtmlResponseSchema;
-  void importDocFromHtmlResultSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'importDocFromHtml is a pre-flight stub; runtime body lands at v0.5-M37 IMPL.',
+  const variables: Record<string, unknown> = {
+    html: inputs.html,
+    workspaceId: inputs.workspaceId,
+  };
+  if (inputs.kind !== undefined) {
+    variables.kind = inputs.kind;
+  }
+  if (inputs.folderId !== undefined) {
+    variables.folderId = inputs.folderId;
+  }
+  if (inputs.title !== undefined) {
+    variables.title = inputs.title;
+  }
+  const response = await inputs.client.raw<unknown>(
+    IMPORT_DOC_FROM_HTML_MUTATION,
+    variables,
+    { operationName: 'ImportDocFromHtml' },
+  );
+  const data = unwrapOrThrow(
+    importDocFromHtmlResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M37 IMPL',
-        hint:
-          'agent contract surface (argv schema + custom-OBJECT projection ' +
-          'contract per D12) ships at pre-flight; the wire-call leg lands at IMPL.',
-      },
+      context: 'Monday returned a malformed ImportDocFromHtml response',
+      details: { workspace_id: inputs.workspaceId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update `importDocFromHtmlResponseSchema` ' +
+        'if Monday\'s contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'import_doc_from_html',
+    operationLabel: 'ImportDocFromHtml',
+    details: { workspace_id: inputs.workspaceId },
+    nullHandling: 'caller_handles',
+  });
+  const rawResult = data.import_doc_from_html;
+  if (rawResult === null || rawResult === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no payload from import_doc_from_html for workspace ${inputs.workspaceId}.`,
+      { details: { workspace_id: inputs.workspaceId } },
+    );
+  }
+  const parsed = unwrapOrThrow(
+    importDocFromHtmlResultSchema.safeParse(rawResult),
+    {
+      context: `Monday returned a malformed ImportDocFromHtmlResult payload from import_doc_from_html (workspace ${inputs.workspaceId})`,
+      details: { workspace_id: inputs.workspaceId },
+    },
+  );
+  if (!parsed.success) {
+    if (parsed.error !== null && parsed.error.length > 0) {
+      throw new ApiError(
+        'validation_failed',
+        `Monday rejected import_doc_from_html: ${parsed.error}`,
+        {
+          details: {
+            workspace_id: inputs.workspaceId,
+            error: parsed.error,
+            hint:
+              'Monday\'s wire-side rejection reason is verbatim in `error`; ' +
+              'inspect it for invalid HTML, payload-size, or permission issues.',
+          },
+        },
+      );
+    }
+    throw new ApiError(
+      'internal_error',
+      `Monday returned success: false from import_doc_from_html without a populated error message (workspace ${inputs.workspaceId}).`,
+      {
+        details: {
+          workspace_id: inputs.workspaceId,
+          hint:
+            'wire-shape regression — Monday\'s contract is that `error` is ' +
+            'a non-empty string when `success: false`. Re-probe via ' +
+            '`scripts/probe/v0.5-doc-mutations.ts` if this persists.',
+        },
+      },
+    );
+  }
+  if (parsed.doc_id === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned success: true from import_doc_from_html but a null doc_id (workspace ${inputs.workspaceId}).`,
+      {
+        details: {
+          workspace_id: inputs.workspaceId,
+          hint:
+            'wire-shape regression — Monday\'s probe description promises a ' +
+            'non-null `doc_id` on success. Re-probe via `scripts/probe/v0.5-' +
+            'doc-mutations.ts` if this persists.',
+        },
+      },
+    );
+  }
+  return {
+    result: { doc_id: parsed.doc_id, success: true },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */
 
 export interface AddContentToDocFromMarkdownInputs {
   readonly client: MondayClient;
@@ -2799,55 +2875,140 @@ export interface AddContentToDocFromMarkdownActionResult {
 }
 
 /**
- * **PRE-FLIGHT STUB** — appends parsed-markdown blocks to an existing
- * workdoc via `add_content_to_doc_from_markdown(...)` with
- * `operationName: 'AddContentToDocFromMarkdown'` (R-NEW-37 W2).
- * Runtime body lands at v0.5-M37 IMPL.
+ * Appends parsed-markdown blocks to an existing workdoc via
+ * `add_content_to_doc_from_markdown(docId, markdown, afterBlockId?)`
+ * with `operationName: 'AddContentToDocFromMarkdown'` (R-NEW-37 W2).
  *
- * **At IMPL the runtime body will:**
+ * Two-stage parse: the loose
+ * {@link addContentToDocFromMarkdownResponseSchema} wrapping schema
+ * tolerates side-band keys; `assertResponseFieldPresent` rewraps a
+ * missing key as `internal_error`; the inner OBJECT pins via
+ * {@link docBlocksFromMarkdownResultSchema}.
  *
- *   1. Dispatch `add_content_to_doc_from_markdown` via `client.raw`;
- *      omit `afterBlockId` when undefined.
- *   2. Two-stage parse (loose root + strict inner OBJECT pin via
- *      {@link docBlocksFromMarkdownResultSchema}).
- *   3. Project per D12:
- *      - `success: true + block_ids present` (incl. empty array) →
- *        success envelope `{doc_id (echoed), block_ids, success: true}`.
- *      - `success: false + populated error` → throw
- *        `validation_failed` with `details: {doc_id, error, hint}`.
- *      - `success: false + empty/null error` → throw
- *        `internal_error` with wire-regression hint.
- *      - `success: true + missing block_ids` → throw `internal_error`
- *        (Monday promises a non-null `block_ids` list on success).
- *      - `success: true + present-but-empty block_ids` → success
- *        envelope WITH empty `block_ids` (Monday's plausible "no
- *        convertible blocks in markdown" semantics; NOT a failure).
+ * Custom-OBJECT projection per D12 (5 branches):
+ *
+ *   - `success: true + block_ids present (incl. EMPTY array)` →
+ *     success envelope `{doc_id (echoed), block_ids, success: true}`.
+ *     Empty `block_ids: []` IS a valid success shape per probe
+ *     finding — Monday's "no convertible blocks in markdown"
+ *     semantics is plausible (e.g. an empty file).
+ *   - `success: false + populated error` → throw `validation_failed`
+ *     with `details: {doc_id, error, hint}`.
+ *   - `success: false + empty/null error` → throw `internal_error`
+ *     with wire-regression hint.
+ *   - `success: true + null block_ids` → throw `internal_error`
+ *     (per-fetcher null-payload contract per R-v0.5-NEW-11 — Monday's
+ *     probe description "Returns the IDs of the newly created blocks
+ *     on success" promises a non-null array).
+ *
+ * Omits `afterBlockId` when undefined (M34 / M35 / M36 omit-vs-null
+ * discipline).
  */
-/* c8 ignore start */
 export const addContentToDocFromMarkdown = async (
   inputs: AddContentToDocFromMarkdownInputs,
 ): Promise<AddContentToDocFromMarkdownActionResult> => {
-  // Pre-flight stub body — same deferred-use pattern as
-  // {@link importDocFromHtml}. IMPL drops the `void` statements when
-  // the wire call + two-stage parse + D12 projection land.
-  void inputs;
-  void ADD_CONTENT_TO_DOC_FROM_MARKDOWN_MUTATION;
-  void addContentToDocFromMarkdownResponseSchema;
-  void docBlocksFromMarkdownResultSchema;
-  void assertResponseFieldPresent;
-  void unwrapOrThrow;
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    'addContentToDocFromMarkdown is a pre-flight stub; runtime body lands at v0.5-M37 IMPL.',
+  const variables: Record<string, unknown> = {
+    docId: inputs.docId,
+    markdown: inputs.markdown,
+  };
+  if (inputs.afterBlockId !== undefined) {
+    variables.afterBlockId = inputs.afterBlockId;
+  }
+  const response = await inputs.client.raw<unknown>(
+    ADD_CONTENT_TO_DOC_FROM_MARKDOWN_MUTATION,
+    variables,
+    { operationName: 'AddContentToDocFromMarkdown' },
+  );
+  const data = unwrapOrThrow(
+    addContentToDocFromMarkdownResponseSchema.safeParse(response.data),
     {
-      details: {
-        deferred_to: 'v0.5-M37 IMPL',
-        hint:
-          'agent contract surface (argv schema + custom-OBJECT projection ' +
-          'contract per D12) ships at pre-flight; the wire-call leg lands at IMPL.',
-      },
+      context:
+        'Monday returned a malformed AddContentToDocFromMarkdown response',
+      details: { doc_id: inputs.docId },
+      hint:
+        'this is a data-integrity error in Monday\'s response; verify ' +
+        'the response shape and update ' +
+        '`addContentToDocFromMarkdownResponseSchema` if Monday\'s ' +
+        'contract has changed.',
     },
   );
+  assertResponseFieldPresent({
+    data,
+    key: 'add_content_to_doc_from_markdown',
+    operationLabel: 'AddContentToDocFromMarkdown',
+    details: { doc_id: inputs.docId },
+    nullHandling: 'caller_handles',
+  });
+  const rawResult = data.add_content_to_doc_from_markdown;
+  if (rawResult === null || rawResult === undefined) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned no payload from add_content_to_doc_from_markdown for doc ${inputs.docId}.`,
+      { details: { doc_id: inputs.docId } },
+    );
+  }
+  const parsed = unwrapOrThrow(
+    docBlocksFromMarkdownResultSchema.safeParse(rawResult),
+    {
+      context: `Monday returned a malformed DocBlocksFromMarkdownResult payload from add_content_to_doc_from_markdown (doc ${inputs.docId})`,
+      details: { doc_id: inputs.docId },
+    },
+  );
+  if (!parsed.success) {
+    if (parsed.error !== null && parsed.error.length > 0) {
+      throw new ApiError(
+        'validation_failed',
+        `Monday rejected add_content_to_doc_from_markdown: ${parsed.error}`,
+        {
+          details: {
+            doc_id: inputs.docId,
+            error: parsed.error,
+            hint:
+              'Monday\'s wire-side rejection reason is verbatim in `error`; ' +
+              'inspect it for invalid markdown, payload-size, doc visibility, ' +
+              'or permission issues.',
+          },
+        },
+      );
+    }
+    throw new ApiError(
+      'internal_error',
+      `Monday returned success: false from add_content_to_doc_from_markdown without a populated error message (doc ${inputs.docId}).`,
+      {
+        details: {
+          doc_id: inputs.docId,
+          hint:
+            'wire-shape regression — Monday\'s contract is that `error` is ' +
+            'a non-empty string when `success: false`. Re-probe via ' +
+            '`scripts/probe/v0.5-doc-mutations.ts` if this persists.',
+        },
+      },
+    );
+  }
+  if (parsed.block_ids === null) {
+    throw new ApiError(
+      'internal_error',
+      `Monday returned success: true from add_content_to_doc_from_markdown but a null block_ids list (doc ${inputs.docId}).`,
+      {
+        details: {
+          doc_id: inputs.docId,
+          hint:
+            'wire-shape regression — Monday\'s probe description promises a ' +
+            'non-null `block_ids` list on success (empty array is plausible ' +
+            'when the markdown parses to zero convertible blocks). Re-probe ' +
+            'via `scripts/probe/v0.5-doc-mutations.ts` if this persists.',
+        },
+      },
+    );
+  }
+  return {
+    result: {
+      doc_id: inputs.docId,
+      block_ids: parsed.block_ids,
+      success: true,
+    },
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: response.complexity,
+  };
 };
-/* c8 ignore stop */

@@ -3920,11 +3920,10 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
 
   // ---------------------------------------------------------------
   // v0.5-M37 doc-content import (`import-html` + `append-markdown`)
-  // pre-flight stub surface — parse-boundary rejections + post-parse
-  // stub `internal_error` (the c8-ignored stub body fires after
-  // `parseArgv` succeeds; runtime body lands at M37 IMPL alongside
-  // per-verb integration tests in `tests/integration/commands/doc-
-  // import-html` + `doc-append-markdown.test.ts`). No
+  // — parse-boundary rejections + dry-run success envelopes (runtime
+  // body landed at M37 IMPL; per-verb integration tests with wire
+  // fixture cassettes live in `tests/integration/commands/doc-
+  // import-html.test.ts` + `doc-append-markdown.test.ts`). No
   // `confirmation_required` snapshot — both verbs are content-creation
   // (0 destructive verbs at M37).
   // ---------------------------------------------------------------
@@ -4038,12 +4037,15 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
       ],
       { interactions: [] },
     );
-    // Stub action body throws `internal_error` after parseArgv per
-    // R-NEW-76; dry-run path lands at IMPL. Snapshot captures the
-    // post-parse stub envelope so the IMPL-time flip from
-    // internal_error → success+planned_changes is visible in diff.
-    expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+    // M37 IMPL: dry-run path emits a `success: true` envelope with
+    // `planned_changes: [{operation: 'import_doc_from_html', ...}]`
+    // + `meta.dry_run: true` + `meta.source: 'none'`. The HTML payload
+    // itself is omitted from the envelope; only the `html_source`
+    // descriptor (`'(inline)'` for `--html-string`; `'(stdin)'` for
+    // `--html -`; the literal path for `--html <file>`) lands so
+    // agents see WHAT would be sent without the bytes.
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 
   it('doc append-markdown rejects mutual exclusion of --markdown / --markdown-string', async () => {
@@ -4147,10 +4149,12 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
       ],
       { interactions: [] },
     );
-    // Same stub-shape note as import-html dry-run snapshot above —
-    // captures the M37 pre-flight stub envelope; IMPL flips to
-    // success+planned_changes.
-    expect(out.exitCode).toBe(2);
-    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+    // M37 IMPL: dry-run path emits a `success: true` envelope with
+    // `planned_changes: [{operation: 'add_content_to_doc_from_markdown',
+    // doc_id, after_block_id?, markdown_source}]` + `meta.dry_run:
+    // true` + `meta.source: 'none'`. The markdown payload itself is
+    // omitted; only the `markdown_source` descriptor lands.
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 });

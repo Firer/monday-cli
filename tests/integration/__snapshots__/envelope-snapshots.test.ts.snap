@@ -3913,30 +3913,28 @@ exports[`envelope snapshot — notification (M27) > notification send --dry-run 
 
 exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown dry-run envelope (planned_changes shape) 1`] = `
 {
-  "error": {
-    "code": "internal_error",
-    "details": {
-      "deferred_to": "v0.5-M37 IMPL",
-      "hint": "agent contract surface (argv schema + parse-boundary rejections + dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.",
-    },
-    "http_status": null,
-    "message": "monday doc append-markdown runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.",
-    "monday_code": null,
-    "request_id": "fixed-req-id",
-    "retry_after_seconds": null,
-    "retryable": false,
-  },
+  "data": null,
   "meta": {
     "api_version": "2026-01",
     "cache_age_seconds": null,
     "cli_version": "0.0.0-test",
     "complexity": null,
+    "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
   },
-  "ok": false,
+  "ok": true,
+  "planned_changes": [
+    {
+      "after_block_id": "blk_anchor",
+      "doc_id": "88010",
+      "markdown_source": "(inline)",
+      "operation": "add_content_to_doc_from_markdown",
+    },
+  ],
+  "warnings": [],
 }
 `;
 
@@ -4251,30 +4249,30 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-update dry-
 
 exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html dry-run envelope (planned_changes shape) 1`] = `
 {
-  "error": {
-    "code": "internal_error",
-    "details": {
-      "deferred_to": "v0.5-M37 IMPL",
-      "hint": "agent contract surface (argv schema + parse-boundary rejections + dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.",
-    },
-    "http_status": null,
-    "message": "monday doc import-html runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.",
-    "monday_code": null,
-    "request_id": "fixed-req-id",
-    "retry_after_seconds": null,
-    "retryable": false,
-  },
+  "data": null,
   "meta": {
     "api_version": "2026-01",
     "cache_age_seconds": null,
     "cli_version": "0.0.0-test",
     "complexity": null,
+    "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
     "source": "none",
   },
-  "ok": false,
+  "ok": true,
+  "planned_changes": [
+    {
+      "folder_id": "12345",
+      "html_source": "(inline)",
+      "kind": "private",
+      "operation": "import_doc_from_html",
+      "title": "Q4 plan",
+      "workspace_id": "5555",
+    },
+  ],
+  "warnings": [],
 }
 `;
 
