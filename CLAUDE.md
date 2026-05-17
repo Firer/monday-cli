@@ -820,20 +820,22 @@ at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
 `documentBlockSchema` already exists at M32 (M36 fetchers
 reuse it); no R-class lift fires ahead of feat.
 
-**Live numbers (post-v0.5-M37 pre-flight close):**
+**Live numbers (post-v0.5-M37 pre-flight close + post-close
+refactor-audit):**
 
-- Test count: **3997 + 1 skipped** across **167** test files
-  (+47 net vs 3950 + 1 skipped at M36 IMPL close: 30 new argv-
+- Test count: **3998 + 1 skipped** across **167** test files
+  (+48 net vs 3950 + 1 skipped at M36 IMPL close: 30 new argv-
   parser unit tests at `tests/unit/commands/doc/m37-argv.test.ts`
-  + 10 new envelope snapshots at `tests/integration/envelope-
+  + 11 new envelope snapshots at `tests/integration/envelope-
   snapshots.test.ts` (4 import-html parse-boundary rejections +
   1 import-html dry-run stub envelope + 4 append-markdown
   parse-boundary rejections + 1 append-markdown dry-run stub
-  envelope; round-1 P2-1 fix-up added 1 oversized-payload
-  envelope snapshot) + 1 schema-snapshot refresh from the +2
-  commands in the registry + 6 from parameterized .each
-  expansion. Round-1 added 1 envelope test; rounds 2 + 3
-  fix-ups added 0 tests (prose-only).
+  envelope + 1 import-html oversized-payload snapshot at
+  round-1 P2-1 fix-up + 1 append-markdown oversized-payload
+  parallel-sibling snapshot at the post-close refactor-audit
+  per R-v0.5-NEW-9 2nd-supporting-instance graduation) + 1
+  schema-snapshot refresh from the +2 commands in the registry
+  + 6 from parameterized .each expansion.
 - Coverage: **99.30 / 96.38 / 99.45 / 99.56** (stmts /
   branches / fns / lines) at the **95 / 95.45 / 95 / 95**
   floor. **Branches margin 0.93pp** (UNCHANGED vs M36 IMPL
@@ -1045,7 +1047,21 @@ post-lift; MEDIUM priority lift fires at M37 IMPL kickoff per
 R-NEW-58 lift-ahead-of-feat cadence). **R-NEW-41 5th supporting
 site landed** (camelCase wire arg names `workspaceId` /
 `folderId` / `docId` / `afterBlockId`). **Pushed to `origin/main`**
-at close-docs.
+at close-docs. **Post-close refactor-audit additions:**
+**R-v0.5-NEW-9 GRADUATED** (2nd supporting instance — the M37
+round-1 P2-1 fix-up added an oversized-payload envelope
+snapshot for `--html-string` but missed the parallel
+`--markdown-string` sibling; rounds 2-4 didn't catch the gap;
+the post-close audit closed the gap inline + bumped the entry
+to 2 instances, graduating the round-N parallel-fetcher fix-up
+test parity discipline to a permanent IMPL-review / pre-flight
+template W{N} audit-point at the next template extension
+session). **R-v0.5-NEW-20 NEWLY FILED** (mutex-source argv
+cross-field `.refine()` pattern; 2 consumers via M37; LOW
+priority; fires at 3rd consumer). **R-v0.5-NEW-21 NEWLY
+FILED** (UTF-8 byte-length cap via `.refine()` for wire-side
+payload caps; 2 consumers via M37; LOW priority; fires at 3rd
+consumer).
 
 **Next session — M37 IMPL (runtime bodies for doc import-html +
 append-markdown).** Lift `readUpdateBody` AHEAD-of-feat to

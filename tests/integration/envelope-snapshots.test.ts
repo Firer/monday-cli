@@ -4089,6 +4089,49 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
     expect(parseEnvelope(out.stderr)).toMatchSnapshot();
   });
 
+  it('doc append-markdown rejects oversized --markdown-string at parse boundary (D13)', async () => {
+    // Parallel-sibling snapshot to the `import-html` oversized test
+    // above — added at the post-M37-pre-flight refactor-audit per
+    // R-v0.5-NEW-9 (round-N parallel-fetcher fix-up test parity
+    // discipline) 2nd supporting instance. Round-1 M37 fix-up added
+    // the oversized snapshot for `import-html` only; this mirror
+    // pin closes the parity gap so a future refactor that drops
+    // either size-guard `.refine()` regresses ONE consumer
+    // visibly + makes the gap-class drift catchable by gates rather
+    // than the next audit pass.
+    const oversized = 'x'.repeat(256_001);
+    const out = await drive(
+      [
+        'doc',
+        'append-markdown',
+        '88010',
+        '--markdown-string',
+        oversized,
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    // Same sentinel-trim as the `import-html` mirror — the 256_001-
+    // byte literal would bloat the snapshot; the shape (path /
+    // message envelope) is what we pin.
+    const env = parseEnvelope(out.stderr);
+    if (
+      !env.ok
+      && typeof env.error?.details === 'object'
+      && env.error.details !== null
+      && Array.isArray((env.error.details as Record<string, unknown>).issues)
+    ) {
+      const issues = (env.error.details as { issues: { message?: unknown }[] }).issues;
+      for (const issue of issues) {
+        if (typeof issue.message === 'string') {
+          issue.message = '<oversized-string-rejection-message>';
+        }
+      }
+    }
+    expect(env).toMatchSnapshot();
+  });
+
   it('doc append-markdown dry-run envelope (planned_changes shape)', async () => {
     const out = await drive(
       [
