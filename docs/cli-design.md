@@ -8373,8 +8373,9 @@ scoped idempotent changes, and post comments narrating its work.**
   milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
   the doc-level CRUD surface (5 verbs)** + **v0.5-M36 ships the
   per-block CRUD surface (3 verbs)** end-to-end; **v0.5-M37
-  pre-flight at this commit ships the doc-content import surface
-  (2 verbs)** as stubs — runtime bodies land at M37 IMPL.
+  pre-flight closed at `8eb6da7..35868fc` ships the doc-content
+  import surface (2 verbs)** as stubs — runtime bodies land at
+  M37 IMPL.
   v0.5-M35 verbs (closed): `monday doc create-in-workspace`
   (`create_doc(location: {workspace: ...})`) +
   `monday doc create-on-column` (`create_doc(location: {board:
