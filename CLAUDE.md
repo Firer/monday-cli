@@ -820,6 +820,37 @@ at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
 `documentBlockSchema` already exists at M32 (M36 fetchers
 reuse it); no R-class lift fires ahead of feat.
 
+**Live numbers (post-v0.5-M37 pre-flight close):**
+
+- Test count: **3997 + 1 skipped** across **167** test files
+  (+47 net vs 3950 + 1 skipped at M36 IMPL close: 30 new argv-
+  parser unit tests at `tests/unit/commands/doc/m37-argv.test.ts`
+  + 10 new envelope snapshots at `tests/integration/envelope-
+  snapshots.test.ts` (4 import-html parse-boundary rejections +
+  1 import-html dry-run stub envelope + 4 append-markdown
+  parse-boundary rejections + 1 append-markdown dry-run stub
+  envelope; round-1 P2-1 fix-up added 1 oversized-payload
+  envelope snapshot) + 1 schema-snapshot refresh from the +2
+  commands in the registry + 6 from parameterized .each
+  expansion. Round-1 added 1 envelope test; rounds 2 + 3
+  fix-ups added 0 tests (prose-only).
+- Coverage: **99.30 / 96.38 / 99.45 / 99.56** (stmts /
+  branches / fns / lines) at the **95 / 95.45 / 95 / 95**
+  floor. **Branches margin 0.93pp** (UNCHANGED vs M36 IMPL
+  close — pre-flight stub c8-ignore wraps held coverage at
+  floor through argv-test branch coverage on the new schemas
+  + envelope-snapshot coverage on the parse-boundary path;
+  IMPL further improves all metrics per the M32 + M34 + M35 +
+  M36 IMPL precedent).
+- ERROR_CODES count: **29** (unchanged per D12 closure — M37
+  reuses existing codes; the `validation_failed` code covers
+  `success: false + error` and the `internal_error` code
+  covers wire-regression branches).
+- Command count: **117** (was 115 at M36 close; +2 new doc-
+  content-import verbs).
+- `package.json` version: **0.4.0** (stays through v0.5
+  milestones; bumps to `0.5.0` at v0.5 release-prep).
+
 **Live numbers (post-M36 IMPL close):**
 
 - Test count: **3950 + 1 skipped** across **166** test files
@@ -951,28 +982,88 @@ prep opens cleanly after M37 IMPL close-docs). After M37 closes,
 v0.5 release-prep opens at its own candidate-selection-or-direct
 session per the framework's per-milestone cadence.
 
-**Next session — M37 pre-flight (doc-content import contract
-diff).** Lands the contract surface: 2 new stub fetchers at
+**v0.5-M37 pre-flight closed at `8eb6da7..7f77b2d`** (4
+commits: feat `8eb6da7` + 3 Codex fix-up rounds at `44783f9` /
+`42860bb` / `7f77b2d` + round-4 ratification clean).
+**Cumulative pre-flight findings: 0 P1 + 1 P2 + 4 P3 across 3
+fix-up rounds** — within the M22 / M27 / M30 / M31 / M32 / M34
+/ M35 / M36 write-surface pre-flight precedent (cumulative 0-3
+P2 + 3-10 P3 typical). The contract surface for the 2 new
+v0.5-M37 verbs (`monday doc import-html` +
+`monday doc append-markdown`) ships: 2 stub fetchers at
 `src/api/documents.ts` (`importDocFromHtml` +
-`addContentToDocFromMarkdown` with `c8 ignore` wraps + JSDoc
-pinning the custom `{success, error?}` shape) + 2 GraphQL
-mutation documents pinned at literal operationNames
+`addContentToDocFromMarkdown` with `c8 ignore` wraps) + 2
+GraphQL mutation documents pinned at literal operationNames
 (`ImportDocFromHtml` + `AddContentToDocFromMarkdown` per
-R-NEW-37 W2 safely-by-construction); 2 wrapping response
-schemas + the shared custom-OBJECT projection contract per D12
-closure (`success: false` + populated `error` →
-`validation_failed`; empty `error` → `internal_error` with
-wire-regression hint); 2 command stubs at
-`src/commands/doc/import-html.ts` + `src/commands/doc/append-
-markdown.ts` (argv parsing BEFORE c8-ignore per R-NEW-76
-graduated discipline); cli-design §4.3 DOC extension; D13
-empirical size-limit probe runs at pre-flight kickoff
-(`scripts/probe/v0.5-m37-size-limits.ts` or similar) to find
-Monday's wire-side rejection threshold + map to a typed error
-code. Codex pre-flight review 2-4 rounds per the M35 / M36
-write-surface precedent (cumulative 0-3 P2 + 3-10 P3
-typical). v0.5-M37 closes M37 D12 + D13 + lights the
-remaining feature milestone in v0.5 scope before release-prep.
+R-NEW-37 W2 safely-by-construction) + 2 wrapping response
+schemas + 2 strict inner-OBJECT result schemas
+(`importDocFromHtmlResultSchema` /
+`docBlocksFromMarkdownResultSchema`) + 2 CLI projection
+envelopes + `MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000` constant +
+2 command stubs with mutex-source schemas
+(`src/commands/doc/import-html.ts` + `append-markdown.ts` —
+`parseArgv` BEFORE c8-ignore per R-NEW-76 graduated discipline;
+11th + 12th consumers post-graduation); cli-design §4.3 DOC
+extension + §13 v0.5 entry fold-in; output-shapes.md M37
+sections + "Doc-content import error messages" reference table
+per R-v0.5-NEW-15 per-source TBD deferral. D13 empirical
+size-limit probe ran at pre-flight kickoff
+(`scripts/probe/v0.5-m37-size-limits.ts`, 2026-05-17) +
+pinned the wire-side rejection threshold between 250KB-OK and
+500KB-rejected on both surfaces — rejection shape is generic
+`INTERNAL_SERVER_ERROR` (NOT the documented `{success: false,
+error}` envelope path), so the CLI pre-empts at parse boundary
+via the `MAX_DOC_IMPORT_PAYLOAD_BYTES` `.refine()` on inline
+`--html-string` / `--markdown-string`. D12 closure pins the
+custom-OBJECT projection (5 branches): success → flat envelope;
+`success: false + populated error` → `validation_failed`;
+`success: false + empty/null error` → `internal_error` (wire-
+regression hint); `success: true + missing payload` →
+`internal_error` (probe descriptions promise non-null); EMPTY
+`block_ids: []` on success → success WITH empty array. **9 doc-
+mutation surfaces total now sequenced across M35 (4 wire / 5
+CLI verbs) + M36 (3 wire / 3 CLI) + M37 (2 wire / 2 CLI) — 10
+CLI verbs; closes the v0.4-M32 doc-mutation deferral.**
+
+**R-v0.5-NEW-11 GRADUATED to a permanent Codex pre-flight
+template audit-point at M37 pre-flight close** (3rd supporting
+instance — per-fetcher null-payload contract decision discipline
+derived from probe-description return-shape promises). **R-v0.5-
+NEW-15 GRADUATED** (3rd supporting instance — pre-flight per-
+variant payload-shape deferral to IMPL cassettes). Template
+extensions (`.claude/templates/codex-pre-flight-review.md` W{N}
+audit-points) land at the next pre-flight session touching a
+custom-OBJECT / opaque-JSON / N-variant payload surface. **R-NEW-
+72 cross-doc grep extension to `src/commands/index.ts` module-
+import block prose filed as R-v0.5-NEW-19** (1 supporting
+instance from M37 pre-flight round-3 P3-1 catch — fix-up cost
+a full extra round because the round-1 W4 sweep missed the
+`src/commands/index.ts:286` site). **R-v0.5-NEW-18 filed**
+(`readUpdateBody` lift to generic file-or-stdin-or-inline-string
+helper; 3 consumers today + 2 projected at M37 IMPL = 5 projected
+post-lift; MEDIUM priority lift fires at M37 IMPL kickoff per
+R-NEW-58 lift-ahead-of-feat cadence). **R-NEW-41 5th supporting
+site landed** (camelCase wire arg names `workspaceId` /
+`folderId` / `docId` / `afterBlockId`). **Pushed to `origin/main`**
+at close-docs.
+
+**Next session — M37 IMPL (runtime bodies for doc import-html +
+append-markdown).** Lift `readUpdateBody` AHEAD-of-feat to
+generic source-content helper per R-v0.5-NEW-18; swap the 2
+c8-ignored stub fetcher bodies for live `client.raw` round-trips
++ two-stage parse + custom-OBJECT projection per D12 5-branch
+matrix; swap the 2 c8-ignored action body stubs for dry-run +
+runtime file/stdin source reading (via the lifted helper) +
+runtime size-guard at the read boundary + wire dispatch + emit
+via `emitMutation`. Per-source wire-side `error` string content
+(R-v0.5-NEW-15 deferral) pinned via M37 IMPL integration test
+cassettes — fills in the `docs/output-shapes.md` "Doc-content
+import error messages" TBD rows. Codex IMPL review 2-4 rounds
+per the M22 / M27 / M30 / M31 / M32 / M34 / M35 / M36 write-
+surface IMPL precedent (custom-OBJECT shape may add ~1 round vs
+M36's clean 3-round cadence per the M35 7-round outlier
+rationale). v0.5-M37 IMPL closes the LAST feature milestone in
+v0.5 scope; v0.5 release-prep opens after M37 IMPL close-docs.
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
