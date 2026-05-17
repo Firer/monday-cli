@@ -3911,6 +3911,134 @@ exports[`envelope snapshot — notification (M27) > notification send --dry-run 
 }
 `;
 
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown dry-run envelope (planned_changes shape) 1`] = `
+{
+  "error": {
+    "code": "internal_error",
+    "details": {
+      "deferred_to": "v0.5-M37 IMPL",
+      "hint": "agent contract surface (argv schema + parse-boundary rejections + dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.",
+    },
+    "http_status": null,
+    "message": "monday doc append-markdown runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects mutual exclusion of --markdown / --markdown-string 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "--markdown (file path or \`-\` for stdin) and --markdown-string (literal markdown) are mutually exclusive; supply exactly one",
+          "path": "markdown",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: markdown: --markdown (file path or \`-\` for stdin) and --markdown-string (literal markdown) are mutually exclusive; supply exactly one",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects neither --markdown nor --markdown-string (mutex) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "--markdown (file path or \`-\` for stdin) and --markdown-string (literal markdown) are mutually exclusive; supply exactly one",
+          "path": "markdown",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: markdown: --markdown (file path or \`-\` for stdin) and --markdown-string (literal markdown) are mutually exclusive; supply exactly one",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects non-numeric <doc-id> via DocId brand 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "expected a numeric ID",
+          "path": "docId",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: docId: expected a numeric ID",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
@@ -4088,6 +4216,134 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-update dry-
 }
 `;
 
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html dry-run envelope (planned_changes shape) 1`] = `
+{
+  "error": {
+    "code": "internal_error",
+    "details": {
+      "deferred_to": "v0.5-M37 IMPL",
+      "hint": "agent contract surface (argv schema + parse-boundary rejections + dry-run envelope) ships at pre-flight; the wire-call leg lands at IMPL.",
+    },
+    "http_status": null,
+    "message": "monday doc import-html runtime body is a pre-flight stub; lands at v0.5-M37 IMPL alongside integration tests.",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects mutual exclusion of --html / --html-string 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "--html (file path or \`-\` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+          "path": "html",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: html: --html (file path or \`-\` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects neither --html nor --html-string (mutex) 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "--html (file path or \`-\` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+          "path": "html",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: html: --html (file path or \`-\` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects unknown --kind at parse boundary 1`] = `
+{
+  "error": {
+    "code": "usage_error",
+    "details": {
+      "issues": [
+        {
+          "message": "Invalid option: expected one of "public"|"private"|"share"",
+          "path": "kind",
+        },
+      ],
+    },
+    "http_status": null,
+    "message": "invalid arguments: kind: Invalid option: expected one of "public"|"private"|"share"",
+    "monday_code": null,
+    "request_id": "fixed-req-id",
+    "retry_after_seconds": null,
+    "retryable": false,
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "none",
+  },
+  "ok": false,
+}
+`;
+
 exports[`envelope snapshot — raw > raw inline query 1`] = `
 {
   "data": {
@@ -4117,7 +4373,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 115,
+    "command_count": 117,
     "error_codes": [
       {
         "code": "usage_error",

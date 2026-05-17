@@ -3917,4 +3917,155 @@ describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
+
+  // ---------------------------------------------------------------
+  // v0.5-M37 doc-content import (`import-html` + `append-markdown`)
+  // pre-flight stub surface — parse-boundary rejections + post-parse
+  // stub `internal_error` (the c8-ignored stub body fires after
+  // `parseArgv` succeeds; runtime body lands at M37 IMPL alongside
+  // per-verb integration tests in `tests/integration/commands/doc-
+  // import-html` + `doc-append-markdown.test.ts`). No
+  // `confirmation_required` snapshot — both verbs are content-creation
+  // (0 destructive verbs at M37).
+  // ---------------------------------------------------------------
+
+  it('doc import-html rejects mutual exclusion of --html / --html-string', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'import-html',
+        '--workspace',
+        '5555',
+        '--html',
+        './plan.html',
+        '--html-string',
+        '<h1>x</h1>',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc import-html rejects neither --html nor --html-string (mutex)', async () => {
+    const out = await drive(
+      ['doc', 'import-html', '--workspace', '5555', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc import-html rejects unknown --kind at parse boundary', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'import-html',
+        '--workspace',
+        '5555',
+        '--html-string',
+        '<h1>x</h1>',
+        '--kind',
+        'not-a-kind',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc import-html dry-run envelope (planned_changes shape)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'import-html',
+        '--workspace',
+        '5555',
+        '--html-string',
+        '<h1>Plan</h1>',
+        '--folder',
+        '12345',
+        '--kind',
+        'private',
+        '--title',
+        'Q4 plan',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    // Stub action body throws `internal_error` after parseArgv per
+    // R-NEW-76; dry-run path lands at IMPL. Snapshot captures the
+    // post-parse stub envelope so the IMPL-time flip from
+    // internal_error → success+planned_changes is visible in diff.
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc append-markdown rejects mutual exclusion of --markdown / --markdown-string', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'append-markdown',
+        '88010',
+        '--markdown',
+        './notes.md',
+        '--markdown-string',
+        '# x',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc append-markdown rejects neither --markdown nor --markdown-string (mutex)', async () => {
+    const out = await drive(
+      ['doc', 'append-markdown', '88010', '--json'],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc append-markdown rejects non-numeric <doc-id> via DocId brand', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'append-markdown',
+        'not-numeric',
+        '--markdown-string',
+        '# x',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
+
+  it('doc append-markdown dry-run envelope (planned_changes shape)', async () => {
+    const out = await drive(
+      [
+        'doc',
+        'append-markdown',
+        '88010',
+        '--markdown-string',
+        '# Heading\n\nBody',
+        '--after',
+        'blk_anchor',
+        '--dry-run',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    // Same stub-shape note as import-html dry-run snapshot above —
+    // captures the M37 pre-flight stub envelope; IMPL flips to
+    // success+planned_changes.
+    expect(out.exitCode).toBe(2);
+    expect(parseEnvelope(out.stderr)).toMatchSnapshot();
+  });
 });

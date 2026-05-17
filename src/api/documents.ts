@@ -1,9 +1,11 @@
 /**
  * Workdocs read + mutation surface for the v0.4-M32 `monday doc
- * list/get` verbs, the v0.5-M35 doc-level CRUD verbs, and the
- * v0.5-M36 per-block CRUD verbs (`cli-design.md` §2.7 + §4.3 +
- * §13 v0.4/v0.5 entries; `v0.4-plan.md` §3 M32; `v0.5-plan.md` §3
- * M35 + §8 D7-D9; `v0.5-plan.md` §3 M36 + §8 D10-D11).
+ * list/get` verbs, the v0.5-M35 doc-level CRUD verbs, the v0.5-M36
+ * per-block CRUD verbs, and the v0.5-M37 doc-content import verbs
+ * (`cli-design.md` §2.7 + §4.3 + §13 v0.4/v0.5 entries;
+ * `v0.4-plan.md` §3 M32; `v0.5-plan.md` §3 M35 + §8 D7-D9;
+ * `v0.5-plan.md` §3 M36 + §8 D10-D11; `v0.5-plan.md` §3 M37 + §8
+ * D12-D13).
  *
  * **Wire surface (empirical probe 2026-05-14, API `2026-01`).** Two
  * Monday GraphQL operations land here, both against `Query.docs(...)`:
@@ -2295,3 +2297,554 @@ export const deleteDocBlock = async (
     complexity: response.complexity,
   };
 };
+
+// ===========================================================================
+// v0.5-M37 doc-content import mutation surface (PRE-FLIGHT STUBS)
+// ===========================================================================
+// Two fetchers land the doc-content import wire surface against Monday's
+// `import_doc_from_html` + `add_content_to_doc_from_markdown` mutations.
+// Each issues a single `client.raw` round-trip with a literal-pinned
+// `operationName` (R-NEW-37 W2 safely-by-construction); the response shape
+// is a custom `{ success!, doc_id? | block_ids?, error? }` OBJECT (NOT the
+// opaque-JSON M35 cadence and NOT the typed-OBJECT M36 cadence — distinct
+// third return shape on the doc-mutation surface).
+//
+// **Pre-flight ships stubs only.** Both fetcher bodies are `c8 ignore`-
+// wrapped; runtime bodies (two-stage parse + custom-OBJECT projection +
+// success/failure routing per D12) land at v0.5-M37 IMPL alongside
+// integration tests.
+//
+// Wire summary (empirical probe at `scripts/probe/v0.5-doc-mutations.ts` +
+// `v0.5-inputs-and-results.ts`, 2026-05-15, API `2026-01`):
+//
+//   - `import_doc_from_html(html: String!, workspaceId: ID!,
+//     kind: DocKind, folderId: ID, title: String) →
+//     ImportDocFromHtmlResult` (NON_NULL/OBJECT with 3 fields:
+//     `success: Boolean!`, `doc_id: String` (nullable), `error: String`
+//     (nullable)). Operation name `ImportDocFromHtml` pinned literally
+//     per R-NEW-37 W2.
+//   - `add_content_to_doc_from_markdown(docId: ID!, markdown: String!,
+//     afterBlockId: String) → DocBlocksFromMarkdownResult` (NON_NULL/
+//     OBJECT with 3 fields: `success: Boolean!`, `block_ids:
+//     [String!]` (nullable list of non-null strings), `error: String`
+//     (nullable)). Operation name `AddContentToDocFromMarkdown` pinned.
+//
+// **camelCase wire arg names (Finding 7).** Both M37 mutations use
+// camelCase (`workspaceId`, `folderId`, `docId`, `afterBlockId`) on
+// Monday's wire — same asymmetry as M35's `update_doc_name` /
+// `delete_doc` / `duplicate_doc` (NOT the M36 snake_case symmetric
+// path). The GraphQL operation documents below use camelCase variable
+// names + camelCase wire arg names verbatim; CLI argv stays kebab-case
+// throughout (`--workspace <wid>`, `--folder <fid>`, `--after <bid>`);
+// error envelope `details.*` keys stay snake_case per cli-design §6.5
+// (`details.workspace_id`, `details.doc_id`). Documented as the 5th
+// supporting site for R-NEW-41 at the canonical `docs/architecture.md`
+// "Wire-vs-CLI semantics documentation conventions" section.
+//
+// **Custom-OBJECT projection contract (D12 closure).** Distinct third
+// return-shape on Monday's doc-mutation surface:
+//
+//   - M35 `create_doc` returns full Document OBJECT (typed schema).
+//   - M35 `update_doc_name` / `delete_doc` / `duplicate_doc` return
+//     opaque `JSON` scalar (D9 projection to `{doc_id, success: true}`).
+//   - M36 `create_doc_block` / `update_doc_block` return full
+//     DocumentBlock OBJECT (typed schema); `delete_doc_block` returns
+//     DocumentBlockIdOnly OBJECT.
+//   - **M37 `import_doc_from_html` / `add_content_to_doc_from_markdown`
+//     return a custom 3-field result OBJECT carrying a `success`
+//     discriminator** + an optional payload (`doc_id` / `block_ids`) +
+//     an optional `error` string (wire-side detail when `success:
+//     false`).
+//
+// Per D12 closure, the fetcher projects the custom OBJECT into the
+// flat `{ doc_id, success: true }` (import-html) / `{ doc_id (echoed),
+// block_ids, success: true }` (append-markdown) envelope on the success
+// path, and throws typed `ApiError`s on failure:
+//
+//   - **`success: true + payload present`** → success envelope. The
+//     `data.success: true` slot pins literal-`true` so agents key off
+//     it for retry/idempotency reasoning across the doc-mutation
+//     surface uniformly (mirrors M35's `{doc_id, success: true}` cadence).
+//   - **`success: false + populated `error`** → throw
+//     `validation_failed` with `details.error: <wire-error-message>`.
+//     Monday's `error` field carries the user-visible rejection reason
+//     (invalid HTML, payload too large, markdown parse failure, etc.);
+//     `validation_failed` is the right typed code because the wire-
+//     side rejection is structural, NOT a transport or permission
+//     error.
+//   - **`success: false + empty/null `error`** → throw
+//     `internal_error` with a wire-regression hint. Monday's contract
+//     is "`error` is detailed message when `success: false`"; missing
+//     `error` on a failed mutation indicates the wire shape regressed
+//     (the field went missing OR Monday returned `success: false`
+//     without populating the documented diagnostic slot).
+//   - **`success: true + missing payload`** → throw `internal_error`
+//     (Monday promises the new `doc_id` / `block_ids` on success).
+//
+// The exact per-fetcher null-payload contract decisions (per
+// R-v0.5-NEW-11 graduation candidate at 3rd supporting instance) are
+// derived from each mutation's probe-description return-shape promise:
+//
+//   - `import_doc_from_html` probe description: "Returns the ID of
+//     the newly created document on success" → null `doc_id` on
+//     `success: true` IS a wire-regression signal (`internal_error`).
+//   - `add_content_to_doc_from_markdown` probe description: "Returns
+//     the IDs of the newly created blocks on success" → null
+//     `block_ids` on `success: true` IS a wire-regression signal
+//     (`internal_error`). An EMPTY (`[]`) `block_ids` array on
+//     success is plausible (markdown payload contains no convertible
+//     blocks); the schema accepts empty arrays as success.
+//
+// **D13 closure: empirical wire-side payload-size threshold.** The
+// pre-flight `scripts/probe/v0.5-m37-size-limits.ts` probe (2026-05-17,
+// API `2026-01`) pinned an empirical wire-side rejection threshold
+// between **250KB (last-known-good) and 500KB (first-known-rejected)**
+// on BOTH `import_doc_from_html` (`html`) and
+// `add_content_to_doc_from_markdown` (`markdown`) slots — identical
+// threshold on both surfaces, consistent with a transport-layer
+// request-size cap (NOT a per-mutation schema constraint).
+//
+// **Wire rejection shape is unusual.** Oversized payloads do NOT
+// surface via the documented `{ success: false, error: '...' }`
+// envelope path. Instead, Monday's transport layer rejects the
+// request BEFORE the schema layer can return the typed envelope,
+// surfacing a generic GraphQL `errors[]` payload:
+//
+//   ```
+//   errors: [{ message: 'Internal Server Error',
+//              extensions: { code: 'INTERNAL_SERVER_ERROR' } }]
+//   ```
+//
+// This routes through the standard transport-layer `mapMondayError`
+// path and lands as `internal_error` — misleading for what is
+// fundamentally a payload-size issue. The CLI pre-empts this by
+// rejecting oversized `--html-string` / `--markdown-string` payloads
+// at the argv-parse boundary via {@link MAX_DOC_IMPORT_PAYLOAD_BYTES}
+// (the parse-time string-length check fires `usage_error.details.
+// reason: 'payload_too_large'` ahead of any wire dispatch). The file-
+// read path (`--html <file>` / `--markdown <file>`) lands the same
+// size guard at the runtime read boundary (IMPL).
+//
+// **No new ERROR_CODES at M37.** Existing codes route doc-content-
+// import failures: `usage_error` (argv-parse rejections — mutual-
+// exclusion of file vs string source, empty payload, oversized
+// `--html-string` / `--markdown-string`), `validation_failed`
+// (Monday-side rejection via `success: false + error`), `internal_
+// error` (wire-shape regression OR `INTERNAL_SERVER_ERROR` for an
+// oversized payload that slipped past the parse-boundary check),
+// `not_found` (`append-markdown` against a non-existent or
+// inaccessible `<doc-id>`), `forbidden` / `unauthorized` (token
+// lacks workdoc-write scope).
+//
+// **0 destructive verbs at M37.** Both `doc import-html` + `doc
+// append-markdown` are content-creation surfaces — no `--yes`
+// destructive gate fires (M10 round-1 P2 invariant doesn't apply).
+//
+// **R-NEW-76 discipline preserved.** Both pre-flight stub action
+// bodies run `parseArgv` BEFORE the `c8 ignore start` block-wrap so
+// invalid argv surfaces `usage_error` from the parse boundary, NOT
+// `internal_error` from the c8-ignored stub throw.
+
+/**
+ * Maximum byte-size for the inline `--html-string` / `--markdown-string`
+ * payload at the argv-parse boundary (empirical probe 2026-05-17, API
+ * `2026-01`; `scripts/probe/v0.5-m37-size-limits.report.txt`). Set
+ * conservatively at the LAST-KNOWN-GOOD probe size (250KB) — the wire's
+ * first-known-rejection sits at 500KB, so 250KB leaves the agent contract
+ * comfortably below the threshold without leaving room for the wire-side
+ * `INTERNAL_SERVER_ERROR` surprise.
+ *
+ * Bytes (NOT UTF-16 code units) — the parse-boundary check measures the
+ * payload via `Buffer.byteLength(payload, 'utf8')` so multi-byte
+ * characters in the payload count toward the limit the same way Monday's
+ * transport layer sees them.
+ *
+ * Raising this constant is a contract bump: any agent that relied on
+ * being rejected at the old limit might now silently succeed with a
+ * larger payload (additive change). Lowering it is a tighter rejection
+ * surface (potentially breaking — fold into a Codex review at the v0.6+
+ * pre-flight that touches doc-content import). Future API versions may
+ * shift Monday's wire threshold; re-running the probe at any v0.5.x or
+ * v0.6 pre-flight that re-opens this surface pins the new threshold.
+ */
+export const MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000;
+
+/**
+ * Inner OBJECT schema for `import_doc_from_html`'s
+ * `ImportDocFromHtmlResult` wire return shape — 3 fields per the
+ * v0.5 introspection probe (`scripts/probe/v0.5-inputs-and-results.
+ * report.txt`):
+ *
+ *   - `success: Boolean!` — discriminator; pinned NON_NULL per
+ *     introspection.
+ *   - `doc_id: String` — nullable; populated on `success: true`,
+ *     null on `success: false` per Monday's documented contract.
+ *     Note Monday's wire types this slot as `String` (NOT `ID`!)
+ *     despite the value being a doc-id-shaped reference. The CLI
+ *     surfaces it as a brand-untyped string at the wire layer; the
+ *     CLI projection envelope re-brands via {@link DocIdSchema} on
+ *     the way out so agents read a `DocId`-shaped slot.
+ *   - `error: String` — nullable; populated on `success: false`,
+ *     null on `success: true`. Wire-side rejection reason (invalid
+ *     HTML, payload-too-large, etc.).
+ *
+ * `.strict()` mode — Monday's wire OBJECT shape is documented at
+ * exactly 3 fields; an unknown key would indicate wire-shape
+ * regression worth catching loudly (the wrapping `loose()` schema
+ * tolerates side-band debug keys at the response root, not at the
+ * inner OBJECT layer).
+ */
+export const importDocFromHtmlResultSchema = z
+  .object({
+    success: z.boolean(),
+    doc_id: z.string().min(1).nullable(),
+    error: z.string().nullable(),
+  })
+  .strict();
+
+export type ImportDocFromHtmlResult = z.infer<typeof importDocFromHtmlResultSchema>;
+
+/**
+ * Inner OBJECT schema for `add_content_to_doc_from_markdown`'s
+ * `DocBlocksFromMarkdownResult` wire return shape — 3 fields per the
+ * v0.5 introspection probe:
+ *
+ *   - `success: Boolean!` — discriminator; NON_NULL.
+ *   - `block_ids: [String!]` — nullable LIST of NON_NULL strings;
+ *     populated on `success: true` with the newly-created block
+ *     ids (one per parsed markdown block); null on `success:
+ *     false`. EMPTY array on success is plausible (markdown payload
+ *     contains no convertible blocks); the schema accepts empty.
+ *   - `error: String` — nullable; populated on `success: false`,
+ *     null on `success: true`.
+ *
+ * `.strict()` mode for the same reason as
+ * {@link importDocFromHtmlResultSchema}.
+ */
+export const docBlocksFromMarkdownResultSchema = z
+  .object({
+    success: z.boolean(),
+    block_ids: z.array(z.string().min(1)).nullable(),
+    error: z.string().nullable(),
+  })
+  .strict();
+
+export type DocBlocksFromMarkdownResult = z.infer<
+  typeof docBlocksFromMarkdownResultSchema
+>;
+
+/**
+ * CLI projection envelope for `monday doc import-html` — flat
+ * `{ doc_id, success: true }` shape mirroring M35's
+ * {@link docMutationResultSchema} cadence so agents read a uniform
+ * `{ doc_id, success }` shape across every doc-mutation success
+ * envelope (rename / delete / duplicate / import-html). `doc_id`
+ * carries the **NEWLY-CREATED** doc's id; `success` is literal-
+ * `true` because failure paths throw typed `ApiError`s
+ * (`validation_failed` for `success: false + error` per D12 / null
+ * for wire regression) BEFORE this projection schema is referenced.
+ *
+ * No `error` slot — failures don't reach this envelope. Agents read
+ * `error.code` + `error.details.error` from the failure envelope
+ * instead.
+ */
+export const docImportHtmlOutputSchema = z
+  .object({
+    doc_id: z.string().min(1),
+    success: z.literal(true),
+  })
+  .strict();
+
+export type DocImportHtmlOutput = z.infer<typeof docImportHtmlOutputSchema>;
+
+/**
+ * CLI projection envelope for `monday doc append-markdown` —
+ * `{ doc_id (echoed input), block_ids, success: true }`. Echoes
+ * the input source-doc id so agents that pipe the append envelope
+ * into a follow-up call (e.g. a `monday doc get <doc-id>` to verify
+ * post-append state) have the parent doc context inline.
+ * `block_ids` carries the wire's full list of NEWLY-CREATED block
+ * ids (one per parsed markdown block) preserved in markdown-source
+ * order. Empty array IS a valid success shape (markdown payload
+ * contained zero convertible blocks).
+ *
+ * `success` is literal-`true` for the same reason as
+ * {@link docImportHtmlOutputSchema}.
+ */
+export const docAppendMarkdownOutputSchema = z
+  .object({
+    doc_id: z.string().min(1),
+    block_ids: z.array(z.string().min(1)),
+    success: z.literal(true),
+  })
+  .strict();
+
+export type DocAppendMarkdownOutput = z.infer<
+  typeof docAppendMarkdownOutputSchema
+>;
+
+/**
+ * GraphQL mutation document for `import_doc_from_html(html,
+ * workspaceId, kind?, folderId?, title?) → ImportDocFromHtmlResult`.
+ * Operation name pinned literally to `ImportDocFromHtml` (R-NEW-37
+ * W2 audit-point — operationNames NOT caller-overridable). All wire
+ * args are camelCase (Finding 7); variable names match the wire
+ * shape verbatim.
+ *
+ * Selects every `ImportDocFromHtmlResult` field per the introspection
+ * probe — the 3-field selection lets the fetcher project the
+ * discriminator + payload + error in a single round-trip.
+ */
+export const IMPORT_DOC_FROM_HTML_MUTATION = `
+  mutation ImportDocFromHtml(
+    $html: String!,
+    $workspaceId: ID!,
+    $kind: DocKind,
+    $folderId: ID,
+    $title: String
+  ) {
+    import_doc_from_html(
+      html: $html,
+      workspaceId: $workspaceId,
+      kind: $kind,
+      folderId: $folderId,
+      title: $title
+    ) {
+      success
+      doc_id
+      error
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation document for `add_content_to_doc_from_markdown(
+ * docId, markdown, afterBlockId?) → DocBlocksFromMarkdownResult`.
+ * Operation name pinned to `AddContentToDocFromMarkdown` (R-NEW-37
+ * W2). camelCase wire arg names (Finding 7).
+ *
+ * `afterBlockId` is the optional opaque block-id positional anchor —
+ * Monday inserts the parsed markdown blocks immediately after the
+ * named block; absent → blocks land at the document tail (append-end
+ * semantics, NOT append-head; Monday's probe description: "Use this
+ * to append content to the end of a document or insert content after
+ * a specific block").
+ */
+export const ADD_CONTENT_TO_DOC_FROM_MARKDOWN_MUTATION = `
+  mutation AddContentToDocFromMarkdown(
+    $docId: ID!,
+    $markdown: String!,
+    $afterBlockId: String
+  ) {
+    add_content_to_doc_from_markdown(
+      docId: $docId,
+      markdown: $markdown,
+      afterBlockId: $afterBlockId
+    ) {
+      success
+      block_ids
+      error
+    }
+  }
+`;
+
+/**
+ * Wrapping response schema for the `ImportDocFromHtml` mutation. The
+ * `import_doc_from_html` slot widens to `unknown` so the wrapping
+ * parse tolerates Monday's side-band debug keys (the `.loose()` mode
+ * mirrors M27 / M32 / M34 / M35 / M36); the post-parse layer pins
+ * the value against {@link importDocFromHtmlResultSchema} via
+ * `unwrapOrThrow` so per-field drift surfaces with structured
+ * `details.issues` (two-stage parse, mirrors M34 / M35 / M36 cadence).
+ */
+const importDocFromHtmlResponseSchema = z
+  .object({
+    import_doc_from_html: z.unknown(),
+  })
+  .loose();
+
+/**
+ * Wrapping response schema for the `AddContentToDocFromMarkdown`
+ * mutation. Same shape as {@link importDocFromHtmlResponseSchema} —
+ * loose root tolerance + strict inner OBJECT pin at the post-parse
+ * layer.
+ */
+const addContentToDocFromMarkdownResponseSchema = z
+  .object({
+    add_content_to_doc_from_markdown: z.unknown(),
+  })
+  .loose();
+
+export interface ImportDocFromHtmlInputs {
+  readonly client: MondayClient;
+  readonly html: string;
+  readonly workspaceId: string;
+  /**
+   * Optional doc-kind enum (`public` / `private` / `share`) — maps
+   * to wire `kind: DocKind`. Absent → omitted from the wire payload
+   * (Monday's wire-side default "public" applies per the probe
+   * description: "Defaults to 'public' if not specified").
+   */
+  readonly kind?: DocKind;
+  /**
+   * Optional folder id — maps to wire `folderId: ID`. Absent →
+   * omitted; Monday creates the doc at the workspace root level per
+   * the probe description: "If not provided, the document will be
+   * created at the root level of the workspace".
+   */
+  readonly folderId?: string;
+  /**
+   * Optional title — maps to wire `title: String`. Absent → omitted;
+   * Monday infers the title from the HTML content per the probe
+   * description: "If not provided, the title will be inferred from
+   * the HTML content".
+   */
+  readonly title?: string;
+}
+
+export interface ImportDocFromHtmlActionResult {
+  readonly result: DocImportHtmlOutput;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * **PRE-FLIGHT STUB** — imports an HTML payload as a new workdoc via
+ * `import_doc_from_html(...)` with `operationName: 'ImportDocFromHtml'`
+ * (R-NEW-37 W2). The runtime body lands at v0.5-M37 IMPL alongside
+ * integration tests; today's body is a `c8 ignore`-wrapped
+ * `internal_error` throw so the parse-boundary surface
+ * (`MAX_DOC_IMPORT_PAYLOAD_BYTES` + mutual-exclusion + required-slot
+ * presence) ships as the agent contract while the wire-call leg
+ * stays out of the coverage scope.
+ *
+ * **At IMPL the runtime body will:**
+ *
+ *   1. Dispatch `import_doc_from_html` via `client.raw` with the
+ *      camelCase variable shape (`workspaceId`, `folderId`, etc.);
+ *      omit optional variables when their input slot is undefined
+ *      (Monday's omit-vs-null discipline — undefined-keyed JSON
+ *      serialises to a missing key, NOT `null`).
+ *   2. Two-stage parse: loose wrapping schema tolerates side-band
+ *      keys; `assertResponseFieldPresent` rewraps missing-key as
+ *      `internal_error`; the inner OBJECT pins via
+ *      {@link importDocFromHtmlResultSchema}.
+ *   3. Project the result OBJECT per D12 closure:
+ *      - `success: true + doc_id present` → success envelope
+ *        `{doc_id, success: true}`.
+ *      - `success: false + populated error` → throw
+ *        `validation_failed` with
+ *        `details: {workspace_id, error, hint}`.
+ *      - `success: false + empty/null error` → throw
+ *        `internal_error` with wire-regression hint.
+ *      - `success: true + missing doc_id` → throw `internal_error`
+ *        (Monday promises a non-null doc_id on success per probe
+ *        description).
+ */
+/* c8 ignore start */
+export const importDocFromHtml = async (
+  inputs: ImportDocFromHtmlInputs,
+): Promise<ImportDocFromHtmlActionResult> => {
+  // Pre-flight stub body — IMPL session swaps for the live `client.raw`
+  // round-trip + two-stage parse via the loose wrapping schema +
+  // `assertResponseFieldPresent` + inner OBJECT pin via
+  // `importDocFromHtmlResultSchema` + projection per D12. The `void`
+  // statements pre-pin the deferred-use symbols so they don't show as
+  // unused at pre-flight; IMPL drops them when the symbols start
+  // showing up in real expressions.
+  void inputs;
+  void IMPORT_DOC_FROM_HTML_MUTATION;
+  void importDocFromHtmlResponseSchema;
+  void importDocFromHtmlResultSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'importDocFromHtml is a pre-flight stub; runtime body lands at v0.5-M37 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M37 IMPL',
+        hint:
+          'agent contract surface (argv schema + custom-OBJECT projection ' +
+          'contract per D12) ships at pre-flight; the wire-call leg lands at IMPL.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */
+
+export interface AddContentToDocFromMarkdownInputs {
+  readonly client: MondayClient;
+  readonly docId: string;
+  readonly markdown: string;
+  /**
+   * Optional opaque block-id anchor — Monday inserts the parsed
+   * markdown blocks immediately after `afterBlockId` in the doc body
+   * order. Absent → blocks land at the document tail (append-end
+   * semantics per Monday's probe description).
+   */
+  readonly afterBlockId?: string;
+}
+
+export interface AddContentToDocFromMarkdownActionResult {
+  readonly result: DocAppendMarkdownOutput;
+  readonly source: 'live';
+  readonly cacheAgeSeconds: null;
+  readonly complexity: Complexity | null;
+}
+
+/**
+ * **PRE-FLIGHT STUB** — appends parsed-markdown blocks to an existing
+ * workdoc via `add_content_to_doc_from_markdown(...)` with
+ * `operationName: 'AddContentToDocFromMarkdown'` (R-NEW-37 W2).
+ * Runtime body lands at v0.5-M37 IMPL.
+ *
+ * **At IMPL the runtime body will:**
+ *
+ *   1. Dispatch `add_content_to_doc_from_markdown` via `client.raw`;
+ *      omit `afterBlockId` when undefined.
+ *   2. Two-stage parse (loose root + strict inner OBJECT pin via
+ *      {@link docBlocksFromMarkdownResultSchema}).
+ *   3. Project per D12:
+ *      - `success: true + block_ids present` (incl. empty array) →
+ *        success envelope `{doc_id (echoed), block_ids, success: true}`.
+ *      - `success: false + populated error` → throw
+ *        `validation_failed` with `details: {doc_id, error, hint}`.
+ *      - `success: false + empty/null error` → throw
+ *        `internal_error` with wire-regression hint.
+ *      - `success: true + missing block_ids` → throw `internal_error`
+ *        (Monday promises a non-null `block_ids` list on success).
+ *      - `success: true + present-but-empty block_ids` → success
+ *        envelope WITH empty `block_ids` (Monday's plausible "no
+ *        convertible blocks in markdown" semantics; NOT a failure).
+ */
+/* c8 ignore start */
+export const addContentToDocFromMarkdown = async (
+  inputs: AddContentToDocFromMarkdownInputs,
+): Promise<AddContentToDocFromMarkdownActionResult> => {
+  // Pre-flight stub body — same deferred-use pattern as
+  // {@link importDocFromHtml}. IMPL drops the `void` statements when
+  // the wire call + two-stage parse + D12 projection land.
+  void inputs;
+  void ADD_CONTENT_TO_DOC_FROM_MARKDOWN_MUTATION;
+  void addContentToDocFromMarkdownResponseSchema;
+  void docBlocksFromMarkdownResultSchema;
+  void assertResponseFieldPresent;
+  void unwrapOrThrow;
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    'addContentToDocFromMarkdown is a pre-flight stub; runtime body lands at v0.5-M37 IMPL.',
+    {
+      details: {
+        deferred_to: 'v0.5-M37 IMPL',
+        hint:
+          'agent contract surface (argv schema + custom-OBJECT projection ' +
+          'contract per D12) ships at pre-flight; the wire-call leg lands at IMPL.',
+      },
+    },
+  );
+};
+/* c8 ignore stop */

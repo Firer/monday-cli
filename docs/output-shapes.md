@@ -67,7 +67,7 @@ no `data`); see the **Errors** section at the bottom.
 | [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
 | [webhook](#monday-webhook-list-bid-v03-m27) | list (M27), create (M27), delete (M27) |
 | [notification](#monday-notification-send---user-uid---target-iidbid---target-type-itemboard---text-t---dry-run-v03-m27) | send (M27) |
-| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35), block-create (v0.5-M36), block-update (v0.5-M36), block-delete (v0.5-M36) |
+| [doc](#monday-doc-list---workspace-wid---order-by-created_atused_at---limit-n---page-n-v04-m32) | list (v0.4-M32), get (v0.4-M32), create-in-workspace (v0.5-M35), create-on-column (v0.5-M35), rename (v0.5-M35), delete (v0.5-M35), duplicate (v0.5-M35), block-create (v0.5-M36), block-update (v0.5-M36), block-delete (v0.5-M36), import-html (v0.5-M37 pre-flight), append-markdown (v0.5-M37 pre-flight) |
 | [completion](#monday-completion-bashzshfish-v04-m33) | completion (v0.4-M33) |
 | [Errors](#errors) | error envelope shape |
 
@@ -4864,6 +4864,301 @@ they're variants whose live shapes await a real-world cassette
 `--type` enum still accepts them and the wire round-trip still
 fires; only the documented `--content` shape is pending.
 Extending the table is additive at any future v0.5.x patch.
+
+### `monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>) [--folder <fid>] [--kind public|private|share] [--title <t>]` (v0.5-M37 pre-flight)
+
+> **STATUS: pre-flight stub at this commit.** Argv schema +
+> commander wiring + custom-OBJECT projection contract ship as the
+> agent contract surface. Runtime body (file/stdin source reading +
+> size guard at runtime + `import_doc_from_html` dispatch + custom-
+> OBJECT projection per D12) lands at v0.5-M37 IMPL alongside
+> integration tests. The wire-call leg is `c8 ignore`-wrapped at
+> the action body — the post-parse stub surface throws
+> `internal_error.details.deferred_to: 'v0.5-M37 IMPL'` for any
+> live invocation while the parse-boundary surface (mutual-
+> exclusion of `--html` / `--html-string`, oversized
+> `--html-string` rejection per D13, malformed `WorkspaceId` /
+> `DocFolderId` brands, unknown `--kind`) ships verbatim.
+
+Import an HTML payload as a new workdoc via Monday's
+`Mutation.import_doc_from_html(html: String!, workspaceId: ID!,
+kind: DocKind, folderId: ID, title: String) →
+ImportDocFromHtmlResult` (operationName `ImportDocFromHtml` pinned
+literally per R-NEW-37 W2). Custom-OBJECT return shape — distinct
+third return cadence on the doc-mutation surface (NOT M35's opaque
+JSON, NOT M36's typed-OBJECT direct-unwrap).
+
+**Argv shape.**
+
+- `--workspace <wid>` — required (Monday's `workspaceId: ID!`).
+  Brand-validated via `WorkspaceIdSchema`.
+- `--html <file|->` OR `--html-string <s>` — mutually exclusive,
+  exactly one required. File path form supports `-` for stdin per
+  cli-design §3.1 stdin discipline. **Inline `--html-string` is
+  capped at 256_000 bytes UTF-8** (`MAX_DOC_IMPORT_PAYLOAD_BYTES`)
+  at the parse boundary per D13 closure — oversized payloads
+  reject with `usage_error.details.reason: 'payload_too_large'`
+  ahead of any wire call. File / stdin path applies the same cap
+  at the runtime read boundary (IMPL).
+- `--folder <fid>` — optional, brand-validated via
+  `DocFolderIdSchema` (numeric). Absent → doc lands at workspace
+  root.
+- `--kind <k>` — optional 3-value closed enum (`public` /
+  `private` / `share`); maps to wire `kind: DocKind`. Absent →
+  Monday applies wire-side default `public`.
+- `--title <t>` — optional non-empty string; maps to wire
+  `title: String`. Absent → Monday infers title from HTML content.
+
+**camelCase wire arg names** (`workspaceId` / `folderId`) — 5th
+supporting site for R-NEW-41 asymmetric wire-vs-CLI documentation
+(see `src/api/documents.ts` module header for canonical asymmetry
+note).
+
+**Live success envelope** (custom-OBJECT projection per D12 —
+flat `{doc_id, success: true}` mirroring M35 cadence):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "doc_id": "8702200",
+    "success": true
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+**Validation-failed envelope** (D12 — `success: false + populated error`):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "validation_failed",
+    "message": "import_doc_from_html rejected by Monday: <wire-error-message>",
+    "details": {
+      "workspace_id": "5555",
+      "error": "<verbatim wire error string>",
+      "hint": "verify the HTML payload is well-formed and the workspace allows doc creation"
+    }
+  },
+  "meta": { /* source: "live" */ }
+}
+```
+
+**Payload-too-large envelope** (D13 — parse-boundary check on
+inline `--html-string` AHEAD of any wire call):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "invalid argv: --html-string exceeds the 256000-byte wire-side limit ...",
+    "details": {
+      "issues": [
+        {
+          "path": "htmlString",
+          "message": "--html-string exceeds the 256000-byte wire-side limit (empirical probe pinned the threshold between 250KB OK and 500KB rejected; pass --html <file> with a smaller payload, or split the import across multiple calls)"
+        }
+      ]
+    }
+  },
+  "meta": { /* source: "none" */ }
+}
+```
+
+**Mutual-exclusion envelope** (parse-boundary rejection when both
+or neither of `--html` / `--html-string` are supplied):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "invalid argv: --html (file path or `-` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+    "details": {
+      "issues": [
+        {
+          "path": "html",
+          "message": "--html (file path or `-` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one"
+        }
+      ]
+    }
+  },
+  "meta": { /* source: "none" */ }
+}
+```
+
+**Dry-run envelope** (argv-derived; no preflight read; HTML
+payload itself omitted, only its source descriptor logged so
+agents see WHAT would be sent without the bytes):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { /* source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "import_doc_from_html",
+      "workspace_id": "5555",
+      "html_source": "(inline)",
+      "folder_id": "12345",
+      "kind": "private",
+      "title": "Q4 plan"
+    }
+  ],
+  "warnings": []
+}
+```
+
+Idempotent: no (re-running creates a fresh duplicate doc; Monday's
+wire does not dedupe by HTML content or title).
+
+### `monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>) [--after <bid>]` (v0.5-M37 pre-flight)
+
+> **STATUS: pre-flight stub at this commit.** Same shape as
+> `import-html` — argv parse-boundary surface ships verbatim; the
+> wire-call leg + file/stdin reading + size guard at runtime land
+> at M37 IMPL.
+
+Append a parsed-markdown payload as new blocks to an existing
+workdoc via Monday's `Mutation.add_content_to_doc_from_markdown
+(docId: ID!, markdown: String!, afterBlockId: String) →
+DocBlocksFromMarkdownResult` (operationName
+`AddContentToDocFromMarkdown` pinned per R-NEW-37 W2).
+
+**Argv shape.**
+
+- `<doc-id>` — required positional, brand-validated via
+  `DocIdSchema`.
+- `--markdown <file|->` OR `--markdown-string <s>` — mutually
+  exclusive, exactly one required. Same file / stdin / inline shape
+  as `import-html` (`-` for stdin per §3.1; 256KB cap on inline
+  per D13).
+- `--after <bid>` — optional opaque-string block ID anchor (maps
+  to wire `afterBlockId: String`); brand-validated via
+  `DocBlockIdSchema`. Absent → markdown blocks land at the
+  document tail (append-end semantics per Monday's probe
+  description: "Use this to append content to the end of a
+  document or insert content after a specific block").
+
+**camelCase wire arg names** (`docId` / `afterBlockId`) — 5th
+supporting site for R-NEW-41.
+
+**Live success envelope** (custom-OBJECT projection per D12 —
+echoes input `doc_id` for follow-up pipeline ergonomics):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "doc_id": "88010",
+    "block_ids": ["blk_new1", "blk_new2", "blk_new3"],
+    "success": true
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+**Empty `block_ids` IS valid success** (markdown payload contained
+zero convertible blocks — e.g. empty file, or markdown that parsed
+to comments only):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "doc_id": "88010",
+    "block_ids": [],
+    "success": true
+  },
+  "meta": { /* source: "live" */ },
+  "warnings": []
+}
+```
+
+**Validation-failed envelope** (D12 — `success: false + populated error`):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "validation_failed",
+    "message": "add_content_to_doc_from_markdown rejected by Monday: <wire-error-message>",
+    "details": {
+      "doc_id": "88010",
+      "error": "<verbatim wire error string>",
+      "hint": "verify the markdown payload parses cleanly and the doc allows content append"
+    }
+  },
+  "meta": { /* source: "live" */ }
+}
+```
+
+**Dry-run envelope** (argv-derived; markdown payload omitted):
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "meta": { /* source: "none", dry_run: true */ },
+  "planned_changes": [
+    {
+      "operation": "add_content_to_doc_from_markdown",
+      "doc_id": "88010",
+      "markdown_source": "./notes.md",
+      "after_block_id": "blk_anchor"
+    }
+  ],
+  "warnings": []
+}
+```
+
+Idempotent: no (re-running creates a SECOND block-set with the
+same content; Monday's wire does not dedupe append operations).
+For fine-grained per-block control use the M36 `doc block-*`
+verbs.
+
+### Doc-content import error messages (v0.5-M37 IMPL reference)
+
+Monday's `import_doc_from_html` + `add_content_to_doc_from_markdown`
+mutations surface wire-side rejection reasons via the
+`{success: false, error: <message>}` envelope. The exact `error`
+string content (per source — invalid HTML / markdown parse failure
+/ permission denied / payload-too-large / etc.) is NOT pinned by
+introspection and the pre-flight probe was structural-only (the
+D13 size probe ran the success path through cleanup; failure
+strings live at the IMPL cassette boundary per R-v0.5-NEW-15
+per-variant payload-shape deferral discipline).
+
+The table below pins the per-source `error` strings the M37 IMPL
+integration-test cassettes will exercise live. Pre-flight ships
+the table with TBD rows; M37 IMPL fills the rows from cassette
+evidence + the CLI projection (D12) maps each row's
+`success: false + error` to `validation_failed.details.error:
+<verbatim>`.
+
+| Mutation | Failure source | Wire `error` string | Mapped CLI envelope |
+|----------|----------------|---------------------|---------------------|
+| `import_doc_from_html` | Invalid HTML payload (malformed tags / broken structure) | TBD (cassette-pin at M37 IMPL) | `validation_failed.details.error: <verbatim>` |
+| `import_doc_from_html` | Workspace lacks doc-create permission | TBD | `validation_failed.details.error: <verbatim>` OR `forbidden` per transport-layer mapping |
+| `import_doc_from_html` | Oversized payload that slipped past parse-boundary check | `Internal Server Error` (extensions.code: `INTERNAL_SERVER_ERROR`) | `internal_error` (transport-layer; CLI parse-boundary pre-empts at 256KB) |
+| `add_content_to_doc_from_markdown` | Invalid markdown payload (rare — markdown is permissive) | TBD | `validation_failed.details.error: <verbatim>` |
+| `add_content_to_doc_from_markdown` | Non-existent / inaccessible `<doc-id>` | TBD | `not_found` (likely; transport-layer mapping) OR `validation_failed` per wire shape |
+| `add_content_to_doc_from_markdown` | `afterBlockId` references a block in a different doc | TBD | `validation_failed.details.error: <verbatim>` |
+| `add_content_to_doc_from_markdown` | Token lacks workdoc-write scope | TBD | `forbidden` per transport-layer mapping |
+
+Cells marked `TBD` are NOT cassette-pinned at v0.5-M37 pre-flight
+— they're per-source failure-string shapes whose verbatim wire
+text awaits a real-world cassette at M37 IMPL. The CLI's argv
+schema still rejects oversized inline payloads at the parse
+boundary per D13; the wire-call leg + the per-source rejection
+strings land at M37 IMPL. Extending the table is additive at any
+future v0.5.x patch as new failure modes surface.
 
 ---
 

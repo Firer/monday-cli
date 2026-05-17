@@ -2803,6 +2803,150 @@ monday doc block-delete <bid> --yes [--dry-run]                             v0.5
                                           # rewraps to `not_found` per
                                           # the standard delete cadence
                                           # mirroring M14 / M34 / M35).
+monday doc import-html --workspace <wid> (--html <file|-> | --html-string <s>)
+                       [--folder <fid>] [--kind public|private|share]
+                       [--title <t>] [--dry-run]                            v0.5
+                                          # `Mutation.import_doc_from_
+                                          # html(html: String!,
+                                          # workspaceId: ID!, kind:
+                                          # DocKind, folderId: ID, title:
+                                          # String) →
+                                          # ImportDocFromHtmlResult`
+                                          # (custom 3-field OBJECT:
+                                          # `success: Boolean!`,
+                                          # `doc_id: String` nullable,
+                                          # `error: String` nullable).
+                                          # Pinned at M37 pre-flight via
+                                          # the v0.5 empirical probe
+                                          # (`scripts/probe/v0.5-doc-
+                                          # mutations.ts` + `v0.5-inputs-
+                                          # and-results.ts`, 2026-05-15).
+                                          # Mutually-exclusive content
+                                          # source: `--html <file|->`
+                                          # (file path or `-` for stdin
+                                          # per §3.1 stdin discipline)
+                                          # OR `--html-string <s>`
+                                          # (literal HTML); exactly one
+                                          # required, rejected at parse
+                                          # boundary with
+                                          # `usage_error.details.issues
+                                          # []`. **Empirical size cap
+                                          # at 256KB** (per D13 closure
+                                          # — `scripts/probe/v0.5-m37-
+                                          # size-limits.ts` 2026-05-17
+                                          # pinned the wire-side
+                                          # rejection threshold between
+                                          # 250KB-OK and 500KB-rejected;
+                                          # CLI pre-empts at parse
+                                          # boundary on inline
+                                          # `--html-string` via
+                                          # `usage_error.details.reason:
+                                          # 'payload_too_large'`; file/
+                                          # stdin path applies the
+                                          # same cap at runtime). The
+                                          # wire rejection shape for
+                                          # oversized payloads is a
+                                          # generic GraphQL
+                                          # `INTERNAL_SERVER_ERROR`
+                                          # (NOT `{success: false,
+                                          # error}`) — the parse-boundary
+                                          # check pre-empts the
+                                          # misleading transport-layer
+                                          # error. camelCase wire arg
+                                          # names (`workspaceId`,
+                                          # `folderId`) — 5th supporting
+                                          # site for R-NEW-41 asymmetric
+                                          # wire-vs-CLI documentation.
+                                          # Custom-OBJECT projection per
+                                          # D12 closure: `success: true
+                                          # + doc_id` → success envelope
+                                          # `data: { doc_id, success:
+                                          # true }` (mirrors M35's
+                                          # cadence); `success: false +
+                                          # populated error` →
+                                          # `validation_failed.details.
+                                          # error: <wire-error>`;
+                                          # `success: false + empty
+                                          # error` → `internal_error`
+                                          # (wire-regression hint).
+                                          # `operationName:
+                                          # 'ImportDocFromHtml'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned
+                                          # operation + resolved input
+                                          # slots (HTML payload itself
+                                          # omitted; only its source
+                                          # descriptor logged).
+                                          # Idempotent: no (Monday's
+                                          # wire does not dedupe by
+                                          # HTML content or title;
+                                          # re-running creates a fresh
+                                          # duplicate doc).
+monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>)
+                           [--after <bid>] [--dry-run]                      v0.5
+                                          # `Mutation.add_content_to_
+                                          # doc_from_markdown(docId:
+                                          # ID!, markdown: String!,
+                                          # afterBlockId: String) →
+                                          # DocBlocksFromMarkdownResult`
+                                          # (custom 3-field OBJECT:
+                                          # `success: Boolean!`,
+                                          # `block_ids: [String!]`
+                                          # nullable, `error: String`
+                                          # nullable). Same
+                                          # custom-OBJECT cadence as
+                                          # `import-html`; same D12
+                                          # projection contract; same
+                                          # D13 256KB parse-boundary cap
+                                          # on inline `--markdown-string`
+                                          # (transport-layer cap is
+                                          # surface-wide). Mutually-
+                                          # exclusive content source
+                                          # `--markdown <file|->` vs
+                                          # `--markdown-string <s>` —
+                                          # exactly one required. `<did>`
+                                          # is the target doc's numeric
+                                          # ID (`DocIdSchema`). `--after
+                                          # <bid>` is the optional
+                                          # opaque-string block ID
+                                          # anchor (`DocBlockIdSchema`)
+                                          # — markdown blocks insert
+                                          # immediately after the named
+                                          # block; absent → blocks land
+                                          # at the document tail (append-
+                                          # end semantics per Monday's
+                                          # probe description). camelCase
+                                          # wire arg names (`docId`,
+                                          # `afterBlockId`) — 5th
+                                          # supporting site for R-NEW-41.
+                                          # Envelope per D12: `success:
+                                          # true + block_ids` → success
+                                          # envelope `data: { doc_id
+                                          # (echoed), block_ids,
+                                          # success: true }` (echoes
+                                          # input doc id for follow-up
+                                          # pipeline ergonomics);
+                                          # **empty `block_ids: []` IS
+                                          # a valid success shape**
+                                          # (markdown payload had zero
+                                          # convertible blocks). Failure
+                                          # mapping mirrors `import-html`
+                                          # (`success: false + error` →
+                                          # `validation_failed`; empty
+                                          # error → `internal_error`).
+                                          # `operationName: 'AddContent
+                                          # ToDocFromMarkdown'` pinned
+                                          # (R-NEW-37 W2). Live-only;
+                                          # dry-run emits planned
+                                          # operation + resolved input
+                                          # slots (markdown payload
+                                          # itself omitted). Idempotent:
+                                          # no (re-running creates a
+                                          # SECOND block-set with the
+                                          # same content; for fine-
+                                          # grained per-block control
+                                          # use the M36 `doc block-*`
+                                          # verbs).
 
 # === NOTIFICATION ===
 monday notification send --user <uid> --target <iid|bid> --target-type item|board --text <t> [--dry-run]   v0.3
@@ -8198,8 +8342,9 @@ scoped idempotent changes, and post comments narrating its work.**
 - Workdocs CRUD mutations — 9 surfaces total split across 3 v0.5
   milestones per the M35/M36/M37 sequencing. **v0.5-M35 ships
   the doc-level CRUD surface (5 verbs)** + **v0.5-M36 ships the
-  per-block CRUD surface (3 verbs)** end-to-end; M37 doc-content
-  import opens at its own pre-flight after M36 IMPL closes.
+  per-block CRUD surface (3 verbs)** end-to-end; **v0.5-M37
+  pre-flight at this commit ships the doc-content import surface
+  (2 verbs)** as stubs — runtime bodies land at M37 IMPL.
   v0.5-M35 verbs (closed): `monday doc create-in-workspace`
   (`create_doc(location: {workspace: ...})`) +
   `monday doc create-on-column` (`create_doc(location: {board:
@@ -8233,8 +8378,41 @@ scoped idempotent changes, and post comments narrating its work.**
   `DocumentBlockIdOnly`). Snake_case wire arg names (`doc_id`,
   `block_id`, `after_block_id`, `parent_block_id`) — back to
   Monday's standard cadence after M35's camelCase asymmetry.
-  Doc-content import (`import_doc_from_html` /
-  `add_content_to_doc_from_markdown`) defers to v0.5-M37.
+  **v0.5-M37 pre-flight stubs at this commit.** v0.5-M37 verbs:
+  `monday doc import-html --workspace <wid> (--html <file|-> |
+  --html-string <s>) [--folder <fid>] [--kind <k>] [--title <t>]`
+  (`import_doc_from_html`) + `monday doc append-markdown <did>
+  (--markdown <file|-> | --markdown-string <s>) [--after <bid>]`
+  (`add_content_to_doc_from_markdown`). Both wire mutations return
+  a custom 3-field OBJECT (`success: Boolean!`, `doc_id?` /
+  `block_ids?`, `error?`) per D12 closure — distinct third return
+  shape on the doc-mutation surface (NOT M35's opaque JSON, NOT
+  M36's typed-OBJECT direct-unwrap). camelCase wire arg names
+  (`workspaceId`, `folderId`, `docId`, `afterBlockId`) — 5th
+  supporting site for R-NEW-41 asymmetric wire-vs-CLI cadence.
+  Mutually-exclusive content source flags
+  (`--html`/`--html-string`, `--markdown`/`--markdown-string`) —
+  file path / stdin / inline-string per §3.1 stdin discipline;
+  pre-flight ships parse-boundary mutual-exclusion + the D13
+  empirical 256KB payload-size cap on inline `--*-string` forms
+  (`MAX_DOC_IMPORT_PAYLOAD_BYTES`). D13 closure pinned the wire-
+  side rejection threshold between 250KB-OK and 500KB-rejected
+  via `scripts/probe/v0.5-m37-size-limits.ts` (2026-05-17);
+  rejection shape is generic `INTERNAL_SERVER_ERROR` (NOT the
+  documented `{success: false, error}` envelope), so the CLI
+  pre-empts at parse boundary with `usage_error.details.reason:
+  'payload_too_large'` on oversized `--*-string` payloads. D12
+  closure pins the custom-OBJECT projection: `success: true +
+  payload` → flat `{doc_id, success: true}` (import-html) or
+  `{doc_id (echoed), block_ids, success: true}` (append-markdown);
+  `success: false + populated error` → `validation_failed.details.
+  error: <wire-error>`; `success: false + empty error` →
+  `internal_error` (wire-regression hint). Runtime bodies (file/
+  stdin source reading + size guard at runtime read boundary +
+  wire dispatch + projection) + integration tests land at M37
+  IMPL. **9 doc-mutation surfaces total now sequenced across M35
+  (4 wire / 5 CLI verbs) + M36 (3 wire / 3 CLI) + M37 (2 wire /
+  2 CLI) — closes the v0.4-M32 doc-mutation deferral.**
   Empirical probe at v0.5 kickoff
   (`scripts/probe/v0.5-doc-mutations.ts` +
   `v0.5-inputs-and-results.ts` + `v0.5-nested-inputs.ts`,

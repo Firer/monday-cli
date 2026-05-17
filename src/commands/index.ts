@@ -259,6 +259,33 @@ import { docDuplicateCommand } from './doc/duplicate.js';
 import { docBlockCreateCommand } from './doc/block-create.js';
 import { docBlockUpdateCommand } from './doc/block-update.js';
 import { docBlockDeleteCommand } from './doc/block-delete.js';
+// M37 (v0.5) — doc-content import mutation surface (`doc import-html` /
+// `append-markdown`). 2 new mutation verbs under the existing `doc`
+// namespace; fourth v0.5 milestone after M34 team writers + M35 doc-
+// level CRUD + M36 per-block CRUD. Pre-flight stubs at this commit
+// (argv schema + wire mutation documents + custom-OBJECT projection
+// schemas + parse-boundary size guard per D13 — runtime bodies + file/
+// stdin source reading + integration tests land at M37 IMPL).
+// Empirical probes:
+//   - `scripts/probe/v0.5-doc-mutations.ts` + `v0.5-inputs-and-results
+//     .ts` (2026-05-15, API `2026-01`) pinned Monday's `Mutation.import_
+//     doc_from_html` + `add_content_to_doc_from_markdown` signatures +
+//     `ImportDocFromHtmlResult` / `DocBlocksFromMarkdownResult` 3-field
+//     custom OBJECT shapes (`success!`, `doc_id|block_ids?`, `error?`).
+//   - `scripts/probe/v0.5-m37-size-limits.ts` (2026-05-17, API
+//     `2026-01`) pinned the empirical wire-side payload-size threshold
+//     between 250KB-OK and 500KB-rejected on both surfaces (D13
+//     closure). The rejection shape is `errors[]: [{ message: 'Internal
+//     Server Error', extensions: { code: 'INTERNAL_SERVER_ERROR' } }]`
+//     — NOT the documented `success: false + error` envelope; the CLI
+//     pre-empts via a parse-boundary size guard at
+//     `MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000`.
+// D12 closure: project the custom OBJECT — `success: false + populated
+// error` → `validation_failed`; empty `error` → `internal_error` (wire-
+// regression hint). D13 closure: empirical size threshold pinned at
+// 256KB conservative (last-known-good).
+import { docImportHtmlCommand } from './doc/import-html.js';
+import { docAppendMarkdownCommand } from './doc/append-markdown.js';
 // M34 (v0.5) — team writer surface (`user team-list` / `team-get` /
 // `team-create` / `team-delete` / `team-add-members` /
 // `team-remove-members`). 6 new verbs under the existing `user`
@@ -412,6 +439,8 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     docBlockCreateCommand,
     docBlockUpdateCommand,
     docBlockDeleteCommand,
+    docImportHtmlCommand,
+    docAppendMarkdownCommand,
     completionCommand,
     rawCommand,
     boardDoctorCommand,
