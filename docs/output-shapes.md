@@ -4981,7 +4981,7 @@ inline `--html-string` AHEAD of any wire call):
   "ok": false,
   "error": {
     "code": "usage_error",
-    "message": "invalid argv: --html-string exceeds the 256000-byte wire-side limit ...",
+    "message": "invalid arguments: htmlString: --html-string exceeds the 256000-byte wire-side limit (empirical probe pinned the threshold between 250KB OK and 500KB rejected; pass --html <file> with a smaller payload, or split the import across multiple calls)",
     "details": {
       "issues": [
         {
@@ -5003,7 +5003,7 @@ or neither of `--html` / `--html-string` are supplied):
   "ok": false,
   "error": {
     "code": "usage_error",
-    "message": "invalid argv: --html (file path or `-` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
+    "message": "invalid arguments: html: --html (file path or `-` for stdin) and --html-string (literal HTML) are mutually exclusive; supply exactly one",
     "details": {
       "issues": [
         {
