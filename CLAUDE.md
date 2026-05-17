@@ -11,8 +11,8 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.5.0 ready for publish — pending user push authorization +
-npm publish.** The v0.5 release-prep cluster (this session)
+**v0.5.0 published — release complete.** The v0.5 release-prep
+cluster (this session)
 mirrored v0.4 release-prep's `c193f21..b8e4cd0` shape verbatim
 across 5 commits with diff + 1 zero-diff envelope-snapshot probe
 (skipped because every v0.5 milestone refreshed its own snapshots
@@ -26,11 +26,12 @@ v0.5-M34 close-docs gap caught at release-prep ToC audit per
 R-NEW-82's 3rd-consecutive-consumer graduation) + `665c46e`
 README v0.5 quickstart + scope refresh + `ae7b074` version bump
 0.4.0 → 0.5.0 in `package.json` + `package-lock.json` + `5afa3fe`
-CHANGELOG `[0.5.0]` entry + this close-docs sweep commit.
-Annotated `v0.5.0` git tag created locally pointing at this
-cluster's HEAD; push to `origin/main`, `gh release create`, and
-`npm publish` pending user authorization (mirroring v0.3-M28 +
-v0.4 release-prep wait-for-authorization cadence).
+CHANGELOG `[0.5.0]` entry + `c2e2df6` close-docs sweep.
+**Pushed to `origin/main`** at the close-docs commit +
+**annotated `v0.5.0` tag pushed** pointing at `c2e2df6` +
+**GitHub release live** at https://github.com/Firer/monday-cli/releases/tag/v0.5.0
+with the full CHANGELOG body + **npm publish landed
+2026-05-17T20:55:05Z** (`monday-cli@0.5.0`, `latest` dist-tag).
 
 **No code-surface change in the release-prep cluster** — only
 docs, tests, the deferral-slip string-literal updates, and the
@@ -936,7 +937,7 @@ at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
 `documentBlockSchema` already exists at M32 (M36 fetchers
 reuse it); no R-class lift fires ahead of feat.
 
-**Live numbers (v0.5.0 ready for publish):**
+**Live numbers (v0.5.0 published):**
 
 - Test count: **4054 + 1 skipped** across **170** test files
   (unchanged from M37 IMPL close — the release-prep cluster adds
@@ -958,11 +959,12 @@ reuse it); no R-class lift fires ahead of feat.
 - Command count: **117** (unchanged — release-prep adds no
   verbs).
 - `package.json` version: **0.5.0** (bumped at `ae7b074`).
-- `v0.5.0` annotated tag points at the cluster's final commit
-  (created locally; **pushed to `origin/main` + GitHub release
-  + npm publish pending user authorization**, mirroring the
-  v0.3-M28 + v0.4 release-prep cadences). v0.4.0's tag remains
-  live at `b8e4cd0`.
+- `v0.5.0` annotated tag points at `c2e2df6` (close-docs
+  commit); **pushed to `origin/main`** + **GitHub release live**
+  at https://github.com/Firer/monday-cli/releases/tag/v0.5.0.
+  v0.4.0's tag remains live at `b8e4cd0`.
+- npm registry version: **0.5.0** (`latest` dist-tag,
+  published 2026-05-17T20:55:05Z by `nickwebster`).
 
 **Live numbers (post-v0.5-M37 IMPL close — carried for context):**
 
