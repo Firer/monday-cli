@@ -657,10 +657,14 @@ describe('monday update create (integration, M5b)', () => {
       );
       expect(out.exitCode).toBe(1);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: { code: string; details?: { body_file?: string } };
+        error?: { code: string; details?: { file_path?: string } };
       };
       expect(env.error?.code).toBe('usage_error');
-      expect(env.error?.details?.body_file).toBe(path);
+      // Post-R-v0.5-NEW-18 lift: the generic `readSourceContent` helper
+      // surfaces the path under `details.file_path` (universal naming
+      // across M13 update verbs + M37 doc-content imports), replacing
+      // M13's `details.body_file`.
+      expect(env.error?.details?.file_path).toBe(path);
     });
   });
 
@@ -695,8 +699,9 @@ describe('monday update create (integration, M5b)', () => {
     // Codex M5b finding #4 (P2): coverage proof for the value-
     // scanning redactor on a user-input echo path that landed in
     // M5b. `update create --body-file <path>` echoes the path via
-    // `JSON.stringify(bodyFile)` and `details.body_file` when the
-    // read fails. Drive a non-existent path whose name LITERALLY
+    // `JSON.stringify(file)` and `details.file_path` when the
+    // read fails (post-R-v0.5-NEW-18 lift; was `details.body_file`
+    // pre-lift). Drive a non-existent path whose name LITERALLY
     // CONTAINS the canary bytes and verify the redactor scrubs
     // them before the UsageError envelope is emitted.
     const path = `/tmp/nonexistent-${LEAK_CANARY}.md`;

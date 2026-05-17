@@ -27,7 +27,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { UpdateIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { readUpdateBody } from './body-source.js';
+import { readSourceContent } from '../../utils/source-content.js';
 import {
   projectMutationUpdate,
   UPDATE_FIELDS_FRAGMENT,
@@ -101,10 +101,12 @@ export const updateReplyCommand: CommandModule<
           program.opts(),
         );
 
-        const body = await readUpdateBody({
-          inlineBody: parsed.body,
-          bodyFile: globalFlags.bodyFile,
+        const body = await readSourceContent({
+          inline: parsed.body,
+          file: globalFlags.bodyFile,
           stdin: ctx.stdin,
+          inlineFlagName: '--body',
+          fileFlagName: '--body-file',
           verbHint:
             'monday update reply requires either --body <md> or ' +
             '--body-file <path>. Use --body-file - to read from stdin.',
