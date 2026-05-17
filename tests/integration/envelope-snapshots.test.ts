@@ -3818,13 +3818,21 @@ describe('envelope snapshot — doc CRUD (v0.5-M35)', () => {
   });
 });
 
-describe('envelope snapshot — per-block CRUD (v0.5-M36)', () => {
+describe('envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37)', () => {
   // M36 wraps `create_doc_block` + `update_doc_block` +
-  // `delete_doc_block`. Snapshots cover the parse-boundary
-  // usage_error rejections + destructive-gate confirmation_required
-  // + dry-run envelopes; live-mutation envelopes are pinned in the
-  // per-verb integration test files (doc-block-create / update /
-  // delete) where cassettes thread the wire response shape.
+  // `delete_doc_block`. M37 wraps `import_doc_from_html` +
+  // `add_content_to_doc_from_markdown`. Snapshots cover the
+  // parse-boundary usage_error rejections + destructive-gate
+  // confirmation_required + dry-run envelopes; live-mutation
+  // envelopes are pinned in the per-verb integration test files
+  // (doc-block-create / update / delete + doc-import-html /
+  // append-markdown) where cassettes thread the wire response shape.
+  //
+  // Pre-Codex-IMPL-round-5: M37 cases lived inside the M36 describe
+  // block (vestige of the M37 pre-flight commit that added them
+  // mid-block). The describe-title widening here keeps the M37
+  // snapshot keys readable (they prepend the describe title) without
+  // moving the snapshot bodies — see Codex IMPL round-5 P3-1.
 
   it('doc block-create rejects unknown --type at parse boundary (D10)', async () => {
     const out = await drive(

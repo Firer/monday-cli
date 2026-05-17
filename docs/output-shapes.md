@@ -4936,7 +4936,7 @@ populated error`):
   "ok": false,
   "error": {
     "code": "validation_failed",
-    "message": "import_doc_from_html rejected by Monday: <wire-error-message>",
+    "message": "Monday rejected import_doc_from_html: <wire-error-message>",
     "details": {
       "workspace_id": "5555",
       "error": "<verbatim wire error string>",
@@ -5120,7 +5120,7 @@ populated error`):
   "ok": false,
   "error": {
     "code": "validation_failed",
-    "message": "add_content_to_doc_from_markdown rejected by Monday: <wire-error-message>",
+    "message": "Monday rejected add_content_to_doc_from_markdown: <wire-error-message>",
     "details": {
       "doc_id": "88010",
       "error": "<verbatim wire error string>",

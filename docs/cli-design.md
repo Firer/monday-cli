@@ -8428,9 +8428,11 @@ scoped idempotent changes, and post comments narrating its work.**
   Mutually-exclusive content source flags
   (`--html`/`--html-string`, `--markdown`/`--markdown-string`) —
   file path / stdin / inline-string per §3.1 stdin discipline;
-  pre-flight ships parse-boundary mutual-exclusion + the D13
-  empirical 256_000-byte payload-size cap on inline `--*-string`
-  forms (`MAX_DOC_IMPORT_PAYLOAD_BYTES`). D13 closure pinned the wire-
+  parse-boundary mutual-exclusion + the D13 empirical 256_000-byte
+  payload-size cap on inline `--*-string` forms
+  (`MAX_DOC_IMPORT_PAYLOAD_BYTES`); file / stdin paths apply the
+  same cap at the runtime read boundary via the lifted
+  `readSourceContent.maxBytes` slot. D13 closure pinned the wire-
   side rejection threshold between 250KB-OK and 500KB-rejected
   via `scripts/probe/v0.5-m37-size-limits.ts` (2026-05-17);
   rejection shape is generic `INTERNAL_SERVER_ERROR` (NOT the

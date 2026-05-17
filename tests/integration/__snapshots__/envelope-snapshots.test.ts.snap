@@ -3911,7 +3911,7 @@ exports[`envelope snapshot — notification (M27) > notification send --dry-run 
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown dry-run envelope (planned_changes shape) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc append-markdown dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
   "meta": {
@@ -3938,7 +3938,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown d
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects mutual exclusion of --markdown / --markdown-string 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc append-markdown rejects mutual exclusion of --markdown / --markdown-string 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -3971,7 +3971,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown r
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects neither --markdown nor --markdown-string (mutex) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc append-markdown rejects neither --markdown nor --markdown-string (mutex) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4004,7 +4004,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown r
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects non-numeric <doc-id> via DocId brand 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc append-markdown rejects non-numeric <doc-id> via DocId brand 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4037,7 +4037,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown r
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown rejects oversized --markdown-string at parse boundary (D13) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc append-markdown rejects oversized --markdown-string at parse boundary (D13) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4070,7 +4070,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc append-markdown r
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create dry-run envelope (planned_changes shape) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-create dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
   "meta": {
@@ -4101,7 +4101,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create dry-
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create rejects malformed --content JSON at parse boundary 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-create rejects malformed --content JSON at parse boundary 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4131,7 +4131,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create reje
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create rejects unknown --type at parse boundary (D10) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-create rejects unknown --type at parse boundary (D10) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4164,7 +4164,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-create reje
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete (confirmation_required without --yes / --dry-run) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-delete (confirmation_required without --yes / --dry-run) 1`] = `
 {
   "error": {
     "code": "confirmation_required",
@@ -4193,7 +4193,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete (con
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete dry-run envelope (planned_changes shape) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-delete dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
   "meta": {
@@ -4218,7 +4218,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-delete dry-
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-update dry-run envelope (planned_changes shape) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc block-update dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
   "meta": {
@@ -4247,7 +4247,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc block-update dry-
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html dry-run envelope (planned_changes shape) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc import-html dry-run envelope (planned_changes shape) 1`] = `
 {
   "data": null,
   "meta": {
@@ -4276,7 +4276,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html dry-r
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects mutual exclusion of --html / --html-string 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc import-html rejects mutual exclusion of --html / --html-string 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4309,7 +4309,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejec
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects neither --html nor --html-string (mutex) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc import-html rejects neither --html nor --html-string (mutex) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4342,7 +4342,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejec
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects oversized --html-string at parse boundary (D13) 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc import-html rejects oversized --html-string at parse boundary (D13) 1`] = `
 {
   "error": {
     "code": "usage_error",
@@ -4375,7 +4375,7 @@ exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejec
 }
 `;
 
-exports[`envelope snapshot — per-block CRUD (v0.5-M36) > doc import-html rejects unknown --kind at parse boundary 1`] = `
+exports[`envelope snapshot — per-block CRUD (v0.5-M36) + doc-content import (v0.5-M37) > doc import-html rejects unknown --kind at parse boundary 1`] = `
 {
   "error": {
     "code": "usage_error",
