@@ -11,8 +11,63 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.5-M34 IMPL closed at `afdba15..02f1b1a`.** First v0.5
-milestone shipped end-to-end — team writer surface (6 new
+**v0.5-M37 IMPL closed at `c431d96..25e1204`.** LAST v0.5
+feature milestone shipped end-to-end — doc-content import
+surface (2 new verbs under the existing `monday doc` namespace:
+`import-html` + `append-markdown`) backed by Monday's
+`import_doc_from_html` + `add_content_to_doc_from_markdown`
+custom-OBJECT mutations. IMPL cluster: R-v0.5-NEW-18 lift
+`c431d96` (ahead-of-feat per R-NEW-58 cadence — generic
+`readSourceContent` at `src/utils/source-content.ts` widens
+M13's `readUpdateBody` to parameterise on `inlineFlagName` /
+`fileFlagName` / `verbHint?` / `maxBytes?` /
+`trimTrailingWhitespace?`; 5 consumers post-lift across 3 M13
+update verbs + 2 M37 doc verbs; 20 unit tests pin the helper's
+branch matrix) + IMPL feat `51ad434` (2 runtime fetcher bodies
+in `src/api/documents.ts` swap c8-ignored stubs for live
+`client.raw` round-trips against literal-pinned operationNames
+`ImportDocFromHtml` + `AddContentToDocFromMarkdown`; two-stage
+parse via loose wrapping schemas + `assertResponseFieldPresent`
++ strict inner-OBJECT pin per `importDocFromHtmlResultSchema` /
+`docBlocksFromMarkdownResultSchema`; D12 5-branch custom-OBJECT
+projection per fetcher per R-v0.5-NEW-11 graduated discipline;
+2 action bodies wire `resolveClient` + `readSourceContent` with
+`MAX_DOC_IMPORT_PAYLOAD_BYTES` runtime size-guard +
+`emitDryRun` / `emitMutation`; 36 new integration tests across
+2 new files at `tests/integration/commands/doc-{import-html,
+append-markdown}.test.ts`; 2 envelope-snapshot dry-run shapes
+refreshed) + 5 Codex IMPL fix-up rounds (round-1 `9374a7c`:
+0 P1 + 2 P2 + 2 P3 — dry-run/live whitespace-only asymmetry
+fixed by `.refine((s) => s.trim().length > 0, ...)` on both
+schemas + M13 lift contract drift pinned in update.test.ts +
+5 stale pre-flight prose sites + empty-block_ids prose conflict;
+round-2 `0ec8629`: 0 P1 + 0 P2 + 2 P3 — residual empty-block
+prose + 3 remaining pre-flight prose sites including the
+R-v0.5-NEW-19 W15 catch on src/commands/index.ts; round-3
+`1a64f49`: 0 P1 + 0 P2 + 1 P3 — sibling-site empty-block
+prose at schema + envelope + cli-design row; round-4 `58e41c2`:
+0 P1 + 0 P2 + 3 P3 — append-markdown read-boundary half +
+stale `readUpdateBody` references in update/edit.ts +
+update/reply.ts + output-shapes test count swap; round-5
+`25e1204`: 0 P1 + 0 P2 + 3 P3 — envelope-snapshots describe-
+title M37 mislabelling + cli-design "pre-flight ships" stale
+tense + validation_failed example message order mismatch).
+Round-6 ratified clean (0 P1 + 0 P2 + 0 P3 across all 16
+audit points W1-W16). **Cumulative IMPL findings: 0 P1 + 2 P2
++ 11 P3 across 5 fix-up rounds** — within the M22 / M27 / M30
+/ M31 / M32 / M34 / M35 / M36 write-surface IMPL precedent;
+~1 round above M36's clean 3-round OBJECT-return cadence,
+driven by the custom-OBJECT shape's prose surface + the R-NEW-72
+sibling-site grep cycle expanding noun-stem matching over
+rounds 3-5. **Pushed to `origin/main`** at close-docs.
+**v0.5-M37 closes the LAST feature milestone in v0.5 scope.**
+**16 new CLI verbs / 9 wire mutations across M34 (6) + M35 (5)
++ M36 (3) + M37 (2)** all shipped end-to-end; v0.5 release-
+prep opens at the next session per the per-milestone cadence.
+
+**v0.5-M34 IMPL closed at `afdba15..02f1b1a`** (carried for
+context). First v0.5 milestone shipped end-to-end — team writer
+surface (6 new
 verbs under the existing `monday user` namespace: `team-list`
 / `team-get` / `team-create` / `team-delete` / `team-add-
 members` / `team-remove-members`). IMPL cluster: `afdba15`
@@ -820,38 +875,40 @@ at v0.3-M27 (M36 consumes the helper at consumers 4 + 5);
 `documentBlockSchema` already exists at M32 (M36 fetchers
 reuse it); no R-class lift fires ahead of feat.
 
-**Live numbers (post-v0.5-M37 pre-flight close + post-close
-refactor-audit):**
+**Live numbers (post-v0.5-M37 IMPL close):**
 
-- Test count: **3998 + 1 skipped** across **167** test files
-  (+48 net vs 3950 + 1 skipped at M36 IMPL close: 30 new argv-
-  parser unit tests at `tests/unit/commands/doc/m37-argv.test.ts`
-  + 11 new envelope snapshots at `tests/integration/envelope-
-  snapshots.test.ts` (4 import-html parse-boundary rejections +
-  1 import-html dry-run stub envelope + 4 append-markdown
-  parse-boundary rejections + 1 append-markdown dry-run stub
-  envelope + 1 import-html oversized-payload snapshot at
-  round-1 P2-1 fix-up + 1 append-markdown oversized-payload
-  parallel-sibling snapshot at the post-close refactor-audit
-  per R-v0.5-NEW-9 2nd-supporting-instance graduation) + 1
-  schema-snapshot refresh from the +2 commands in the registry
-  + 6 from parameterized .each expansion.
-- Coverage: **99.30 / 96.38 / 99.45 / 99.56** (stmts /
+- Test count: **4054 + 1 skipped** across **170** test files
+  (+56 net vs 3998 + 1 skipped at M37 pre-flight close: 20
+  source-content unit tests at `tests/unit/utils/source-content.
+  test.ts` (R-v0.5-NEW-18 lift) + 36 M37 integration tests
+  across 2 new files (`tests/integration/commands/doc-{import-
+  html,append-markdown}.test.ts`; 17 + 19) − 2 envelope-
+  snapshot tests renumbered post-describe-widening (round-5
+  P3-1 widened the M36 describe-block to cover M37; snapshot
+  bodies byte-identical, only key prefix changed). Rounds 1-5
+  fix-ups added prose-only changes; round-1 P2-2 pinned 2 new
+  assertions on existing update.test.ts cases; round-4 P3-2
+  renamed one test.
+- Coverage: **99.29 / 96.45 / 99.45 / 99.55** (stmts /
   branches / fns / lines) at the **95 / 95.45 / 95 / 95**
-  floor. **Branches margin 0.93pp** (UNCHANGED vs M36 IMPL
-  close — pre-flight stub c8-ignore wraps held coverage at
-  floor through argv-test branch coverage on the new schemas
-  + envelope-snapshot coverage on the parse-boundary path;
-  IMPL further improves all metrics per the M32 + M34 + M35 +
-  M36 IMPL precedent).
+  floor. **Branches margin 1.00pp** (was 0.93pp at M37
+  pre-flight close; +0.07pp from runtime-body branches covered
+  by integration tests vs the 2 c8-ignored stub fetcher drops
+  + 2 stub action-body drops; first v0.5 IMPL milestone to
+  cross the 1.00pp branches margin threshold). All four
+  metrics within floor; stmts/fns/lines functionally unchanged
+  vs pre-flight (the R-v0.5-NEW-18 lift adds the helper file
+  outside the M37 src surface; the round-1 P2-1 `.refine()`
+  adds minor branch surface).
 - ERROR_CODES count: **29** (unchanged per D12 closure — M37
-  reuses existing codes; the `validation_failed` code covers
-  `success: false + error` and the `internal_error` code
-  covers wire-regression branches).
-- Command count: **117** (was 115 at M36 close; +2 new doc-
-  content-import verbs).
+  reuses existing codes; `validation_failed` covers `success:
+  false + error`; `internal_error` covers wire-regression
+  branches; `usage_error` covers parse-boundary + runtime
+  size-guard rejections).
+- Command count: **117** (unchanged from pre-flight; IMPL adds
+  no verbs).
 - `package.json` version: **0.4.0** (stays through v0.5
-  milestones; bumps to `0.5.0` at v0.5 release-prep).
+  release-prep, then bumps to `0.5.0`).
 
 **Live numbers (post-M36 IMPL close):**
 
@@ -1063,23 +1120,54 @@ FILED** (UTF-8 byte-length cap via `.refine()` for wire-side
 payload caps; 2 consumers via M37; LOW priority; fires at 3rd
 consumer).
 
-**Next session — M37 IMPL (runtime bodies for doc import-html +
-append-markdown).** Lift `readUpdateBody` AHEAD-of-feat to
-generic source-content helper per R-v0.5-NEW-18; swap the 2
-c8-ignored stub fetcher bodies for live `client.raw` round-trips
-+ two-stage parse + custom-OBJECT projection per D12 5-branch
-matrix; swap the 2 c8-ignored action body stubs for dry-run +
-runtime file/stdin source reading (via the lifted helper) +
-runtime size-guard at the read boundary + wire dispatch + emit
-via `emitMutation`. Per-source wire-side `error` string content
-(R-v0.5-NEW-15 deferral) pinned via M37 IMPL integration test
-cassettes — fills in the `docs/output-shapes.md` "Doc-content
-import error messages" TBD rows. Codex IMPL review 2-4 rounds
-per the M22 / M27 / M30 / M31 / M32 / M34 / M35 / M36 write-
-surface IMPL precedent (custom-OBJECT shape may add ~1 round vs
-M36's clean 3-round cadence per the M35 7-round outlier
-rationale). v0.5-M37 IMPL closes the LAST feature milestone in
-v0.5 scope; v0.5 release-prep opens after M37 IMPL close-docs.
+**v0.5-M37 IMPL closed at `c431d96..25e1204`** (7 commits:
+R-v0.5-NEW-18 lift `c431d96` + IMPL feat `51ad434` + 5 Codex
+fix-up rounds at `9374a7c` / `0ec8629` / `1a64f49` / `58e41c2` /
+`25e1204` + round-6 ratification clean across all 16 audit
+points; cumulative IMPL findings **0 P1 + 2 P2 + 11 P3 across 5
+fix-up rounds** — within the M22 / M27 / M30 / M31 / M32 / M34
+/ M35 / M36 write-surface IMPL precedent; ~1 round above M36's
+clean 3-round OBJECT-return cadence, driven by the custom-OBJECT
+shape's prose surface + the R-NEW-72 sibling-site grep cycle
+expanding noun-stem matching over rounds 3-5). v0.5-M37 closes
+the LAST feature milestone in v0.5 scope. **R-v0.5-NEW-11
+GRADUATED** (3rd supporting instance — per-fetcher null-payload
+contract decision discipline) + **R-v0.5-NEW-15 GRADUATED**
+(3rd supporting instance — per-variant payload-shape deferral
+to IMPL cassettes); both promote to permanent Codex pre-flight
+template audit-points at the next pre-flight session touching a
+custom-OBJECT / opaque-JSON / N-variant payload surface.
+**R-v0.5-NEW-18 SHIPPED** (5 consumers post-lift: 3 M13 +
+2 M37; helper at `src/utils/source-content.ts` with 20 unit
+tests). **R-v0.5-NEW-19** fired at IMPL round-2 P3-2 (first
+post-pre-flight supporting instance); folds into R-NEW-72's
+"Workflow rules" entry at next contract-flipping fix-up cluster.
+**R-NEW-72 ratified for the 8th time** across rounds 1-5 with a
+load-bearing lesson: noun-stem matching must extend to ALL
+sibling sites; round-N fixes commonly introduce round-N+1
+catches when the grep pattern is too narrow.
+
+**Next session — v0.5 release-prep candidate-selection.** Per
+the R-NEW-75 5-dimension framework, release-prep is a process-
+only candidate (mirrors v0.4 release-prep cadence verbatim:
+returns zero on 4 of 5 axes — wire-shape novelty / transport
+seam / destructive gate / R-class triggers — fires only on the
+Codex round estimate axis). The R-NEW-84 carve-out applies:
+test-only / mechanical / process-only clusters with zero
+production `src/**/*.ts` changes skip the Codex pass; gates
+verify. Expected cluster shape (6 commits mirroring v0.4
+release-prep `c193f21..b8e4cd0`): envelope-snapshot refresh +
+ToC audit + slip stale `deferred_to: "v0.5"` slots (R-NEW-82
+2nd-instance graduation check) + README v0.5 quickstart + v0.5
+scope refresh + version bump 0.4.0 → 0.5.0 in `package.json` +
+`package-lock.json` + CHANGELOG `[0.5.0]` entry (M34 + M35 +
+M36 + M37 surfaces) + close-docs sweep + `v0.5.0` annotated git
+tag + push to `origin/main` + GitHub release + `npm publish`.
+v0.5 feature scope shipped end-to-end across M34 (team writers,
+6 verbs) + M35 (doc-level CRUD, 5 verbs) + M36 (doc-block CRUD,
+3 verbs) + M37 (doc-content import, 2 verbs) = **16 new CLI
+verbs / 9 wire mutations**. No breaking changes vs v0.4.0;
+every v0.5 surface is additive.
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
