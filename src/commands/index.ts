@@ -282,8 +282,9 @@ import { docBlockDeleteCommand } from './doc/block-delete.js';
 //     `MAX_DOC_IMPORT_PAYLOAD_BYTES = 256_000`.
 // D12 closure: project the custom OBJECT — `success: false + populated
 // error` → `validation_failed`; empty `error` → `internal_error` (wire-
-// regression hint). D13 closure: empirical size threshold pinned at
-// 256KB conservative (last-known-good).
+// regression hint). D13 closure: CLI parse-boundary guard capped
+// at 256_000 bytes (`MAX_DOC_IMPORT_PAYLOAD_BYTES`; conservative
+// pin at the last-known-good probe size).
 import { docImportHtmlCommand } from './doc/import-html.js';
 import { docAppendMarkdownCommand } from './doc/append-markdown.js';
 // M34 (v0.5) — team writer surface (`user team-list` / `team-get` /
