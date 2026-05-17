@@ -1229,34 +1229,75 @@ load-bearing lesson: noun-stem matching must extend to ALL
 sibling sites; round-N fixes commonly introduce round-N+1
 catches when the grep pattern is too narrow.
 
-**Next session — v0.6 kickoff candidate-selection.** v0.5.0 is
-live on npm (`monday-cli@0.5.0`, `latest` dist-tag, published
-2026-05-17T20:55:05Z) + GitHub release; v0.6 opens with a
-candidate-selection session per the R-NEW-75 5-dimension
-framework. Carried-forward backlog candidates from v0.5
-(slipped from v0.5 → v0.6 at v0.5 release-prep): files-shaped
-friendly column writes (`--set <file-col>=<path>` + `--set-raw
-<file-col>=<json>` — `monday item upload` from v0.4-M31 is the
-verb-shaped alternative agents use today); multi-level subitem
-creation (still conditional on Monday's `sub_items_board`
-surfacing a `subtasks` column at a future API version);
-cross-board `item move` value-overrides (Monday's
-`ColumnMappingInput` still carries no value slot); resumable
-cross-board cursor pagination (per-board cursor-lifetime under
-aggregation needs design work). **Plus one new candidate filed
-at the v0.6 kickoff candidate-selection session** (this
-session): profile-scoped argument defaults — extends
-`~/.monday-cli/config.toml` with a `[profiles.<name>.defaults]`
-table carrying scoping args (`board` / `workspace` / `output` /
-`concurrency` at initial scope) + optional companion
-`monday config set/get/unset` helper; coexists with the M26
-`[profiles.<name>.dev]` table; **requires a prerequisite §13
-carve-out Decision at pre-flight** distinguishing aliases-as-
-stored-command-strings (still non-goal) from defaults-as-
-stored-flag-values (carve-out). Filed at cli-design.md §13 v0.5
-slipped-candidates list to track ahead of M38 candidate
-selection. Plus any other unspecified v0.6 wishlist items the
-user prioritises. **R-NEW-82 graduated at
+**Candidate-selection closed: v0.6-M38 = files-shaped `--set`
+writes** per the R-NEW-75 5-dimension framework (this
+session). Decision pinned across 5 candidates evaluated (4
+carried forward from v0.5 release-prep slips + 1 newly-filed
+profile-scoped argument defaults candidate at cli-design.md
+§13). M38 won on three neutral trade-offs: (a) closes the
+longest-running carry-over (v0.4 → v0.5 → v0.6 across two
+consecutive release-preps); (b) lowest novelty risk on the
+5-dimension scoring — zero new Monday wire shape, zero new
+transport seam (multipart shipped at v0.4-M31), R-v0.4-W2 does
+NOT fire, no destructive gate; (c) advances Monday wire-surface
+coverage (rounds out the M8 + M12 + M31 column-write story so
+agents can inline file-column writes inside bulk `item update
+--set` rather than falling back to the `monday item upload`
+verb). Codex round estimate 3-4 IMPL rounds per the M22 / M27 /
+M30 / M31 / M32 / M34 / M35 / M36 / M37 write-surface
+precedent. **Trade-offs surfaced at the AskUserQuestion**:
+modest novelty (won't fire new template-extension R-class
+lessons); profile-scoped defaults (candidate 5) was the
+strong second on absolute-risk grounds but carries §13
+carve-out Decision overhead; cross-board move value-overrides
+(candidate 3) advances bulk + cross-board mutation patterns
+but the cross-leg partial-failure envelope is heavier design;
+multi-level subitem (candidate 2) is probe-conditional with
+the M28 gap potentially persisting; resumable cursor (candidate
+4) is the heaviest design work + lowest agent-demand signal.
+
+**M38 pre-flight watch-items** (per R-NEW-58 lift-ahead-of-
+feat discipline scan at IMPL kickoff — surface them at pre-
+flight contract diff so kickoff knows what to scan): (1) M31's
+`dispatchMultipart` shared helper stays at 1 consumer today; M38
+would push to 2nd consumer if the file-column write dispatch is
+byte-identical to M31's pattern — lift target stays UNFILED
+per the per-fetcher argument divergence rationale, but
+re-evaluate at IMPL kickoff. (2) M31's `ResolvedClient.multipart`
+slot stays at 1 consumer; M38 pushes to 2nd consumer (test
+seam pattern). (3) `sniffContentType` (R-NEW-NEW M31-IMPL-
+surfaced) at `src/utils/mime.ts` already shipped at v0.4-M31
+IMPL ahead-of-feat per the 2-consumer lift cadence; M38 would
+extend its consumer count to 4 (2 M31 verbs + the inline
+`--set` + `--set-raw` translator-boundary dispatch into the
+multipart wire). (4) R-NEW-41 "Wire-vs-CLI semantics
+documentation" section at `docs/architecture.md` may gain a
+5th supporting site if the translator-boundary file-column
+dispatch surfaces a distinct asymmetry vs the verb-shaped M31
+path; check at pre-flight. (5) R-v0.4-W2's "non-retryable
+rewrap placement" axis (extended at M31 IMPL P2-1) applies to
+M38 — 2nd consumer of the M31 IMPL lesson; the rewrap-inside-
+retry-thunk pattern transfers verbatim.
+
+**Probe requirements deferred to pre-flight kickoff**: none.
+The wire shape is M31's `add_file_to_column` mutation verbatim;
+no fresh probe needed. The translator-boundary design (how
+`--set <file-col>=<path>` dispatches to the multipart wire from
+inside the standard `--set` parser that fans out to other column
+types via the M8/M12 translator) is the load-bearing novel
+work; that's pre-flight contract diff work, not a probe. The
+§5.3 translator architecture from M8/M12 + the M31 multipart
+wire contract are both already pinned.
+
+**Carried-forward to v0.6.x / v0.7 backlog**: the 4 unpicked
+candidates (multi-level subitem creation, cross-board `item
+move` value-overrides, resumable cross-board cursor pagination,
+profile-scoped argument defaults) all stay in cli-design.md §13
+v0.5 slipped-candidates list as v0.6+ candidates pending future
+candidate-selection sessions. The newly-filed profile-scoped
+argument defaults candidate carries its §13 carve-out Decision
+prerequisite forward — that Decision lands at whichever future
+milestone picks the candidate. **R-NEW-82 graduated at
 this v0.5 release-prep cluster** — 3rd consecutive release-prep
 that caught ≥ 1 stale `deferred_to` site (M28 caught 2; v0.4
 caught 3; v0.5 caught 4 production + 5 test + 5 doc prose sites
