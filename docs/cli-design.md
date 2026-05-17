@@ -2958,11 +2958,16 @@ monday doc append-markdown <did> (--markdown <file|-> | --markdown-string <s>)
                                           # on success); (5) `success:
                                           # true + EMPTY block_ids: []`
                                           # → success envelope WITH
-                                          # empty block_ids (markdown
-                                          # payload had zero convertible
-                                          # blocks; plausible "no
-                                          # blocks" semantics). Full
-                                          # per-branch projection
+                                          # empty block_ids (non-empty
+                                          # markdown Monday parses to
+                                          # zero convertible blocks;
+                                          # plausible "no blocks"
+                                          # semantics — empty /
+                                          # whitespace-only input
+                                          # rejects at parse / read
+                                          # boundary as usage_error
+                                          # and never reaches wire).
+                                          # Full per-branch projection
                                           # matrix at v0.5-plan §8 D12.
                                           # `operationName: 'AddContent
                                           # ToDocFromMarkdown'` pinned

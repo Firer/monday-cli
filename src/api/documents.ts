@@ -2518,8 +2518,11 @@ export type ImportDocFromHtmlResult = z.infer<typeof importDocFromHtmlResultSche
  *   - `block_ids: [String!]` — nullable LIST of NON_NULL strings;
  *     populated on `success: true` with the newly-created block
  *     ids (one per parsed markdown block); null on `success:
- *     false`. EMPTY array on success is plausible (markdown payload
- *     contains no convertible blocks); the schema accepts empty.
+ *     false`. EMPTY array on success is plausible for non-empty
+ *     markdown that Monday parses to zero convertible blocks (e.g.
+ *     comments-only input); the schema accepts empty. Empty /
+ *     whitespace-only `--markdown-string` rejects at the parse /
+ *     read boundary as `usage_error` and never reaches the wire.
  *   - `error: String` — nullable; populated on `success: false`,
  *     null on `success: true`.
  *
@@ -2570,8 +2573,10 @@ export type DocImportHtmlOutput = z.infer<typeof docImportHtmlOutputSchema>;
  * post-append state) have the parent doc context inline.
  * `block_ids` carries the wire's full list of NEWLY-CREATED block
  * ids (one per parsed markdown block) preserved in markdown-source
- * order. Empty array IS a valid success shape (markdown payload
- * contained zero convertible blocks).
+ * order. Empty array IS a valid success shape for non-empty markdown
+ * that Monday parses to zero convertible blocks (e.g. comments-only
+ * input); empty / whitespace-only `--markdown-string` rejects at the
+ * parse / read boundary as `usage_error` and never reaches the wire.
  *
  * `success` is literal-`true` for the same reason as
  * {@link docImportHtmlOutputSchema}.
