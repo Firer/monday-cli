@@ -1229,30 +1229,37 @@ load-bearing lesson: noun-stem matching must extend to ALL
 sibling sites; round-N fixes commonly introduce round-N+1
 catches when the grep pattern is too narrow.
 
-**Next session — v0.6 kickoff (externally-blocked on user
-authorization for v0.5.0 push + publish first).** Once `v0.5.0`
-has been pushed + published, v0.6 opens with a candidate-
-selection session per the R-NEW-75 5-dimension framework.
-Carried-forward backlog candidates from v0.5 (slipped from v0.5
-→ v0.6 at v0.5 release-prep): files-shaped friendly column
-writes (`--set <file-col>=<path>` + `--set-raw <file-col>=<json>`
-— `monday item upload` from v0.4-M31 is the verb-shaped
-alternative agents use today); multi-level subitem creation
-(still conditional on Monday's `sub_items_board` surfacing a
-`subtasks` column at a future API version); cross-board `item
-move` value-overrides (Monday's `ColumnMappingInput` still
-carries no value slot); resumable cross-board cursor pagination
-(per-board cursor-lifetime under aggregation needs design work).
-Plus any unspecified v0.6 wishlist items the user prioritises.
-**R-NEW-82 graduated at this v0.5 release-prep cluster** —
-3rd consecutive release-prep that caught ≥ 1 stale `deferred_to`
-site (M28 caught 2; v0.4 caught 3; v0.5 caught 4 production + 5
-test + 5 doc prose sites + 1 ToC user-row drift); promoted to a
-permanent CLAUDE.md "Workflow rules" entry under the existing
-release-prep cadence. **R-NEW-84 ratified** — the v0.5 release-
-prep cluster IS the symmetric application of the rule (zero
-production `src/**/*.ts` changes → Codex review skipped; gates
-alone verified).
+**Next session — v0.6 kickoff candidate-selection.** v0.5.0 is
+live on npm (`monday-cli@0.5.0`, `latest` dist-tag, published
+2026-05-17T20:55:05Z) + GitHub release; v0.6 opens with a
+candidate-selection session per the R-NEW-75 5-dimension
+framework. Carried-forward backlog candidates from v0.5
+(slipped from v0.5 → v0.6 at v0.5 release-prep): files-shaped
+friendly column writes (`--set <file-col>=<path>` + `--set-raw
+<file-col>=<json>` — `monday item upload` from v0.4-M31 is the
+verb-shaped alternative agents use today); multi-level subitem
+creation (still conditional on Monday's `sub_items_board`
+surfacing a `subtasks` column at a future API version);
+cross-board `item move` value-overrides (Monday's
+`ColumnMappingInput` still carries no value slot); resumable
+cross-board cursor pagination (per-board cursor-lifetime under
+aggregation needs design work). Plus any unspecified v0.6
+wishlist items the user prioritises. **R-NEW-82 graduated at
+this v0.5 release-prep cluster** — 3rd consecutive release-prep
+that caught ≥ 1 stale `deferred_to` site (M28 caught 2; v0.4
+caught 3; v0.5 caught 4 production + 5 test + 5 doc prose sites
++ 1 ToC user-row drift); promoted to a permanent CLAUDE.md
+"Workflow rules" entry under the existing release-prep cadence.
+**R-NEW-84 ratified** — the v0.5 release-prep cluster IS the
+symmetric application of the rule (zero production
+`src/**/*.ts` changes → Codex review skipped; gates alone
+verified). **R-v0.5-NEW-24 filed** at the post-release-prep
+audit — post-publish flip commit covers BOTH CLAUDE.md AND
+v0.5-plan.md placeholder/status-marker sites in one pass (the
+v0.5 post-publish flip `78e8100` touched only CLAUDE.md;
+v0.5-plan.md's parallel `<this-commit>` placeholders + "ready
+for publish" prose stayed stale, caught at the post-cluster
+audit). See v0.5-plan §22 R-v0.5-NEW-24 + §16 commit 7's NOTE.
 
 **M34 closed end-to-end** at `afdba15..02f1b1a` (carried for
 context). IMPL feat + 3 Codex fix-up rounds + 1 ratification —
