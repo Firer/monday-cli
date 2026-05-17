@@ -2580,6 +2580,32 @@ v0.1-plan.md / v0.2-plan.md. **Don't restate them here.**
   applied for the first time) + M33 IMPL (graduated). Sister rule
   to R-NEW-56: kickoff grep covers pre-flight → runtime transition
   prose; post-fix-up grep covers round-N fix → round-N+1 prose.
+
+  **Cross-doc grep search paths** (R-v0.5-NEW-19 graduated at
+  v0.5-M37 IMPL — 2nd supporting instance fired at round-2 P3-2;
+  pre-flight surfacing event was round-3 P3-1). The post-fix-up
+  cross-doc grep MUST search:
+    - `src/api/*.ts` (fetcher headers + projection contracts).
+    - `src/commands/**/*.ts` (verb-specific JSDoc).
+    - **`src/commands/index.ts` (module-import block prose
+      summarising milestone wire shape + D-closures — easy to miss
+      because it lives outside the per-verb command file but
+      carries contract-prose mirroring the verbs').**
+    - `docs/*.md` (cli-design + plan docs + output-shapes).
+
+  **Noun-stem matching for grep patterns** (carry-forward lesson
+  from v0.5-M37 IMPL rounds 3-5). Use `\b<noun>\b` regex matching
+  rather than literal-substring matching to catch all inflections
+  in a single pass. M37 IMPL rounds 3-5 each surfaced new sibling-
+  site drifts the prior round's grep missed because the pattern
+  was too narrow: `pre-flight stub` literal missed `pre-flight
+  ships`; `empty markdown` literal missed sibling schema/envelope
+  JSDoc sites; `wire dispatch` literal missed
+  `readUpdateBody`/`body-source.ts` in untouched-but-documenting-
+  the-lifted-symbol module headers. Lesson: when running the post-
+  fix-up grep, (a) extend the search paths per R-v0.5-NEW-19 above;
+  (b) enumerate sibling-site noun-stems before grepping; (c) use
+  regex word-boundary matching.
 - **Candidate-selection session when ≥2 backlog candidates remain
   with non-obvious priority** (R-NEW-75, post-v0.4-M33 IMPL
   graduation). When a feature-cluster closes and 2+ candidates
