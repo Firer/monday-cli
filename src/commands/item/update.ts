@@ -824,15 +824,17 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //        - Clean single file `--set` → returns
   //          `kind: 'file_bulk'` (v0.7-M42 D5 carve-out fold;
   //          action body branches into the per-item multipart
-  //          fan-out stub below).
+  //          fan-out helper `runItemUpdateBulkFileDispatch` —
+  //          shipped at v0.7-M42 IMPL).
   //        - No file `--set` → returns `kind: 'json'` (standard
   //          JSON-translator path continues).
   //
   //      At v0.6-M38 the `'item_update_bulk'` callShape rejected
   //      ALL bulk file `--set` paths with
   //      `'file_set_on_bulk_unsupported'`; v0.7-M42 pre-flight
-  //      contract diff (this commit) carves that out per D5 fold.
-  //      `--set-raw <file-col>=<json>` stays at
+  //      contract diff (`160330b`) carved that out per D5 fold,
+  //      and IMPL (`22df2fa` + R1 fix-up `968b154`) shipped the
+  //      runtime body. `--set-raw <file-col>=<json>` stays at
   //      `translateRawColumnValue`'s D3 permanent rejection (the
   //      pre-check only inspects setEntries; the standard path's
   //      `translateRawColumnValue` handles --set-raw rejection

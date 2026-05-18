@@ -1860,10 +1860,12 @@ is that the agent's `--set` token transitions across two
 wire shapes based on column type). The mutex rules at M38's
 column-resolution boundary (no mixing file `--set` with value
 `--set` / `--set-raw` / `--name`; single file `--set` only;
-bulk + create reject) keep the per-call atomicity guarantee
-intact — when a file `--set` fires, NO value `--set` /
-`--set-raw` / `--name` fires in the same call, and the wire
-dispatch is single-multipart-mutation atomic. Documented
+create rejects pending v0.7-M43; bulk ships at v0.7-M42 as a
+per-item multipart fan-out under `--concurrency`) keep the
+per-call atomicity guarantee intact — when a file `--set` fires,
+NO value `--set` / `--set-raw` / `--name` fires in the same call,
+and the wire dispatch is single-multipart-mutation atomic (per
+matched item on bulk). Documented
 inline in `src/api/file-column-set.ts`'s module docstring +
 `cli-design.md` §5.3 step 4 / step 5 "File-column dispatch
 leg" + the §13 v0.6 entry.
