@@ -612,14 +612,14 @@ const resolveCreateMode = async (
           `creation is deferred. Use a classic board ` +
           `(hierarchy_type null/"classic"). v0.3 M28 Decision 11 closure: ` +
           `Monday's sub_items_board carries no subtasks column at API ` +
-          `2026-01, so depth-2 subitems have no data-model home — v0.6 ` +
+          `2026-01, so depth-2 subitems have no data-model home — v0.7 ` +
           `picks the feature up if Monday surfaces the capability.`,
         {
           details: {
             parent_item_id: dispatch.parentItemId,
             parent_board_id: parent.boardId,
             hierarchy_type: parent.hierarchyType,
-            deferred_to: 'v0.6',
+            deferred_to: 'v0.7',
           },
         },
       );
