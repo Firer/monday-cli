@@ -11,18 +11,28 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Status
 
-**v0.6-M38 pre-flight contract diff landed (this session).** The
-v0.6-M38 pre-flight cluster opens with the files-shaped friendly
-`--set` writes contract surface. Closes the longest-running
-carry-over in the §13 backlog (v0.4 → v0.5 → v0.6 across two
-consecutive release-preps because neither cycle picked up the
-translator-to-multipart-wire dispatch). M38 adds **zero new
-Monday wire surface** (reuses v0.4-M31's `add_file_to_column`
-fetcher verbatim), **zero new transport seam** (multipart wire
-shipped at M31), **zero new ERROR_CODE** (29 stays — all M38
-rejections route through existing `usage_error` /
-`unsupported_column_type` with `details.reason`
-discrimination).
+**v0.6-M38 pre-flight closed end-to-end at `0cb8b69..1a92955`
+(this session).** Codex pre-flight review converged across 4
+fix-up rounds + 1 ratification (round-5 returned 0 P1 + 0 P2 +
+0 P3 on code/contract surfaces; a single self-referential
+R-NEW-72 instance-count metadata flip applied at close-docs).
+**Cumulative pre-flight findings: 0 P1 + 6 P2 + 7 P3 across 5
+fix-up rounds** — at the upper bound of the M22 / M27 / M30 /
+M31 / M32 / M34 / M35 / M36 / M37 write-surface pre-flight
+precedent (cumulative 0-3 P2 + 3-10 P3 typical); the P2 count
+slightly exceeds the upper bound (6 vs 3) due to the substantive
+round-1 dry-run rewrap fix introducing more contract surface than
+typical pre-flight stub passes. The v0.6-M38 pre-flight cluster
+opens with the files-shaped friendly `--set` writes contract
+surface. Closes the longest-running carry-over in the §13
+backlog (v0.4 → v0.5 → v0.6 across two consecutive release-preps
+because neither cycle picked up the translator-to-multipart-wire
+dispatch). M38 adds **zero new Monday wire surface** (reuses
+v0.4-M31's `add_file_to_column` fetcher verbatim), **zero new
+transport seam** (multipart wire shipped at M31), **zero new
+ERROR_CODE** (29 stays — all M38 rejections route through
+existing `usage_error` / `unsupported_column_type` with
+`details.reason` discrimination).
 
 **Pre-flight contract surface shipped at `0cb8b69`**: NEW
 `docs/v0.6-plan.md` (anchor doc mirroring v0.4-plan / v0.5-plan
@@ -95,14 +105,47 @@ shaped columns; the new reason discriminators that the cli-
 design + v0.6-plan + output-shapes all reference become
 agent-reachable at IMPL.
 
-**M38 pre-flight Codex review opens at the next session.** The
-contract diff cluster is ONE feat commit; expected 1-3 fix-up
-rounds + 1 ratification per the M22 / M27 / M30 / M31 / M32 /
-M34 / M35 / M36 / M37 write-surface pre-flight precedent
-(cumulative 0-3 P2 + 3-10 P3 typical).
+**Codex round summary (`0cb8b69..1a92955`)**:
 
-**Live numbers (v0.6-M38 pre-flight, post Codex round-1 fix-up
-at `b9c5ff4`):**
+- **Round 1** `b9c5ff4`: 0 P1 + 3 P2 + 2 P3 — substantive
+  dry-run path bypass fix (`item set --dry-run <file-col>=<path>`
+  reached `planChanges` translator + surfaced
+  `unsupported_column_type` instead of M38 stub; first pass moved
+  resolution upfront but caused dry-run envelope `source` to
+  flip to "mixed" via cache-hit double-resolution; final fix is
+  catch-and-rewrap inside the dry-run branch preserving source
+  aggregation) + 3 prose flips at output-shapes.md +
+  architecture.md +  v0.6-plan.md (D3 permanent rejection
+  prose; nonexistent `parseFileColumnSet` reference flipped
+  to `enforceSingleFileColumnSet`; pre-flight scope-overstatement
+  trimmed from "3 action bodies" to "1") + 2 P3 asymmetry-
+  numbering + consumer-count framing fixes.
+- **Round 2** `5808fd4`: 0 P1 + 1 P2 + 4 P3 — `noncanonical_
+  column_type` warning prose at `board column-create` + cli-
+  design §4.3 inline comment widened to name BOTH write paths +
+  message-prose assertion extension at `tests/integration/
+  commands/board.test.ts` + 4 P3 remaining asymmetry-numbering
+  drift sites + dry-run test prose flip to describe catch-and-
+  rewrap + CLAUDE.md live-numbers refresh.
+- **Round 3** `30204a3`: 0 P1 + 0 P2 + 1 P3 — provenance
+  metadata only (R-NEW-72 instance count update + `<this-commit>`
+  placeholder fill-in + CLAUDE.md R-NEW-72 carry-forward bullet
+  refresh).
+- **Round 4** `1a92955`: 0 P1 + 2 P2 + 0 P3 — discriminator
+  strings broken across line boundaries inside backticked code
+  spans (cli-design.md §5.3 mutex rules; agents key on literal
+  `details.reason` strings) + stale single-path files-shaped
+  prose at 3 sites still claiming "deferred to v0.4" or "M31
+  only" while implementation joins BOTH paths with ` OR `.
+- **Round 5** ratification: 0 P1 + 0 P2 + 1 P3 (self-referential
+  R-NEW-72 instance-count metadata flip) → applied at
+  close-docs without a separate fix-up commit per the R-NEW-84
+  spirit (process-only cadence updates skip Codex re-review).
+  Code/contract surfaces: clean across all 16 audit points
+  (W1-W16); W3'''' / W7'''' / W10'''' / W11'''' / W13'''' /
+  W14'''' all "clean" in round-5 verdict.
+
+**Live numbers (v0.6-M38 pre-flight close):**
 - Test count: **4062 + 1 skipped** across **171** test files
   (+8 net vs 4054 + 1 skipped at M37 close: 5 unit envelope-
   schema tests at `tests/unit/api/file-column-set.test.ts` + 1
@@ -110,11 +153,15 @@ at `b9c5ff4`):**
   the M38 dispatch stub at
   `tests/integration/commands/item-set.test.ts` — 1 live + 1
   dry-run added at round-1 for the catch-and-rewrap path).
+  Rounds 2-5 added prose-only changes + extended an existing
+  test assertion at `tests/integration/commands/board.test.ts`
+  (round-2 P2-1) for message-prose pinning; test count
+  unchanged from round-1.
 - Coverage: **99.28 / 96.46 / 99.45 / 99.54** (stmts / branches /
   fns / lines) at the **95 / 95.45 / 95 / 95** floor.
   **Branches margin 1.01pp** (was 1.03pp at b4d4512; -0.02pp
-  from the round-1 catch-and-rewrap's c8-ignored branch additions,
-  well above floor).
+  from the round-1 catch-and-rewrap's c8-ignored branch
+  additions, well above floor).
 - ERROR_CODES count: **29** (unchanged per D8 closure).
 - Command count: **117** (unchanged — pre-flight adds no
   verbs; M38 extends existing `--set` accepted-value grammar).
@@ -131,14 +178,19 @@ at `b9c5ff4`):**
   stub.
 - **R-NEW-72 carry-forward** (post-fix-up cross-doc grep with
   search path extensions per R-v0.5-NEW-19 + noun-stem regex
-  matching per v0.5-M37 lesson): rounds 1 + 2 of the M38
-  pre-flight Codex review both applied the cadence (9th + 10th
-  instances). Round-1 caught a trailing comment in
-  `tests/unit/api/column-values.test.ts`; round-2 swept
-  remaining "5th supporting" / "THREE to FIVE" / "2 → 4" stems
-  + identified historical v0.5-M37-era sites correctly left
-  untouched. Round-3 ratification surfaced no new contract-
-  flipping fix-ups.
+  matching per v0.5-M37 lesson): all four M38 fix-up rounds
+  applied the cadence (9th-12th instances). Round-1
+  (`b9c5ff4`): trailing test comment in
+  `tests/unit/api/column-values.test.ts`. Round-2 (`5808fd4`):
+  swept "5th supporting" / "THREE to FIVE" / "2 → 4" stems +
+  identified historical v0.5-M37-era sites correctly left
+  untouched. Round-3 (`30204a3`): provenance metadata sweep
+  (stale `<this-commit>` placeholders). Round-4 (`1a92955`):
+  broken-discriminator-string sweep + stale-single-path
+  files-shaped prose sweep + R-class register provenance sweep.
+  Round-5 ratification surfaced no new contract-flipping
+  fix-ups — only a self-referential instance-count metadata
+  flip applied at close-docs.
 - **R-NEW-41 4th asymmetry filed** at `docs/architecture.md`
   "Wire-vs-CLI semantics documentation conventions": the M38
   translator-boundary dispatch asymmetry is distinct from
@@ -152,12 +204,30 @@ at `b9c5ff4`):**
   into `src/api/assets.ts` as a sibling export) fires AHEAD
   of feat per R-NEW-29's M25 cadence at M38 IMPL kickoff.
 
-**Next session**: M38 pre-flight Codex review. Run via
-`codex exec -m gpt-5.5 -s read-only - < .review-prompt.md >
-.review-output.md` against the `.claude/templates/codex-pre-
-flight-review.md` template. Apply findings inline through
-1-3 fix-up rounds + 1 ratification; IMPL opens at the next-
-next session post-ratification.
+**Next session**: M38 IMPL. Swap the c8-ignored stubs at
+`src/api/file-column-set.ts` for runtime bodies
+(`executeFileColumnSet` calls M31's `addFileToColumn` after
+file pre-check + Blob construction; `enforceSingleFileColumnSet`
+runs the mutex rules per D2/D5/D6). Add the action body
+branches in `src/commands/item/update.ts` (single + bulk paths)
++ `src/commands/item/create.ts` for the 4 reason discriminators
+(`mixed_file_and_value_sets` / `multi_file_set_unsupported` /
+`file_set_on_create_unsupported` / `file_set_on_bulk_unsupported`)
+that the contract surface already documents but doesn't yet
+enforce in code. Replace the catch-and-rewrap shim in
+`src/commands/item/set.ts` dry-run branch with the D4 dry-run
+envelope shape (`planned_changes: [{operation:
+'add_file_to_column', item_id, column_id, file_path, filename,
+file_size_bytes}]`; size from `fs.stat()`, no file bytes
+loaded). **R-NEW-58 IMPL-kickoff lift**: extract the file pre-
+check + Blob-construction pattern (M31 `item upload` action body
++ M31 `update upload` + M38 `--set` dispatch = 3-consumer
+trigger) into a shared `src/utils/file-source.ts` helper AHEAD
+of the IMPL feat commit per R-NEW-29's M25 cadence — pre-flight
+stub docstrings reference the future helper site by name. Codex
+IMPL review estimate: 3-4 fix-up rounds per the M22 / M27 / M30
+/ M31 / M32 / M34 / M35 / M36 / M37 write-surface IMPL precedent
+(M35's 7-round outlier was opaque-JSON-driven and doesn't apply).
 
 ---
 
