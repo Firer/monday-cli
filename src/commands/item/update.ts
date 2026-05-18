@@ -1005,17 +1005,18 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 
   // v0.7-M42 D5 carve-out fold — bulk file `--set` dispatch leg.
   // When the pre-check returned `kind: 'file_bulk'`, branch into
-  // the per-item multipart fan-out stub here. The branch fires
+  // the per-item multipart fan-out helper here. The branch fires
   // AFTER the items_page walker + confirmation gate (so an agent
   // sees the matched-count via `confirmation_required` before
   // the bulk file dispatch fans out) and BEFORE the JSON
   // translator path's `resolveAndTranslate` call (which has
   // nothing to translate when every `--set` is a file column).
   //
-  // **Pre-flight stub.** The dispatch helper's body is
-  // c8-ignored — runtime body lands at M42 IMPL. argv parse +
-  // shape validation + items_page walk + confirmation gate
-  // already ran above and are shipped contract.
+  // The helper runs single upfront `precheckLocalFile` + per-item
+  // `executeFileColumnSet` (fail-fast vs `--continue-on-error`
+  // per `parsed.continueOnError`; sequential vs parallel per
+  // `parsed.concurrency`) + post-dispatch `invalidateBoard` +
+  // envelope emit (`operation: 'item_update_bulk_file_set'`).
   if (m38FileBulk !== undefined) {
     await runItemUpdateBulkFileDispatch({
       parsed,
@@ -1032,6 +1033,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       filterWarnings: filterResult.warnings,
       retries: globalFlags.retry,
       isDryRun: globalFlags.dryRun,
+      noCache: globalFlags.noCache,
     });
     return;
   }
@@ -1063,12 +1065,12 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       cacheAgeSeconds: meta.cacheAgeSeconds,
     });
     for (const itemId of matchedItemIds) {
-      // v0.6-M38 D5 file-set rejection already fired at the pre-check
-      // above (step 1.5) — bulk file-set never reaches this loop body
-      // since `preCheckM38FileDispatch({callShape: 'item_update_bulk'})`
-      // throws `'file_set_on_bulk_unsupported'` before items_page
-      // walks. `--set-raw <file-col>=<json>` still rejects normally
-      // via `translateRawColumnValue`'s D3 permanent rejection.
+      // v0.7-M42 IMPL: clean bulk file `--set` paths branched into
+      // `runItemUpdateBulkFileDispatch` above (the `m38FileBulk !==
+      // undefined` arm) and returned before reaching this loop, so
+      // this dry-run body only ever sees JSON-shaped paths.
+      // `--set-raw <file-col>=<json>` still rejects normally via
+      // `translateRawColumnValue`'s D3 permanent rejection.
       let result;
       try {
         result = await planChanges({
@@ -1700,6 +1702,18 @@ interface RunItemUpdateBulkFileDispatchInputs {
    * across the file-dispatch family.
    */
   readonly isDryRun: boolean;
+  /**
+   * v0.7-M42 IMPL Codex R1 P1-1 fix: `globalFlags.noCache` threaded
+   * through so `foldAndRemap` (Codex pass-1 F4 remap from `src/api/
+   * resolver-error-fold.ts`) can refresh stale board metadata when a
+   * cache-served file-column resolution surfaces `validation_failed`
+   * post-dispatch. Without this, per-item failures bypass the
+   * stable-code rule (cli-design §6.5) — `column_archived` would not
+   * remap and agents would see `validation_failed` for an archived
+   * file column on file-bulk dispatch while the JSON-bulk path
+   * already surfaces `column_archived` for the same root cause.
+   */
+  readonly noCache: boolean;
 }
 
 /**
@@ -1785,13 +1799,40 @@ export const runItemUpdateBulkFileDispatch = async (
     ...inputs.m38.warnings,
   ]);
 
+  // Source/cache-age aggregator. Seeded with the metadata leg, then
+  // folds the M38 pre-check leg + a synthetic 'live' leg representing
+  // the items_page walker (always live, fired upstream before this
+  // helper). On dry-run the dispatch leg never fires; on live the
+  // dispatch leg adds another 'live' record (idempotent under
+  // `mergeSource` since 'live' + 'live' = 'live'). Codex IMPL R1
+  // P2-1 fix — pre-fix the helper dropped `inputs.m38.source` +
+  // `inputs.m38.cacheAgeSeconds`, so a cache-served file-column
+  // resolution after a live metadata fetch surfaced `'live'`
+  // instead of `'mixed'`. Mirrors the JSON-bulk path's
+  // SourceAggregator pattern at runBulk's dry-run + live legs.
+  const sourceAgg = new SourceAggregator({
+    source: inputs.metaSource,
+    cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+  });
+  if (inputs.m38.source !== undefined) {
+    sourceAgg.record(inputs.m38.source, inputs.m38.cacheAgeSeconds);
+  }
+  // items_page walker always fires live before reaching the helper
+  // (the empty-match short-circuit is the only path that skips it,
+  // and that path emits the envelope upstream — this helper never
+  // sees matchedItemIds.length === 0). Record one synthetic 'live'
+  // leg so the aggregate reflects the wire round-trip cost the
+  // caller already paid.
+  sourceAgg.record('live', null);
+
   // 2) Dry-run branch — D4-shaped envelope. One
   //    `add_file_to_column` planned_change per matched item-ID;
   //    no file bytes loaded, no multipart wire round-trip. Unlike
   //    the M38 single-item dry-run (which pins `source: 'none'`
   //    because its dry-run is pure-local), bulk dry-run carries
   //    the aggregated upstream `source` — metadata load + items_page
-  //    walk already paid for wire legs to reach here.
+  //    walk + M38 pre-check already paid for wire legs to reach
+  //    here.
   if (inputs.isDryRun) {
     const plannedChanges = inputs.matchedItemIds.map((itemId) => ({
       operation: 'add_file_to_column' as const,
@@ -1801,18 +1842,13 @@ export const runItemUpdateBulkFileDispatch = async (
       filename: precheck.filename,
       file_size_bytes: precheck.fileSizeBytes,
     }));
-    // cache-served metadata + live items_page walk → `mixed`; live
-    // metadata + live walk → `live` (mirrors the JSON-bulk
-    // `emptyEnvelopeSource` derivation above at the empty-match
-    // short-circuit).
-    const dryRunSource: 'live' | 'cache' | 'mixed' =
-      inputs.metaSource === 'cache' ? 'mixed' : 'live';
+    const dryRunAgg = sourceAgg.result();
     emitDryRun({
       ctx: inputs.ctx,
       programOpts: inputs.programOpts,
       plannedChanges,
-      source: dryRunSource,
-      cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+      source: dryRunAgg.source,
+      cacheAgeSeconds: dryRunAgg.cacheAgeSeconds,
       warnings: combinedWarnings,
       apiVersion: inputs.apiVersion,
     });
@@ -1835,17 +1871,29 @@ export const runItemUpdateBulkFileDispatch = async (
     fileSizeBytes: precheck.fileSizeBytes,
   };
 
-  // Common envelope source — cache-served metadata + live multipart
-  // dispatch → `mixed`; live metadata + live dispatch → `live`.
-  // Same derivation as the dry-run branch + the empty-match short-
-  // circuit above.
-  const liveSource: 'live' | 'cache' | 'mixed' =
-    inputs.metaSource === 'cache' ? 'mixed' : 'live';
+  // Live dispatch is always 'live' — fold one more leg into the
+  // aggregator. Idempotent if metadata + pre-check were also live
+  // ('live' + 'live' = 'live'); promotes 'cache' to 'mixed' when
+  // metadata/pre-check served from cache.
+  sourceAgg.record('live', null);
+  const liveAgg = sourceAgg.result();
+
   // resolved_ids slot — pre-check returned the resolved column ID
   // for the file token; echo it into the envelope's
   // `meta.resolved_ids` so agents can confirm token-to-ID resolution
   // (mirrors the M38 single-item envelope at `runItemUpdateSingleFileDispatch`).
   const resolvedIds = { [inputs.m38.token]: inputs.m38.columnId };
+
+  // Resolution source for foldAndRemap — defaults to 'live' when
+  // pre-check didn't record one (no resolveColumnWithRefresh leg
+  // fired; the only path that's possible is the no-setEntries
+  // shortcut, which doesn't reach this helper). The remap probe
+  // refreshes board metadata + re-checks the file column's
+  // `archived` flag when a Monday-side `validation_failed`
+  // surfaces against cache-served file-column resolution. Codex
+  // IMPL R1 P1-1 fix.
+  const remapSource: 'live' | 'cache' | 'mixed' =
+    inputs.m38.source ?? 'live';
 
   // Discriminator for the dispatch shape: fail-fast (default,
   // applied to the v0.1 fail-fast bulk path's `applied_to` decoration)
@@ -1873,11 +1921,42 @@ export const runItemUpdateBulkFileDispatch = async (
         appliedAssets.push({ itemId, asset: result.asset });
       } catch (err: unknown) {
         if (err instanceof MondayCliError) {
+          // Codex IMPL R1 P2-2 fix: if any prior item applied
+          // successfully, the board's asset state already mutated
+          // wire-side — invalidate the cache BEFORE re-throwing the
+          // fail-fast error so a follow-up read doesn't serve stale
+          // metadata. Mirrors the M38 single-item invalidate-on-
+          // success pattern; the JSON-bulk fail-fast path has the
+          // same gap (unchanged by this commit — separate lift
+          // candidate per the future-lift-candidate note in the
+          // module docstring).
+          if (appliedAssets.length > 0) {
+            await invalidateBoard(inputs.boardId, inputs.ctx.env);
+          }
+          // Codex IMPL R1 P1-1 fix: apply `foldAndRemap` BEFORE
+          // building the decoration so per-item failures inherit
+          // the SAME `validation_failed` → `column_archived`
+          // stale-cache remap the JSON-bulk fail-fast path applies
+          // (cli-design §6.5 stable-code rule). Without this, an
+          // archived file column surfaces `validation_failed` on
+          // file-bulk dispatch but `column_archived` on JSON-bulk
+          // dispatch — agents keying on the stable code see
+          // inconsistent outcomes for the same root cause.
+          const remapped = await foldAndRemap({
+            err,
+            warnings: inputs.m38.warnings,
+            client: inputs.client,
+            boardId: inputs.boardId,
+            columnIds: [inputs.m38.columnId],
+            env: inputs.ctx.env,
+            noCache: inputs.noCache,
+            resolutionSource: remapSource,
+          });
           // Same decoration shape as the JSON-bulk fail-fast path
           // (lines ~1334-1361 above). Preserves the existing error
           // class' fields and grafts `applied_count` / `applied_to`
           // / `failed_at_item` / `matched_count` onto `details`.
-          const existing = err.details ?? {};
+          const existing = remapped.details ?? {};
           const decoration = {
             ...existing,
             applied_count: appliedAssets.length,
@@ -1885,33 +1964,40 @@ export const runItemUpdateBulkFileDispatch = async (
             failed_at_item: itemId,
             matched_count: inputs.matchedItemIds.length,
           };
-          if (err.code === 'usage_error') {
-            throw new UsageError(err.message, {
-              ...(err.cause === undefined ? {} : { cause: err.cause }),
+          if (remapped.code === 'usage_error') {
+            throw new UsageError(remapped.message, {
+              ...(remapped.cause === undefined
+                ? {}
+                : { cause: remapped.cause }),
               details: decoration,
             });
           }
-          throw new ApiError(err.code, err.message, {
-            ...(err.cause === undefined ? {} : { cause: err.cause }),
-            ...(err.httpStatus === undefined
+          throw new ApiError(remapped.code, remapped.message, {
+            ...(remapped.cause === undefined
               ? {}
-              : { httpStatus: err.httpStatus }),
-            ...(err.mondayCode === undefined
+              : { cause: remapped.cause }),
+            ...(remapped.httpStatus === undefined
               ? {}
-              : { mondayCode: err.mondayCode }),
-            ...(err.requestId === undefined
+              : { httpStatus: remapped.httpStatus }),
+            ...(remapped.mondayCode === undefined
               ? {}
-              : { requestId: err.requestId }),
-            retryable: err.retryable,
-            ...(err.retryAfterSeconds === undefined
+              : { mondayCode: remapped.mondayCode }),
+            ...(remapped.requestId === undefined
               ? {}
-              : { retryAfterSeconds: err.retryAfterSeconds }),
+              : { requestId: remapped.requestId }),
+            retryable: remapped.retryable,
+            ...(remapped.retryAfterSeconds === undefined
+              ? {}
+              : { retryAfterSeconds: remapped.retryAfterSeconds }),
             details: decoration,
           });
         }
         // Non-CliError programmer bug — re-throw to the runner's
         // catch-all (surfaces as `internal_error` whole-call;
-        // mirrors the JSON-bulk fail-fast path).
+        // mirrors the JSON-bulk fail-fast path). The partial-
+        // success invalidate above doesn't fire for this branch
+        // because non-CliError throws indicate broken contract,
+        // not partial-mutation state worth preserving.
         throw err;
       }
     }
@@ -1946,8 +2032,8 @@ export const runItemUpdateBulkFileDispatch = async (
       schema: bulkFileSetDataSchema,
       programOpts: inputs.programOpts,
       warnings: combinedWarnings,
-      source: liveSource,
-      cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+      source: liveAgg.source,
+      cacheAgeSeconds: liveAgg.cacheAgeSeconds,
       apiVersion: inputs.apiVersion,
       resolvedIds,
     });
@@ -1965,15 +2051,48 @@ export const runItemUpdateBulkFileDispatch = async (
   const perTargetDispatch = async ({
     targetId,
   }: DispatchOneTargetInputs<string>): Promise<void> => {
-    const result = await executeFileColumnSet({
-      client: inputs.client,
-      multipart: inputs.multipart,
-      itemId: targetId,
-      entry,
-      signal: inputs.ctx.signal,
-      retries: inputs.retries,
-    });
-    assetById.set(targetId, result.asset);
+    try {
+      const result = await executeFileColumnSet({
+        client: inputs.client,
+        multipart: inputs.multipart,
+        itemId: targetId,
+        entry,
+        signal: inputs.ctx.signal,
+        retries: inputs.retries,
+      });
+      assetById.set(targetId, result.asset);
+    } catch (err: unknown) {
+      if (err instanceof MondayCliError) {
+        // Codex IMPL R1 P1-1 fix: apply `foldAndRemap` BEFORE
+        // re-throwing into the shared dispatcher so per-record
+        // `error.code` carries the SAME `column_archived` stable
+        // code the JSON-bulk partial-success path emits. Mirrors
+        // `runPartialSuccessBulkUpdate`'s perTargetDispatch
+        // closure (src/api/partial-success-bulk.ts:431-475).
+        // `foldAndRemap` NEVER converts a non-`internal_error`
+        // into `internal_error`, so the dispatcher's
+        // `internal_error` re-throw escape hatch (M14 round-2 F1)
+        // stays intact: schema drift still surfaces as top-level
+        // `ok: false` rather than papered over as a per-record
+        // slot.
+        const remapped = await foldAndRemap({
+          err,
+          warnings: inputs.m38.warnings,
+          client: inputs.client,
+          boardId: inputs.boardId,
+          columnIds: [inputs.m38.columnId],
+          env: inputs.ctx.env,
+          noCache: inputs.noCache,
+          resolutionSource: remapSource,
+        });
+        throw remapped;
+      }
+      // Non-CliError — programmer bug. Re-throw through
+      // dispatchSequential / dispatchParallel's non-CliError
+      // branch so the runner's catch-all surfaces as
+      // internal_error (whole-call, not per-record).
+      throw err;
+    }
   };
 
   // Routing — `--concurrency > 1` routes through dispatchParallel
@@ -2098,8 +2217,8 @@ export const runItemUpdateBulkFileDispatch = async (
     schema: bulkFileSetDataSchema,
     programOpts: inputs.programOpts,
     warnings: combinedWarnings,
-    source: liveSource,
-    cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+    source: liveAgg.source,
+    cacheAgeSeconds: liveAgg.cacheAgeSeconds,
     apiVersion: inputs.apiVersion,
     resolvedIds,
   });

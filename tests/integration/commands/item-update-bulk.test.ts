@@ -21,7 +21,7 @@
  * past §15's 1,500-line threshold; the per-mode split mirrors R14's
  * per-verb split of the original `item.test.ts` (M5b session 4).
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat as fsStat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -32,6 +32,7 @@ import {
   type EnvelopeShape,
 } from '../helpers.js';
 import { createInlineMultipartFixtureTransport } from '../../fixtures/multipart-load.js';
+import { resolveCacheRoot, writeEntry } from '../../../src/api/cache.js';
 import {
   boardMetadataInteraction,
   sampleBoardMetadata,
@@ -3656,9 +3657,13 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(env.ok).toBe(true);
       const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
       expect(meta.dry_run).toBe(true);
-      // Source aggregates the metadata + items_page legs (live);
-      // dry-run does NOT collapse to 'none' on the bulk path.
-      expect(meta.source).toBe('live');
+      // Source aggregates 3 wire legs: live metadata fetch +
+      // cache-served M38 pre-check (resolveColumnWithRefresh hits
+      // the just-written cache) + synthetic live items_page walk.
+      // `mergeSource(live + cache + live) === 'mixed'` per
+      // cli-design §6.1. Codex IMPL R1 P2-1 fix — pre-fix dropped
+      // the M38 pre-check leg and emitted 'live' instead.
+      expect(meta.source).toBe('mixed');
       expect(env.planned_changes).toEqual([
         {
           operation: 'add_file_to_column',
@@ -4092,6 +4097,249 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       };
       expect(env.error?.code).toBe('unsupported_column_type');
       expect(env.error?.details?.reason).toBeUndefined();
+    });
+
+    it('cache-preseeded metadata: emits source: "mixed" reflecting cache metadata + live walk + live multipart dispatch (Codex IMPL R1 P2-1 — SourceAggregator folds metaSource + m38.source + walk leg)', async () => {
+      // Codex IMPL R1 P2-1 fix: bulk file dispatch helper now folds
+      // the metadata + M38 pre-check + items_page walk + multipart
+      // dispatch source legs through SourceAggregator. With cache-
+      // preseeded metadata, the aggregate is `cache` + `cache`
+      // (pre-check hits the just-read cache) + `live` (walk) +
+      // `live` (dispatch) → `mixed`. Pre-fix the helper derived
+      // source from `metaSource` alone and emitted `'mixed'` only
+      // because `metaSource === 'cache'` short-circuits to
+      // `'mixed'` — but that misses the case where metaSource is
+      // 'live' yet m38.source is 'cache' (also `mixed` post-fix).
+      const cacheRoot = resolveCacheRoot({
+        env: { XDG_CACHE_HOME: xdgRoot() },
+      });
+      // writeEntry wraps `data` in the on-disk envelope
+      // ({schema_version, created_at, key, data}); pass the raw
+      // BoardMetadata shape so readEntry's parseCacheEntry hit.
+      await writeEntry(cacheRoot, { kind: 'board', boardId: '111' }, fileBoard);
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+            repeat: 2,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--json',
+        ],
+        {
+          // No BoardMetadata interaction — pre-seeded cache hits.
+          interactions: [itemsPageWithTwo],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { summary: { applied_count: number } };
+      };
+      expect(env.ok).toBe(true);
+      // Cache-served metadata + cache-served pre-check + live walk +
+      // live dispatch → `mixed`.
+      expect(env.meta.source).toBe('mixed');
+      expect(env.data.summary.applied_count).toBe(2);
+      expect(multipart.requests).toHaveLength(2);
+      // P2-2 corollary: cache invalidates after happy path even though
+      // it was pre-seeded. The cache file should be removed.
+      const cachePath = join(cacheRoot, 'boards', '111.json');
+      await expect(fsStat(cachePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('fail-fast partial success then failure: invalidates board cache before re-throwing (Codex IMPL R1 P2-2 — wire state mutated before the abort, cache must follow)', async () => {
+      // Codex IMPL R1 P2-2 fix: when the fail-fast loop applies any
+      // items successfully before a per-item failure aborts the
+      // call, the board cache must invalidate before the throw —
+      // otherwise a follow-up read serves stale metadata that
+      // doesn't reflect the asset count change. Pre-fix the
+      // invalidate fired only when EVERY item applied; the
+      // partial-success-then-fail path skipped it entirely.
+      const cacheRoot = resolveCacheRoot({
+        env: { XDG_CACHE_HOME: xdgRoot() },
+      });
+      // writeEntry wraps `data` in the on-disk envelope
+      // ({schema_version, created_at, key, data}); pass the raw
+      // BoardMetadata shape so readEntry's parseCacheEntry hit.
+      await writeEntry(cacheRoot, { kind: 'board', boardId: '111' }, fileBoard);
+      const cachePath = join(cacheRoot, 'boards', '111.json');
+      await expect(fsStat(cachePath)).resolves.toBeDefined();
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          // First item succeeds — asset attached wire-side.
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+          },
+          // Second item fails — fail-fast aborts the loop.
+          {
+            operation_name: 'AddFileToColumn',
+            response: {
+              errors: [{ message: 'Item not found' }],
+              http_status: 404,
+            },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { applied_count?: number; applied_to?: readonly string[] };
+        };
+      };
+      // Decoration confirms one item applied before the abort.
+      expect(env.error?.details?.applied_count).toBe(1);
+      expect(env.error?.details?.applied_to).toEqual(['12345']);
+      // Cache invalidated despite the throw — agent's next read
+      // doesn't serve a count that lies about the asset state.
+      await expect(fsStat(cachePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('--continue-on-error: per-item `validation_failed` against an archived file column remaps to `column_archived` via foldAndRemap (Codex IMPL R1 P1-1 — stable-code rule applies uniformly across single + JSON-bulk + file-bulk fail-fast + partial-success)', async () => {
+      // Codex IMPL R1 P1-1 fix: per-item failures now apply
+      // `foldAndRemap` BEFORE landing in `data.results[i].error`
+      // so a stale-cache `validation_failed` (column archived
+      // server-side, still active in the local cache) remaps to
+      // the stable `column_archived` code. Mirrors
+      // `runPartialSuccessBulkUpdate`'s perTargetDispatch
+      // (`src/api/partial-success-bulk.ts`) and the v0.1 fail-fast
+      // JSON-bulk pattern; cli-design §6.5 stable-code rule is
+      // now applied uniformly across single + JSON-bulk + file-
+      // bulk paths.
+      //
+      // Cassette flow:
+      //   1. Pre-seed cache with file column ACTIVE.
+      //   2. Bulk dispatch — pre-check resolves from cache (active).
+      //   3. Multipart wire returns `validation_failed`-mapped
+      //      INVALID_ARGUMENT for the single matched item.
+      //   4. foldAndRemap fires `refreshBoardMetadata`; cassette
+      //      returns the same board with the file column ARCHIVED.
+      //   5. Per-record `error.code` remaps to `column_archived`.
+      const cacheRoot = resolveCacheRoot({
+        env: { XDG_CACHE_HOME: xdgRoot() },
+      });
+      // writeEntry wraps `data` in the on-disk envelope
+      // ({schema_version, created_at, key, data}); pass the raw
+      // BoardMetadata shape so readEntry's parseCacheEntry hit.
+      await writeEntry(cacheRoot, { kind: 'board', boardId: '111' }, fileBoard);
+      const archivedFileBoard = {
+        ...fileBoard,
+        columns: [
+          { ...fileBoard.columns[0], archived: true },
+          fileBoard.columns[1],
+        ],
+      };
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            http_status: 400,
+            response: {
+              errors: [
+                {
+                  message: 'column is archived',
+                  extensions: { code: 'INVALID_ARGUMENT' },
+                },
+              ],
+            },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--continue-on-error',
+          '--json',
+        ],
+        {
+          interactions: [
+            // Cache-hit on first call. Then foldAndRemap refreshes
+            // metadata once for the remap probe.
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [archivedFileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          summary: { applied_count: number; failed_count: number };
+          results: readonly {
+            item_id: string;
+            ok: boolean;
+            error?: { code: string };
+          }[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.summary.applied_count).toBe(0);
+      expect(env.data.summary.failed_count).toBe(1);
+      // P1-1 fix lands the remap — without it, error.code would be
+      // `validation_failed` and agents keying off the stable
+      // `column_archived` code (cli-design §6.5) would see
+      // inconsistent outcomes across the bulk fail modes.
+      expect(env.data.results[0]?.error?.code).toBe('column_archived');
     });
 
     it("'file_set_on_bulk_unsupported' literal stays RESERVED across the codebase: bulk file --set no longer surfaces it (carve-out folded at v0.7-M42); the literal MUST NOT reappear from this dispatch path", async () => {

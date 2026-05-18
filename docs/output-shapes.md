@@ -2243,8 +2243,12 @@ Single-target shape:
 **v0.6-M38 file-column dispatch on single-item `item update`.**
 When `--set <file-col>=<path>` resolves to a `file`-typed column,
 the action body branches OFF the JSON-translator path INTO M31's
-multipart wire (single-item path only — bulk + create reject).
-Mutex rules at the resolution boundary (D2/D5/D6 closures):
+multipart wire. v0.6-M38 shipped the single-item + bulk-`item update`
+paths; v0.7-M42 carved out the bulk `item update --where ... --set
+<file-col>=<path>` path into a per-item multipart fan-out (see
+"v0.7-M42 bulk file-column dispatch" below); v0.7-M43 (pending) lands
+the create-time path. Mutex rules at the resolution boundary
+(D2/D5/D6 closures, universal across single + bulk):
 
   - Exactly ONE file `--set` per call. 2+ file `--set` entries
     reject with `usage_error` carrying `'multi_file_set_unsupported'`
@@ -2252,6 +2256,9 @@ Mutex rules at the resolution boundary (D2/D5/D6 closures):
   - NO mixing with value `--set` / `--set-raw` / `--name`.
     Mixing rejects with `usage_error` carrying
     `'mixed_file_and_value_sets'` at `details.reason`.
+  - `item create --set <file-col>=<path>` still rejects with
+    `usage_error.details.reason: 'file_set_on_create_unsupported'`
+    (D6 carve-out fold deferred to v0.7-M43).
 
 Envelope shape on success mirrors `item set` file-column dispatch
 verbatim (`operation: "add_file_to_column"` + wire `Asset`
@@ -2361,6 +2368,131 @@ must be acknowledged for the live partial-success path to fire.
 `--continue-on-error --dry-run` emits the same dry-run envelope as
 the fail-fast bulk path (N-element `planned_changes[]`); dry-run
 can't preview per-item failures because no per-item mutation fires.
+
+### `item update --where ... --set <file-col>=<path>` (v0.7-M42 bulk file dispatch)
+
+Bulk file-column dispatch (v0.7-M42 D5 carve-out fold from v0.6-M38).
+When the matched setEntries resolve to a `file`-typed column, the
+action body branches OFF the JSON translator path INTO a per-item
+multipart fan-out (M31's `add_file_to_column` repeated per matched
+item-ID) under the v0.4-M30 `--concurrency` selector. The shared
+local file is pre-checked ONCE upfront (`precheckLocalFile` —
+whole-call abort with `usage_error.details.reason:
+'file_not_readable'` / `'file_empty'` regardless of
+`--continue-on-error` per cli-design §5.8 atomicity discipline).
+
+**Fail-fast bulk file envelope (default).** Every matched item
+applied successfully → `operation: 'item_update_bulk_file_set'`
+with per-item `asset` projections in `data.results[]`:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "item_update_bulk_file_set",
+    "summary": {
+      "matched_count": 3,
+      "applied_count": 3,
+      "failed_count": 0,
+      "board_id": "67890",
+      "column_id": "attachments",
+      "filename": "report.pdf",
+      "file_size_bytes": 8192
+    },
+    "results": [
+      { "item_id": "5001", "ok": true,
+        "asset": { "id": "asset-1", "name": "report.pdf", ... } },
+      { "item_id": "5002", "ok": true,
+        "asset": { "id": "asset-2", "name": "report.pdf", ... } },
+      { "item_id": "5003", "ok": true,
+        "asset": { "id": "asset-3", "name": "report.pdf", ... } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "attachments": "attachments" }
+}
+```
+
+Fail-fast bulk per-item failure aborts whole-call with the same
+v0.1-shape `applied_count` + `applied_to` + `failed_at_item` +
+`matched_count` decoration the JSON-bulk path emits. The `error.code`
+inherits the stable code (`column_archived` post-`foldAndRemap`
+remap when a stale cache served the file-column resolution against
+an archived column, mirroring cli-design §6.5 stable-code rule
+applied uniformly across single + bulk + file-bulk).
+
+**`--continue-on-error` partial-success.** Per-item failures land
+per-record inside `data.results[]`; top-level envelope is
+**always `ok: true`** when dispatch ran (universal rule per
+cli-design §6.1). Each result row carries either `asset` (on
+success) or `error: {code, message}` (on failure):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "item_update_bulk_file_set",
+    "summary": {
+      "matched_count": 2,
+      "applied_count": 1,
+      "failed_count": 1,
+      "board_id": "67890",
+      "column_id": "attachments",
+      "filename": "report.pdf",
+      "file_size_bytes": 8192
+    },
+    "results": [
+      { "item_id": "5001", "ok": true,
+        "asset": { "id": "asset-1", "name": "report.pdf", ... } },
+      { "item_id": "5002", "ok": false,
+        "error": { "code": "file_too_large",
+                   "message": "File size limit exceeded" } }
+    ]
+  },
+  "meta": { ..., "source": "mixed" },
+  "warnings": [],
+  "resolved_ids": { "attachments": "attachments" }
+}
+```
+
+`--concurrency <n>` (range 1..32, requires `--continue-on-error`)
+routes the per-item dispatch through `dispatchParallel` over a
+shared `MultipartTransport`. Result-row order preserves input
+order regardless of worker completion order (axis 5 of the
+R-NEW-28 6-axis equivalence). Cache invalidates ONCE after the
+dispatch loop completes (mirrors M38's single-leg invalidate
+pattern). On fail-fast with at least one successful item before
+the failure, the cache also invalidates before the throw — wire
+state already mutated, stale cache would lie.
+
+**Dry-run envelope.** No multipart wire calls fire; the
+`planned_changes` array lists one `add_file_to_column` entry per
+matched item-ID with the upfront pre-check's filename +
+file_size_bytes:
+
+```json
+{
+  "ok": true,
+  "data": null,
+  "planned_changes": [
+    { "operation": "add_file_to_column", "item_id": "5001",
+      "column_id": "attachments", "file_path": "./report.pdf",
+      "filename": "report.pdf", "file_size_bytes": 8192 },
+    { "operation": "add_file_to_column", "item_id": "5002",
+      "column_id": "attachments", "file_path": "./report.pdf",
+      "filename": "report.pdf", "file_size_bytes": 8192 }
+  ],
+  "meta": { ..., "dry_run": true, "source": "mixed" },
+  "warnings": []
+}
+```
+
+Unlike the M38 single-item dry-run (`source: 'none'` — pure-local),
+bulk dry-run reflects the upstream wire legs (metadata load +
+items_page walk + M38 pre-check) that fired to reach the helper.
+Source aggregates per cli-design §6.1 (cache-served metadata + live
+walk → `mixed`).
 
 ### `item create --board <bid> --name <n> [--set ...] [--set-raw ...] [--group ...] [--position ... --relative-to ...]`
 
