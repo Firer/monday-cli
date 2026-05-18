@@ -260,8 +260,8 @@ canonical anti-pattern.
   review. Spec gaps the implementation surfaced (e.g. M3's
   `--limit-pages` flag) are logged as backfill work in the
   milestone's exit block.
-- **`CLAUDE.md`** — bump "Status" if a milestone shipped; bump
-  "Contract at a glance" if a binding decision moved.
+- **`CLAUDE.md`** — bump "Current state" if a milestone shipped; bump
+  "Contract headlines" if a binding decision moved.
 - **`docs/api-reference.md`** — add to the cheat sheet only if the
   command introduces a Monday concept not already covered.
 
