@@ -11,27 +11,31 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.5.0` on npm (`latest` dist-tag,
-  2026-05-17). **v0.6.0 ready for publish** — release-prep closed
-  end-to-end at `98185d4..HEAD` (5 commits: ToC audit + slip /
-  README refresh / version bump + audit-fix / CHANGELOG / this
-  close-docs sweep; the envelope-snapshot refresh probe ran clean
-  and folded into this close-docs prose per the v0.5 release-prep
-  precedent). Pending user push authorization + npm publish.
+- **Published:** `monday-cli@0.6.0` on npm (`latest` dist-tag,
+  2026-05-18T16:30:21Z). **v0.6.0 published — release complete.**
+  Release-prep closed at `98185d4..51ba1a4` (5 commits: ToC audit
+  + slip / README refresh / version bump + audit-fix / CHANGELOG /
+  close-docs sweep; envelope-snapshot probe ran clean + folded
+  into close-docs prose per the v0.5 precedent). Annotated
+  `v0.6.0` tag pushed pointing at `51ba1a4`; GitHub release live
+  at https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
+  Previous: `monday-cli@0.5.0` (2026-05-17T20:55:05Z).
 - **package.json version:** `0.6.0`.
 - **Live numbers:** 4100 tests + 1 skipped across 172 files; coverage
   99.26 / 96.46 / 99.31 / 99.52 (stmts / branches / fns / lines) at
   the 95 / 95.45 / 95 / 95 floor (branches margin **1.01pp**, was
-  1.00pp at v0.5.0); **29 ERROR_CODES**; **117 commands**.
+  1.00pp at v0.5.0); **29 ERROR_CODES**; **117 commands**;
+  `npm audit` 0 vulnerabilities (audit-fix `fast-uri 3.1.0 →
+  3.1.2` folded into the version-bump commit per security.md
+  "high = merge blocker").
 - **Next session:** v0.7 kickoff candidate-selection per R-NEW-75
-  framework — **externally blocked on v0.6.0 push + npm publish
-  first**. Carry-forward backlog: multi-level subitems / cross-board
-  move value-overrides / resumable cross-board cursor (all slipped
-  v0.6 → v0.7 at this release-prep per R-NEW-82's 4th-consecutive
-  ratification) + profile-scoped argument defaults + v0.6.x
-  carve-outs (bulk + create file `--set` paths per D5 / D6;
-  multi-file `--set` per call per D2; file-`--set` stdin support
-  per D7).
+  framework. Carry-forward backlog: multi-level subitems / cross-
+  board move value-overrides / resumable cross-board cursor (all
+  slipped v0.6 → v0.7 at this release-prep per R-NEW-82's
+  4th-consecutive ratification) + profile-scoped argument
+  defaults + v0.6.x carve-outs (bulk + create file `--set` paths
+  per D5 / D6; multi-file `--set` per call per D2; file-`--set`
+  stdin support per D7).
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —
