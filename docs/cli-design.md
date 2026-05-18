@@ -1727,10 +1727,14 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # wire failures partition between fail-fast (default —
                                           # first failure aborts) and --continue-on-error (per-item
                                           # data.results[] with {item_id, ok, asset?, error?}).
-                                          # **PRE-FLIGHT STATUS:** argv + pre-check + items_page +
-                                          # confirmation are shipped contract; per-item dispatch
-                                          # body is c8-ignored at pre-flight, throws internal_error
-                                          # with details.reason: 'm42_preflight_stub' until M42 IMPL.
+                                          # **Shipped at v0.7-M42 IMPL.** The full per-item
+                                          # multipart fan-out (single upfront precheckLocalFile +
+                                          # dispatchSequential / dispatchParallel selector over
+                                          # `executeFileColumnSet` + single post-dispatch
+                                          # invalidateBoard + `operation: 'item_update_bulk_file_set'`
+                                          # envelope) runs end-to-end; the 'm42_preflight_stub'
+                                          # discriminator literal is RESERVED across the codebase
+                                          # but no longer surfaces from the runtime path.
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
                                           # --continue-on-error (v0.3-M25): opt-in to the per-item

@@ -67,7 +67,14 @@ import {
 } from '../../api/file-column-set.js';
 import { precheckLocalFile } from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
+import type { Asset } from '../../api/assets.js';
 import type { MultipartTransport } from '../../api/multipart-transport.js';
+import {
+  dispatchSequential,
+  type DispatchOneTargetInputs,
+  type PartialSuccessResult,
+} from '../../api/partial-success-mutation.js';
+import { dispatchParallel } from '../../api/parallel-dispatch.js';
 import type { EmitFromNetworkResult } from '../../api/resolve-client.js';
 import type { MondayResponse } from '../../api/client.js';
 import {
@@ -1024,6 +1031,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       metaCacheAgeSeconds: meta.cacheAgeSeconds,
       filterWarnings: filterResult.warnings,
       retries: globalFlags.retry,
+      isDryRun: globalFlags.dryRun,
     });
     return;
   }
@@ -1526,15 +1534,16 @@ const runItemUpdateSingleFileDispatch = async (
 // body verbatim under v0.4-M30's `dispatchParallel` /
 // `dispatchSequential` selector for `--concurrency` semantics.
 //
-// **Pre-flight contract diff (this commit).** argv parse + shape
-// validation + board-metadata load + file-column dispatch pre-check
-// + items_page walk + confirmation gate are all SHIPPED CONTRACT
-// (visible to coverage). The per-item dispatch loop + envelope emit
-// is the wire-call leg, c8-ignored at pre-flight per R-NEW-76. The
-// stub body throws `internal_error` with `details.reason:
-// 'm42_preflight_stub'` so an agent invoking the carved-out path
-// sees a clear "not yet implemented" signal rather than silent
-// success / corrupted state.
+// **Status: runtime body shipped at v0.7-M42 IMPL.** The pre-flight
+// contract diff (commit `160330b`) shipped the argv + pre-check +
+// items_page + confirmation-gate surface plus the per-item dispatch
+// stub that threw `internal_error` with `details.reason:
+// 'm42_preflight_stub'`; IMPL replaces the stub with the runtime
+// body below. The `'m42_preflight_stub'` literal is RESERVED across
+// the codebase (regression-guarded by an integration test that
+// asserts the literal does not appear in stdout/stderr); a
+// historical `'file_set_on_bulk_unsupported'` literal stays
+// reserved alongside it.
 //
 // **D-list closures (v0.7-plan §3 M42 entry):**
 //
@@ -1554,8 +1563,11 @@ const runItemUpdateSingleFileDispatch = async (
 //     per-item failure surfaces as
 //     `data.results[i].error: { code, message }` per M25
 //     partial-success. Aggregate `data.summary.{matched_count,
-//     applied_count, failed_count, board_id}` mirrors M25's
-//     `partialSuccessBulkUpdateDataSchema`.
+//     applied_count, failed_count, board_id, column_id, filename,
+//     file_size_bytes}` extends M25's
+//     `partialSuccessBulkUpdateDataSchema` with file-dispatch slots
+//     so an agent reading the envelope sees which file was
+//     dispatched + where.
 //
 //   - **D3 — Per-item file pre-check timing.** Single upfront
 //     `precheckLocalFile` call BEFORE the per-item dispatch loop —
@@ -1572,26 +1584,39 @@ const runItemUpdateSingleFileDispatch = async (
 //
 //   - **D4 — ERROR_CODES delta.** Zero. Registry stays at 29.
 //     Per-item dispatch failures route through the existing
-//     `m25-shaped` per-record `error: { code, message }` shape;
+//     `m25-shaped` per-record `error: { code, message }` shape
+//     under `--continue-on-error`, or through the v0.1 fail-fast
+//     decoration (`details.applied_to` + `applied_count` +
+//     `failed_at_item` + `matched_count`) on the default path;
 //     no new top-level code surfaces.
 //
 // **R-class watch-items.**
 //
 //   - R-v0.6-NEW-1 (file pre-check + Blob-construction helper) —
-//     `precheckLocalFile` consumer count goes 3 → 4 (M31 item
-//     upload + M31 update upload + M38 item set / item update
+//     `precheckLocalFile` consumer count goes 3 → 4 at IMPL (M31
+//     item upload + M31 update upload + M38 item set / item update
 //     single + M42 bulk item update). Already-shipped helper
-//     scales cleanly to consumer 4.
+//     scales cleanly to consumer 4; graduation candidate at the
+//     5th consumer (v0.7-M43 create-time fold likely tips it).
 //   - R-v0.6-NEW-2 (`details.reason` discriminator pattern) — 4
-//     instances at v0.6-M38; M42 likely adds no new reasons
-//     (per D4 zero-delta closure); IF a probe surfaces an
-//     unexpected per-item rejection that needs its own
-//     discriminator, the watch-item lights up.
-//   - R-NEW-76 (parseArgv-BEFORE-c8) — this stub applied; argv
-//     parse + shape validation + pre-check fire upfront, only
-//     the wire-dispatch leg is c8-ignored.
+//     instances at v0.6-M38; M42 IMPL adds zero new reasons (per
+//     D4 zero-delta closure — the existing `'file_not_readable'`
+//     / `'file_empty'` / `'multi_file_set_unsupported'` /
+//     `'mixed_file_and_value_sets'` reasons cover every M42
+//     rejection shape).
+//   - R-NEW-76 (parseArgv-BEFORE-c8) — applied at pre-flight; the
+//     c8-ignore boundary dropped at IMPL (runtime body fully
+//     covered).
 //   - R-NEW-72 (post-fix-up cross-doc grep) — apply at every
-//     Codex fix-up round that flips a contract surface.
+//     Codex IMPL fix-up round that flips a contract surface.
+//
+// **Future lift candidate.** The fail-fast error-decoration block
+// (`if (err.code === 'usage_error') { throw new UsageError(...) } else
+// { throw new ApiError(...) }`) is byte-equivalent across this
+// helper and the JSON-bulk action body (R-NEW-58 2-consumer
+// trigger). Lift candidate fires at the 3rd consumer (M43 create-
+// time fold may add one if its rollback / orphan-warn shape
+// re-uses the same decoration).
 // ============================================================
 
 /**
@@ -1666,115 +1691,416 @@ interface RunItemUpdateBulkFileDispatchInputs {
   readonly metaCacheAgeSeconds: number | null;
   readonly filterWarnings: readonly Warning[];
   readonly retries: number;
+  /**
+   * v0.7-M42 IMPL: dry-run vs live branching. Carries `globalFlags.dryRun`
+   * from the bulk action body so the helper emits the D4 planned_changes
+   * envelope (per-item `add_file_to_column` entry) without burning multipart
+   * wire round-trips, or runs the per-item dispatch loop on the live path.
+   * Mirrors the M38 single-file helper's `isDryRun` slot for consistency
+   * across the file-dispatch family.
+   */
+  readonly isDryRun: boolean;
 }
 
 /**
  * Bulk file `--set` per-item dispatch helper (v0.7-M42 D5 carve-out
  * fold).
  *
- * **Status: PRE-FLIGHT STUB at this commit.** The function signature
- * + the c8-ignored body that throws `internal_error` are the
- * shipped pre-flight surface; the per-item multipart fan-out body
- * lifts at M42 IMPL. argv parse, shape validation, board-metadata
- * load, pre-check (which returned `kind: 'file_bulk'` for callers
- * reaching this helper), items_page walk, and the confirmation
- * gate have ALL run upstream and are shipped contract — the
- * c8-ignore boundary lives at the per-item dispatch leg ONLY per
- * R-NEW-76.
+ * **Status: runtime body shipped at v0.7-M42 IMPL.** argv parse,
+ * shape validation, board-metadata load, pre-check (which returned
+ * `kind: 'file_bulk'` for callers reaching this helper), items_page
+ * walk, and the confirmation gate run upstream — this helper takes
+ * the resolved file-column dispatch slot + matched item-IDs and
+ * fans the multipart wire across them under the partial-success vs
+ * fail-fast contract.
  *
- * **Planned M42 IMPL body (sketch — lands at IMPL commit, NOT
- * this commit):**
+ * **Execution shape:**
  *
  *   1. Single upfront `precheckLocalFile(inputs.m38.rawValue)` —
- *      one file path shared across all matched items. Failed
- *      pre-check surfaces as `usage_error` (file_not_readable /
- *      file_empty) whole-call-abort per D3 closure.
- *   2. Per-item dispatch loop over `inputs.matchedItemIds`:
- *      - `--continue-on-error` absent / sequential (`--concurrency
- *        undefined | 1`): fail-fast loop via `dispatchSequential`;
- *        first per-item failure aborts with `details.applied_to`
- *        decoration (mirrors M25 sequential-path semantics).
- *      - `--continue-on-error` set: per-item records via either
- *        `dispatchSequential` (N=1) or `dispatchParallel`
- *        (N > 1) per `--concurrency`; build
- *        {@link BulkFileSetData} with per-record outcomes;
- *        `summary.{applied,failed}_count` derived from
- *        `results.filter(r => r.ok)`.
- *   3. Cache invalidation: `await invalidateBoard(inputs.boardId,
- *      inputs.ctx.env)` ONCE after the dispatch loop completes
- *      (mirrors M38's single-leg invalidate pattern; one board's
- *      cache covers every matched item).
- *   4. Emit envelope: `data: BulkFileSetData` for success /
- *      partial-success; thread `inputs.m38.warnings` +
- *      `inputs.filterWarnings` into the envelope's `warnings`
- *      slot deduped by code+message+token (mirrors the JSON-bulk
- *      `dedupeWarnings` path); source = `mixed` (cache-served
- *      metadata + live wire calls); `cache_age_seconds` from
- *      `inputs.metaCacheAgeSeconds` per §6.1 aggregation rules.
- *
- * The stub throw below intentionally surfaces `internal_error`
- * (exit 2) with `details.reason: 'm42_preflight_stub'` so an
- * agent invoking the carved-out path sees a clear "not yet
- * implemented" signal AND a structured `details.reason` slot
- * that points at the milestone tracker. The `internal_error`
- * code (rather than `usage_error`) is deliberate: the argv IS
- * accepted now (parse succeeded), the issue is that the wire
- * dispatch isn't shipped yet — that's a server-side / internal
- * gap, not a user-input problem.
+ *      one file path shared across all matched items. Failure
+ *      surfaces as `usage_error` (`file_not_readable` /
+ *      `file_empty`) whole-call-abort regardless of
+ *      `--continue-on-error` per D3 + cli-design §5.8 atomicity
+ *      discipline (pre-checks MUST fire BEFORE any wire round-trip).
+ *   2. Dry-run branch — emits the D4-shaped envelope with one
+ *      `add_file_to_column` planned_change per matched item-ID
+ *      (no file bytes loaded; no multipart wire). Unlike M38
+ *      single-item which pins `source: 'none'` (its dry-run is
+ *      pure-local), bulk dry-run carries the upstream legs'
+ *      aggregated `source` (metadata load + items_page walk —
+ *      `mixed` when metadata was cache-served, `live` otherwise);
+ *      reaching this branch already paid for those wire legs.
+ *   3. Live dispatch — two shapes per `parsed.continueOnError`:
+ *      - **Fail-fast (default)** — sequential loop over matched
+ *        items (no `--concurrency` per M30 D2 closure:
+ *        `--concurrency requires --continue-on-error`); first
+ *        per-item failure aborts whole-call with the v0.1-shaped
+ *        `details.applied_to` / `applied_count` / `failed_at_item`
+ *        / `matched_count` decoration so agents see how many
+ *        items applied before the failure.
+ *      - **`--continue-on-error`** — routes through
+ *        {@link dispatchSequential} (concurrency `undefined`/`1`)
+ *        or {@link dispatchParallel} (concurrency `> 1`) over a
+ *        shared {@link MultipartTransport}; per-item failures
+ *        land as `data.results[i].error: {code, message}` records,
+ *        successes carry `data.results[i].asset` via a side-map
+ *        fold keyed by `item_id`. `internal_error` re-throws
+ *        whole-call via the shared dispatchers' escape hatch
+ *        (M14 round-2 F1 precedent) so schema drift surfaces as
+ *        top-level `ok: false` rather than per-record.
+ *   4. Cache invalidation — single `invalidateBoard(boardId, env)`
+ *      after the dispatch loop completes (mirrors M38's single-
+ *      leg invalidate timing; one board covers every matched
+ *      item's mutated `asset` slot).
+ *   5. Envelope emit — `data: BulkFileSetData` with the
+ *      `operation: 'item_update_bulk_file_set'` literal
+ *      discriminator + per-item `results[]` + aggregate
+ *      `summary.{matched_count, applied_count, failed_count,
+ *      board_id, column_id, filename, file_size_bytes}`. Warnings
+ *      threaded as `dedupeWarnings([...filterWarnings,
+ *      ...m38.warnings])` (mirrors the JSON-bulk path); source
+ *      derives from `metaSource` (cache-served metadata + live
+ *      wire calls → `mixed`).
  */
 export const runItemUpdateBulkFileDispatch = async (
   inputs: RunItemUpdateBulkFileDispatchInputs,
 ): Promise<void> => {
-  /* c8 ignore start — v0.7-M42 pre-flight stub. Runtime body
-     lifts at M42 IMPL; the c8-ignore boundary lives at the
-     per-item dispatch leg only per R-NEW-76. All upstream
-     argv parse + shape validation + pre-check + items_page
-     walk + confirmation gate fired before reaching this
-     point and are shipped contract. */
-  // Anchors the `async` signature so M42 IMPL doesn't have to
-  // re-shape callers when it adds the real `await
-  // precheckLocalFile(...)` / `await dispatchParallel(...)` /
-  // `await invalidateBoard(...)` legs. The `await` resolves
-  // immediately; the throw below is the only observable behaviour
-  // at pre-flight.
-  await Promise.resolve();
-  // Reference inputs once so TS doesn't flag them as unused on the
-  // pre-flight stub; IMPL replaces this whole body. The throw below
-  // is the only observable behaviour at pre-flight.
-  void inputs.parsed;
-  void inputs.client;
-  void inputs.multipart;
-  void inputs.ctx;
-  void inputs.programOpts;
-  void inputs.apiVersion;
-  void inputs.boardId;
-  void inputs.matchedItemIds;
-  void inputs.m38;
-  void inputs.metaSource;
-  void inputs.metaCacheAgeSeconds;
-  void inputs.filterWarnings;
-  void inputs.retries;
-  throw new ApiError(
-    'internal_error',
-    'v0.7-M42 bulk file `--set` dispatch is not yet implemented; ' +
-      'pre-flight contract diff only at this commit (runtime body ' +
-      'lands at M42 IMPL). The argv shape + pre-check are shipped — ' +
-      'reaching this throw means the carve-out fold path was ' +
-      'correctly entered.',
-    {
-      details: {
-        reason: 'm42_preflight_stub',
-        milestone: 'v0.7-M42',
-        column_id: inputs.m38.columnId,
+  // 1) Single upfront pre-check (D3 closure). Whole-call abort
+  //    regardless of `--continue-on-error` per cli-design §5.8 —
+  //    the local file pre-check is shared across N matched items,
+  //    so failure aborts the whole call before any multipart wire
+  //    leg fires. `precheckLocalFile` throws `usage_error` with
+  //    `details.reason: 'file_not_readable'` / `'file_empty'`
+  //    (M31 single-item discriminators reused per D4 zero-delta
+  //    closure).
+  const precheck = await precheckLocalFile(inputs.m38.rawValue);
+
+  // Combined warnings list threaded into every envelope emit below.
+  // Mirrors the JSON-bulk `dedupeWarnings(filter ∪ m38)` pattern at
+  // the action body; key is `code+message+token` so a pre-check
+  // `stale_cache_refreshed` plus a filter-time `stale_cache_refreshed`
+  // for the SAME token collapse to one entry.
+  const combinedWarnings = dedupeWarnings([
+    ...inputs.filterWarnings,
+    ...inputs.m38.warnings,
+  ]);
+
+  // 2) Dry-run branch — D4-shaped envelope. One
+  //    `add_file_to_column` planned_change per matched item-ID;
+  //    no file bytes loaded, no multipart wire round-trip. Unlike
+  //    the M38 single-item dry-run (which pins `source: 'none'`
+  //    because its dry-run is pure-local), bulk dry-run carries
+  //    the aggregated upstream `source` — metadata load + items_page
+  //    walk already paid for wire legs to reach here.
+  if (inputs.isDryRun) {
+    const plannedChanges = inputs.matchedItemIds.map((itemId) => ({
+      operation: 'add_file_to_column' as const,
+      item_id: itemId,
+      column_id: inputs.m38.columnId,
+      file_path: inputs.m38.rawValue,
+      filename: precheck.filename,
+      file_size_bytes: precheck.fileSizeBytes,
+    }));
+    // cache-served metadata + live items_page walk → `mixed`; live
+    // metadata + live walk → `live` (mirrors the JSON-bulk
+    // `emptyEnvelopeSource` derivation above at the empty-match
+    // short-circuit).
+    const dryRunSource: 'live' | 'cache' | 'mixed' =
+      inputs.metaSource === 'cache' ? 'mixed' : 'live';
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges,
+      source: dryRunSource,
+      cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+      warnings: combinedWarnings,
+      apiVersion: inputs.apiVersion,
+    });
+    return;
+  }
+
+  // 3) Live dispatch. Build the shared `FileColumnSetEntry` once —
+  //    every per-item leg uses the SAME local file (one path × N
+  //    items), so `buildBlobFromPath` (inside `executeFileColumnSet`)
+  //    re-reads the bytes per leg rather than sharing one Blob
+  //    instance. Re-reading per-leg is the simpler shape; a future
+  //    optimisation could memoise the bytes if profiling motivates
+  //    it (~bytes × N reads vs ~bytes × 1 read + held in memory).
+  const entry = {
+    columnId: inputs.m38.columnId,
+    columnType: 'file' as const,
+    rawValue: inputs.m38.rawValue,
+    filePath: precheck.filePath,
+    filename: precheck.filename,
+    fileSizeBytes: precheck.fileSizeBytes,
+  };
+
+  // Common envelope source — cache-served metadata + live multipart
+  // dispatch → `mixed`; live metadata + live dispatch → `live`.
+  // Same derivation as the dry-run branch + the empty-match short-
+  // circuit above.
+  const liveSource: 'live' | 'cache' | 'mixed' =
+    inputs.metaSource === 'cache' ? 'mixed' : 'live';
+  // resolved_ids slot — pre-check returned the resolved column ID
+  // for the file token; echo it into the envelope's
+  // `meta.resolved_ids` so agents can confirm token-to-ID resolution
+  // (mirrors the M38 single-item envelope at `runItemUpdateSingleFileDispatch`).
+  const resolvedIds = { [inputs.m38.token]: inputs.m38.columnId };
+
+  // Discriminator for the dispatch shape: fail-fast (default,
+  // applied to the v0.1 fail-fast bulk path's `applied_to` decoration)
+  // vs `--continue-on-error` (partial-success per-record envelope).
+  // M30 D2 closure pins `--concurrency requires --continue-on-error`,
+  // so fail-fast bulk file dispatch is always sequential N=1.
+  const continueOnError = inputs.parsed.continueOnError === true;
+
+  if (!continueOnError) {
+    // Fail-fast bulk file dispatch. Sequential loop; first per-item
+    // failure aborts whole-call. Track applied (item_id, asset)
+    // pairs so the failure decoration can echo `applied_to` (matches
+    // the JSON-bulk fail-fast pattern at runBulk's main loop).
+    const appliedAssets: { itemId: string; asset: Asset }[] = [];
+    for (const itemId of inputs.matchedItemIds) {
+      try {
+        const result = await executeFileColumnSet({
+          client: inputs.client,
+          multipart: inputs.multipart,
+          itemId,
+          entry,
+          signal: inputs.ctx.signal,
+          retries: inputs.retries,
+        });
+        appliedAssets.push({ itemId, asset: result.asset });
+      } catch (err: unknown) {
+        if (err instanceof MondayCliError) {
+          // Same decoration shape as the JSON-bulk fail-fast path
+          // (lines ~1334-1361 above). Preserves the existing error
+          // class' fields and grafts `applied_count` / `applied_to`
+          // / `failed_at_item` / `matched_count` onto `details`.
+          const existing = err.details ?? {};
+          const decoration = {
+            ...existing,
+            applied_count: appliedAssets.length,
+            applied_to: appliedAssets.map((a) => a.itemId),
+            failed_at_item: itemId,
+            matched_count: inputs.matchedItemIds.length,
+          };
+          if (err.code === 'usage_error') {
+            throw new UsageError(err.message, {
+              ...(err.cause === undefined ? {} : { cause: err.cause }),
+              details: decoration,
+            });
+          }
+          throw new ApiError(err.code, err.message, {
+            ...(err.cause === undefined ? {} : { cause: err.cause }),
+            ...(err.httpStatus === undefined
+              ? {}
+              : { httpStatus: err.httpStatus }),
+            ...(err.mondayCode === undefined
+              ? {}
+              : { mondayCode: err.mondayCode }),
+            ...(err.requestId === undefined
+              ? {}
+              : { requestId: err.requestId }),
+            retryable: err.retryable,
+            ...(err.retryAfterSeconds === undefined
+              ? {}
+              : { retryAfterSeconds: err.retryAfterSeconds }),
+            details: decoration,
+          });
+        }
+        // Non-CliError programmer bug — re-throw to the runner's
+        // catch-all (surfaces as `internal_error` whole-call;
+        // mirrors the JSON-bulk fail-fast path).
+        throw err;
+      }
+    }
+
+    // Every item applied — single board-cache invalidate before emit
+    // (mirrors M38 single-leg invalidate timing).
+    await invalidateBoard(inputs.boardId, inputs.ctx.env);
+
+    const results: BulkFileSetResult[] = appliedAssets.map(
+      ({ itemId, asset }) => ({
+        item_id: itemId,
+        ok: true,
+        asset,
+      }),
+    );
+    const data: BulkFileSetData = {
+      operation: 'item_update_bulk_file_set',
+      summary: {
         matched_count: inputs.matchedItemIds.length,
-        hint:
-          'this command path is reserved for v0.7-M42 IMPL (bulk ' +
-          'file `--set` carve-out fold); the pre-flight contract ' +
-          'diff (current commit) ships only the argv + pre-check ' +
-          'surface. Use `monday item set <iid> <file-col>=<path>` ' +
-          'per matched item until IMPL ships.',
+        applied_count: appliedAssets.length,
+        failed_count: 0,
+        board_id: inputs.boardId,
+        column_id: inputs.m38.columnId,
+        filename: precheck.filename,
+        file_size_bytes: precheck.fileSizeBytes,
       },
+      results,
+    };
+    emitMutation({
+      ctx: inputs.ctx,
+      data,
+      schema: bulkFileSetDataSchema,
+      programOpts: inputs.programOpts,
+      warnings: combinedWarnings,
+      source: liveSource,
+      cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+      apiVersion: inputs.apiVersion,
+      resolvedIds,
+    });
+    return;
+  }
+
+  // `--continue-on-error` path. Per-item failures land as per-record
+  // `error: {code, message}` slots; the envelope is `ok: true`
+  // regardless of how many items failed (universal partial-success
+  // rule per cli-design §6.4). `internal_error` re-throws whole-call
+  // via the shared dispatcher's escape hatch — schema drift in the
+  // multipart response surfaces as top-level `ok: false`, not
+  // papered over as a per-record slot.
+  const assetById = new Map<string, Asset>();
+  const perTargetDispatch = async ({
+    targetId,
+  }: DispatchOneTargetInputs<string>): Promise<void> => {
+    const result = await executeFileColumnSet({
+      client: inputs.client,
+      multipart: inputs.multipart,
+      itemId: targetId,
+      entry,
+      signal: inputs.ctx.signal,
+      retries: inputs.retries,
+    });
+    assetById.set(targetId, result.asset);
+  };
+
+  // Routing — `--concurrency > 1` routes through dispatchParallel
+  // (bounded async-pool); absent / `=== 1` routes through
+  // dispatchSequential. Both dispatchers thread the optional
+  // `signal` so SIGINT-aware callers see consistent cooperative-
+  // abort semantics (R-NEW-28 axis 6 — identical between routes).
+  let dispatchResults: readonly PartialSuccessResult[];
+  if (
+    inputs.parsed.concurrency !== undefined &&
+    inputs.parsed.concurrency > 1
+  ) {
+    dispatchResults = await dispatchParallel(
+      inputs.matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+      inputs.parsed.concurrency,
+      inputs.ctx.signal,
+    );
+  } else {
+    dispatchResults = await dispatchSequential(
+      inputs.matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+      inputs.ctx.signal,
+    );
+  }
+
+  // Single post-dispatch invalidate. Fires even when every per-item
+  // dispatch failed (failed_count === matched_count) — wire calls
+  // still fired against Monday, so the metadata cache's view of the
+  // file column's content count may be stale even if the asset
+  // didn't land. Cheap to always fire; expensive if missed.
+  await invalidateBoard(inputs.boardId, inputs.ctx.env);
+
+  // Fold dispatcher results + side-map assets into the
+  // BulkFileSetResult[] shape. Mirrors `foldPartialSuccessBulkResult`
+  // (`src/api/partial-success-bulk.ts`) but with the file-dispatch's
+  // `asset` slot replacing the JSON path's `item` projection.
+  const results: BulkFileSetResult[] = dispatchResults.map((row) => {
+    const itemIdSlot = row.item_id;
+    /* c8 ignore next 8 — dispatcher contract: every result row
+       carries the id-field slot (populated by the dispatch helper);
+       this guard catches a contract violation that would surface as
+       a programmer bug, not a Monday-side failure. */
+    if (typeof itemIdSlot !== 'string' || itemIdSlot.length === 0) {
+      throw new ApiError(
+        'internal_error',
+        'bulk file dispatch result row is missing the `item_id` field — dispatcher contract violation.',
+        { details: { record_keys: Object.keys(row) } },
+      );
+    }
+    if (row.ok) {
+      const asset = assetById.get(itemIdSlot);
+      /* c8 ignore next 8 — side-map invariant: every successful
+         per-target dispatch records the asset; this guard catches a
+         wrapper-layer miss (programmer bug). */
+      if (asset === undefined) {
+        throw new ApiError(
+          'internal_error',
+          `bulk file dispatch result row for item_id ${itemIdSlot} reported ok: true but no Asset was captured — wrapper-layer side-map miss.`,
+          { details: { item_id: itemIdSlot } },
+        );
+      }
+      return { item_id: itemIdSlot, ok: true, asset };
+    }
+    /* c8 ignore next 8 — dispatcher contract: every `ok: false` row
+       carries the `error` slot (populated by the shared dispatcher's
+       per-target error decoration). */
+    if (row.error === undefined) {
+      throw new ApiError(
+        'internal_error',
+        `bulk file dispatch result row for item_id ${itemIdSlot} reported ok: false but no error payload was captured — dispatcher contract violation.`,
+        { details: { item_id: itemIdSlot } },
+      );
+    }
+    return {
+      item_id: itemIdSlot,
+      ok: false,
+      error: { code: row.error.code, message: row.error.message },
+    };
+  });
+
+  const appliedCount = results.filter((r) => r.ok).length;
+  const failedCount = results.filter((r) => !r.ok).length;
+  /* c8 ignore next 11 — invariant: every matched item produces
+     exactly one result row (success or failure) under both
+     dispatchers; mismatch would indicate a programmer bug in the
+     dispatcher or the fold. Mirrors `buildPartialSuccessBulkSummary`'s
+     defensive check. */
+  if (appliedCount + failedCount !== inputs.matchedItemIds.length) {
+    throw new ApiError(
+      'internal_error',
+      `bulk file dispatch summary invariant violated — matched_count (${String(inputs.matchedItemIds.length)}) !== applied_count (${String(appliedCount)}) + failed_count (${String(failedCount)}).`,
+      {
+        details: {
+          matched_count: inputs.matchedItemIds.length,
+          applied_count: appliedCount,
+          failed_count: failedCount,
+          board_id: inputs.boardId,
+        },
+      },
+    );
+  }
+
+  const data: BulkFileSetData = {
+    operation: 'item_update_bulk_file_set',
+    summary: {
+      matched_count: inputs.matchedItemIds.length,
+      applied_count: appliedCount,
+      failed_count: failedCount,
+      board_id: inputs.boardId,
+      column_id: inputs.m38.columnId,
+      filename: precheck.filename,
+      file_size_bytes: precheck.fileSizeBytes,
     },
-  );
-  /* c8 ignore stop */
+    results,
+  };
+  emitMutation({
+    ctx: inputs.ctx,
+    data,
+    schema: bulkFileSetDataSchema,
+    programOpts: inputs.programOpts,
+    warnings: combinedWarnings,
+    source: liveSource,
+    cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+    apiVersion: inputs.apiVersion,
+    resolvedIds,
+  });
 };

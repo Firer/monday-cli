@@ -21,13 +21,17 @@
  * past §15's 1,500-line threshold; the per-mode split mirrors R14's
  * per-verb split of the original `item.test.ts` (M5b session 4).
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   FIXTURE_API_URL,
   LEAK_CANARY,
   parseEnvelope,
   type EnvelopeShape,
 } from '../helpers.js';
+import { createInlineMultipartFixtureTransport } from '../../fixtures/multipart-load.js';
 import {
   boardMetadataInteraction,
   sampleBoardMetadata,
@@ -3452,7 +3456,12 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     expect(out.stdout).toBe('');
   });
 
-  describe('v0.7-M42 bulk file `--set` carve-out fold (D5 closure from v0.6-M38) — pre-flight contract diff', () => {
+  describe('v0.7-M42 bulk file `--set` carve-out fold (D5 closure from v0.6-M38) — IMPL', () => {
+    // Board metadata fixture pinning a file-typed `attachments`
+    // column alongside the standard `status_1` filter column. The
+    // file dispatch's pre-check resolves `attachments` to type
+    // `file` and returns `kind: 'file_bulk'`; the action body
+    // branches into `runItemUpdateBulkFileDispatch`.
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -3477,21 +3486,78 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       ],
     };
 
-    it("reaches the v0.7-M42 pre-flight stub on the bulk live path — argv + pre-check + items_page + confirmation are shipped contract; per-item dispatch throws internal_error with details.reason: 'm42_preflight_stub' (was 'file_set_on_bulk_unsupported' at v0.6-M38)", async () => {
-      // v0.7-M42 pre-flight contract diff: the v0.6-M38 D5 rejection
-      // is carved out. Bulk file --set now traverses the FULL
-      // shipped argv + pre-check + items_page + confirmation path,
-      // then hits the per-item dispatch stub which throws
-      // `internal_error` (exit 2). The stub-throw is the only
-      // observable behaviour at pre-flight; the runtime body lifts
-      // at M42 IMPL.
-      //
-      // Why the items_page cassette is required now: bulk file
-      // dispatch reaches the items_page walker (the carve-out fold
-      // pushed the rejection past the walker). The walker resolves
-      // matched items so the confirmation gate sees a real count;
-      // --yes satisfies the gate; then the per-item dispatch stub
-      // fires.
+    // Standard `add_file_to_column` success response template.
+    // Per-test specs override only the slots the assertion inspects
+    // (id / name). The shape mirrors M31's asset projection.
+    const buildAsset = (id: string): Record<string, unknown> => ({
+      id,
+      name: 'report.pdf',
+      url: `https://files.monday.com/x/${id}.pdf`,
+      public_url: `https://share.monday.com/${id}`,
+      file_extension: 'pdf',
+      file_size: 17,
+      created_at: '2026-06-01T10:30:00Z',
+      uploaded_by: { id: '1', name: 'Alice' },
+      original_geometry: null,
+      url_thumbnail: null,
+    });
+
+    let workdir: string;
+    let reportPath: string;
+    beforeEach(async () => {
+      workdir = await mkdtemp(join(tmpdir(), 'monday-cli-item-update-m42-'));
+      reportPath = join(workdir, 'report.pdf');
+      await writeFile(reportPath, 'PDF-bytes-fixture', 'utf8');
+    });
+    afterEach(async () => {
+      await rm(workdir, { recursive: true, force: true });
+    });
+
+    const fileBoardMetadata = {
+      operation_name: 'BoardMetadata',
+      response: { data: { boards: [fileBoard] } },
+    };
+    const itemsPageWithTwo = {
+      operation_name: 'ItemsPage',
+      response: {
+        data: {
+          boards: [
+            {
+              items_page: {
+                cursor: null,
+                items: [{ id: '12345' }, { id: '23456' }],
+              },
+            },
+          ],
+        },
+      },
+    };
+
+    it('live --yes fail-fast bulk file dispatch: fans `add_file_to_column` across matched items, emits BulkFileSetData envelope with per-item asset slots', async () => {
+      // The IMPL replacement of the v0.7-M42 pre-flight stub. The
+      // shipped contract surface (argv parse, pre-check returning
+      // `kind: 'file_bulk'`, items_page walk, confirmation gate)
+      // runs upstream; the helper now runs the local file pre-check
+      // once + dispatches `executeFileColumnSet` per matched item
+      // + emits the partial-success-bulk envelope shape with
+      // `operation: 'item_update_bulk_file_set'`. Fail-fast bulk
+      // (no `--continue-on-error`) succeeds end-to-end → every
+      // result row carries `ok: true` + the asset projection.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: buildAsset('asset-2') } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
       const out = await drive(
         [
           'item',
@@ -3501,16 +3567,429 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
           '--where',
           'status_1=Backlog',
           '--set',
-          'attachments=./report.pdf',
+          `attachments=${reportPath}`,
           '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          summary: {
+            matched_count: number;
+            applied_count: number;
+            failed_count: number;
+            board_id: string;
+            column_id: string;
+            filename: string;
+            file_size_bytes: number;
+          };
+          results: readonly {
+            item_id: string;
+            ok: boolean;
+            asset?: { id: string; name: string };
+          }[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.operation).toBe('item_update_bulk_file_set');
+      expect(env.data.summary).toEqual({
+        matched_count: 2,
+        applied_count: 2,
+        failed_count: 0,
+        board_id: '111',
+        column_id: 'attachments',
+        filename: 'report.pdf',
+        file_size_bytes: 17,
+      });
+      expect(env.data.results).toHaveLength(2);
+      expect(env.data.results[0]).toMatchObject({
+        item_id: '12345',
+        ok: true,
+        asset: { id: 'asset-1', name: 'report.pdf' },
+      });
+      expect(env.data.results[1]).toMatchObject({
+        item_id: '23456',
+        ok: true,
+        asset: { id: 'asset-2', name: 'report.pdf' },
+      });
+      // One multipart wire call per matched item (no `--concurrency`
+      // on fail-fast bulk; M30 D2 closure pins `--concurrency requires
+      // --continue-on-error`).
+      expect(multipart.requests).toHaveLength(2);
+    });
+
+    it('dry-run bulk file dispatch: emits per-item planned_changes (one `add_file_to_column` per matched item), no multipart wire round-trips', async () => {
+      // Dry-run branch — pre-check still fires (local file read +
+      // size measurement) so the envelope's planned_changes carry
+      // real filename + file_size_bytes; no multipart wire calls
+      // fire. Unlike M38 single-item dry-run which pins
+      // `meta.source: 'none'` (pure-local), bulk dry-run carries
+      // the upstream legs' aggregated source (metadata + items_page
+      // walk) — reaching this branch already paid for wire legs.
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--dry-run',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      expect(env.ok).toBe(true);
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      // Source aggregates the metadata + items_page legs (live);
+      // dry-run does NOT collapse to 'none' on the bulk path.
+      expect(meta.source).toBe('live');
+      expect(env.planned_changes).toEqual([
+        {
+          operation: 'add_file_to_column',
+          item_id: '12345',
+          column_id: 'attachments',
+          file_path: reportPath,
+          filename: 'report.pdf',
+          file_size_bytes: 17,
+        },
+        {
+          operation: 'add_file_to_column',
+          item_id: '23456',
+          column_id: 'attachments',
+          file_path: reportPath,
+          filename: 'report.pdf',
+          file_size_bytes: 17,
+        },
+      ]);
+      expect(multipart.requests).toHaveLength(0);
+    });
+
+    it("single upfront pre-check failure aborts whole-call with usage_error.details.reason: 'file_not_readable' BEFORE any multipart wire call (D3 atomicity discipline)", async () => {
+      // D3 closure: the local file pre-check fires ONCE upfront
+      // (one path × N items), and a failed pre-check aborts the
+      // whole call regardless of `--continue-on-error`. The
+      // multipart transport's `assertExhaustive` is on with an
+      // empty cassette — any wire call would fail loudly. The
+      // test passing means zero multipart traffic.
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: true,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${join(workdir, 'does-not-exist.pdf')}`,
+          '--yes',
+          '--continue-on-error',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_not_readable');
+      expect(multipart.requests).toHaveLength(0);
+    });
+
+    it("single upfront pre-check failure with empty file aborts whole-call with usage_error.details.reason: 'file_empty' (also fires on the --dry-run path — pre-check is path-uniform)", async () => {
+      // Pre-check fires on dry-run too (the planned_changes need
+      // a real filename + file_size_bytes to be meaningful).
+      // A zero-byte fixture surfaces `file_empty` before either
+      // the dry-run planned_changes emit or the live multipart
+      // dispatch.
+      const emptyPath = join(workdir, 'empty.pdf');
+      await writeFile(emptyPath, '', 'utf8');
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: true,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${emptyPath}`,
+          '--dry-run',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_empty');
+      expect(multipart.requests).toHaveLength(0);
+    });
+
+    it('fail-fast: first per-item failure aborts whole-call with `applied_to: []` decoration (no items succeeded yet)', async () => {
+      // Mirrors the v0.1 fail-fast JSON-bulk pattern at the action
+      // body's main loop — the error class carries
+      // `details.applied_count` / `applied_to` / `failed_at_item`
+      // / `matched_count` so an agent reading the failure envelope
+      // sees how many items applied before the failure.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: {
+              errors: [
+                {
+                  message: 'File size limit exceeded',
+                  extensions: { code: 'FILE_SIZE_LIMIT_EXCEEDED' },
+                },
+              ],
+            },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      // `file_too_large` (rewrap of FILE_SIZE_LIMIT_EXCEEDED) is a
+      // usage_error → exit 1.
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: {
+            reason?: string;
+            applied_count?: number;
+            applied_to?: readonly string[];
+            failed_at_item?: string;
+            matched_count?: number;
+          };
+        };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_too_large');
+      expect(env.error?.details?.applied_count).toBe(0);
+      expect(env.error?.details?.applied_to).toEqual([]);
+      expect(env.error?.details?.failed_at_item).toBe('12345');
+      expect(env.error?.details?.matched_count).toBe(2);
+      // One multipart wire call fired (the failing one); the
+      // second item never dispatched (fail-fast).
+      expect(multipart.requests).toHaveLength(1);
+    });
+
+    it('fail-fast: second per-item failure aborts whole-call with `applied_to: [<first-id>]` decoration', async () => {
+      // First item succeeds → `applied_to` echoes its ID; second
+      // item fails → whole-call abort with the decoration. Third
+      // item would never dispatch (none in this 2-item set).
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            response: {
+              errors: [{ message: 'Item not found' }],
+              http_status: 404,
+            },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: {
+            applied_count?: number;
+            applied_to?: readonly string[];
+            failed_at_item?: string;
+            matched_count?: number;
+          };
+        };
+      };
+      expect(env.error?.details?.applied_count).toBe(1);
+      expect(env.error?.details?.applied_to).toEqual(['12345']);
+      expect(env.error?.details?.failed_at_item).toBe('23456');
+      expect(env.error?.details?.matched_count).toBe(2);
+      // Two multipart wire calls fired (the success + the failure).
+      expect(multipart.requests).toHaveLength(2);
+    });
+
+    it('--continue-on-error: per-item failures land in `data.results[i].error`, successes in `data.results[i].asset`; envelope is ok: true with mixed records', async () => {
+      // Partial-success path. The shared `dispatchSequential`
+      // captures per-target failures into per-record slots rather
+      // than aborting the loop; the universal partial-success
+      // rule (cli-design §6.4) keeps the top-level envelope
+      // `ok: true` regardless of how many items failed.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            response: {
+              errors: [
+                {
+                  message: 'File size limit exceeded',
+                  extensions: { code: 'FILE_SIZE_LIMIT_EXCEEDED' },
+                },
+              ],
+            },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--continue-on-error',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          summary: {
+            matched_count: number;
+            applied_count: number;
+            failed_count: number;
+          };
+          results: readonly {
+            item_id: string;
+            ok: boolean;
+            asset?: { id: string };
+            error?: { code: string; message: string };
+          }[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.operation).toBe('item_update_bulk_file_set');
+      expect(env.data.summary).toMatchObject({
+        matched_count: 2,
+        applied_count: 1,
+        failed_count: 1,
+      });
+      expect(env.data.results).toHaveLength(2);
+      expect(env.data.results[0]).toMatchObject({
+        item_id: '12345',
+        ok: true,
+        asset: { id: 'asset-1' },
+      });
+      expect(env.data.results[0]?.error).toBeUndefined();
+      expect(env.data.results[1]).toMatchObject({
+        item_id: '23456',
+        ok: false,
+        error: { code: 'usage_error' },
+      });
+      expect(env.data.results[1]?.asset).toBeUndefined();
+      expect(multipart.requests).toHaveLength(2);
+    });
+
+    it('--continue-on-error --concurrency 4: routes through dispatchParallel; all 4 items dispatched concurrently', async () => {
+      // v0.4-M30 D2 closure: `--concurrency > 1` routes through
+      // `dispatchParallel` (bounded async-pool). 4 items × N=4
+      // means every worker is busy for the whole run — the
+      // captured request count == matched count regardless of
+      // completion order.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+            repeat: 4,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath}`,
+          '--yes',
+          '--continue-on-error',
+          '--concurrency',
+          '4',
           '--json',
         ],
         {
           interactions: [
-            {
-              operation_name: 'BoardMetadata',
-              response: { data: { boards: [fileBoard] } },
-            },
+            fileBoardMetadata,
             {
               operation_name: 'ItemsPage',
               response: {
@@ -3519,7 +3998,12 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
                     {
                       items_page: {
                         cursor: null,
-                        items: [{ id: '12345' }, { id: '23456' }],
+                        items: [
+                          { id: '7001' },
+                          { id: '7002' },
+                          { id: '7003' },
+                          { id: '7004' },
+                        ],
                       },
                     },
                   ],
@@ -3528,26 +4012,41 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
             },
           ],
         },
+        { multipartTransport: multipart },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: {
-          code: string;
-          message: string;
-          details?: { reason?: string; milestone?: string; matched_count?: number };
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          summary: {
+            matched_count: number;
+            applied_count: number;
+            failed_count: number;
+          };
+          results: readonly { item_id: string; ok: boolean }[];
         };
       };
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details?.reason).toBe('m42_preflight_stub');
-      expect(env.error?.details?.milestone).toBe('v0.7-M42');
-      expect(env.error?.details?.matched_count).toBe(2);
-      expect(env.error?.message).toMatch(/v0\.7-M42/);
+      expect(env.data.summary).toMatchObject({
+        matched_count: 4,
+        applied_count: 4,
+        failed_count: 0,
+      });
+      // Result rows preserve input order regardless of worker
+      // completion order (axis 5 of the R-NEW-28 6-axis equivalence
+      // — both dispatchers populate `results[i]` by input index).
+      expect(env.data.results.map((r) => r.item_id)).toEqual([
+        '7001',
+        '7002',
+        '7003',
+        '7004',
+      ]);
+      expect(multipart.requests).toHaveLength(4);
     });
 
     it("D3 invariant: bulk `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_bulk_unsupported — Codex round-2 P3-2 pin)", async () => {
       // Pre-check inspects setEntries only; --set-raw rejection
       // flows through resolveAndTranslate → translateRawColumnValue
-      // → D3 permanent rejection.
+      // → D3 permanent rejection (M42 IMPL does not surface this
+      // path — the file-bulk dispatch helper never runs).
       const out = await drive(
         [
           'item',
@@ -3563,10 +4062,7 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
         ],
         {
           interactions: [
-            {
-              operation_name: 'BoardMetadata',
-              response: { data: { boards: [fileBoard] } },
-            },
+            fileBoardMetadata,
             // items_page is reached because pre-check has no
             // setEntries to scan, then resolveAndTranslate runs
             // and translateRawColumnValue rejects.
@@ -3598,11 +4094,24 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(env.error?.details?.reason).toBeUndefined();
     });
 
-    it("reaches the v0.7-M42 pre-flight stub on the bulk --dry-run path too — stub-throw is path-uniform (was 'file_set_on_bulk_unsupported' at v0.6-M38)", async () => {
-      // The carve-out fold flips the bulk-file path on BOTH --yes
-      // and --dry-run shapes. The pre-flight stub fires uniformly
-      // (the stub doesn't branch on --dry-run; that branching lives
-      // in the runtime body landing at M42 IMPL).
+    it("'file_set_on_bulk_unsupported' literal stays RESERVED across the codebase: bulk file --set no longer surfaces it (carve-out folded at v0.7-M42); the literal MUST NOT reappear from this dispatch path", async () => {
+      // Regression guard for the v0.6-M38 D5 literal. The IMPL
+      // dispatches the file-bulk path through the multipart fan-out;
+      // any failure now surfaces `file_too_large` / `not_found` /
+      // partial-success records — never the historical
+      // `file_set_on_bulk_unsupported` discriminator. Tests this
+      // by exercising the live happy path + confirming the
+      // discriminator literal is absent from both streams.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildAsset('asset-1') } },
+            repeat: 2,
+          },
+        ],
+        { assertExhaustive: false },
+      );
       const out = await drive(
         [
           'item',
@@ -3612,40 +4121,18 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
           '--where',
           'status_1=Backlog',
           '--set',
-          'attachments=./report.pdf',
-          '--dry-run',
+          `attachments=${reportPath}`,
+          '--yes',
           '--json',
         ],
-        {
-          interactions: [
-            {
-              operation_name: 'BoardMetadata',
-              response: { data: { boards: [fileBoard] } },
-            },
-            {
-              operation_name: 'ItemsPage',
-              response: {
-                data: {
-                  boards: [
-                    {
-                      items_page: {
-                        cursor: null,
-                        items: [{ id: '12345' }],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          ],
-        },
+        { interactions: [fileBoardMetadata, itemsPageWithTwo] },
+        { multipartTransport: multipart },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: { code: string; details?: { reason?: string } };
-      };
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details?.reason).toBe('m42_preflight_stub');
+      expect(out.exitCode).toBe(0);
+      expect(out.stdout).not.toContain('file_set_on_bulk_unsupported');
+      expect(out.stderr).not.toContain('file_set_on_bulk_unsupported');
+      expect(out.stdout).not.toContain('m42_preflight_stub');
+      expect(out.stderr).not.toContain('m42_preflight_stub');
     });
   });
 });
