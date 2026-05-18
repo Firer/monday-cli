@@ -24,7 +24,7 @@ rejections route through existing `usage_error` /
 `unsupported_column_type` with `details.reason`
 discrimination).
 
-**Pre-flight contract surface shipped at this commit**: NEW
+**Pre-flight contract surface shipped at `0cb8b69`**: NEW
 `docs/v0.6-plan.md` (anchor doc mirroring v0.4-plan / v0.5-plan
 structure; §1 scope, §3 M38 sequencing, §8 D1-D8 closures, §9
 preconditions, §22 R-class register placeholders) + NEW
@@ -102,15 +102,18 @@ M34 / M35 / M36 / M37 write-surface pre-flight precedent
 (cumulative 0-3 P2 + 3-10 P3 typical).
 
 **Live numbers (v0.6-M38 pre-flight close):**
-- Test count: **4060 + 1 skipped** across **171** test files
-  (+6 net vs 4054 + 1 skipped at M37 close: 5 unit envelope-
+- Test count: **4061 + 1 skipped** across **171** test files
+  (+7 net vs 4054 + 1 skipped at M37 close: 5 unit envelope-
   schema tests at `tests/unit/api/file-column-set.test.ts` + 1
-  integration test for the M38 dispatch stub at
+  type-narrowing compile-time check + 1 integration test for
+  the M38 dispatch stub at
   `tests/integration/commands/item-set.test.ts`).
-- Coverage: **TBD — verify at pre-flight gate run.** Branches
-  margin held at 1.00pp at M37 close; pre-flight adds c8-
-  ignored stub branches (no new live branches) so the margin
-  should hold within ±0.05pp tolerance.
+- Coverage: **99.29 / 96.48 / 99.45 / 99.55** (stmts / branches /
+  fns / lines) at the **95 / 95.45 / 95 / 95** floor.
+  **Branches margin 1.03pp** (was 1.00pp at v0.5-M37 IMPL close;
+  +0.03pp recovery — pre-flight adds c8-ignored stub branches
+  that drop from v8's denominator while the new test surface
+  adds branch coverage at the schema-validation boundary).
 - ERROR_CODES count: **29** (unchanged per D8 closure).
 - Command count: **117** (unchanged — pre-flight adds no
   verbs; M38 extends existing `--set` accepted-value grammar).

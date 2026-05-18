@@ -131,7 +131,7 @@
  */
 
 import { z } from 'zod';
-import { UsageError } from '../utils/errors.js';
+import { ApiError } from '../utils/errors.js';
 import { assetSchema, type Asset } from './assets.js';
 import type { Complexity } from '../utils/output/envelope.js';
 import type { MondayClient } from './client.js';
@@ -274,7 +274,8 @@ export const executeFileColumnSet = async (
   // (IMPL body awaits the multipart dispatch in its place).
   await Promise.resolve();
   void inputs;
-  throw new UsageError(
+  throw new ApiError(
+    'internal_error',
     'executeFileColumnSet: pre-flight stub. Runtime body lands at v0.6-M38 IMPL.',
     {
       details: {
@@ -304,10 +305,13 @@ export const executeFileColumnSet = async (
  *   - Returns `null` when NO file-column entries exist (the
  *     standard JSON translator path applies; action body proceeds
  *     unchanged).
- *   - Throws `UsageError` with the appropriate
+ *   - Throws `ApiError('usage_error', ...)` with the appropriate
  *     `details.reason` discriminator when a mutex violation is
  *     detected (mixed file + value, multi-file, file-on-create,
- *     file-on-bulk).
+ *     file-on-bulk). At pre-flight the stub throws
+ *     `internal_error` instead; the IMPL body replaces the stub
+ *     with the runtime mutex-check logic that surfaces
+ *     `usage_error` for true violations.
  *
  * The function is a pure check — no I/O, no side effects. The
  * caller passes resolved column types + flag presence flags only.
@@ -375,7 +379,9 @@ export interface EnforceSingleFileColumnSetInputs {
  * Returns `null` when NO file-column entries are present (the
  * standard JSON translator path applies). Returns a
  * {@link FileColumnSetEntry} when a clean file-column dispatch
- * path applies. Throws `UsageError` on mutex violations.
+ * path applies. Throws `ApiError('usage_error', ...)` on mutex
+ * violations at IMPL; the pre-flight stub throws `internal_error`
+ * to surface "the surface is wired but not implemented" cleanly.
  *
  * The IMPL body iterates `inputs.setEntries`, identifies entries
  * with `columnType === 'file'`, applies the mutex rules per
@@ -388,7 +394,8 @@ export const enforceSingleFileColumnSet = (
   inputs: EnforceSingleFileColumnSetInputs,
 ): null => {
   void inputs;
-  throw new UsageError(
+  throw new ApiError(
+    'internal_error',
     'enforceSingleFileColumnSet: pre-flight stub. Runtime body lands at v0.6-M38 IMPL.',
     {
       details: {
