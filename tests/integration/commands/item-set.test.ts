@@ -1936,6 +1936,64 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     });
   });
 
+  it('v0.6-M38 file-column friendly --set <file-col>=<path> --dry-run: dispatch leg pre-flight stub fires for dry-run too (per D4, M38 dispatch fires for BOTH dry-run and live paths; at pre-flight the stub throws `internal_error.details.reason: pre_flight_stub` BEFORE planChanges runs, so the file-column path never reaches the JSON translator that would surface `unsupported_column_type`)', async () => {
+    // Pre-flight pin: the M38 file-column dispatch check fires
+    // BEFORE the dry-run / live split at item set's action body
+    // (cli-design §5.3 step 5 + D4). At pre-flight the stub throws
+    // internal_error for BOTH paths; at IMPL the runtime body lands
+    // the dry-run envelope shape per D4 (planned_changes:
+    // [{operation: 'add_file_to_column', ...}]) without loading
+    // file bytes (size from fs.stat).
+    const fileBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'attachments=./report.pdf',
+        '--board',
+        '111',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    // Pre-flight stub throws `internal_error` (exit 2) regardless
+    // of dry-run; at IMPL the dry-run path flips to exit 0 with
+    // the M31-shaped `planned_changes` envelope per D4.
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.message).toMatch(/v0\.6-M38/u);
+    expect(env.error?.message).toMatch(/pre-flight/u);
+    expect(env.error?.details).toMatchObject({
+      column_id: 'attachments',
+      column_type: 'file',
+      deferred_to: 'v0.6-M38-impl',
+      reason: 'pre_flight_stub',
+    });
+  });
+
   it('--set-raw with malformed JSON fails fast at argv-parse — no API call fires', async () => {
     const out = await drive(
       [

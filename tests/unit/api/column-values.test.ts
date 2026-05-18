@@ -664,10 +664,13 @@ describe('translateColumnValue — future-roadmap types', () => {
   // specific version. Pinned column types from cli-design §5.3
   // writer-expansion roadmap have their own branches:
   //   - `time_tracking` → `deferred_to: "v0.3"` (start/stop verbs)
-  //   - `file` (files-shaped) → `deferred_to: "v0.6"` (the verb-shaped
-  //     `monday item upload` shipped at v0.4-M31; the friendly --set
-  //     form for file columns slipped from v0.4 → v0.5 → v0.6 across
-  //     two consecutive release-preps)
+  //   - `file` (files-shaped) → no `deferred_to` slot post-v0.6-M38:
+  //     the M38 friendly `--set <file-col>=<path>` dispatch ships
+  //     via `executeFileColumnSet` (`src/api/file-column-set.ts`)
+  //     wrapping M31's `addFileToColumn` multipart fetcher; the
+  //     UNSUPPORTED_TABLE.files_shaped row now fires ONLY on paths
+  //     the M38 dispatch doesn't cover (item create per D6, bulk
+  //     item update --where per D5, --set-raw per D3).
   // Both are tested in the dedicated describe blocks below.
   // M16 pre-flight reclassified `item_assignees` as read-only-forever.
   it.each([

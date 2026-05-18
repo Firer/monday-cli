@@ -56,17 +56,25 @@
  * through safely-by-construction since the dispatch goes through
  * the existing fetcher rather than a re-implementation).
  *
- *   - `addFileToColumn` consumer count: 1 → 2 at M38 (M31's `item
- *     upload` action body + M38's `executeFileColumnSet`).
- *   - `MultipartTransport` consumer count via `ResolvedClient.
- *     multipart`: 1 → 2 (test seam pattern).
- *   - `sniffContentType` from `src/utils/mime.ts`: 2 → 3 (M31's
- *     `item upload` + `update upload` + M38's `executeFileColumnSet`).
- *     R-NEW-58 IMPL-kickoff lift target: extract the file-pre-check
- *     + Blob-construction pattern (M31's `item upload` action body
- *     lines 188-261) into a shared `src/utils/file-source.ts` helper
- *     at the 3rd consumer trigger; IMPL kickoff scan applies the
- *     lift ahead-of-feat per R-NEW-29's M25 cadence.
+ * **Projected consumer counts at M38 IMPL** (pre-flight ships
+ * the dispatch stub; the runtime body that actually consumes
+ * these helpers lands at M38 IMPL):
+ *
+ *   - `addFileToColumn` projected at M38 IMPL: 1 → 2 (M31's `item
+ *     upload` action body + M38's `executeFileColumnSet` runtime
+ *     body). Today (pre-flight) still 1 consumer — the M38 stub
+ *     throws `internal_error` before reaching the fetcher.
+ *   - `MultipartTransport` via `ResolvedClient.multipart` projected
+ *     at M38 IMPL: 1 → 2 (test seam pattern). Today still 1.
+ *   - `sniffContentType` from `src/utils/mime.ts` projected at M38
+ *     IMPL: 2 → 3 (M31's `item upload` + `update upload` + M38's
+ *     `executeFileColumnSet` runtime body). Today still 2.
+ *     **R-NEW-58 IMPL-kickoff lift target**: extract the file-
+ *     pre-check + Blob-construction pattern (M31's `item upload`
+ *     action body lines 188-261) into a shared
+ *     `src/utils/file-source.ts` helper at the 3rd consumer
+ *     trigger; IMPL kickoff scan applies the lift ahead-of-feat
+ *     per R-NEW-29's M25 cadence.
  *
  * **Mutex rules (D2 closure).** Enforced at the column-resolution
  * boundary (parse-time can't know — column types only resolve
@@ -119,15 +127,15 @@
  * M38-specific rejections route through existing `usage_error`
  * with `details.reason` discrimination.
  *
- * **R-NEW-41 5th supporting site candidate.** The `--set` syntax
- * is type-uniform from the agent's view (`<col>=<value>`), but
- * for file columns the value is a path and the dispatch
- * transitions silently from JSON to multipart at the translator
- * boundary. The asymmetry is at the AGENT-INPUT boundary, NOT at
- * the wire boundary (M31's multipart-vs-JSON asymmetry is wire-
- * boundary-only). See `docs/architecture.md` "Wire-vs-CLI
- * semantics documentation conventions" for the canonical
- * cross-link.
+ * **R-NEW-41 4th supporting site filed at M38 pre-flight.** The
+ * `--set` syntax is type-uniform from the agent's view
+ * (`<col>=<value>`), but for file columns the value is a path
+ * and the dispatch transitions silently from JSON to multipart at
+ * the translator boundary. The asymmetry is at the AGENT-INPUT
+ * boundary, NOT at the wire boundary (M31's multipart-vs-JSON
+ * asymmetry #3 is wire-boundary-only). See `docs/architecture.md`
+ * "Wire-vs-CLI semantics documentation conventions" for the
+ * canonical cross-link.
  */
 
 import { z } from 'zod';

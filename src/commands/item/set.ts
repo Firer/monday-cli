@@ -236,19 +236,74 @@ export const itemSetCommand: CommandModule<
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
-          const result = await planChanges({
-            client,
-            boardId,
-            itemId: parsed.itemId,
-            setEntries: friendly === null ? [] : [friendly],
-            ...(rawParsed === null ? {} : { rawEntries: [rawParsed] }),
-            dateResolution,
-            peopleResolution,
-            tagResolution,
-            relationResolution,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
+          // M38 pre-flight: the friendly `--set <file-col>=<path>`
+          // dispatch fires for BOTH dry-run and live paths per the
+          // cli-design §5.3 step 5 contract. At pre-flight the live
+          // path's dispatch check (below) catches files-shaped
+          // columns AFTER `resolveColumnWithRefresh`; the dry-run
+          // path's column resolution lives INSIDE `planChanges` (so
+          // pre-resolving here would double-count the resolution leg
+          // in the dry-run envelope's `source` / `cache_age_seconds`
+          // aggregation). The catch-and-rewrap below intercepts the
+          // translator's `UNSUPPORTED_TABLE.files_shaped` rejection
+          // (`unsupported_column_type` with `details.type === 'file'`)
+          // and rewraps as the M38 pre-flight stub for friendly
+          // `--set` paths — `--set-raw <file-col>=<json>` stays
+          // `unsupported_column_type` per D3 (permanent rejection;
+          // Monday's wire has no JSON-shape for `change_column_value`
+          // on file columns). At M38 IMPL the rewrap collapses: the
+          // dispatch fires upfront with the dry-run envelope shape
+          // per D4 (`planned_changes: [{operation:
+          // 'add_file_to_column', ...}]`; no file bytes loaded).
+          let result;
+          try {
+            result = await planChanges({
+              client,
+              boardId,
+              itemId: parsed.itemId,
+              setEntries: friendly === null ? [] : [friendly],
+              ...(rawParsed === null ? {} : { rawEntries: [rawParsed] }),
+              dateResolution,
+              peopleResolution,
+              tagResolution,
+              relationResolution,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+            });
+          } catch (err) {
+            /* c8 ignore start — pre-flight stub; rewrap collapses at v0.6-M38 IMPL */
+            if (
+              !isRaw &&
+              err instanceof ApiError &&
+              err.code === 'unsupported_column_type' &&
+              err.details?.type === 'file'
+            ) {
+              const details = err.details;
+              throw new ApiError(
+                'internal_error',
+                `item set: v0.6-M38 file-column --set dispatch is wired ` +
+                  `at pre-flight; runtime body lands at M38 IMPL. The ` +
+                  `dispatch routes from the friendly --set <file-col>=<path> ` +
+                  `boundary into Monday's add_file_to_column multipart wire ` +
+                  `via executeFileColumnSet (src/api/file-column-set.ts).`,
+                {
+                  details: {
+                    column_id: details.column_id,
+                    column_type: details.type,
+                    deferred_to: 'v0.6-M38-impl',
+                    reason: 'pre_flight_stub',
+                    hint:
+                      'this dispatch leg is contract-pinned at v0.6-M38 ' +
+                      'pre-flight but the runtime body lands at IMPL. Use ' +
+                      '`monday item upload <iid> --column <col> <file>` ' +
+                      '(v0.4-M31; verb-shaped multipart) in the meantime.',
+                  },
+                },
+              );
+            }
+            /* c8 ignore stop */
+            throw err;
+          }
           emitDryRun({
             ctx,
             programOpts: program.opts(),
@@ -291,20 +346,21 @@ export const itemSetCommand: CommandModule<
           );
         }
 
-        // v0.6-M38: file-column dispatch leg (cli-design §5.3 step 5
-        // "File-column dispatch leg" + `src/api/file-column-set.ts`
-        // module docstring). When the resolved column has
-        // `type === 'file'` AND the call shape is friendly `--set`
-        // (NOT `--set-raw`), the action body branches OFF the JSON-
-        // translator path INTO Monday's multipart `add_file_to_column`
-        // wire via M31's existing `addFileToColumn` fetcher (wrapped
-        // by `executeFileColumnSet` in `src/api/file-column-set.ts`).
+        // v0.6-M38: file-column dispatch leg on the LIVE path
+        // (cli-design §5.3 step 5 "File-column dispatch leg" +
+        // `src/api/file-column-set.ts` module docstring). When the
+        // resolved column has `type === 'file'` AND the call shape
+        // is friendly `--set` (NOT `--set-raw`), the action body
+        // branches OFF the JSON-translator path INTO Monday's
+        // multipart `add_file_to_column` wire via M31's existing
+        // `addFileToColumn` fetcher (wrapped by
+        // `executeFileColumnSet` in `src/api/file-column-set.ts`).
         //
-        // The `--set-raw <file-col>=<json>` rejection stays
-        // unchanged per D3 — `translateRawColumnValue` (below)
-        // surfaces `unsupported_column_type` for files-shaped types
-        // because Monday's wire has no JSON-shape for
-        // `change_column_value` on file columns.
+        // The dry-run path's analogue lives in the catch-and-rewrap
+        // above the dry-run emit (planChanges' translator surfaces
+        // `unsupported_column_type` for files-shaped columns; the
+        // catch rewraps as the same M38 pre-flight stub). Both
+        // paths collapse at M38 IMPL when the runtime body lands.
         //
         // At pre-flight, the dispatch leg's runtime body is a
         // c8-ignored stub throwing `internal_error`. Runtime body
@@ -316,6 +372,12 @@ export const itemSetCommand: CommandModule<
         // multipart transport; (d) `emitMutation` with the
         // `fileColumnSetOutputSchema` envelope shape (mirrors
         // M31 `item upload` envelope verbatim).
+        //
+        // The `--set-raw <file-col>=<json>` rejection stays
+        // unchanged per D3 — `translateRawColumnValue` (below)
+        // surfaces `unsupported_column_type` for files-shaped types
+        // because Monday's wire has no JSON-shape for
+        // `change_column_value` on file columns.
         if (resolution.match.column.type === 'file' && !isRaw) {
           /* c8 ignore start — pre-flight stub; runtime body lands at v0.6-M38 IMPL */
           throw new ApiError(

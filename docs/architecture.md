@@ -241,12 +241,13 @@
   **`translateRawColumnValue(column, value, rawJson)`** is
   post-resolution: rejects read-only-forever types
   (`unsupported_column_type` with `read_only: true`) and files-
-  shaped types (`unsupported_column_type` with
-  `deferred_to: "v0.6"` — `add_file_to_column` is multipart, not
-  `change_column_value`; v0.4-M31 shipped the verb-shaped
-  `monday item upload` path, the friendly `--set-raw <file-col>=
-  <json>` form slipped from v0.4 → v0.5 → v0.6 across two
-  consecutive release-preps); otherwise builds a `TranslatedColumnValue`
+  shaped types (`unsupported_column_type`, rejection STAYS at
+  v0.6-M38 per D3 closure — PERMANENT for `--set-raw` because
+  `add_file_to_column` is multipart-only and `change_column_value`
+  has no JSON-shape for file columns; the hint names BOTH M38
+  friendly `--set <file-col>=<path>` (`monday item set` / `monday
+  item update`) AND M31 verb-shaped `monday item upload` write
+  paths reaching the multipart wire); otherwise builds a `TranslatedColumnValue`
   with `payload: {format: 'rich', value: <parsed>}` so
   `selectMutation` / `bundleColumnValues` handle it uniformly.
   Per cli-design §5.3 line 949–960: no per-type schema validation
@@ -1774,7 +1775,7 @@ ratchet upward as new code lands; never lower).
 
 The CLI surfaces a stable, agent-keyed envelope contract (§6
 in `cli-design.md`). Monday's wire surface evolves at its own
-cadence — and at API `2026-01` the wire surface carries three
+cadence — and at API `2026-01` the wire surface carries four
 documented asymmetries where the CLI's argv shape OR transport
 shape diverges from a 1:1 mirror of Monday's wire. Each
 asymmetry needs documentation discipline so future agents
@@ -1893,7 +1894,7 @@ The cadence is **inline-first**. An agent diagnosing a wire
 mismatch reads the module docstring first (it's the closest to
 the code path); the architecture section exists to explain
 WHY the documentation lives where it does and to flag the
-pattern for future maintainers seeing a 4th asymmetry.
+pattern for future maintainers seeing a 5th asymmetry.
 
 ### Expansion rule — the 5th asymmetry
 
