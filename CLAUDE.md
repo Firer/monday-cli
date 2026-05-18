@@ -12,17 +12,26 @@ humans are second-class. Built incrementally via Claude Code on top of
 ## Current state
 
 - **Published:** `monday-cli@0.5.0` on npm (`latest` dist-tag,
-  2026-05-17). v0.6 work-in-progress on `main`; v0.6-M38 IMPL closed
-  end-to-end at `3c2a9b0..63adb40` — the **last feature milestone in
-  v0.6 scope**.
-- **package.json version:** `0.5.0` (bumps to `0.6.0` at v0.6
-  release-prep).
+  2026-05-17). **v0.6.0 ready for publish** — release-prep closed
+  end-to-end at `98185d4..HEAD` (5 commits: ToC audit + slip /
+  README refresh / version bump + audit-fix / CHANGELOG / this
+  close-docs sweep; the envelope-snapshot refresh probe ran clean
+  and folded into this close-docs prose per the v0.5 release-prep
+  precedent). Pending user push authorization + npm publish.
+- **package.json version:** `0.6.0`.
 - **Live numbers:** 4100 tests + 1 skipped across 172 files; coverage
   99.26 / 96.46 / 99.31 / 99.52 (stmts / branches / fns / lines) at
-  the 95 / 95.45 / 95 / 95 floor; **29 ERROR_CODES**; **117 commands**.
-- **Next session:** v0.6 release-prep. Mirrors the v0.4 / v0.5
-  release-prep cluster shape verbatim — see [`docs/v0.6-plan.md`](./docs/v0.6-plan.md)
-  §3 for the sequence.
+  the 95 / 95.45 / 95 / 95 floor (branches margin **1.01pp**, was
+  1.00pp at v0.5.0); **29 ERROR_CODES**; **117 commands**.
+- **Next session:** v0.7 kickoff candidate-selection per R-NEW-75
+  framework — **externally blocked on v0.6.0 push + npm publish
+  first**. Carry-forward backlog: multi-level subitems / cross-board
+  move value-overrides / resumable cross-board cursor (all slipped
+  v0.6 → v0.7 at this release-prep per R-NEW-82's 4th-consecutive
+  ratification) + profile-scoped argument defaults + v0.6.x
+  carve-outs (bulk + create file `--set` paths per D5 / D6;
+  multi-file `--set` per call per D2; file-`--set` stdin support
+  per D7).
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —
@@ -32,7 +41,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
 2. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — active plan;
-   v0.6-M38 closed, release-prep next.
+   v0.6 release-prep closed, ready for publish.
 3. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
 4. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
