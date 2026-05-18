@@ -334,9 +334,10 @@ export const getColumnRoadmapCategory = (
  *     `monday item upload <iid> --column <col> <file>` (M31; verb-
  *     shaped) + `monday item set <iid> <file-col>=<path>` /
  *     `monday item update <iid> --set <file-col>=<path>` (M38;
- *     friendly translator dispatch). `suggested_write_path`
- *     points at the M38 friendly form (the simpler agent flow for
- *     existing-item file writes). Currently `file` only.
+ *     friendly translator dispatch). `suggested_write_path` is a
+ *     single human-readable string joining BOTH paths with ` OR `
+ *     (R-v0.6-NEW-3 watch-item: lift to `readonly string[]` at the
+ *     2nd N>1 consumer). Currently `file` only.
  *
  * Returns `null` for canonical types (membership in `WRITABLE_COLUMN_
  * TYPES`) — `column-create` skips emitting the warning when the type
@@ -354,11 +355,22 @@ export type NoncanonicalColumnTypeCategory =
 export interface NoncanonicalColumnTypeDetails {
   readonly category: NoncanonicalColumnTypeCategory;
   /**
-   * The path agents should use to write to the column post-creation,
-   * matching cli-design §5.3 escape-hatch contract — `--set-raw
-   * <col>=<json>` for raw-writable types, `monday item upload`
-   * (v0.4-M31, multipart) for files-shaped types, `null` for
-   * read-only-forever types (no write path exists).
+   * The path(s) agents should use to write to the column post-
+   * creation, matching cli-design §5.3 escape-hatch + dispatch
+   * contracts:
+   *
+   *   - `raw_writable` types: `--set-raw <col>=<json>`.
+   *   - `read_only_forever` types: `null` (no write path exists —
+   *     the column exists for read-side display / mirror sources
+   *     only).
+   *   - `files_shaped` types post-v0.6-M38: a single human-readable
+   *     string joining BOTH write paths with ` OR ` — the v0.6-M38
+   *     friendly `monday item set <iid> <file-col>=<path>` /
+   *     `monday item update <iid> --set <file-col>=<path>` dispatch
+   *     AND the v0.4-M31 verb-shaped `monday item upload <iid>
+   *     --column <col> <file>`. R-v0.6-NEW-3 watch-item: lift to
+   *     `readonly string[]` at the 2nd N>1 consumer for structured
+   *     enumeration.
    */
   readonly suggestedWritePath: string | null;
 }

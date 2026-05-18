@@ -980,12 +980,18 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           # `--set-raw <col>=<json>`) /
                                           # `"read_only_forever"` (no write
                                           # path; `suggested_write_path: null`)
-                                          # / `"files_shaped"` (suggests
-                                          # `add_file_to_column` deferred to
-                                          # v0.4). `category` is a stable
-                                          # enum — adding a value is
-                                          # SemVer-minor; removing is
-                                          # SemVer-major.
+                                          # / `"files_shaped"` (suggests BOTH
+                                          # `monday item set <iid> <file-col>=
+                                          # <path>` / `monday item update <iid>
+                                          # --set <file-col>=<path>` (v0.6-M38;
+                                          # friendly translator) AND `monday
+                                          # item upload <iid> --column <col>
+                                          # <file>` (v0.4-M31; verb-shaped) —
+                                          # joined with ` OR ` in the
+                                          # `suggested_write_path` string).
+                                          # `category` is a stable enum —
+                                          # adding a value is SemVer-minor;
+                                          # removing is SemVer-major.
                                           # `--title <t>` is required; empty
                                           # after trim → `usage_error` at argv-
                                           # parse. `--description <d>` is
@@ -3529,20 +3535,21 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      dispatch to v0.6.x.
    - **No mixing with value flags.** File `--set` mixed with any
      value `--set` / `--set-raw` / `--name <n>` in the same call
-     rejects as `usage_error.details.reason: 'mixed_file_and_
-     value_sets'` — mixing would force non-atomic multi-leg
-     dispatch (one multipart round-trip per file column + one
-     JSON round-trip per value column), breaking the existing
-     atomicity guarantee.
+     rejects as `usage_error` with
+     `details.reason: 'mixed_file_and_value_sets'` — mixing
+     would force non-atomic multi-leg dispatch (one multipart
+     round-trip per file column + one JSON round-trip per value
+     column), breaking the existing atomicity guarantee.
    - **No `item create --set <file-col>=<path>`.** Rejects as
-     `usage_error.details.reason: 'file_set_on_create_
-     unsupported'` — defers create-time file upload to v0.6.x
-     (non-atomic post-create wire shape would break §5.8 state
-     safety).
+     `usage_error` with
+     `details.reason: 'file_set_on_create_unsupported'` —
+     defers create-time file upload to v0.6.x (non-atomic post-
+     create wire shape would break §5.8 state safety).
    - **No bulk `item update --where ... --set <file-col>=<path>`.**
-     Rejects as `usage_error.details.reason: 'file_set_on_bulk_
-     unsupported'` — defers per-item file dispatch + partial-
-     success envelope to v0.6.x.
+     Rejects as `usage_error` with
+     `details.reason: 'file_set_on_bulk_unsupported'` — defers
+     per-item file dispatch + partial-success envelope to
+     v0.6.x.
    - **No `--set <file-col>=-` stdin.** Rejects via the existing
      `<file>` path-string validation (mirrors M31 `monday item
      upload`'s rejection rationale — no clean `--filename`
