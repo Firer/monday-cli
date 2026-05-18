@@ -291,6 +291,57 @@ export const itemSetCommand: CommandModule<
           );
         }
 
+        // v0.6-M38: file-column dispatch leg (cli-design §5.3 step 5
+        // "File-column dispatch leg" + `src/api/file-column-set.ts`
+        // module docstring). When the resolved column has
+        // `type === 'file'` AND the call shape is friendly `--set`
+        // (NOT `--set-raw`), the action body branches OFF the JSON-
+        // translator path INTO Monday's multipart `add_file_to_column`
+        // wire via M31's existing `addFileToColumn` fetcher (wrapped
+        // by `executeFileColumnSet` in `src/api/file-column-set.ts`).
+        //
+        // The `--set-raw <file-col>=<json>` rejection stays
+        // unchanged per D3 — `translateRawColumnValue` (below)
+        // surfaces `unsupported_column_type` for files-shaped types
+        // because Monday's wire has no JSON-shape for
+        // `change_column_value` on file columns.
+        //
+        // At pre-flight, the dispatch leg's runtime body is a
+        // c8-ignored stub throwing `internal_error`. Runtime body
+        // lands at M38 IMPL — at which point the stub is replaced
+        // by: (a) file pre-check (`fs.stat` + `fs.access(R_OK)` +
+        // non-empty; mirrors M31 `item upload`); (b) `Blob`
+        // construction with sniffed content-type; (c)
+        // `addFileToColumn(...)` dispatch via the resolved
+        // multipart transport; (d) `emitMutation` with the
+        // `fileColumnSetOutputSchema` envelope shape (mirrors
+        // M31 `item upload` envelope verbatim).
+        if (resolution.match.column.type === 'file' && !isRaw) {
+          /* c8 ignore start — pre-flight stub; runtime body lands at v0.6-M38 IMPL */
+          throw new ApiError(
+            'internal_error',
+            `item set: v0.6-M38 file-column --set dispatch is wired ` +
+              `at pre-flight; runtime body lands at M38 IMPL. The ` +
+              `dispatch routes from the friendly --set <file-col>=<path> ` +
+              `boundary into Monday's add_file_to_column multipart wire ` +
+              `via executeFileColumnSet (src/api/file-column-set.ts).`,
+            {
+              details: {
+                column_id: resolution.match.column.id,
+                column_type: resolution.match.column.type,
+                deferred_to: 'v0.6-M38-impl',
+                reason: 'pre_flight_stub',
+                hint:
+                  'this dispatch leg is contract-pinned at v0.6-M38 ' +
+                  'pre-flight but the runtime body lands at IMPL. Use ' +
+                  '`monday item upload <iid> --column <col> <file>` ' +
+                  '(v0.4-M31; verb-shaped multipart) in the meantime.',
+              },
+            },
+          );
+          /* c8 ignore stop */
+        }
+
         // Translator + mutation-selection + live mutation all share
         // the same resolver-warnings preservation rule. Any typed
         // failure (UsageError from date/dropdown/people invalid

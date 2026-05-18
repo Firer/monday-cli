@@ -727,17 +727,16 @@ describe('translateColumnValue — future-roadmap types', () => {
     }
   });
 
-  it('file (files-shaped) → unsupported_column_type with deferred_to: "v0.6" (Codex M18 round-2 P2; slipped from v0.4 → v0.5 → v0.6 across two consecutive release-preps — `monday item upload` (v0.4-M31) is the alternative path agents should use today)', () => {
+  it('file (files-shaped) → unsupported_column_type with NO deferred_to slot (v0.6-M38: rejection row fires only for item create + bulk paths — the friendly --set form ships at M38 dispatching at the action body level before this row fires; the rejection itself has no `deferred_to` because the create + bulk paths defer to v0.6.x rather than to a specific future release)', () => {
     // cli-design §5.3 writer-expansion roadmap row: files-shaped
-    // types use add_file_to_column (multipart upload). Pinned as
-    // a v0.4 deferral originally; v0.4-M31 shipped the verb-shaped
-    // path (`monday item upload`) but NOT the friendly `--set` form
-    // for files (the translator boundary doesn't dispatch into the
-    // multipart wire). The slot slipped from "v0.4" → "v0.5" at v0.4
-    // release-prep, then "v0.5" → "v0.6" at v0.5 release-prep
-    // because v0.5 didn't pick up the friendly form either; v0.5.0
-    // agents must not read `deferred_to: "v0.5"` on the release
-    // they're already running.
+    // types use add_file_to_column (multipart upload). v0.6-M38
+    // ships the friendly `--set <file-col>=<path>` form on `monday
+    // item set` + `monday item update` (single-item only); this
+    // UNSUPPORTED_TABLE.files_shaped row fires ONLY on paths the M38
+    // dispatch doesn't cover (item create per D6; bulk item update
+    // --where per D5; --set-raw per D3). No `deferred_to` slot —
+    // the rejection here surfaces alternative-path hints rather
+    // than a future-version deferral.
     expect(() => translate('file', 'whatever', 'col_z')).toThrow(
       /add_file_to_column/u,
     );
@@ -749,8 +748,13 @@ describe('translateColumnValue — future-roadmap types', () => {
       expect(err.details).toMatchObject({
         column_id: 'col_z',
         type: 'file',
-        deferred_to: 'v0.6',
       });
+      // v0.6-M38: the UNSUPPORTED_TABLE.files_shaped row no longer
+      // carries `deferred_to` — the friendly --set form ships at M38
+      // (so the rejection isn't a future-version deferral); the
+      // remaining create + bulk + --set-raw rejection paths defer to
+      // v0.6.x candidate-selection rather than a pinned milestone.
+      expect(err.details).not.toHaveProperty('deferred_to');
     }
   });
 

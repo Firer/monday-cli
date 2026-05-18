@@ -289,7 +289,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     },
   );
 
-  it('files-shaped type (file) → unsupported_column_type with deferred_to: v0.6', () => {
+  it('files-shaped type (file) → unsupported_column_type rejection STAYS at v0.6-M38 per D3 closure (no deferred_to slot — the rejection is permanent for --set-raw; v0.6-M38 ships the friendly --set <file-col>=<path> form on item set / item update, dispatching into the multipart wire at the action body, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', () => {
     expect(() =>
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -309,23 +309,26 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       expect(err.details).toMatchObject({
         column_id: 'attachments',
         type: 'file',
-        deferred_to: 'v0.6',
       });
+      // v0.6-M38: no `deferred_to` slot — the --set-raw rejection
+      // for file columns is permanent per D3 closure. The friendly
+      // `--set <file-col>=<path>` form ships at M38 but --set-raw
+      // stays rejected (no JSON wire shape for add_file_to_column).
+      expect(err.details).not.toHaveProperty('deferred_to');
       expect(err.details).not.toHaveProperty('read_only');
     }
   });
 
-  it('hint on files-shaped error points at `monday item upload` (v0.4-M31 verb)', () => {
-    // Updated post-M31 IMPL: the hint now points at the shipped
-    // verb name (`monday item upload`) instead of the underlying
-    // wire mutation (`add_file_to_column`). The error MESSAGE
-    // still names the wire mutation for the curious agent. The
-    // `details.deferred_to` slot slipped from "v0.4" → "v0.5" at
-    // v0.4 release-prep, then "v0.5" → "v0.6" at v0.5 release-prep
-    // because neither v0.4 nor v0.5 picked up the raw-payload-
-    // into-multipart-wire form; agents reading the v0.5.0 envelope
-    // key off the alternative-path hint pointing at
-    // `monday item upload`.
+  it('hint on files-shaped error points at BOTH v0.6-M38 friendly `--set <file-col>=<path>` AND v0.4-M31 `monday item upload` verb', () => {
+    // v0.6-M38: hint widened to name BOTH write paths reaching
+    // Monday's add_file_to_column multipart wire — (a) `monday item
+    // set <iid> <file-col>=<path>` / `monday item update <iid>
+    // --set <file-col>=<path>` (M38; friendly translator dispatch),
+    // (b) `monday item upload` (M31; verb-shaped multipart). The
+    // `--set-raw <file-col>=<json>` form stays REJECTED per D3
+    // because Monday's wire has no JSON-shape for change_column_
+    // value on file columns. No `deferred_to` slot — the --set-raw
+    // rejection is permanent per D3.
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -335,10 +338,13 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     } catch (e) {
       const err = e as ApiError;
       const hint = (err.details as { hint: string }).hint;
+      expect(hint).toMatch(/monday item set/u);
+      expect(hint).toMatch(/monday item update/u);
+      expect(hint).toMatch(/v0\.6-M38/u);
       expect(hint).toMatch(/monday item upload/u);
       expect(hint).toMatch(/v0\.4-M31/u);
       // Error MESSAGE still names the wire surface so an agent
-      // grepping logs sees both the verb name + the underlying
+      // grepping logs sees both the verb names + the underlying
       // mutation name.
       expect(err.message).toMatch(/add_file_to_column/u);
     }

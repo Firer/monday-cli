@@ -3211,10 +3211,16 @@ describe('monday board column-create (integration, M16)', () => {
       }[];
     };
     expect(env.warnings[0]?.details?.category).toBe('files_shaped');
-    // Post-M31 IMPL: hint flipped from `add_file_to_column (deferred to
-    // v0.4)` to `monday item upload (v0.4-M31, multipart)` since the
-    // verb is now shipped and a verb name is more useful than a wire
-    // mutation name for agents.
+    // v0.6-M38: suggested_write_path widened to name BOTH write
+    // paths reaching Monday's add_file_to_column multipart wire —
+    // `monday item set <iid> <file-col>=<path>` / `monday item
+    // update --set <file-col>=<path>` (M38; friendly translator)
+    // AND `monday item upload` (M31; verb-shaped). M38 is the
+    // simpler agent flow for existing-item file writes.
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
+      /monday item set/,
+    );
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.6-M38/);
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
       /monday item upload/,
     );

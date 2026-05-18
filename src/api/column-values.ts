@@ -1621,16 +1621,23 @@ export const bundleColumnValues = (
  *     `deferred_to: "v0.3"`; hint nudges agents at `--set-raw`.
  *   - **`files`-shaped** (currently `file` only) — Monday writes via
  *     `add_file_to_column` (multipart upload) rather than
- *     `change_column_value`, so neither friendly translator nor
- *     `--set-raw` can reach the wire surface. Carry
- *     `deferred_to: "v0.6"`; hint points at `monday item upload`
- *     (shipped v0.4-M31; multipart wire — the alternative path
- *     agents should use today). The `deferred_to` slot tracks the
- *     friendly `--set <file-col>=<path>` form specifically; v0.4
- *     shipped the verb-shaped path (`monday item upload`); v0.5
- *     didn't pick up the inline-`--set` translator either (the
- *     translator boundary still doesn't dispatch into the multipart
- *     wire); slot slipped from v0.5 to v0.6 at v0.5 release-prep.
+ *     `change_column_value`. v0.6-M38 ships the friendly
+ *     `--set <file-col>=<path>` form via a sibling dispatch leg at
+ *     the command action body (see `src/api/file-column-set.ts`);
+ *     the rejection table row here fires ONLY for paths that
+ *     don't route through the M38 dispatch — specifically the
+ *     `item create` carve-in (`create_item.column_values` is
+ *     JSON-only and can't accept a multipart file part; M38 D6
+ *     closure defers create-time file upload to v0.6.x) + the
+ *     bulk path (`item update --where ... --set <file-col>=
+ *     <path>`; M38 D5 closure defers per-item file dispatch to
+ *     v0.6.x). The friendly translator's M38-routed entries
+ *     never hit this `UNSUPPORTED_TABLE.files_shaped` row —
+ *     they branch off ahead of the translator call at the
+ *     action body level. Hint points at `monday item upload`
+ *     (v0.4-M31; verb-shaped multipart) AND `monday item set` /
+ *     `monday item update --set <file-col>=<path>` (v0.6-M38;
+ *     friendly translator dispatch).
  *   - **`time_tracking`** — verb-shaped extension (start/stop, not
  *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
  *     hint points at the upcoming verb surface.
@@ -1724,18 +1731,25 @@ const UNSUPPORTED_TABLE: Readonly<
     message: (columnId, type) =>
       `Column "${columnId}" has type "${type}", which Monday writes ` +
       `via add_file_to_column (multipart upload) rather than ` +
-      `change_column_value. The friendly --set translator can't ` +
-      `reach this surface; --set-raw <col>=<json> can't either. ` +
+      `change_column_value. The v0.6-M38 friendly --set ` +
+      `<file-col>=<path> form dispatches into the multipart wire on ` +
+      `\`monday item set\` + \`monday item update\` (single-item ` +
+      `only); this rejection row fires on paths the M38 dispatch ` +
+      `doesn't cover (item create, bulk item update --where). ` +
       `Use \`monday item upload <iid> --column <col> <file>\` ` +
-      `(v0.4-M31, multipart wire) for file columns.`,
+      `(v0.4-M31; verb-shaped) OR \`monday item set <iid> ` +
+      `<file-col>=<path>\` / \`monday item update <iid> --set ` +
+      `<file-col>=<path>\` (v0.6-M38; friendly translator).`,
     details: () => ({
-      deferred_to: 'v0.6',
       hint:
-        'use `monday item upload <iid> --column <col> <file>` ' +
-        '(shipped v0.4-M31, multipart wire) — the friendly ' +
-        '--set translator + --set-raw both target ' +
-        'change_column_value-shaped types and can\'t reach the ' +
-        'multipart wire.',
+        'two write paths reach Monday\'s add_file_to_column ' +
+        'multipart wire: `monday item upload <iid> --column <col> ' +
+        '<file>` (v0.4-M31; verb-shaped) and `monday item set <iid> ' +
+        '<file-col>=<path>` / `monday item update <iid> --set ' +
+        '<file-col>=<path>` (v0.6-M38; friendly translator ' +
+        'dispatch, single-item only). The bulk + create paths ' +
+        'reject file-shaped columns at v0.6-M38 — those defer to ' +
+        'v0.6.x per cli-design §5.3 + §13 v0.6 entry.',
     }),
   },
   time_tracking: {

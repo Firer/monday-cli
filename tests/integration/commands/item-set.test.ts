@@ -1831,7 +1831,7 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     expect(env.error?.details?.read_only).toBe(true);
   });
 
-  it('--set-raw rejects files-shaped (file) with deferred_to: v0.6 (no API call fires; v0.5 release-prep slipped the raw-payload-into-multipart-wire form again because v0.5 didn\'t pick it up either — `monday item upload` (v0.4-M31) is the alternative path)', async () => {
+  it('--set-raw rejects files-shaped (file) at v0.6-M38 per D3 closure (no API call fires; rejection is permanent for --set-raw because Monday\'s wire has no JSON-shape for change_column_value on file columns; the friendly --set <file-col>=<path> form ships at M38 but --set-raw stays rejected)', async () => {
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -1871,7 +1871,69 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
       error?: { code: string; details?: { deferred_to?: string } };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    expect(env.error?.details?.deferred_to).toBe('v0.6');
+    // v0.6-M38: no `deferred_to` slot — the --set-raw rejection for
+    // file columns is permanent per D3. The hint widens to name
+    // both M38 (friendly --set) + M31 (verb-shaped upload) write
+    // paths.
+    expect(env.error?.details).not.toHaveProperty('deferred_to');
+  });
+
+  it('v0.6-M38 file-column friendly --set <file-col>=<path>: dispatch leg pre-flight stub fires (the runtime body lands at M38 IMPL; the pre-flight contract surface ships the c8-ignored stub at src/commands/item/set.ts to surface `internal_error` with reason: pre_flight_stub)', async () => {
+    // Pre-flight pin: friendly --set on a `file`-typed column
+    // resolves through the new M38 dispatch branch at item set's
+    // action body (cli-design §5.3 step 5 "File-column dispatch
+    // leg"). At pre-flight, the stub throws internal_error; at
+    // M38 IMPL, the runtime body shipping at executeFileColumnSet
+    // performs file pre-check + Blob construction + addFileToColumn
+    // dispatch + emitMutation with the fileColumnSetOutputSchema
+    // envelope.
+    const fileBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const out = await drive(
+      [
+        'item',
+        'set',
+        '12345',
+        'attachments=./report.pdf',
+        '--board',
+        '111',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    // Pre-flight stub throws `internal_error` (exit 2); at IMPL the
+    // expectation flips to a successful add_file_to_column dispatch
+    // (exit 0 with the M31-shaped envelope).
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.message).toMatch(/v0\.6-M38/u);
+    expect(env.error?.message).toMatch(/pre-flight/u);
+    expect(env.error?.details).toMatchObject({
+      column_id: 'attachments',
+      column_type: 'file',
+      deferred_to: 'v0.6-M38-impl',
+      reason: 'pre_flight_stub',
+    });
   });
 
   it('--set-raw with malformed JSON fails fast at argv-parse — no API call fires', async () => {

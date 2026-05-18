@@ -210,16 +210,30 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  * column_values` (`cli-design.md` §5.3 writer-expansion roadmap "files"
  * row + the escape-hatch contract).
  *
- * The friendly translator and `--set-raw` both go through
- * `change_column_value` / `change_multiple_column_values`, so a
- * `--set-raw` raw payload cannot reach the right wire surface for
- * these types — `--set-raw` rejects them with `unsupported_column_
- * type` carrying `deferred_to: "v0.6"`. v0.4-M31 shipped the verb-
- * shaped path (`monday item upload`); the `--set-raw <file-col>=
- * <json>` form remains deferred because it would need a separate
- * dispatch from the escape-hatch boundary into the multipart wire.
- * Slot slipped from v0.5 to v0.6 at v0.5 release-prep — v0.5 didn't
- * pick up the dispatch either.
+ * **Two write paths reach the multipart wire** post-v0.6-M38:
+ *
+ *   - **v0.4-M31 verb-shaped**: `monday item upload <iid> --column
+ *     <col> <file>` + `monday update upload <uid> <file>`. Direct
+ *     multipart dispatch via `addFileToColumn` /
+ *     `addFileToUpdate` (`src/api/assets.ts`).
+ *   - **v0.6-M38 friendly translator**: `monday item set <iid>
+ *     <file-col>=<path>` + `monday item update <iid> --set
+ *     <file-col>=<path>`. Sibling dispatch leg at the command
+ *     action body that detects `column.type === 'file'` AFTER
+ *     resolution + routes through `executeFileColumnSet`
+ *     (`src/api/file-column-set.ts`), which itself wraps M31's
+ *     `addFileToColumn` verbatim. Single-item only at M38; mutex
+ *     rules at the resolution boundary (D2/D5/D6 closures —
+ *     bulk + create paths reject; mixed-set rejects; multi-file-
+ *     set rejects).
+ *
+ * The `--set-raw <file-col>=<json>` form STAYS REJECTED at v0.6-M38
+ * per D3 closure — Monday's wire has no JSON-shape for
+ * `change_column_value` on file columns, and the escape-hatch
+ * contract "user supplies the JSON `change_column_value` accepts"
+ * doesn't compose with multipart. The rejection now points at
+ * BOTH write paths (M31 verb + M38 friendly `--set`) as
+ * alternatives.
  *
  * Currently one entry (`file`); the slot is plural because Monday may
  * surface other multipart-upload-shaped types in future API versions
@@ -316,10 +330,13 @@ export const getColumnRoadmapCategory = (
  *     path` is `null` (agents can't write at all; the column
  *     exists for read-side display / mirror sources only).
  *   - `'files_shaped'`: Monday writes the type via `add_file_to_
- *     column` (multipart upload). `monday item upload <iid> --column
- *     <col> <file>` shipped at v0.4-M31 as the agent-facing verb;
- *     `suggested_write_path` carries that pointer. Currently
- *     `file` only.
+ *     column` (multipart upload). Two write paths post-v0.6-M38:
+ *     `monday item upload <iid> --column <col> <file>` (M31; verb-
+ *     shaped) + `monday item set <iid> <file-col>=<path>` /
+ *     `monday item update <iid> --set <file-col>=<path>` (M38;
+ *     friendly translator dispatch). `suggested_write_path`
+ *     points at the M38 friendly form (the simpler agent flow for
+ *     existing-item file writes). Currently `file` only.
  *
  * Returns `null` for canonical types (membership in `WRITABLE_COLUMN_
  * TYPES`) — `column-create` skips emitting the warning when the type
@@ -356,7 +373,8 @@ export const categorizeNoncanonicalColumnType = (
   if (isFilesShapedType(type)) {
     return {
       category: 'files_shaped',
-      suggestedWritePath: 'monday item upload (v0.4-M31, multipart)',
+      suggestedWritePath:
+        'monday item set <iid> <file-col>=<path> (v0.6-M38; friendly) OR monday item upload <iid> --column <col> <file> (v0.4-M31; verb-shaped)',
     };
   }
   return {

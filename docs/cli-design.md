@@ -1673,19 +1673,38 @@ monday item search [--board <bid>] [--workspace <wid>] [--favorites] [--max-boar
                                           # and are skipped (not fatal).
                                           # Inaccessible board IDs emit an
                                           # `inaccessible_boards` warning.
-monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>]   # single column write   v0.1 (--set-raw v0.2)
+monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>]   # single column write   v0.1 (--set-raw v0.2; file-column `<col>=<path>` v0.6-M38)
                                           # positional <col>=<val> uses friendly translator (§5.3)
                                           # --set-raw skips translation; agent supplies wire-shape JSON
+                                          # v0.6-M38: file-column dispatch — when <col> resolves to
+                                          # type `file`, <value> is treated as a local file path and
+                                          # routed via add_file_to_column (multipart). --set-raw
+                                          # <file-col>=<json> stays rejected (no JSON wire shape).
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
 monday item clear --board <bid> <col> (--where <c>=<v>... | --filter-json <json>) [--yes] [--dry-run]   v0.2
                                           # bulk clear — same gating as item update --where
                                           # live (non-empty match): requires --yes unless --dry-run is set
-monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--board <bid>] [--create-labels-if-missing]   v0.1 (--set-raw v0.2)
+monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--board <bid>] [--create-labels-if-missing]   v0.1 (--set-raw v0.2; file-column `--set <file-col>=<path>` v0.6-M38)
                                           # single-item multi-column atomic update
                                           # at least one of --name / --set / --set-raw required
                                           # --set and --set-raw against the same <col> → usage_error
-monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30)
+                                          # v0.6-M38: file-column dispatch — when a --set <col>=<path>
+                                          # resolves to type `file`, the command branches off the JSON
+                                          # translator path into add_file_to_column (multipart).
+                                          # Mutex rules at M38: exactly one file --set per call; mixing
+                                          # with any value --set / --set-raw / --name → usage_error
+                                          # (details.reason: 'mixed_file_and_value_sets'); 2+ file
+                                          # --set → usage_error (details.reason:
+                                          # 'multi_file_set_unsupported' — multi-file dispatch defers
+                                          # to v0.6.x). --set-raw <file-col>=<json> stays REJECTED.
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38, defers to v0.6.x)
                                           # bulk update — at least one of --name / --set / --set-raw required
+                                          # v0.6-M38: file-column --set REJECTED on the bulk path —
+                                          # `--set <file-col>=<path>` surfaces usage_error
+                                          # (details.reason: 'file_set_on_bulk_unsupported') at the
+                                          # resolution boundary. Per-item file dispatch + partial-
+                                          # success envelope + --concurrency shared-transport semantics
+                                          # defer to v0.6.x candidate-selection.
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
                                           # --continue-on-error (v0.3-M25): opt-in to the per-item
@@ -1708,12 +1727,17 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # `data.summary.{matched,applied,failed}_count` invariant.
                                           # Monday's `concurrency_exceeded` retries via the existing
                                           # retry layer (§2.5) — no new error code surfaces.
-monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set REJECTED at v0.6-M38, defers to v0.6.x)
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
                                           # entries → usage_error (covers --set + --set, --set-raw
                                           # + --set-raw, and --set + --set-raw permutations;
                                           # resolution-time enforced — see §5.3)
+                                          # v0.6-M38: file-column --set REJECTED on item create —
+                                          # `--set <file-col>=<path>` surfaces usage_error
+                                          # (details.reason: 'file_set_on_create_unsupported') at the
+                                          # resolution boundary. Defers to v0.6.x — non-atomic
+                                          # post-create wire shape would break §5.8 state safety.
                                           # --set / --set-raw values bundle into the single
                                           # create_item / create_subitem mutation — single
                                           # round-trip, no post-create fallback (see §5.8)
@@ -3431,17 +3455,21 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `change_column_value` / `change_multiple_column_values`.
    - **`files`-shaped types** (`file`, anything else where Monday
      uses `add_file_to_column` rather than `change_column_value`)
-     carry `deferred_to: "v0.6"`. The verb-shaped path
-     (`monday item upload`) shipped at v0.4-M31 — that's the
-     alternative agents should use today; the friendly `--set`
-     form for file columns (which would need a dispatch from the
-     translator boundary into the multipart wire) slipped from
-     v0.4 → v0.5 → v0.6 across two consecutive release-preps
-     because neither v0.4 nor v0.5 picked up the
-     translator-to-multipart dispatch. `--set-raw` rejects these
-     too — the underlying mutation isn't `change_column_value` so
-     a raw payload can't reach the right wire surface; hint points
-     at `monday item upload`.
+     ship the friendly `--set <file-col>=<path>` form at **v0.6-M38**
+     — the command action body branches OFF the standard JSON-
+     translator path INTO M31's multipart `addFileToColumn` fetcher
+     when the resolved column has `type === 'file'`. See "File-
+     column dispatch leg" below + step 5's mutation-selection rules
+     for the dispatch routing decision. The verb-shaped path
+     (`monday item upload`, v0.4-M31) stays as the alternative for
+     `item upload <iid> --column <col> <file>` ergonomics. The
+     `--set-raw <file-col>=<json>` form stays REJECTED at M38 per
+     `--set-raw`'s escape-hatch contract (the user-supplied JSON
+     reaches `change_column_value`, never `add_file_to_column`) —
+     M38 ships the friendly `--set` form ONLY. The translator-to-
+     multipart dispatch slipped from v0.4 → v0.5 → v0.6 across two
+     consecutive release-preps because neither cycle picked up the
+     dispatch design; M38 landed it (see §13 v0.6 entry).
    No silent partial support — every translator either lands
    end-to-end or surfaces `unsupported_column_type` with a
    hint that points at `--set-raw` or the type's roadmap slot.
@@ -3457,10 +3485,70 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      combined with one or more `--set` / `--set-raw` flags.
      Saves a round-trip and is **atomic on Monday's side** (all
      columns succeed together or all fail; never partial success).
+   - **File-column dispatch leg (v0.6-M38)** — when a `--set
+     <col>=<path>` resolves to a `file`-typed column, the
+     command action body branches OFF the standard JSON-
+     translator path INTO Monday's `add_file_to_column` multipart
+     mutation via `executeFileColumnSet` (`src/api/file-column-
+     set.ts`), which wraps v0.4-M31's `addFileToColumn` fetcher
+     (`src/api/assets.ts`) verbatim. The file dispatch is
+     **single-column-per-call** on Monday's wire — multipart
+     uploads can't bundle into `change_multiple_column_values`,
+     so M38 enforces single-file-only via the mutex rules below
+     ("File-column dispatch leg" subsection). Path validation
+     mirrors `monday item upload`'s pattern (`fs.stat()` +
+     `fs.access(R_OK)` + non-empty pre-check) before any wire
+     call fires.
    `--set-raw` (v0.2) always uses `change_column_value` for the
    single-column case and `change_multiple_column_values` for the
    bundled case — the simple variant is an optimisation that
-   doesn't apply to user-supplied raw payloads.
+   doesn't apply to user-supplied raw payloads. `--set-raw
+   <file-col>=<json>` STAYS REJECTED at v0.6-M38 per the
+   escape-hatch contract — the user-supplied JSON reaches
+   `change_column_value`, never `add_file_to_column`; M38 ships
+   the friendly `--set <file-col>=<path>` form ONLY.
+
+   **File-column dispatch leg — mutex rules (v0.6-M38).** When
+   any resolved column has `type === 'file'`, the command action
+   body enforces these rules at the column-resolution boundary
+   (parse-time can't know — column types only resolve after
+   metadata loads). Rejection surfaces share the
+   `usage_error.details.reason` discriminator pattern from M14 /
+   M27 / M31:
+
+   - **Single file `--set` per call.** 2+ `--set <file-col>=<path>`
+     entries in the same call reject as `usage_error.details.
+     reason: 'multi_file_set_unsupported'` — defers multi-file
+     dispatch to v0.6.x.
+   - **No mixing with value flags.** File `--set` mixed with any
+     value `--set` / `--set-raw` / `--name <n>` in the same call
+     rejects as `usage_error.details.reason: 'mixed_file_and_
+     value_sets'` — mixing would force non-atomic multi-leg
+     dispatch (one multipart round-trip per file column + one
+     JSON round-trip per value column), breaking the existing
+     atomicity guarantee.
+   - **No `item create --set <file-col>=<path>`.** Rejects as
+     `usage_error.details.reason: 'file_set_on_create_
+     unsupported'` — defers create-time file upload to v0.6.x
+     (non-atomic post-create wire shape would break §5.8 state
+     safety).
+   - **No bulk `item update --where ... --set <file-col>=<path>`.**
+     Rejects as `usage_error.details.reason: 'file_set_on_bulk_
+     unsupported'` — defers per-item file dispatch + partial-
+     success envelope to v0.6.x.
+   - **No `--set <file-col>=-` stdin.** Rejects via the existing
+     `<file>` path-string validation (mirrors M31 `monday item
+     upload`'s rejection rationale — no clean `--filename`
+     companion shape pinned for the `--set` syntax).
+
+   **Dispatch routing layer.** The dispatch branch fires AFTER
+   column resolution at the command action body level — NOT
+   inside `translateColumnValueAsync`. The translator stays
+   JSON-output-shaped for the 13 existing writable types; the
+   file-column leg is a sibling routed at the action body. See
+   `src/api/file-column-set.ts`'s module docstring for the
+   load-bearing rationale (three reasons: wire-shape divergence,
+   atomicity-contract divergence, input-shape divergence).
 
    **`item create` (M9) carve-in.** Both `--set` and `--set-raw`
    translated values bundle into the single `create_item` /
@@ -3518,20 +3606,16 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
   - **`files`-shaped** (`file`, anything else where Monday's
     write path is `add_file_to_column` rather than
     `change_column_value`) → surfaces `unsupported_column_type`
-    with `deferred_to: "v0.6"`. The friendly translator and
-    `--set-raw` both go through column-value mutations
-    (`change_column_value` / `change_multiple_column_values`
-    on `item set` / `item update`; `create_item` /
-    `create_subitem.column_values` on `item create` per the
-    M9 carve-in above) — none of these wire surfaces accept
-    `add_file_to_column`-style payloads, so a `--set-raw` raw
-    payload can't reach the right wire surface for these
-    types. Asset upload itself shipped at v0.4-M31 as the
-    verb-shaped `monday item upload`; the friendly `--set` /
-    `--set-raw` forms for files slipped from v0.4 → v0.5 →
-    v0.6 across two consecutive release-preps because neither
-    v0.4 nor v0.5 picked up the translator-to-multipart
-    dispatch.
+    under `--set-raw` SPECIFICALLY. The friendly `--set
+    <file-col>=<path>` form ships at v0.6-M38 (see step 4
+    "files-shaped types" + step 5 "File-column dispatch leg"),
+    dispatching from the translator boundary into M31's
+    multipart wire; but `--set-raw <file-col>=<json>` goes
+    through `change_column_value` / `change_multiple_column_
+    values`, neither of which accepts `add_file_to_column`-
+    shaped payloads, so the raw form stays rejected. Hint
+    points at the v0.6-M38 friendly `--set <file-col>=<path>`
+    form OR the verb-shaped `monday item upload` (v0.4-M31).
   Every other type (writable + tentative-slipped + future where
   the API accepts `change_column_value`) is accepted by
   `--set-raw`; the user owns wire-shape correctness.
@@ -3603,7 +3687,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | **v0.4** (shipped — M31) | **NOT via `--set`** — files cross the wire as `multipart/form-data` (NOT `change_column_value`). Use the dedicated verbs `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (§4.3). Non-`file` columns passed to `--column` surface `unsupported_column_type` with a hint pointing back at this row. |
+| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set`) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** ships the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update` (single-item only; bulk + create defer to v0.6.x per D5/D6). Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`). Mutex rules at M38: single file `--set` only; no mixing with value `--set` / `--set-raw` / `--name`. `--set-raw <file-col>=<json>` stays REJECTED (no JSON wire shape for `add_file_to_column`). |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -8467,12 +8551,15 @@ scoped idempotent changes, and post comments narrating its work.**
   JSON on rename/delete/duplicate; DocumentBlock on per-block
   create/update; DocumentBlockIdOnly on per-block delete;
   custom `{success, error?}` OBJECT on the imports).
-- Files-shaped friendly `--set` translator + `--set-raw` form —
-  the `monday item upload` verb shipped at v0.4-M31 covers the
-  multipart wire path; the inline `--set` / `--set-raw` form
-  for file columns slipped at v0.4 release-prep (would need a
-  separate dispatch from the translator boundary into the
-  multipart wire).
+- Files-shaped friendly `--set` translator — **slipped from
+  v0.5 to v0.6-M38** at v0.5 release-prep (v0.5 didn't pick up
+  the translator-to-multipart dispatch). The `monday item upload`
+  verb shipped at v0.4-M31 covers the verb-shaped multipart wire
+  path. M38 ships the inline `--set <file-col>=<path>` form
+  dispatching from the translator boundary into M31's existing
+  multipart wire; `--set-raw <file-col>=<json>` stays REJECTED
+  per D3 closure (Monday's wire has no JSON-shape for
+  `change_column_value` on file columns).
 - Cross-board `item move` value-overrides — slipped from v0.4
   release-prep; Monday's `ColumnMappingInput` carries no value
   slot at API `2026-01`, so the richer `{id, value?}` form
@@ -8511,6 +8598,65 @@ scoped idempotent changes, and post comments narrating its work.**
   the discipline: agents should set no defaults and pass every
   scoping arg in argv for reproducibility-across-machines;
   defaults are a human-ergonomics feature.
+
+### v0.6 (next — files-shaped friendly `--set` writes)
+
+- Files-shaped friendly `--set <file-col>=<path>` writes — picked
+  at the v0.6 kickoff candidate-selection session per the
+  R-NEW-75 5-dimension framework. **v0.6-M38** opens with the
+  translator-boundary dispatch from `monday item set <iid>
+  <file-col>=<path>` + `monday item update <iid> --set
+  <file-col>=<path>` into v0.4-M31's multipart `add_file_to_
+  column` mutation. Closes the longest-running carry-over in
+  the §13 backlog (v0.4 → v0.5 → v0.6 across two consecutive
+  release-preps because neither cycle picked up the translator-
+  to-multipart dispatch). Zero new Monday wire surface, zero
+  new transport seam (multipart shipped at v0.4-M31), zero new
+  ERROR_CODE (29 stays). Mutex rules at M38 (per §5.3 step 5
+  "File-column dispatch leg"): single file `--set` only, no
+  mixing with value `--set` / `--set-raw` / `--name`; bulk
+  `item update --where ... --set <file-col>=<path>` defers to
+  v0.6.x per D5; `item create --set <file-col>=<path>` defers
+  to v0.6.x per D6; `--set-raw <file-col>=<json>` STAYS
+  REJECTED per D3. M38 pre-flight stubs at this commit;
+  runtime body lands at M38 IMPL.
+
+- **Carried forward from v0.4 + v0.5 release-prep slips**
+  (each defers to its own v0.6.x candidate-selection session
+  per the R-NEW-75 framework):
+  - Bulk `item update --where ... --set <file-col>=<path>` —
+    surface deferred from M38 per D5; lift candidate for
+    v0.6.x once the per-item file-dispatch + partial-success
+    envelope + `--concurrency` shared-transport semantics
+    design clears.
+  - `item create --set <file-col>=<path>` — surface deferred
+    from M38 per D6; conditional on Monday surfacing an
+    atomic create-with-file wire shape (no such mutation
+    exists at API `2026-01`).
+  - `<path>='-'` stdin for file `--set` — surface deferred
+    from M38 per D7; v0.6.x once a `--filename` companion
+    shape is pinned.
+  - Cross-board `item move` value-overrides — carried over
+    from v0.4 + v0.5 release-prep. Monday's `ColumnMapping
+    Input` carries no value slot at API `2026-01`; richer
+    `{id, value?}` form needs a non-atomic post-move
+    `change_multiple_column_values` with cross-leg partial-
+    failure envelope shapes.
+  - Cross-board search resumable cursor — carried over from
+    v0.4 + v0.5 release-prep; per-board cursor-lifetime
+    under aggregation remains the load-bearing design issue.
+  - Multi-level subitem creation — carried over from v0.4 +
+    v0.5 release-prep; conditional on Monday's data model
+    surfacing `subtasks` on `sub_items_board` at API
+    `2026-01`+.
+  - Profile-scoped argument defaults — filed at v0.6 kickoff
+    candidate-selection session. Extends `~/.monday-cli/
+    config.toml` (M19/M21) with `[profiles.<name>.defaults]`
+    table carrying scoping args. Prerequisite §13 carve-out
+    Decision required at pre-flight kickoff (distinguishes
+    aliases-as-stored-command-strings from defaults-as-
+    stored-flag-values; current "Saved queries / aliases"
+    non-goal reads as forbidding both).
 
 ### Explicitly deferred from v0.1's stable contract
 

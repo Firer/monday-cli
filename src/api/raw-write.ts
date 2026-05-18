@@ -22,12 +22,19 @@
  *         from CLI-time to Monday-time with no new information.
  *       * **`files`-shaped** (`file`, anything else where Monday
  *         uses `add_file_to_column` rather than `change_column_value`)
- *         → `unsupported_column_type` with `deferred_to: "v0.6"`.
- *         The `--set-raw` payload reaches `change_column_value` /
- *         `change_multiple_column_values` only; files-shaped types
- *         can't be written through that wire surface. Hint points
- *         at `monday item upload` (v0.4-M31 — the verb-shaped
- *         alternative path).
+ *         → `unsupported_column_type` rejection STAYS at v0.6-M38
+ *         per D3 closure. The `--set-raw` payload reaches
+ *         `change_column_value` / `change_multiple_column_values`
+ *         only; files-shaped types can't be written through that
+ *         wire surface (Monday's wire has no JSON-shape for
+ *         `change_column_value` on file columns). v0.6-M38 ships
+ *         the friendly `--set <file-col>=<path>` form (dispatching
+ *         into the multipart wire at the command action body) but
+ *         keeps `--set-raw` rejected — the escape-hatch contract
+ *         "user supplies JSON `change_column_value` accepts"
+ *         doesn't compose with multipart. Hint points at the
+ *         v0.6-M38 friendly `--set` form OR `monday item upload`
+ *         (v0.4-M31; verb-shaped multipart).
  *     Otherwise builds a `TranslatedColumnValue` with `payload:
  *     { format: 'rich', value: <parsed> }` so the existing
  *     `selectMutation` dispatcher handles it uniformly.
@@ -173,17 +180,20 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *   - **Read-only-forever** → `unsupported_column_type` with
  *     `read_only: true`. Monday computes these server-side; no
  *     payload (raw or friendly) is ever accepted.
- *   - **`files`-shaped** → `unsupported_column_type` with
- *     `deferred_to: "v0.6"`. Monday writes via `add_file_to_column`
- *     (multipart upload), not `change_column_value`; the raw
- *     payload can't reach the right wire surface. Hint points at
- *     `monday item upload` (shipped v0.4-M31; multipart wire — the
- *     alternative path agents should use today). The `deferred_to`
- *     slot tracks the `--set-raw <file-col>=<json>` form
- *     specifically; v0.4 shipped the verb-shaped path; v0.5 didn't
- *     pick up the raw-payload-into-multipart-wire wiring either
- *     (no escape-hatch-to-multipart dispatch landed); slot slipped
- *     from v0.5 to v0.6 at v0.5 release-prep.
+ *   - **`files`-shaped** → `unsupported_column_type` rejection
+ *     STAYS at v0.6-M38 per D3 closure. Monday writes via
+ *     `add_file_to_column` (multipart upload), not
+ *     `change_column_value`; the raw payload can't reach the
+ *     right wire surface (Monday's wire has no JSON-shape for
+ *     `change_column_value` on file columns). v0.6-M38 ships the
+ *     friendly `--set <file-col>=<path>` form (dispatching into
+ *     the multipart wire at the command action body — see
+ *     `src/api/file-column-set.ts`); the escape-hatch contract
+ *     "user supplies JSON `change_column_value` accepts" doesn't
+ *     compose with multipart, so `--set-raw <file-col>=<json>`
+ *     stays rejected. Hint points at the M38 friendly `--set`
+ *     form OR `monday item upload` (v0.4-M31; verb-shaped
+ *     multipart).
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the
@@ -238,19 +248,24 @@ export const translateRawColumnValue = (
         `change_column_value. --set-raw goes through change_column_value ` +
         `/ change_multiple_column_values, so a raw payload can't reach ` +
         `the right wire surface for this type. Use ` +
-        `\`monday item upload <iid> --column <col> <file>\` ` +
-        `(v0.4-M31, multipart wire) instead.`,
+        `\`monday item set <iid> <file-col>=<path>\` / ` +
+        `\`monday item update <iid> --set <file-col>=<path>\` (v0.6-M38; ` +
+        `friendly translator dispatch) OR \`monday item upload <iid> ` +
+        `--column <col> <file>\` (v0.4-M31; verb-shaped multipart).`,
       {
         details: {
           column_id: column.id,
           type: column.type,
-          deferred_to: 'v0.6',
           hint:
-            'use `monday item upload <iid> --column <col> <file>` ' +
-            '(shipped v0.4-M31; multipart wire). --set-raw rejects ' +
-            'this type at column-resolution time because the ' +
-            'underlying wire shape is incompatible with ' +
-            '`change_column_value`.',
+            'two write paths reach Monday\'s add_file_to_column ' +
+            'multipart wire: (a) `monday item set <iid> ' +
+            '<file-col>=<path>` / `monday item update <iid> --set ' +
+            '<file-col>=<path>` (v0.6-M38; friendly translator ' +
+            'dispatch); (b) `monday item upload <iid> --column <col> ' +
+            '<file>` (v0.4-M31; verb-shaped). --set-raw rejects ' +
+            'file-shaped columns at v0.6-M38 per D3 closure — the ' +
+            'escape-hatch contract requires a JSON wire shape, and ' +
+            'add_file_to_column is multipart-only.',
         },
       },
     );

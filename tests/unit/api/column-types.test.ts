@@ -171,11 +171,13 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     });
   });
 
-  it('file → files_shaped with the shipped `monday item upload` hint (v0.4-M31)', () => {
-    expect(categorizeNoncanonicalColumnType('file')).toEqual({
-      category: 'files_shaped',
-      suggestedWritePath: 'monday item upload (v0.4-M31, multipart)',
-    });
+  it('file → files_shaped with the v0.6-M38 friendly --set hint + v0.4-M31 verb-shaped upload hint (both write paths reach add_file_to_column; M38 is the simpler agent flow for existing items)', () => {
+    const result = categorizeNoncanonicalColumnType('file');
+    expect(result?.category).toBe('files_shaped');
+    expect(result?.suggestedWritePath).toMatch(/monday item set/u);
+    expect(result?.suggestedWritePath).toMatch(/v0\.6-M38/u);
+    expect(result?.suggestedWritePath).toMatch(/monday item upload/u);
+    expect(result?.suggestedWritePath).toMatch(/v0\.4-M31/u);
   });
 
   it.each([

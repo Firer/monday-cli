@@ -1781,11 +1781,11 @@ asymmetry needs documentation discipline so future agents
 (and future maintainers) understand WHY the divergence exists
 and where to look when the wire surface evolves.
 
-This section enumerates the three asymmetries known at v0.4-M31
+This section enumerates the four asymmetries known at v0.6-M38
 pre-flight, the per-asymmetry documentation cadence, and the
 expansion rule for future asymmetries.
 
-### The three asymmetries
+### The four asymmetries
 
 **1. `Webhook.config` JSON-input / String-output asymmetry**
 (v0.3-M27). Monday's `create_webhook` mutation accepts
@@ -1834,6 +1834,39 @@ Documented inline in `src/api/multipart-transport.ts`'s module
 docstring + `src/api/assets.ts`'s module docstring + cli-design
 §6.4 asset-upload sub-section.
 
+**4. Translator-boundary dispatch asymmetry — `--set
+<file-col>=<path>` vs `--set <value-col>=<val>`** (v0.6-M38).
+The CLI's `--set <col>=<value>` syntax is type-uniform from the
+agent's view — same flag, same argv shape, same column-token
+resolution. But for `file`-typed columns, the dispatch leg
+transitions silently from the JSON `change_column_value` /
+`change_multiple_column_values` wire path to Monday's
+multipart `add_file_to_column` wire path at the COMMAND ACTION
+BODY level (NOT inside the translator). The translator
+(`translateColumnValueAsync` in `src/api/column-values.ts`)
+stays JSON-output-shaped for the 13 writable allowlisted types;
+the file-column dispatch is a SIBLING branch routed at
+`src/commands/item/{set,update}.ts` that fires AFTER column
+resolution when `resolution.match.column.type === 'file'`.
+Routed via `executeFileColumnSet` in
+`src/api/file-column-set.ts`, which itself wraps M31's
+`addFileToColumn` fetcher verbatim.
+
+This asymmetry is at the AGENT-INPUT boundary, NOT the wire
+boundary (M31's asymmetry #3 above is wire-boundary-only —
+the multipart wire shape diverges from JSON; M38's asymmetry
+is that the agent's `--set` token transitions across two
+wire shapes based on column type). The mutex rules at M38's
+column-resolution boundary (no mixing file `--set` with value
+`--set` / `--set-raw` / `--name`; single file `--set` only;
+bulk + create reject) keep the per-call atomicity guarantee
+intact — when a file `--set` fires, NO value `--set` /
+`--set-raw` / `--name` fires in the same call, and the wire
+dispatch is single-multipart-mutation atomic. Documented
+inline in `src/api/file-column-set.ts`'s module docstring +
+`cli-design.md` §5.3 step 4 / step 5 "File-column dispatch
+leg" + the §13 v0.6 entry.
+
 ### Documentation cadence — inline + cross-link
 
 Each per-asymmetry inline prose lives in the relevant module
@@ -1862,22 +1895,23 @@ the code path); the architecture section exists to explain
 WHY the documentation lives where it does and to flag the
 pattern for future maintainers seeing a 4th asymmetry.
 
-### Expansion rule — the 4th asymmetry
+### Expansion rule — the 5th asymmetry
 
-When a 4th wire-vs-CLI asymmetry surfaces in a future milestone,
+When a 5th wire-vs-CLI asymmetry surfaces in a future milestone,
 the discipline is:
 
   1. Document the asymmetry inline in the relevant
      `src/api/<noun>.ts` module docstring (empirical-probe
      finding + rationale + failure-mode mapping).
-  2. Extend THIS section's "The three asymmetries" enumeration
-     to four — same prose shape as the existing three.
+  2. Extend THIS section's "The four asymmetries" enumeration
+     to five — same prose shape as the existing four.
   3. Update the per-affected cli-design + plan-doc references
      to point HERE.
   4. File an R-NEW entry in the relevant plan doc's §22 if the
      asymmetry has a code-shape implication (a new
-     transport/interface; a new wire-enum bridge), or skip the
-     R-class entry if it's purely a documentation lift.
+     transport/interface; a new wire-enum bridge; a new
+     translator-boundary dispatch leg), or skip the R-class
+     entry if it's purely a documentation lift.
 
 **Anti-pattern to avoid.** Re-explaining the asymmetry in
 every consumer's docstring + cli-design + plan-doc prose +

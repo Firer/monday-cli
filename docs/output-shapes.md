@@ -2092,6 +2092,77 @@ Two shapes (mutually exclusive — exactly one per call):
 wire-shape correctness; Monday's server-side validation surfaces
 as `validation_failed` with Monday's message.
 
+**v0.6-M38 file-column dispatch shape** (`<file-col>=<path>`).
+When the resolved column has `type === 'file'`, the action body
+branches OFF the JSON-translator path INTO Monday's
+`add_file_to_column` multipart wire — same envelope shape as
+`monday item upload` (M31) with `operation: "add_file_to_column"`
++ wire `Asset` projection:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "operation": "add_file_to_column",
+    "item_id": "12345",
+    "column_id": "files",
+    "filename": "report.pdf",
+    "file_size_bytes": 84210,
+    "asset": {
+      "id": "555000111",
+      "name": "report.pdf",
+      "url": "https://files.monday.com/.../report.pdf",
+      "public_url": "https://share.monday.com/...",
+      "file_extension": "pdf",
+      "file_size": 84210,
+      "created_at": "2026-06-01T10:30:00Z",
+      "uploaded_by": { "id": "1", "name": "Alice" },
+      "original_geometry": null,
+      "url_thumbnail": null
+    }
+  },
+  "meta": { ..., "source": "live" },
+  "warnings": []
+}
+```
+
+Dry-run shape mirrors `item upload --dry-run` verbatim:
+
+```json
+{
+  "ok": true, "data": null,
+  "meta": { ..., "dry_run": true, "source": "none" },
+  "planned_changes": [
+    { "operation": "add_file_to_column",
+      "item_id": "12345",
+      "column_id": "files",
+      "file_path": "./report.pdf",
+      "filename": "report.pdf",
+      "file_size_bytes": 84210 }
+  ]
+}
+```
+
+**`--set-raw <file-col>=<json>` STAYS REJECTED at v0.6-M38** per
+D3 closure. The escape-hatch contract requires a JSON wire shape
+Monday's `change_column_value` accepts; `add_file_to_column` is
+multipart-only. Rejection shape:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "unsupported_column_type",
+    "message": "Column \"attachments\" has type \"file\", which Monday writes via add_file_to_column ...",
+    "details": {
+      "column_id": "attachments",
+      "type": "file",
+      "hint": "two write paths reach Monday's add_file_to_column multipart wire: (a) `monday item set <iid> <file-col>=<path>` / `monday item update <iid> --set <file-col>=<path>` (v0.6-M38; friendly translator dispatch); (b) `monday item upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped)."
+    }
+  }
+}
+```
+
 ### `item clear <id> <token>`
 
 Per-column clear. Per-type wire payload:
@@ -2162,6 +2233,40 @@ Single-target shape:
   "meta": { ..., "source": "mixed" },
   "resolved_ids": { "status": "status_4", "date4": "date4" },
   "warnings": [] }
+```
+
+**v0.6-M38 file-column dispatch on single-item `item update`.**
+When `--set <file-col>=<path>` resolves to a `file`-typed column,
+the action body branches OFF the JSON-translator path INTO M31's
+multipart wire (single-item path only — bulk + create reject).
+Mutex rules at the resolution boundary (D2/D5/D6 closures):
+
+  - Exactly ONE file `--set` per call. 2+ file `--set` entries
+    reject with `usage_error.details.reason:
+    'multi_file_set_unsupported'`.
+  - NO mixing with value `--set` / `--set-raw` / `--name`.
+    Mixing rejects with `usage_error.details.reason:
+    'mixed_file_and_value_sets'`.
+
+Envelope shape on success mirrors `item set` file-column dispatch
+verbatim (`operation: "add_file_to_column"` + wire `Asset`
+projection — see `item set` section above for the canonical
+envelope). Mutex rejection shape:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "usage_error",
+    "message": "item update: --set <file-col>=<path> cannot be combined with --set / --set-raw / --name in the same call ...",
+    "details": {
+      "reason": "mixed_file_and_value_sets",
+      "file_column_id": "files",
+      "value_column_ids": ["status_4"],
+      "hint": "split the call into two: `monday item update <iid> --set <file-col>=<path>` for the file write + `monday item update <iid> --set status=Done` for the value write. File-column dispatch goes through add_file_to_column (multipart) while value writes go through change_column_value (JSON) — they can't bundle into one wire mutation."
+    }
+  }
+}
 ```
 
 ### `item update --where ... --board <bid>` (bulk)
