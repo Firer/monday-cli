@@ -259,21 +259,27 @@ export const translateRawColumnValue = (
         `\`monday item update <iid> --set <file-col>=<path>\` (v0.6-M38; ` +
         `single-item friendly) OR \`monday item update --where ... --set ` +
         `<file-col>=<path>\` (v0.7-M42; bulk friendly with per-item ` +
-        `multipart fan-out) OR \`monday item upload <iid> --column <col> ` +
-        `<file>\` (v0.4-M31; verb-shaped multipart).`,
+        `multipart fan-out) OR \`monday item create --set ` +
+        `<file-col>=<path>\` (v0.7-M43; create-time two-leg under ` +
+        `the §5.8 orphan-warn atomicity envelope) OR \`monday item ` +
+        `upload <iid> --column <col> <file>\` (v0.4-M31; verb-shaped ` +
+        `multipart).`,
       {
         details: {
           column_id: column.id,
           type: column.type,
           hint:
-            'three write paths reach Monday\'s add_file_to_column ' +
+            'four write paths reach Monday\'s add_file_to_column ' +
             'multipart wire: (a) `monday item set <iid> ' +
             '<file-col>=<path>` / `monday item update <iid> --set ' +
             '<file-col>=<path>` (v0.6-M38; single-item friendly); ' +
             '(b) `monday item update --where ... --set ' +
             '<file-col>=<path>` (v0.7-M42; bulk friendly per-item ' +
             'fan-out under --concurrency / --continue-on-error); ' +
-            '(c) `monday item upload <iid> --column <col> <file>` ' +
+            '(c) `monday item create --set <file-col>=<path>` ' +
+            '(v0.7-M43; create-time two-leg friendly translator ' +
+            'under the §5.8 orphan-warn atomicity envelope); ' +
+            '(d) `monday item upload <iid> --column <col> <file>` ' +
             '(v0.4-M31; verb-shaped). --set-raw rejects file-shaped ' +
             'columns per D3 closure (permanent) — the escape-hatch ' +
             'contract requires a JSON wire shape, and ' +

@@ -277,8 +277,14 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     expect(JSON.stringify(clean)).not.toContain(
       'file_set_on_create_unsupported',
     );
-    let multiThrowMsg = '';
-    let multiDetails: unknown = null;
+    // Codex pre-flight R1 P3-1 fix: assert that multi-file on
+    // `'item_create'` callShape DOES throw the universal
+    // multi-file mutex (`'multi_file_set_unsupported'` — the
+    // create-callShape gate folded but the universal rule still
+    // fires); regression-guard the M38 literal stays absent from
+    // both message + details. Pre-fix the test silently passed
+    // even if no throw fired (false-positive risk).
+    let multiThrew = false;
     try {
       enforceSingleFileColumnSet({
         callShape: 'item_create',
@@ -290,14 +296,20 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
         hasName: true,
       });
     } catch (err) {
+      multiThrew = true;
       const ae = err as ApiError;
-      multiThrowMsg = ae.message;
-      multiDetails = ae.details;
+      // Pin the multi-file mutex reason on the create callShape.
+      expect(ae.details?.reason).toBe('multi_file_set_unsupported');
+      // R-v0.7-NEW-4 contract-term regression guards: the v0.6
+      // literal stays absent from both message + details.
+      expect(ae.message).not.toContain('file_set_on_create_unsupported');
+      expect(JSON.stringify(ae.details)).not.toContain(
+        'file_set_on_create_unsupported',
+      );
     }
-    expect(multiThrowMsg).not.toContain('file_set_on_create_unsupported');
-    expect(JSON.stringify(multiDetails)).not.toContain(
-      'file_set_on_create_unsupported',
-    );
+    // Pre-flight R1 P3-1 fix: assert the throw actually fired
+    // (pre-fix the test silently passed if no exception fired).
+    expect(multiThrew).toBe(true);
   });
 
   it("throws usage_error.details.reason: 'multi_file_set_unsupported' for 2+ file --set entries (D2 multi leg)", () => {

@@ -33,15 +33,17 @@
  *     the v0.2 escape hatch, accepts wire-shape correctness).
  *   - `read_only_forever` → no write path (the column exists only
  *     for read-side display / mirror sources).
- *   - `files_shaped` → three write paths reach `add_file_to_column`
+ *   - `files_shaped` → four write paths reach `add_file_to_column`
  *     (multipart wire): the v0.6-M38 friendly `--set <file-col>=<path>`
  *     dispatch on `monday item set` / `monday item update <iid>`
  *     (single-item); the v0.7-M42 friendly form on `monday item update
  *     --where ... --set <file-col>=<path>` (bulk per-item fan-out under
- *     `--concurrency` / `--continue-on-error`); AND the v0.4-M31 verb-
- *     shaped `monday item upload <iid> --column <col> <file>`. `monday
- *     item create --set <file-col>=<path>` still rejects (D6 deferred to
- *     v0.7-M43). `--set-raw <file-col>=<json>` STAYS REJECTED per D3
+ *     `--concurrency` / `--continue-on-error`); the v0.7-M43 friendly
+ *     form on `monday item create --set <file-col>=<path>` (create-time
+ *     two-leg `create_item` + `add_file_to_column` dispatch under the
+ *     §5.8 orphan-warn atomicity envelope); AND the v0.4-M31 verb-
+ *     shaped `monday item upload <iid> --column <col> <file>`.
+ *     `--set-raw <file-col>=<json>` STAYS REJECTED per D3
  *     (permanent — `change_column_value` has no JSON-shape for file
  *     columns).
  * The command STILL PROCEEDS in all cases — Monday accepts non-
@@ -476,16 +478,18 @@ const buildNoncanonicalMessage = (
       return (
         `Column type "${columnType}" was created successfully but the ` +
         `write path is \`add_file_to_column\` (multipart upload). ` +
-        `Three paths reach the multipart wire: the v0.6-M38 friendly ` +
+        `Four paths reach the multipart wire: the v0.6-M38 friendly ` +
         `\`monday item set <iid> <file-col>=<path>\` / ` +
         `\`monday item update <iid> --set <file-col>=<path>\` ` +
         `dispatch (single-item); the v0.7-M42 friendly \`monday item ` +
         `update --where ... --set <file-col>=<path>\` dispatch ` +
         `(bulk per-item fan-out under --concurrency / ` +
-        `--continue-on-error); AND the v0.4-M31 verb-shaped \`monday ` +
-        `item upload <iid> --column <col> <file>\`. \`monday item ` +
-        `create --set <file-col>=<path>\` still rejects (deferred to ` +
-        `v0.7-M43). \`--set-raw <file-col>=<json>\` STAYS REJECTED ` +
+        `--continue-on-error); the v0.7-M43 friendly \`monday item ` +
+        `create --set <file-col>=<path>\` dispatch (create-time ` +
+        `two-leg \`create_item\` + \`add_file_to_column\` under the ` +
+        `§5.8 orphan-warn atomicity envelope); AND the v0.4-M31 ` +
+        `verb-shaped \`monday item upload <iid> --column <col> ` +
+        `<file>\`. \`--set-raw <file-col>=<json>\` STAYS REJECTED ` +
         `per D3 — permanent because \`change_column_value\` has no ` +
         `JSON-shape for file columns.`
       );

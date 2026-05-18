@@ -171,7 +171,7 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     });
   });
 
-  it('file → files_shaped with hints for every shipped write path: v0.6-M38 single-item friendly --set + v0.7-M42 bulk friendly --set + v0.4-M31 verb-shaped upload (all three reach add_file_to_column)', () => {
+  it('file → files_shaped with hints for every shipped write path: v0.6-M38 single-item friendly --set + v0.7-M42 bulk friendly --set + v0.7-M43 create-time friendly --set + v0.4-M31 verb-shaped upload (all four reach add_file_to_column)', () => {
     const result = categorizeNoncanonicalColumnType('file');
     expect(result?.category).toBe('files_shaped');
     // v0.6-M38 single-item friendly --set form.
@@ -183,6 +183,12 @@ describe('categorizeNoncanonicalColumnType (M16 noncanonical_column_type warning
     // alongside the single-item variant.
     expect(result?.suggestedWritePath).toMatch(/monday item update --where/u);
     expect(result?.suggestedWritePath).toMatch(/v0\.7-M42/u);
+    // v0.7-M43 create-time friendly --set form — REGRESSION GUARD
+    // per Codex pre-flight R1 P2-1: JSON consumers reading
+    // `details.suggested_write_path` must see the create variant
+    // (post-D6 fold) alongside the single-item + bulk variants.
+    expect(result?.suggestedWritePath).toMatch(/monday item create/u);
+    expect(result?.suggestedWritePath).toMatch(/v0\.7-M43/u);
     // v0.4-M31 verb-shaped upload form.
     expect(result?.suggestedWritePath).toMatch(/monday item upload/u);
     expect(result?.suggestedWritePath).toMatch(/v0\.4-M31/u);

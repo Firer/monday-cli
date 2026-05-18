@@ -3183,7 +3183,7 @@ describe('monday board column-create (integration, M16)', () => {
     expect(env.warnings[0]?.details?.suggested_write_path).toBeNull();
   });
 
-  it('live: --type file emits noncanonical_column_type warning with files_shaped category + names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.4-M31 verb-shaped) in the message + suggested_write_path', async () => {
+  it('live: --type file emits noncanonical_column_type warning with files_shaped category + names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.7-M43 create-time friendly + v0.4-M31 verb-shaped) in the message + suggested_write_path', async () => {
     const out = await drive(
       ['board', 'column-create', '12345', '--type', 'file', '--title', 'Attachments', '--json'],
       {
@@ -3212,12 +3212,15 @@ describe('monday board column-create (integration, M16)', () => {
       }[];
     };
     expect(env.warnings[0]?.details?.category).toBe('files_shaped');
-    // v0.7-M42 post-IMPL: suggested_write_path names every shipped
+    // Post-v0.7-M43 fold: suggested_write_path names every shipped
     // write path reaching Monday's add_file_to_column multipart wire:
     // v0.6-M38 single-item friendly (`monday item set` / `monday
     // item update <iid>`); v0.7-M42 bulk friendly (`monday item
-    // update --where ...`); v0.4-M31 verb-shaped (`monday item
-    // upload`). Codex IMPL R5 P2-1 regression guard.
+    // update --where ...`); v0.7-M43 create-time friendly (`monday
+    // item create --set <file-col>=<path>` under the §5.8 orphan-
+    // warn atomicity envelope); v0.4-M31 verb-shaped (`monday item
+    // upload`). Codex IMPL R5 P2-1 + pre-flight R1 P2-1 regression
+    // guards.
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
       /monday item set/,
     );
@@ -3226,6 +3229,10 @@ describe('monday board column-create (integration, M16)', () => {
       /monday item update --where/,
     );
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.7-M42/);
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
+      /monday item create/,
+    );
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.7-M43/);
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
       /monday item upload/,
     );
@@ -3236,8 +3243,10 @@ describe('monday board column-create (integration, M16)', () => {
     // suggested_write_path is for programmatic branching.
     expect(env.warnings[0]?.message).toMatch(/v0\.6-M38/);
     expect(env.warnings[0]?.message).toMatch(/v0\.7-M42/);
+    expect(env.warnings[0]?.message).toMatch(/v0\.7-M43/);
     expect(env.warnings[0]?.message).toMatch(/v0\.4-M31/);
     expect(env.warnings[0]?.message).toMatch(/monday item set/);
+    expect(env.warnings[0]?.message).toMatch(/monday item create/);
     expect(env.warnings[0]?.message).toMatch(/monday item upload/);
     expect(env.warnings[0]?.message).toMatch(/--set-raw/);
     expect(env.warnings[0]?.message).toMatch(/REJECTED/);

@@ -400,7 +400,7 @@ export const categorizeNoncanonicalColumnType = (
     return {
       category: 'files_shaped',
       suggestedWritePath:
-        'monday item set <iid> <file-col>=<path> OR monday item update <iid> --set <file-col>=<path> (v0.6-M38; single-item friendly) OR monday item update --where ... --set <file-col>=<path> (v0.7-M42; bulk friendly) OR monday item upload <iid> --column <col> <file> (v0.4-M31; verb-shaped)',
+        'monday item set <iid> <file-col>=<path> OR monday item update <iid> --set <file-col>=<path> (v0.6-M38; single-item friendly) OR monday item update --where ... --set <file-col>=<path> (v0.7-M42; bulk friendly) OR monday item create --set <file-col>=<path> (v0.7-M43; create-time two-leg friendly under §5.8 orphan-warn atomicity envelope) OR monday item upload <iid> --column <col> <file> (v0.4-M31; verb-shaped)',
     };
   }
   return {

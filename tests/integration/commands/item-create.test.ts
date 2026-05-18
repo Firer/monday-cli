@@ -1,14 +1,19 @@
 /**
- * Integration tests for `monday item create` (M9 §5.8 single-round-trip
- * + §6.4 item-create shape + classic-only subitem gate).
+ * Integration tests for `monday item create` (M9 §5.8
+ * JSON-only-path single-round-trip + v0.7-M43 file `--set`
+ * two-leg carve-out fold + §6.4 item-create shape + classic-only
+ * subitem gate).
  *
- * Coverage map (per `v0.2-plan.md` §3 M9 + cli-design §5.8 / §6.4):
+ * Coverage map (per `v0.2-plan.md` §3 M9 + v0.7-plan §3 M43 +
+ * cli-design §5.8 / §6.4):
  *
  *   - Argv-parser rules: `--name` empty after trim, `--position`
  *     requires `--relative-to`, `--parent` mutex with `--group` /
  *     `--position` / `--board`, multiple `--set` against same token.
  *   - Top-level happy path: default group, multiple `--set`,
- *     `resolved_ids` echo, mutation envelope shape pinned.
+ *     `resolved_ids` echo, mutation envelope shape pinned
+ *     (JSON-only path — single `create_item` round-trip with
+ *     bundled `column_values`).
  *   - Position path: `before` + `after` (PositionRelative wire-enum
  *     mapping) + `--relative-to` same-board verification.
  *   - Subitem path: parent lookup, hierarchy_type gate (classic vs
@@ -21,6 +26,15 @@
  *   - Dry-run: top-level `create_item` AND subitem `create_subitem`
  *     planned-change shapes pinned (per Codex round-4 P2 — both
  *     §9 preconditions).
+ *   - v0.7-M43 file `--set` carve-out fold (D6 from v0.6-M38):
+ *     file `--set` on item create now routes through the
+ *     `runItemCreateFileDispatch` two-leg helper. Pre-flight stub
+ *     throws `internal_error` with `details.reason:
+ *     'm43_preflight_stub'`; tests assert the stub envelope shape
+ *     + regression-guard the v0.6 `'file_set_on_create_unsupported'`
+ *     literal's absence. The D3 `--set-raw <file-col>=<json>`
+ *     rejection stays at `translateRawColumnValue` (separate
+ *     enforcement layer).
  */
 import { describe, expect, it } from 'vitest';
 import {

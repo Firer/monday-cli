@@ -2171,7 +2171,7 @@ multipart-only. Rejection shape:
     "details": {
       "column_id": "attachments",
       "type": "file",
-      "hint": "three write paths reach Monday's add_file_to_column multipart wire: (a) `monday item set <iid> <file-col>=<path>` / `monday item update <iid> --set <file-col>=<path>` (v0.6-M38; single-item friendly); (b) `monday item update --where ... --set <file-col>=<path>` (v0.7-M42; bulk friendly per-item fan-out under --concurrency / --continue-on-error); (c) `monday item upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped)."
+      "hint": "four write paths reach Monday's add_file_to_column multipart wire: (a) `monday item set <iid> <file-col>=<path>` / `monday item update <iid> --set <file-col>=<path>` (v0.6-M38; single-item friendly); (b) `monday item update --where ... --set <file-col>=<path>` (v0.7-M42; bulk friendly per-item fan-out under --concurrency / --continue-on-error); (c) `monday item create --set <file-col>=<path>` (v0.7-M43; create-time two-leg friendly translator under the §5.8 orphan-warn atomicity envelope); (d) `monday item upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped)."
     }
   }
 }
@@ -2520,10 +2520,19 @@ walk → `mixed`).
 
 ### `item create --board <bid> --name <n> [--set ...] [--set-raw ...] [--group ...] [--position ... --relative-to ...]`
 
-Top-level item create (M9). All `--set` / `--set-raw` values bundle
-into the single `create_item.column_values` parameter — single
-round-trip per cli-design §5.8; partial-success fallback is
-intentionally absent.
+Top-level item create (M9). On the JSON-only path, all non-file
+`--set` / `--set-raw` values bundle into the single
+`create_item.column_values` parameter — single round-trip per
+cli-design §5.8; partial-success fallback is intentionally absent.
+When any `--set <file-col>=<path>` is present, the action body
+routes through the v0.7-M43 two-leg dispatch
+(`runItemCreateFileDispatch`): leg-1 `create_item` bundles the
+non-file column_values atomically; leg-2 `add_file_to_column`
+attaches the file. Pair is non-atomic by construction; leg-2
+failure surfaces `internal_error` with `details.created_item_id`
++ `details.cause` per the §5.8 orphan-warn atomicity envelope (D1
+closure). See the create-time file `--set` carve-out subsection
+below + cli-design §5.8 for the full envelope shape.
 
 ```json
 {

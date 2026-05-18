@@ -23,14 +23,30 @@
  *      v0.3 because the column-resolution path here assumes the
  *      classic auto-generated-subitems-board model.
  *
- * **Single round-trip** (cli-design §5.8 — hard exit gate). Every
- * translated `--set` / `--set-raw` value bundles into one
- * `create_item.column_values` (or `create_subitem.column_values`)
- * parameter via `bundleColumnValues`; the CLI does **not** fall back
- * to `create_item` + `change_multiple_column_values` on partial
- * failure. Monday's server-side rejection of any value fails the
- * whole mutation, and no item is created — agents retry with the
- * value fixed.
+ * **Single round-trip on the JSON-only path** (cli-design §5.8 —
+ * hard exit gate). Every translated non-file `--set` / `--set-raw`
+ * value bundles into one `create_item.column_values` (or
+ * `create_subitem.column_values`) parameter via `bundleColumnValues`;
+ * the CLI does **not** fall back to `create_item` +
+ * `change_multiple_column_values` on partial failure. Monday's
+ * server-side rejection of any value fails the whole mutation, and
+ * no item is created — agents retry with the value fixed.
+ *
+ * **Two-leg dispatch on the create-time file `--set` carve-out
+ * (v0.7-M43 D6 fold).** When any `--set <file-col>=<path>` is
+ * present, the action body partitions setEntries (non-file →
+ * leg-1's `column_values`; file → leg-2) and routes through
+ * `runItemCreateFileDispatch`: leg-1 `create_item` (or
+ * `create_subitem`) bundles the non-file column_values atomically;
+ * leg-2 `add_file_to_column` attaches the file via M31's multipart
+ * wire (reused verbatim through M38's `executeFileColumnSet`). The
+ * pair is non-atomic by construction; leg-2 failure surfaces
+ * `internal_error` with `details.reason:
+ * 'create_then_file_upload_partial_failure'` + `details.cause` +
+ * `details.created_item_id` echoing the orphan + a hint directing
+ * agents to retry leg-2 only OR rollback via `monday item delete`
+ * (cli-design §5.8 orphan-warn atomicity envelope, D1 closure). See
+ * `runItemCreateFileDispatch` below for the helper signature.
  *
  * **`--position` / `--relative-to` cross-validation.** Both flags
  * are required together (one without the other → `usage_error`).
@@ -1303,7 +1319,10 @@ const executeCreateSubitem = async (
 //     leg-2 failure surfaces `internal_error` with
 //     `details.reason: 'create_then_file_upload_partial_failure'`
 //     + `details.created_item_id` echoing leg-1's freshly-created
-//     item ID + `details.column_id` + `details.hint` directing
+//     item ID + `details.column_id` + `details.cause` carrying
+//     leg-2's underlying error shape (M31 wire failure surface
+//     inheritance: `column_archived` / `validation_failed` /
+//     `not_found` / `file_too_large`) + `details.hint` directing
 //     agents to `monday item set <iid> <file-col>=<path>` (retry
 //     leg-2 only) or `monday item delete <iid>` (rollback if the
 //     agent prefers a clean retry of the whole two-leg path). The
@@ -1356,6 +1375,24 @@ const executeCreateSubitem = async (
 //      `asset` record on success; on failure, surface atomicity
 //      envelope per D1 closure (orphan-warn, echoing leg-1's
 //      item ID).
+//
+// **operationName parity contract (W2 audit-point).** M43 IMPL
+// reuses three existing named GraphQL operations verbatim — no
+// new operations introduced at this milestone. The IMPL helper
+// MUST pin them to match the inline doc/operationName parity per
+// `client.raw(doc, vars, { operationName: 'Foo' })`:
+//   - leg-1 top-level: `'ItemCreateTopLevel'` (from
+//     {@link executeCreateItem} above in this file).
+//   - leg-1 subitem: `'ItemCreateSubitem'` (from
+//     {@link executeCreateSubitem} above in this file).
+//   - leg-2: `'AddFileToColumn'` (from M31's
+//     `src/api/assets.ts:addFileToColumn`, threaded via M38's
+//     {@link executeFileColumnSet}).
+// No caller-overridable operationName slot — the helper takes
+// `dispatch` (top-level vs subitem) + `m38` (file column slot)
+// inputs only and routes accordingly. The IMPL body invokes the
+// existing helpers verbatim rather than re-spelling the
+// operation names.
 //
 // **Reuse from existing surfaces.** Leg-1 reuses the existing
 // `executeCreateItem` / `executeCreateSubitem` helpers in this

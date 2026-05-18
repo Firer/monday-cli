@@ -289,7 +289,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     },
   );
 
-  it('files-shaped type (file) → unsupported_column_type rejection STAYS per D3 closure (permanent — no deferred_to slot; the friendly --set <file-col>=<path> form ships across v0.6-M38 single-item + v0.7-M42 bulk + v0.4-M31 verb-shaped upload paths, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', () => {
+  it('files-shaped type (file) → unsupported_column_type rejection STAYS per D3 closure (permanent — no deferred_to slot; the friendly --set <file-col>=<path> form ships across v0.6-M38 single-item + v0.7-M42 bulk + v0.7-M43 create-time + v0.4-M31 verb-shaped upload paths, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', () => {
     expect(() =>
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -313,29 +313,32 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       // Per D3 closure (permanent): the --set-raw rejection for
       // file columns has no `deferred_to` slot. The friendly
       // `--set <file-col>=<path>` form ships across v0.6-M38
-      // single-item + v0.7-M42 bulk paths; v0.4-M31 verb-shaped
-      // `monday item upload` is the third write path. --set-raw
-      // stays rejected because Monday's wire has no JSON-shape
-      // for change_column_value on file columns.
+      // single-item + v0.7-M42 bulk + v0.7-M43 create-time paths;
+      // v0.4-M31 verb-shaped `monday item upload` is the fourth
+      // write path. --set-raw stays rejected because Monday's
+      // wire has no JSON-shape for change_column_value on file
+      // columns.
       expect(err.details).not.toHaveProperty('deferred_to');
       expect(err.details).not.toHaveProperty('read_only');
     }
   });
 
-  it('hint on files-shaped error names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.4-M31 verb-shaped)', () => {
-    // v0.7-M42 post-IMPL: hint names every write path reaching
+  it('hint on files-shaped error names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.7-M43 create-time friendly + v0.4-M31 verb-shaped)', () => {
+    // Post-v0.7-M43 fold: hint names every write path reaching
     // Monday's add_file_to_column multipart wire — (a) `monday item
     // set <iid> <file-col>=<path>` / `monday item update <iid>
     // --set <file-col>=<path>` (v0.6-M38; single-item friendly
     // translator dispatch); (b) `monday item update --where ...
     // --set <file-col>=<path>` (v0.7-M42; bulk friendly per-item
     // fan-out under --concurrency / --continue-on-error);
-    // (c) `monday item upload <iid> --column <col> <file>` (v0.4-M31;
-    // verb-shaped multipart). The `--set-raw <file-col>=<json>`
-    // form stays REJECTED per D3 because Monday's wire has no
-    // JSON-shape for change_column_value on file columns. No
-    // `deferred_to` slot — the --set-raw rejection is permanent
-    // per D3.
+    // (c) `monday item create --set <file-col>=<path>` (v0.7-M43;
+    // create-time two-leg friendly dispatch under §5.8 orphan-warn
+    // atomicity envelope); (d) `monday item upload <iid> --column
+    // <col> <file>` (v0.4-M31; verb-shaped multipart). The
+    // `--set-raw <file-col>=<json>` form stays REJECTED per D3
+    // because Monday's wire has no JSON-shape for
+    // change_column_value on file columns. No `deferred_to` slot
+    // — the --set-raw rejection is permanent per D3.
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -353,6 +356,10 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
       // regression guard.
       expect(hint).toMatch(/monday item update --where/u);
       expect(hint).toMatch(/v0\.7-M42/u);
+      // v0.7-M43 create-time friendly path — Codex pre-flight R1
+      // P2-1 regression guard (post-D6 fold).
+      expect(hint).toMatch(/monday item create/u);
+      expect(hint).toMatch(/v0\.7-M43/u);
       // v0.4-M31 verb-shaped upload.
       expect(hint).toMatch(/monday item upload/u);
       expect(hint).toMatch(/v0\.4-M31/u);

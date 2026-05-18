@@ -3509,18 +3509,24 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `change_column_value` / `change_multiple_column_values`.
    - **`files`-shaped types** (`file`, anything else where Monday
      uses `add_file_to_column` rather than `change_column_value`)
-     ship the friendly `--set <file-col>=<path>` form across two
+     ship the friendly `--set <file-col>=<path>` form across three
      call shapes: **v0.6-M38** (single-item — `monday item set` +
-     `monday item update <iid>`) and **v0.7-M42** (bulk — `monday
+     `monday item update <iid>`); **v0.7-M42** (bulk — `monday
      item update --where ...` with per-item multipart fan-out
-     under `--concurrency` / `--continue-on-error`). The command
-     action body branches OFF the standard JSON-translator path
-     INTO M31's multipart `addFileToColumn` fetcher when the
-     resolved column has `type === 'file'`; the bulk variant fans
-     the fetcher across the matched item-IDs. See "File-column
-     dispatch leg" below + step 5's mutation-selection rules
-     for the dispatch routing decision. The verb-shaped path
-     (`monday item upload`, v0.4-M31) stays as the alternative for
+     under `--concurrency` / `--continue-on-error`); and
+     **v0.7-M43** (create-time — `monday item create` with a
+     two-leg `create_item` + `add_file_to_column` dispatch under
+     the §5.8 orphan-warn atomicity envelope, bundling any
+     non-file `--set` / `--set-raw` entries into leg-1 atomically).
+     The command action body branches OFF the standard JSON-
+     translator path INTO M31's multipart `addFileToColumn`
+     fetcher when the resolved column has `type === 'file'`; the
+     bulk variant fans the fetcher across the matched item-IDs;
+     the create variant routes through leg-2 after leg-1 returns
+     the new item ID. See "File-column dispatch leg" below + step
+     5's mutation-selection rules for the dispatch routing
+     decision. The verb-shaped path (`monday item upload`, v0.4-
+     M31) stays as the alternative for
      `item upload <iid> --column <col> <file>` ergonomics. The
      `--set-raw <file-col>=<json>` form stays REJECTED per
      `--set-raw`'s escape-hatch contract (the user-supplied JSON
