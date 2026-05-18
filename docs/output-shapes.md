@@ -2168,7 +2168,7 @@ multipart-only. Rejection shape:
     "details": {
       "column_id": "attachments",
       "type": "file",
-      "hint": "two write paths reach Monday's add_file_to_column multipart wire: (a) `monday item set <iid> <file-col>=<path>` / `monday item update <iid> --set <file-col>=<path>` (v0.6-M38; friendly translator dispatch); (b) `monday item upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped)."
+      "hint": "three write paths reach Monday's add_file_to_column multipart wire: (a) `monday item set <iid> <file-col>=<path>` / `monday item update <iid> --set <file-col>=<path>` (v0.6-M38; single-item friendly); (b) `monday item update --where ... --set <file-col>=<path>` (v0.7-M42; bulk friendly per-item fan-out under --concurrency / --continue-on-error); (c) `monday item upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped)."
     }
   }
 }
@@ -2249,12 +2249,13 @@ Single-target shape:
 **v0.6-M38 file-column dispatch on single-item `item update`.**
 When `--set <file-col>=<path>` resolves to a `file`-typed column,
 the action body branches OFF the JSON-translator path INTO M31's
-multipart wire. v0.6-M38 shipped the single-item + bulk-`item update`
-paths; v0.7-M42 carved out the bulk `item update --where ... --set
-<file-col>=<path>` path into a per-item multipart fan-out (see
-"v0.7-M42 bulk file-column dispatch" below); v0.7-M43 (pending) lands
-the create-time path. Mutex rules at the resolution boundary
-(D2/D5/D6 closures, universal across single + bulk):
+multipart wire. v0.6-M38 shipped the single-item path (`monday
+item set` + `monday item update <iid>`); v0.7-M42 carved out the
+bulk `item update --where ... --set <file-col>=<path>` path into
+a per-item multipart fan-out (see "v0.7-M42 bulk file-column
+dispatch" below); v0.7-M43 (pending) lands the create-time path.
+Mutex rules at the resolution boundary (D2/D5/D6 closures,
+universal across single + bulk):
 
   - Exactly ONE file `--set` per call. 2+ file `--set` entries
     reject with `usage_error` carrying `'multi_file_set_unsupported'`

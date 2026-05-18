@@ -232,13 +232,15 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  *     mixed-set rejects universally; multi-file-set rejects
  *     universally).
  *
- * The `--set-raw <file-col>=<json>` form STAYS REJECTED at v0.6-M38
- * per D3 closure — Monday's wire has no JSON-shape for
+ * The `--set-raw <file-col>=<json>` form STAYS REJECTED per D3
+ * closure — Monday's wire has no JSON-shape for
  * `change_column_value` on file columns, and the escape-hatch
  * contract "user supplies the JSON `change_column_value` accepts"
- * doesn't compose with multipart. The rejection now points at
- * BOTH write paths (M31 verb + M38 friendly `--set`) as
- * alternatives.
+ * doesn't compose with multipart. The rejection points at every
+ * shipped write path: v0.4-M31 verb-shaped `monday item upload` +
+ * v0.6-M38 single-item friendly `--set` + v0.7-M42 bulk friendly
+ * `--set` (per-item multipart fan-out on `monday item update
+ * --where ...`).
  *
  * Currently one entry (`file`); the slot is plural because Monday may
  * surface other multipart-upload-shaped types in future API versions
@@ -368,14 +370,18 @@ export interface NoncanonicalColumnTypeDetails {
    *   - `read_only_forever` types: `null` (no write path exists —
    *     the column exists for read-side display / mirror sources
    *     only).
-   *   - `files_shaped` types post-v0.6-M38: a single human-readable
-   *     string joining BOTH write paths with ` OR ` — the v0.6-M38
-   *     friendly `monday item set <iid> <file-col>=<path>` /
-   *     `monday item update <iid> --set <file-col>=<path>` dispatch
-   *     AND the v0.4-M31 verb-shaped `monday item upload <iid>
-   *     --column <col> <file>`. R-v0.6-NEW-3 watch-item: lift to
-   *     `readonly string[]` at the 2nd N>1 consumer for structured
-   *     enumeration.
+   *   - `files_shaped` types post-v0.7-M42: a single human-readable
+   *     string joining every shipped write path with ` OR ` — the
+   *     v0.6-M38 friendly `monday item set <iid> <file-col>=<path>` /
+   *     `monday item update <iid> --set <file-col>=<path>` (single-
+   *     item dispatch); the v0.7-M42 friendly `monday item update
+   *     --where ... --set <file-col>=<path>` (bulk per-item multipart
+   *     fan-out); AND the v0.4-M31 verb-shaped `monday item upload
+   *     <iid> --column <col> <file>`. R-v0.6-NEW-3 watch-item: lift
+   *     to `readonly string[]` at the 2nd N>1 consumer for structured
+   *     enumeration. (At v0.7-M42 IMPL the string went from 2-path
+   *     to 3-path; R-v0.6-NEW-3 trigger remains pending until a
+   *     downstream consumer needs structured-array iteration.)
    */
   readonly suggestedWritePath: string | null;
 }
@@ -391,7 +397,7 @@ export const categorizeNoncanonicalColumnType = (
     return {
       category: 'files_shaped',
       suggestedWritePath:
-        'monday item set <iid> <file-col>=<path> (v0.6-M38; friendly) OR monday item upload <iid> --column <col> <file> (v0.4-M31; verb-shaped)',
+        'monday item set <iid> <file-col>=<path> OR monday item update <iid> --set <file-col>=<path> (v0.6-M38; single-item friendly) OR monday item update --where ... --set <file-col>=<path> (v0.7-M42; bulk friendly) OR monday item upload <iid> --column <col> <file> (v0.4-M31; verb-shaped)',
     };
   }
   return {

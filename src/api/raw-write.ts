@@ -250,21 +250,26 @@ export const translateRawColumnValue = (
         `the right wire surface for this type. Use ` +
         `\`monday item set <iid> <file-col>=<path>\` / ` +
         `\`monday item update <iid> --set <file-col>=<path>\` (v0.6-M38; ` +
-        `friendly translator dispatch) OR \`monday item upload <iid> ` +
-        `--column <col> <file>\` (v0.4-M31; verb-shaped multipart).`,
+        `single-item friendly) OR \`monday item update --where ... --set ` +
+        `<file-col>=<path>\` (v0.7-M42; bulk friendly with per-item ` +
+        `multipart fan-out) OR \`monday item upload <iid> --column <col> ` +
+        `<file>\` (v0.4-M31; verb-shaped multipart).`,
       {
         details: {
           column_id: column.id,
           type: column.type,
           hint:
-            'two write paths reach Monday\'s add_file_to_column ' +
+            'three write paths reach Monday\'s add_file_to_column ' +
             'multipart wire: (a) `monday item set <iid> ' +
             '<file-col>=<path>` / `monday item update <iid> --set ' +
-            '<file-col>=<path>` (v0.6-M38; friendly translator ' +
-            'dispatch); (b) `monday item upload <iid> --column <col> ' +
-            '<file>` (v0.4-M31; verb-shaped). --set-raw rejects ' +
-            'file-shaped columns at v0.6-M38 per D3 closure — the ' +
-            'escape-hatch contract requires a JSON wire shape, and ' +
+            '<file-col>=<path>` (v0.6-M38; single-item friendly); ' +
+            '(b) `monday item update --where ... --set ' +
+            '<file-col>=<path>` (v0.7-M42; bulk friendly per-item ' +
+            'fan-out under --concurrency / --continue-on-error); ' +
+            '(c) `monday item upload <iid> --column <col> <file>` ' +
+            '(v0.4-M31; verb-shaped). --set-raw rejects file-shaped ' +
+            'columns per D3 closure (permanent) — the escape-hatch ' +
+            'contract requires a JSON wire shape, and ' +
             'add_file_to_column is multipart-only.',
         },
       },

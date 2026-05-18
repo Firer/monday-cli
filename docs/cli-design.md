@@ -1773,8 +1773,9 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # v0.6-M38: file-column --set REJECTED on item create —
                                           # `--set <file-col>=<path>` surfaces usage_error
                                           # (details.reason: 'file_set_on_create_unsupported') at the
-                                          # resolution boundary. Defers to v0.6.x — non-atomic
-                                          # post-create wire shape would break §5.8 state safety.
+                                          # resolution boundary. Defers to v0.7-M43 per D6 carve-out
+                                          # fold — non-atomic post-create wire shape needs an
+                                          # atomicity-envelope decision per §5.8 state safety.
                                           # --set / --set-raw values bundle into the single
                                           # create_item / create_subitem mutation — single
                                           # round-trip, no post-create fallback (see §5.8)
@@ -8738,20 +8739,21 @@ scoped idempotent changes, and post comments narrating its work.**
   M38 IMPL runtime bodies shipped end-to-end.
 
 - **Carried forward from v0.4 + v0.5 release-prep slips**
-  (each defers to its own v0.6.x candidate-selection session
-  per the R-NEW-75 framework):
+  (each defers to its own candidate-selection session per the
+  R-NEW-75 framework):
   - Bulk `item update --where ... --set <file-col>=<path>` —
-    surface deferred from M38 per D5; lift candidate for
-    v0.6.x once the per-item file-dispatch + partial-success
-    envelope + `--concurrency` shared-transport semantics
-    design clears.
-  - `item create --set <file-col>=<path>` — surface deferred
-    from M38 per D6; conditional on Monday surfacing an
-    atomic create-with-file wire shape (no such mutation
-    exists at API `2026-01`).
+    deferred from M38 per D5 → **shipped at v0.7-M42** (per-
+    item multipart fan-out under `--concurrency` /
+    `--continue-on-error`; closes the v0.6-deferred surface).
+  - `item create --set <file-col>=<path>` — deferred from M38
+    per D6; pending at v0.7-M43 per the D6 carve-out fold.
+    Conditional on Monday surfacing an atomic create-with-file
+    wire shape (no such mutation exists at API `2026-01`); M43
+    pre-flight will pin the atomicity-envelope shape per
+    §5.8 state safety.
   - `<path>='-'` stdin for file `--set` — surface deferred
-    from M38 per D7; v0.6.x once a `--filename` companion
-    shape is pinned.
+    from M38 per D7; v0.7.x candidate once a `--filename`
+    companion shape is pinned.
   - Cross-board `item move` value-overrides — carried over
     from v0.4 + v0.5 release-prep. Monday's `ColumnMapping
     Input` carries no value slot at API `2026-01`; richer

@@ -1621,23 +1621,25 @@ export const bundleColumnValues = (
  *     `deferred_to: "v0.3"`; hint nudges agents at `--set-raw`.
  *   - **`files`-shaped** (currently `file` only) — Monday writes via
  *     `add_file_to_column` (multipart upload) rather than
- *     `change_column_value`. v0.6-M38 ships the friendly
- *     `--set <file-col>=<path>` form via a sibling dispatch leg at
- *     the command action body (see `src/api/file-column-set.ts`);
- *     the rejection table row here fires ONLY for paths that
- *     don't route through the M38 dispatch — specifically the
- *     `item create` carve-in (`create_item.column_values` is
- *     JSON-only and can't accept a multipart file part; M38 D6
- *     closure defers create-time file upload to v0.6.x) + the
- *     bulk path (`item update --where ... --set <file-col>=
- *     <path>`; M38 D5 closure defers per-item file dispatch to
- *     v0.6.x). The friendly translator's M38-routed entries
+ *     `change_column_value`. The friendly dispatch ships across
+ *     three call shapes: v0.6-M38 single-item (`monday item set` +
+ *     `monday item update <iid>`); v0.7-M42 bulk (`monday item
+ *     update --where ...`, per-item multipart fan-out under
+ *     `--concurrency` / `--continue-on-error`); both branch off
+ *     ahead of the translator at the action body level via the
+ *     sibling dispatch leg in `src/api/file-column-set.ts`. The
+ *     rejection table row here fires ONLY for paths the friendly
+ *     dispatch doesn't cover — `item create` (D6 carve-out fold
+ *     deferred to v0.7-M43; `create_item.column_values` is
+ *     JSON-only and can't accept a multipart file part) + the
+ *     `--set-raw <file-col>=<json>` form (D3 permanent rejection
+ *     — `change_column_value` has no JSON wire shape for file
+ *     columns). The friendly translator's dispatch-routed entries
  *     never hit this `UNSUPPORTED_TABLE.files_shaped` row —
- *     they branch off ahead of the translator call at the
- *     action body level. Hint points at `monday item upload`
- *     (v0.4-M31; verb-shaped multipart) AND `monday item set` /
- *     `monday item update --set <file-col>=<path>` (v0.6-M38;
- *     friendly translator dispatch).
+ *     they branch off ahead of the translator call. Hint points
+ *     at every shipped write path: `monday item upload` (v0.4-
+ *     M31; verb-shaped multipart) + the v0.6-M38 single-item
+ *     friendly form + the v0.7-M42 bulk friendly form.
  *   - **`time_tracking`** — verb-shaped extension (start/stop, not
  *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
  *     hint points at the upcoming verb surface.
