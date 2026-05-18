@@ -28,19 +28,30 @@ humans are second-class. Built incrementally via Claude Code on top of
   `npm audit` 0 vulnerabilities (audit-fix `fast-uri 3.1.0 →
   3.1.2` folded into the version-bump commit per security.md
   "high = merge blocker").
-- **Next session:** v0.7 kickoff candidate-selection per R-NEW-75
-  framework — opens against the **v0.7-plan.md SKELETON** filed
-  forward on 2026-05-18 (see [`docs/v0.7-plan.md`](./docs/v0.7-plan.md)).
-  v0.7 scope: API pin 2026-01 → 2026-04 (M39) + `item set-description`
-  (M40) + `doc block-create-bulk` (M41) + v0.6.x bulk + create file
-  `--set` carve-out folds (M42 / M43). v0.8 SKELETON also filed
-  (Monday API 2026-07 + user-entity migration; opens after v0.7
-  ships). Out-of-scope across v0.7 + v0.8: AI surfaces / Enterprise-
-  gated APIs / notetaker meetings / niche surfaces (full lists in
-  each plan §1 "Out of scope"). Other carry-forward backlog (multi-
-  level subitems / cross-board move value-overrides / resumable
-  cross-board cursor / profile-scoped argument defaults / multi-file
-  + stdin file-`--set`) stays deferred per the same documents.
+- **Next session:** v0.7-M42 pre-flight — **bulk file `--set`
+  carve-out fold** (v0.6-M38 D5 closure). M39 D1 closed at
+  the v0.7-kickoff candidate-selection session 2026-05-18 (this
+  commit): **sequence-shuffle ship order to M42 → M43 →
+  (re-probe SDK 15.x) → M39 → M40 → M41.** M42 + M43 are pure
+  v0.6.x carve-out folds reusing v0.4-M31's multipart wire surface
+  — independent of the API pin bump — so they ship under the
+  current 2026-01 / SDK-14.0.0 pin while SDK 15.x has 4-6 more
+  weeks to publish (latest publish at kickoff: 14.0.0,
+  2026-03-18). M42 pre-flight contract diff lands per the standard
+  workflow.md pre-flight discipline; the 4 open decisions
+  (`--concurrency` semantics / per-item asset envelope slot /
+  per-item file pre-check timing / ERROR_CODES delta) close at
+  the M42 pre-flight contract diff commit. At M43 close, re-probe
+  `npm view @mondaydotcomorg/api versions --json | tail` + decide
+  M39 D1 between (a) SDK 15.x lift if shipped / (b) string-literal
+  override on SDK 14.0.0 + hand-rolled zod schemas per the
+  "Boundary-typing trap" pattern / (c) continued wait. Full v0.7
+  scope (M39-M43) unchanged from SKELETON — only the ordering
+  flipped. v0.8 SKELETON stays unratified (opens after v0.7.0
+  publishes). Other carry-forward backlog (multi-level subitems
+  / cross-board move value-overrides / resumable cross-board
+  cursor / profile-scoped argument defaults / multi-file + stdin
+  file-`--set`) stays deferred.
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —
