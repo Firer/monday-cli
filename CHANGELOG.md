@@ -7,6 +7,283 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.6.0] - 2026-05-18 — Files-shaped friendly `--set` writes (M38)
+
+The "agents can write to files-shaped columns inline" milestone —
+v0.4-M31's `monday item upload` verb-shaped multipart wire surface
+gains the friendly translator-boundary inline form
+(`monday item set <iid> <file-col>=<path>` + `monday item update
+<iid> --set <file-col>=<path>`), closing the v0.4 → v0.5 → v0.6
+carry-over of the inline form across two prior release-preps.
+Single-item paths only at M38; bulk + create + multi-file +
+stdin paths reject with `details.reason` discriminators (defer
+to v0.6.x carve-outs). **No breaking changes vs `0.5.0` — every
+v0.6 surface is additive.** Built as a single feature milestone
+(M38).
+
+### Breaking changes vs `0.5.0`
+
+**None.** Every command, error code, envelope key, and warning
+shape shipped in v0.5.0 is preserved byte-for-byte. v0.6 only adds.
+
+### Surface
+
+**117 commands shipped (unchanged from v0.5).** M38 extends two
+existing verbs (`monday item set` + `monday item update`) with a
+new dispatch leg rather than introducing new noun namespaces or
+verbs. The friendly translator stays JSON-output-shaped for the 13
+existing writable types; file-column dispatch routes through a
+new sibling module (`src/api/file-column-set.ts`) that handles the
+multipart leg.
+
+**Files-shaped friendly `--set` (M38) — `monday item set <iid>
+<file-col>=<path>` + `monday item update <iid> --set <file-col>=
+<path>`.** Sibling-branch dispatch at the column-resolution
+boundary (per D1 closure): after column metadata loads, if
+`column.type === 'file'` AND single-`--set` AND no other writes,
+route to `executeFileColumnSet` (the new multipart-wire fetcher);
+otherwise route to the standard translator + `executeItemMutation`
+path. The translator (`translateColumnValueAsync`) stays
+JSON-output-shaped for the 13 existing writable types — no
+breaking shape change on any existing dispatch path. Routes
+into v0.4-M31's `add_file_to_column` multipart wire verbatim
+(no new transport surface; `dispatchMultipart` consumer count
+goes 1 → 2; `ResolvedClient.multipart` consumer count goes
+1 → 2).
+
+**Mutex rules at M38 (per D2 closure).** Exactly ONE file
+`--set <file-col>=<path>` per call, no other `--set` /
+`--set-raw` / `--name` flags allowed:
+
+- File `--set` + ANY value `--set` / `--set-raw` / `--name` →
+  `usage_error` carrying `details.reason:
+  'mixed_file_and_value_sets'` + a hint pointing agents at
+  running the file `--set` alone and applying value writes /
+  rename in a separate call.
+- 2+ file `--set` entries → `usage_error` carrying
+  `details.reason: 'multi_file_set_unsupported'` (defers to
+  v0.6.x; the bulk-file-set milestone will address multi-file
+  dispatch).
+
+Enforcement fires at the column-resolution boundary (parse-time
+can't know — the column type only resolves after board metadata
+loads); rejection happens BEFORE any multipart bytes get
+constructed.
+
+**Bulk + create paths REJECT at M38 (per D5 / D6 closures).**
+The two paths that don't ship friendly file-set dispatch at M38
+surface dedicated rejection reasons:
+
+- `monday item update --board <bid> (--where <c>=<v>... |
+  --filter-json <json>) --set <file-col>=<path>` →
+  `usage_error.details.reason:
+  'file_set_on_bulk_unsupported'`. Per-item file dispatch +
+  `--continue-on-error` partial-success envelope + `--concurrency`
+  shared-transport semantics each carry additional design
+  dimensions worth their own milestone; defers to v0.6.x.
+- `monday item create --board <bid> --name <n> --set <file-col>=
+  <path>` → `usage_error.details.reason:
+  'file_set_on_create_unsupported'`. File upload at create time
+  would require non-atomic post-create `add_file_to_column`
+  (breaks §5.8 state safety) or a Monday wire mutation accepting
+  multipart parts inside `create_item.column_values` (no such
+  mutation at API `2026-01`); defers to v0.6.x.
+
+**`--set-raw <file-col>=<json>` STAYS REJECTED at M38 (per D3
+closure — PERMANENT, not deferred).** Monday's wire has no JSON
+shape for `change_column_value` on file columns — `add_file_to_
+column` is the only file-write wire surface and it's multipart-
+only. The `--set-raw` escape-hatch contract ("user supplies the
+JSON `change_column_value` accepts") doesn't compose with
+multipart. The existing rejection at `src/api/raw-write.ts:
+translateRawColumnValue` stays unchanged. The rejection now
+carries `details.hint` pointing at BOTH the M38 friendly
+`--set` form AND the M31 verb-shaped `monday item upload` —
+agents have two write paths reaching the same multipart wire
+and key off the hint rather than the (absent) `deferred_to`
+slot.
+
+**Dry-run envelope shape (per D4 closure).** Mirrors M31 `item
+upload --dry-run` envelope verbatim:
+`planned_changes: [{operation: 'add_file_to_column', item_id,
+column_id, file_path, filename, file_size_bytes}]` (size from
+`fs.stat()`; no file bytes loaded into memory). `meta.source:
+'none'`. The `file_path` slot echoes the argv-derived path; the
+`column_id` slot echoes the RESOLVED column ID (not the argv
+token).
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** Per D8
+closure, M38 routes every rejection through existing codes
+(`usage_error` / `unsupported_column_type` / `not_found` /
+`validation_failed`) with `details.reason` literal-string
+discriminators. The four M38-specific reasons
+(`mixed_file_and_value_sets` / `multi_file_set_unsupported` /
+`file_set_on_bulk_unsupported` / `file_set_on_create_unsupported`)
+join the existing R-NEW-31 discriminated-union per-status-detail
+pattern.
+
+**No new envelope keys, no new warning shapes.** M38 reuses the
+M31 multipart wire's success envelope shape (single `item` slot
+projecting the post-mutation board snapshot) and the same
+post-success eager-invalidation contract (`invalidateBoard(boardId)`
+fires single-leg on multipart success).
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.6"` is DROPPED
+  for the files-shaped category at the friendly `--set` form.**
+  v0.6-M38 picks the inline write path up. The rejection row at
+  `src/api/column-values.ts` (the files-shaped row of the
+  friendly translator) now fires ONLY on the `item create` +
+  `item update --where` bulk paths per D5 / D6 closures — with
+  `details.reason: 'file_set_on_create_unsupported'` /
+  `'file_set_on_bulk_unsupported'`. The single-item `item set` +
+  `item update` paths dispatch to the new sibling module BEFORE
+  the translator's files-shaped row fires. No more
+  `deferred_to: "v0.6"` slot on the friendly-form path —
+  agents see successful single-item uploads end-to-end.
+- **`unsupported_column_type` for `--set-raw <file-col>=<json>`
+  STAYS REJECTED.** Permanent rejection per D3 — Monday's
+  wire has no JSON shape for files-shaped `change_column_value`.
+  The rejection hint at `src/api/raw-write.ts` now names BOTH
+  the M38 friendly form AND the M31 verb-shaped `monday item
+  upload` as alternative write paths; agents construct retries
+  from either entry point.
+- **Multi-level subitem creation slips from `"v0.6"` →
+  `"v0.7"`.** Originally slipped from v0.3 → v0.4 → v0.5 → v0.6
+  across three prior release-preps. v0.6 didn't pick it up —
+  Monday's `sub_items_board` still carries no `subtasks` column
+  at API `2026-01`, so depth-2 subitems still have no data-model
+  home. Single-level subitems (`item create --parent <iid>`
+  against classic boards) continue to work byte-identically.
+  The `error.code: "usage_error"` + `details.hierarchy_type:
+  "multi_level"` keys are unchanged; only the `deferred_to`
+  literal flipped.
+- **Cross-board `item move` value-overrides slip from `"v0.6"`
+  → `"v0.7"`.** Slipped across v0.3-M11 → v0.4 → v0.5 → v0.6
+  → v0.7 release-preps. Monday's `ColumnMappingInput` still
+  carries no value slot; the cross-leg partial-failure envelope
+  question stays open. Agents needing overrides continue to fire
+  `monday item set <iid> <target>=<value>` post-move.
+- **Cross-board resumable cursor slips from `"v0.6"` →
+  `"v0.7"`.** The `cross_board_truncated` warning's
+  `details.hint` continues to recommend narrowing via
+  `--workspace` / `--favorites` / `--max-boards`; v0.7 may pick
+  the resumable surface up if per-board cursor-lifetime under
+  aggregation gets a clean design.
+- **Stable error-code registry stays at 29.** Existing codes'
+  shapes are unchanged across v0.5 → v0.6.
+- **`monday auth login` placeholder-guard unchanged.** The verb
+  is still registered and still surfaces `usage_error.details.
+  reason: oauth_unregistered` pointing at `MONDAY_API_TOKEN`
+  (unchanged from v0.5.0). The OAuth deferral revisits in
+  v0.6.x / v0.7 contingent on user demand.
+
+### Internals worth highlighting
+
+- **R-class refactor shipped during v0.6.** R-v0.6-NEW-1
+  (`file-source.ts` two-export module: `precheckLocalFile`
+  fs.stat + fs.access(R_OK) + non-empty + size capture +
+  `usage_error.details.reason: 'file_not_readable' |
+  'file_empty'`; `buildBlobFromPath` readFile + sniffContent
+  Type + Blob construction) shipped ahead-of-feat at v0.6-M38
+  IMPL kickoff (`3c2a9b0`) — 3 consumers post-lift (M31
+  `monday item upload` action body + M31 `monday update upload`
+  action body + M38's `executeFileColumnSet` runtime body).
+  10 direct unit tests pin the helper's branch matrix. Mirrors
+  R-NEW-29's M25 ahead-of-feat cadence + R-NEW-70's M34
+  cadence.
+- **R-NEW-82 4th consecutive consumer ratified at v0.6
+  release-prep.** The release-prep cross-doc grep for stale
+  `deferred_to: "v0.6"` slots fired and caught one stale site
+  (multi-level subitem `--parent` rejection — slipped to
+  `"v0.7"`) plus one ToC drift (v0.6-M38 friendly file `--set`
+  annotation missing from `docs/output-shapes.md`'s `item
+  (mutations)` row). Mirrors v0.3-M28 (1st) / v0.4 (2nd) /
+  v0.5 (3rd) / v0.6 (4th) release-prep ratifications.
+- **R-NEW-84 graduated discipline applied.** The v0.6
+  release-prep cluster ships zero production `src/**/*.ts`
+  semantic changes (only the literal `'v0.6'` → `'v0.7'` flip
+  in the multi-level subitem rejection slot); gates carry
+  verification per the R-NEW-84 carve-out (skip Codex review
+  on mechanical / process-only clusters).
+- **`details.reason` discriminator pattern (R-v0.6-NEW-2) at
+  4 supporting instances post-M38** (`mixed_file_and_value_sets`
+  / `multi_file_set_unsupported` / `file_set_on_create_
+  unsupported` / `file_set_on_bulk_unsupported`). Below the 5th-
+  consumer graduation threshold; tracked as a watch-item for the
+  first v0.6.x lift that adds a 5th `details.reason` literal-
+  string discriminator on the file-set surface (bulk file-set
+  carve-out is the natural site).
+- **Two-AI review** (cli-design pre-flight + implementation
+  review) ran for M38 pre-flight + IMPL. **M38 IMPL converged
+  in 4 fix-up rounds** (0 P1 / 3 P2 / 11 P3 cumulative across
+  rounds 1–4 — at the median 3-4 IMPL round count per the
+  v0.5 IMPL precedent). The v0.6 release-prep cluster skipped
+  Codex per R-NEW-84. Cumulative finding count + per-round
+  Codex breakdown lives in the per-milestone post-mortem in
+  [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) §11.
+
+### Tests + quality gates
+
+- **4100 unit/integration + E2E tests** at v0.6.0 (+1 skipped;
+  was 4054+1 at v0.5.0; ~46 new tests for M38 — `file-source`
+  helper unit branch matrix, `file-column-set` action-body
+  branches, integration cassette pins on single-item friendly
+  paths + the four `details.reason`-discriminated rejection
+  paths, envelope-snapshot pins on the M38 surfaces). All green
+  on Node 22 + 24.
+- **Coverage at 99.26 / 96.46 / 99.31 / 99.52** (statements /
+  branches / functions / lines) against the floor 95 / 95.45 /
+  95 / 95. Branches margin **1.01pp** at v0.6.0 (was 1.00pp at
+  v0.5.0; +0.01pp). Floor unchanged across v0.5.0 → v0.6.0.
+- **Envelope-snapshot suite** — refresh probe ran clean at
+  v0.6 release-prep (zero diff vs M38 IMPL close); per-
+  milestone close-docs sweep refreshed snapshots in lockstep at
+  M38 IMPL close.
+- **Five test layers held**: unit, integration (in-process
+  `FixtureTransport` + `MultipartFixtureTransport`), E2E
+  (subprocess against fixture server), envelope-shape snapshot
+  suite, published-tarball E2E.
+- **Audit-fix folded into release-prep.** `npm audit` flagged a
+  transitive `fast-uri@3.1.0` (high severity); `npm audit fix`
+  cleanly resolved to `3.1.2` (non-breaking — `ajv@8.20.0`'s
+  `^3.0.1` constraint satisfies 3.1.x). `npm audit` reports
+  `0 vulnerabilities` post-fix.
+
+### Documentation
+
+- **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** new — the v0.6
+  active plan with M38 milestone, decisions log (D1-D8),
+  R-class register (R-v0.6-NEW-1 through R-v0.6-NEW-11),
+  per-milestone post-mortem (§11 + §22).
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3
+  `monday item set` + `monday item update` rows annotated with
+  the M38 file-column dispatch shape + mutex rules; §5.3
+  "File-column dispatch leg" subsection added explaining the
+  sibling-branch routing + the four `details.reason`
+  discriminators; §13 v0.5 entry's v0.6 deferral list closed
+  out + the v0.7 frame pinned (multi-level subitems + cross-
+  board move value-overrides + cross-board resumable cursor +
+  profile-scoped argument defaults).
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** —
+  `item set` + `item update` sections gained M38 file-column
+  dispatch subsections at lines 2100, 2151, 2243; ToC row
+  for `item (mutations)` updated to enumerate the friendly
+  file `--set v0.6-M38` annotation on `set` + `update`
+  (caught at v0.6 release-prep ToC audit as a v0.6-M38
+  close-docs gap — 4th consecutive R-NEW-82 graduated-
+  discipline ratification).
+- **README.md** quickstart expanded with v0.6 example (step 13
+  demonstrating M38 friendly file `--set` on item set + item
+  update + dry-run). Scope section reshaped around v0.6.0 /
+  v0.5.0 / v0.4.0 / v0.3.0 / v0.2.0 / v0.1.0 per-version
+  layout.
+
+[0.6.0]: https://github.com/Firer/monday-cli/releases/tag/v0.6.0
+
 ## [0.5.0] - 2026-05-17 — Team writers + full Monday workdocs CRUD mutation surface
 
 The "agents can write to teams + drive the full workdocs surface"
