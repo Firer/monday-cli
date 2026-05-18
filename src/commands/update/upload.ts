@@ -58,9 +58,6 @@
  * supports).
  */
 import { z } from 'zod';
-import { stat as fsStat, access as fsAccess, readFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import { resolve as resolvePath, basename } from 'node:path';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { parseArgv } from '../parse-argv.js';
 import { UpdateIdSchema } from '../../types/ids.js';
@@ -70,8 +67,10 @@ import {
   addFileToUpdate,
 } from '../../api/assets.js';
 import { resolveClient } from '../../api/resolve-client.js';
-import { UsageError, asError, errorCode } from '../../utils/errors.js';
-import { sniffContentType } from '../../utils/mime.js';
+import {
+  precheckLocalFile,
+  buildBlobFromPath,
+} from '../../utils/file-source.js';
 import { emitMutation, emitDryRun } from '../emit.js';
 
 const inputSchema = z
@@ -140,69 +139,10 @@ export const updateUploadCommand: CommandModule<
           // Same fs.stat() + fs.access(R_OK) pre-check shape as
           // `item upload` (round-1 P2-2 fix). Pre-resolveClient so a
           // missing/unreadable-file error surfaces as usage_error
-          // (exit 1) before any token check.
-          const filePath = resolvePath(process.cwd(), parsed.file);
-          const filename = basename(filePath);
-          let fileSizeBytes: number;
-          try {
-            const stats = await fsStat(filePath);
-            if (!stats.isFile()) {
-              throw new UsageError(
-                `<file> ${JSON.stringify(parsed.file)} is not a regular file ` +
-                  `(resolved to ${JSON.stringify(filePath)}).`,
-                {
-                  details: {
-                    reason: 'file_not_readable',
-                    file_path: filePath,
-                    hint:
-                      'pass a path to a regular readable file; directories ' +
-                      'and special files (sockets, devices) are rejected.',
-                  },
-                },
-              );
-            }
-            await fsAccess(filePath, fsConstants.R_OK);
-            fileSizeBytes = stats.size;
-          } catch (err) {
-            if (err instanceof UsageError) {
-              throw err;
-            }
-            const code = errorCode(err);
-            throw new UsageError(
-              `<file> ${JSON.stringify(parsed.file)} cannot be read ` +
-                `(resolved to ${JSON.stringify(filePath)}): ` +
-                `${asError(err).message}.`,
-              {
-                cause: err,
-                details: {
-                  reason: 'file_not_readable',
-                  file_path: filePath,
-                  ...(code === undefined ? {} : { errno_code: code }),
-                  hint:
-                    'check that the path exists, is readable by the current ' +
-                    'user, and isn\'t a directory.',
-                },
-              },
-            );
-          }
-          if (fileSizeBytes === 0) {
-            throw new UsageError(
-              `<file> ${JSON.stringify(parsed.file)} is empty (0 bytes); ` +
-                `Monday rejects empty uploads server-side.`,
-              {
-                details: {
-                  reason: 'file_empty',
-                  file_path: filePath,
-                  filename,
-                  file_size_bytes: 0,
-                  hint:
-                    'Monday returns FILE_SIZE_LIMIT_EXCEEDED on empty ' +
-                    'uploads. Provide a non-empty file or remove the upload ' +
-                    'call.',
-                },
-              },
-            );
-          }
+          // (exit 1) before any token check. Lifted to a shared
+          // helper at v0.6-M38 IMPL kickoff per R-v0.6-NEW-1.
+          const { filePath, filename, fileSizeBytes } =
+            await precheckLocalFile(parsed.file);
 
           const { client, globalFlags, apiVersion, multipart, toEmit } =
             resolveClient(ctx, program.opts());
@@ -234,8 +174,11 @@ export const updateUploadCommand: CommandModule<
             return;
           }
 
-          const bytes = await readFile(filePath);
-          const file = new Blob([bytes], { type: sniffContentType(filename) });
+          const file = await buildBlobFromPath({
+            filePath,
+            filename,
+            fileSizeBytes,
+          });
 
           const result = await addFileToUpdate({
             client,
