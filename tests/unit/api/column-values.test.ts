@@ -664,13 +664,16 @@ describe('translateColumnValue — future-roadmap types', () => {
   // specific version. Pinned column types from cli-design §5.3
   // writer-expansion roadmap have their own branches:
   //   - `time_tracking` → `deferred_to: "v0.3"` (start/stop verbs)
-  //   - `file` (files-shaped) → no `deferred_to` slot post-v0.6-M38:
-  //     the M38 friendly `--set <file-col>=<path>` dispatch ships
-  //     via `executeFileColumnSet` (`src/api/file-column-set.ts`)
-  //     wrapping M31's `addFileToColumn` multipart fetcher; the
+  //   - `file` (files-shaped) → no `deferred_to` slot post-v0.7-M42:
+  //     the friendly `--set <file-col>=<path>` dispatch ships across
+  //     v0.6-M38 (single-item) + v0.7-M42 (bulk) via
+  //     `executeFileColumnSet` (`src/api/file-column-set.ts`)
+  //     wrapping M31's `addFileToColumn` multipart fetcher (the
+  //     bulk path fans the fetcher across matched items in
+  //     `runItemUpdateBulkFileDispatch`); the
   //     UNSUPPORTED_TABLE.files_shaped row now fires ONLY on paths
-  //     the M38 dispatch doesn't cover (item create per D6, bulk
-  //     item update --where per D5, --set-raw per D3).
+  //     the friendly dispatch doesn't cover (item create per D6 →
+  //     v0.7-M43; --set-raw per D3 permanent rejection).
   // Both are tested in the dedicated describe blocks below.
   // M16 pre-flight reclassified `item_assignees` as read-only-forever.
   it.each([
@@ -762,6 +765,19 @@ describe('translateColumnValue — future-roadmap types', () => {
       // create rejection defers to v0.7-M43 + --set-raw stays at
       // the permanent D3 rejection.
       expect(err.details).not.toHaveProperty('deferred_to');
+      // Codex IMPL R6 P2-1 regression guard: the `details.hint`
+      // must enumerate every shipped write path including the
+      // v0.7-M42 bulk friendly form. Pre-fix the hint said
+      // "two write paths" and omitted the bulk variant, leaving
+      // agents with stale remediation guidance.
+      const hint = (err.details as { hint?: string }).hint;
+      expect(hint).toMatch(/three write paths/u);
+      expect(hint).toMatch(/monday item set/u);
+      expect(hint).toMatch(/monday item update --where/u);
+      expect(hint).toMatch(/monday item upload/u);
+      expect(hint).toMatch(/v0\.6-M38/u);
+      expect(hint).toMatch(/v0\.7-M42/u);
+      expect(hint).toMatch(/v0\.4-M31/u);
     }
   });
 

@@ -319,16 +319,20 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     }
   });
 
-  it('hint on files-shaped error points at BOTH v0.6-M38 friendly `--set <file-col>=<path>` AND v0.4-M31 `monday item upload` verb', () => {
-    // v0.6-M38: hint widened to name BOTH write paths reaching
+  it('hint on files-shaped error names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.4-M31 verb-shaped)', () => {
+    // v0.7-M42 post-IMPL: hint names every write path reaching
     // Monday's add_file_to_column multipart wire — (a) `monday item
     // set <iid> <file-col>=<path>` / `monday item update <iid>
-    // --set <file-col>=<path>` (M38; friendly translator dispatch),
-    // (b) `monday item upload` (M31; verb-shaped multipart). The
-    // `--set-raw <file-col>=<json>` form stays REJECTED per D3
-    // because Monday's wire has no JSON-shape for change_column_
-    // value on file columns. No `deferred_to` slot — the --set-raw
-    // rejection is permanent per D3.
+    // --set <file-col>=<path>` (v0.6-M38; single-item friendly
+    // translator dispatch); (b) `monday item update --where ...
+    // --set <file-col>=<path>` (v0.7-M42; bulk friendly per-item
+    // fan-out under --concurrency / --continue-on-error);
+    // (c) `monday item upload <iid> --column <col> <file>` (v0.4-M31;
+    // verb-shaped multipart). The `--set-raw <file-col>=<json>`
+    // form stays REJECTED per D3 because Monday's wire has no
+    // JSON-shape for change_column_value on file columns. No
+    // `deferred_to` slot — the --set-raw rejection is permanent
+    // per D3.
     try {
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
@@ -338,9 +342,15 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     } catch (e) {
       const err = e as ApiError;
       const hint = (err.details as { hint: string }).hint;
+      // v0.6-M38 single-item friendly path.
       expect(hint).toMatch(/monday item set/u);
-      expect(hint).toMatch(/monday item update/u);
+      expect(hint).toMatch(/monday item update <iid>/u);
       expect(hint).toMatch(/v0\.6-M38/u);
+      // v0.7-M42 bulk friendly path — Codex IMPL R6 P3-2
+      // regression guard.
+      expect(hint).toMatch(/monday item update --where/u);
+      expect(hint).toMatch(/v0\.7-M42/u);
+      // v0.4-M31 verb-shaped upload.
       expect(hint).toMatch(/monday item upload/u);
       expect(hint).toMatch(/v0\.4-M31/u);
       // Error MESSAGE still names the wire surface so an agent

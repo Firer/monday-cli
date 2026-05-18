@@ -987,13 +987,17 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           # `--set-raw <col>=<json>`) /
                                           # `"read_only_forever"` (no write
                                           # path; `suggested_write_path: null`)
-                                          # / `"files_shaped"` (suggests BOTH
-                                          # `monday item set <iid> <file-col>=
-                                          # <path>` / `monday item update <iid>
-                                          # --set <file-col>=<path>` (v0.6-M38;
-                                          # friendly translator) AND `monday
-                                          # item upload <iid> --column <col>
-                                          # <file>` (v0.4-M31; verb-shaped) —
+                                          # / `"files_shaped"` (suggests every
+                                          # shipped write path: v0.6-M38 single-
+                                          # item friendly `monday item set <iid>
+                                          # <file-col>=<path>` / `monday item
+                                          # update <iid> --set <file-col>=<path>`;
+                                          # v0.7-M42 bulk friendly `monday item
+                                          # update --where ... --set <file-col>=
+                                          # <path>` (per-item fan-out under
+                                          # --concurrency / --continue-on-error);
+                                          # v0.4-M31 verb-shaped `monday item
+                                          # upload <iid> --column <col> <file>` —
                                           # joined with ` OR ` in the
                                           # `suggested_write_path` string).
                                           # `category` is a stable enum —
@@ -3493,11 +3497,16 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `change_column_value` / `change_multiple_column_values`.
    - **`files`-shaped types** (`file`, anything else where Monday
      uses `add_file_to_column` rather than `change_column_value`)
-     ship the friendly `--set <file-col>=<path>` form at **v0.6-M38**
-     — the command action body branches OFF the standard JSON-
-     translator path INTO M31's multipart `addFileToColumn` fetcher
-     when the resolved column has `type === 'file'`. See "File-
-     column dispatch leg" below + step 5's mutation-selection rules
+     ship the friendly `--set <file-col>=<path>` form across two
+     call shapes: **v0.6-M38** (single-item — `monday item set` +
+     `monday item update <iid>`) and **v0.7-M42** (bulk — `monday
+     item update --where ...` with per-item multipart fan-out
+     under `--concurrency` / `--continue-on-error`). The command
+     action body branches OFF the standard JSON-translator path
+     INTO M31's multipart `addFileToColumn` fetcher when the
+     resolved column has `type === 'file'`; the bulk variant fans
+     the fetcher across the matched item-IDs. See "File-column
+     dispatch leg" below + step 5's mutation-selection rules
      for the dispatch routing decision. The verb-shaped path
      (`monday item upload`, v0.4-M31) stays as the alternative for
      `item upload <iid> --column <col> <file>` ergonomics. The
@@ -3661,13 +3670,15 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
     write path is `add_file_to_column` rather than
     `change_column_value`) → surfaces `unsupported_column_type`
     under `--set-raw` SPECIFICALLY. The friendly `--set
-    <file-col>=<path>` form ships at v0.6-M38 (see step 4
-    "files-shaped types" + step 5 "File-column dispatch leg"),
-    dispatching from the translator boundary into M31's
-    multipart wire; but `--set-raw <file-col>=<json>` goes
-    through `change_column_value` / `change_multiple_column_
-    values`, neither of which accepts `add_file_to_column`-
-    shaped payloads, so the raw form stays rejected. Hint
+    <file-col>=<path>` form ships across single-item (v0.6-M38)
+    and bulk (v0.7-M42; `monday item update --where ...`
+    per-item fan-out) call shapes — see step 4 "files-shaped
+    types" + step 5 "File-column dispatch leg" — dispatching
+    from the translator boundary into M31's multipart wire; but
+    `--set-raw <file-col>=<json>` goes through
+    `change_column_value` / `change_multiple_column_values`,
+    neither of which accepts `add_file_to_column`-shaped
+    payloads, so the raw form stays rejected. Hint
     points at the v0.6-M38 friendly `--set <file-col>=<path>`
     form OR the verb-shaped `monday item upload` (v0.4-M31).
   Every other type (writable + tentative-slipped + future where

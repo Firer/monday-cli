@@ -1747,15 +1747,16 @@ const UNSUPPORTED_TABLE: Readonly<
       `verb-shaped) OR the friendly --set on update/set verbs.`,
     details: () => ({
       hint:
-        'two write paths reach Monday\'s add_file_to_column ' +
-        'multipart wire: `monday item upload <iid> --column <col> ' +
-        '<file>` (v0.4-M31; verb-shaped) and `monday item set <iid> ' +
-        '<file-col>=<path>` / `monday item update <iid> --set ' +
-        '<file-col>=<path>` (v0.6-M38; single-item friendly ' +
-        'translator) / `monday item update --where ... --set ' +
-        '<file-col>=<path>` (v0.7-M42; bulk friendly translator + ' +
-        'per-item multipart fan-out). The create + --set-raw paths ' +
-        'still reject file-shaped columns: create defers to ' +
+        'three write paths reach Monday\'s add_file_to_column ' +
+        'multipart wire: (a) `monday item set <iid> <file-col>=' +
+        '<path>` / `monday item update <iid> --set <file-col>=' +
+        '<path>` (v0.6-M38; single-item friendly translator); ' +
+        '(b) `monday item update --where ... --set <file-col>=' +
+        '<path>` (v0.7-M42; bulk friendly translator + per-item ' +
+        'multipart fan-out under --concurrency / --continue-on-' +
+        'error); (c) `monday item upload <iid> --column <col> ' +
+        '<file>` (v0.4-M31; verb-shaped). The create + --set-raw ' +
+        'paths still reject file-shaped columns: create defers to ' +
         'v0.7-M43 per cli-design §5.3 D6; --set-raw is the permanent ' +
         'D3 rejection.',
     }),

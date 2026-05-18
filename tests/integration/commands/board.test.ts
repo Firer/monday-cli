@@ -3183,7 +3183,7 @@ describe('monday board column-create (integration, M16)', () => {
     expect(env.warnings[0]?.details?.suggested_write_path).toBeNull();
   });
 
-  it('live: --type file emits noncanonical_column_type warning with files_shaped category + names BOTH the v0.6-M38 friendly --set dispatch AND the v0.4-M31 verb-shaped `monday item upload` in the message + suggested_write_path', async () => {
+  it('live: --type file emits noncanonical_column_type warning with files_shaped category + names every shipped write path (v0.6-M38 single-item friendly + v0.7-M42 bulk friendly + v0.4-M31 verb-shaped) in the message + suggested_write_path', async () => {
     const out = await drive(
       ['board', 'column-create', '12345', '--type', 'file', '--title', 'Attachments', '--json'],
       {
@@ -3212,25 +3212,30 @@ describe('monday board column-create (integration, M16)', () => {
       }[];
     };
     expect(env.warnings[0]?.details?.category).toBe('files_shaped');
-    // v0.6-M38: suggested_write_path widened to name BOTH write
-    // paths reaching Monday's add_file_to_column multipart wire —
-    // `monday item set <iid> <file-col>=<path>` / `monday item
-    // update --set <file-col>=<path>` (M38; friendly translator)
-    // AND `monday item upload` (M31; verb-shaped). M38 is the
-    // simpler agent flow for existing-item file writes.
+    // v0.7-M42 post-IMPL: suggested_write_path names every shipped
+    // write path reaching Monday's add_file_to_column multipart wire:
+    // v0.6-M38 single-item friendly (`monday item set` / `monday
+    // item update <iid>`); v0.7-M42 bulk friendly (`monday item
+    // update --where ...`); v0.4-M31 verb-shaped (`monday item
+    // upload`). Codex IMPL R5 P2-1 regression guard.
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
       /monday item set/,
     );
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.6-M38/);
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
+      /monday item update --where/,
+    );
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.7-M42/);
+    expect(env.warnings[0]?.details?.suggested_write_path).toMatch(
       /monday item upload/,
     );
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.4-M31/);
-    // v0.6-M38 Codex round-2 P2-1: warning MESSAGE prose also names
-    // both write paths + the --set-raw permanent rejection per D3.
-    // The message is what an agent reading the warning sees first;
-    // the suggested_write_path is for programmatic branching.
+    // Warning MESSAGE prose also names every shipped write path +
+    // the --set-raw permanent rejection per D3. The message is what
+    // an agent reading the warning sees first; the
+    // suggested_write_path is for programmatic branching.
     expect(env.warnings[0]?.message).toMatch(/v0\.6-M38/);
+    expect(env.warnings[0]?.message).toMatch(/v0\.7-M42/);
     expect(env.warnings[0]?.message).toMatch(/v0\.4-M31/);
     expect(env.warnings[0]?.message).toMatch(/monday item set/);
     expect(env.warnings[0]?.message).toMatch(/monday item upload/);

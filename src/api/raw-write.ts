@@ -22,15 +22,17 @@
  *         from CLI-time to Monday-time with no new information.
  *       * **`files`-shaped** (`file`, anything else where Monday
  *         uses `add_file_to_column` rather than `change_column_value`)
- *         → `unsupported_column_type` rejection STAYS at v0.6-M38
- *         per D3 closure. The `--set-raw` payload reaches
+ *         → `unsupported_column_type` rejection STAYS per D3
+ *         closure (permanent). The `--set-raw` payload reaches
  *         `change_column_value` / `change_multiple_column_values`
  *         only; files-shaped types can't be written through that
  *         wire surface (Monday's wire has no JSON-shape for
- *         `change_column_value` on file columns). v0.6-M38 ships
- *         the friendly `--set <file-col>=<path>` form (dispatching
- *         into the multipart wire at the command action body) but
- *         keeps `--set-raw` rejected — the escape-hatch contract
+ *         `change_column_value` on file columns). The friendly
+ *         `--set <file-col>=<path>` form ships across three
+ *         shipped paths (v0.6-M38 single-item + v0.7-M42 bulk +
+ *         v0.4-M31 verb-shaped upload — all dispatching into the
+ *         multipart wire at the command action body) but keeps
+ *         `--set-raw` rejected — the escape-hatch contract
  *         "user supplies JSON `change_column_value` accepts"
  *         doesn't compose with multipart. Hint points at the
  *         v0.6-M38 friendly `--set` form OR `monday item upload`

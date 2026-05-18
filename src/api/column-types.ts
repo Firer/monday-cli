@@ -210,14 +210,14 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  * column_values` (`cli-design.md` §5.3 writer-expansion roadmap "files"
  * row + the escape-hatch contract).
  *
- * **Two write paths reach the multipart wire** post-v0.6-M38:
+ * **Three write paths reach the multipart wire** post-v0.7-M42:
  *
  *   - **v0.4-M31 verb-shaped**: `monday item upload <iid> --column
  *     <col> <file>` + `monday update upload <uid> <file>`. Direct
  *     multipart dispatch via `addFileToColumn` /
  *     `addFileToUpdate` (`src/api/assets.ts`).
- *   - **v0.6-M38 friendly translator**: `monday item set <iid>
- *     <file-col>=<path>` + `monday item update <iid> --set
+ *   - **v0.6-M38 friendly translator (single-item)**: `monday item
+ *     set <iid> <file-col>=<path>` + `monday item update <iid> --set
  *     <file-col>=<path>`. Sibling dispatch leg at the command
  *     action body that detects `column.type === 'file'` AFTER
  *     resolution + routes through `executeFileColumnSet`
@@ -337,14 +337,17 @@ export const getColumnRoadmapCategory = (
  *     path` is `null` (agents can't write at all; the column
  *     exists for read-side display / mirror sources only).
  *   - `'files_shaped'`: Monday writes the type via `add_file_to_
- *     column` (multipart upload). Two write paths post-v0.6-M38:
- *     `monday item upload <iid> --column <col> <file>` (M31; verb-
- *     shaped) + `monday item set <iid> <file-col>=<path>` /
- *     `monday item update <iid> --set <file-col>=<path>` (M38;
- *     friendly translator dispatch). `suggested_write_path` is a
- *     single human-readable string joining BOTH paths with ` OR `
- *     (R-v0.6-NEW-3 watch-item: lift to `readonly string[]` at the
- *     2nd N>1 consumer). Currently `file` only.
+ *     column` (multipart upload). Three write paths post-v0.7-M42:
+ *     `monday item upload <iid> --column <col> <file>` (v0.4-M31;
+ *     verb-shaped) + `monday item set <iid> <file-col>=<path>` /
+ *     `monday item update <iid> --set <file-col>=<path>` (v0.6-M38;
+ *     single-item friendly translator dispatch) + `monday item
+ *     update --where ... --set <file-col>=<path>` (v0.7-M42; bulk
+ *     friendly translator dispatch with per-item multipart fan-out).
+ *     `suggested_write_path` is a single human-readable string
+ *     joining every shipped path with ` OR ` (R-v0.6-NEW-3 watch-
+ *     item: lift to `readonly string[]` at the 2nd N>1 consumer).
+ *     Currently `file` only.
  *
  * Returns `null` for canonical types (membership in `WRITABLE_COLUMN_
  * TYPES`) — `column-create` skips emitting the warning when the type
