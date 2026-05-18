@@ -49,7 +49,7 @@ Requires **Node.js ≥ 22**.
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
 #
 #    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.5.0 — the verb surfaces a clear `usage_error.details.reason:
+#    v0.6.0 — the verb surfaces a clear `usage_error.details.reason:
 #    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
@@ -117,23 +117,35 @@ monday user team-list --json
 monday user team-create --name "Platform" --users 7,9 --json
 monday user team-add-members <tid> --users 11,13 --json
 
-# 13. Find-or-create with idempotent matching (v0.2)
+# 13. Files-shaped friendly `--set` writes (v0.6-M38 — closes the v0.4
+#     → v0.5 → v0.6 carry-over of the inline form). Single-call file
+#     upload via `--set <file-col>=<path>`; sibling-branch dispatch at
+#     the column-resolution boundary routes to the v0.4-M31 multipart
+#     `add_file_to_column` wire. `--dry-run` emits a `planned_changes`
+#     envelope without the multipart round-trip. The v0.4-M31 verb-
+#     shaped `monday item upload` path remains; this is the friendly
+#     inline alternative.
+monday item set 67890 'Attachments'=./screenshot.png --json
+monday item update 67890 --set 'Attachments'=./diagram.png --json
+monday item update 67890 --set 'Attachments'=./report.pdf --dry-run --json
+
+# 14. Find-or-create with idempotent matching (v0.2)
 #     Re-running with the same args is safe — 0/1/2+ matches route to
 #     create / update / `ambiguous_match` (one of the 29 stable error codes).
 monday item upsert --board 12345 --name "Refactor login" \
   --match-by name --set status='Working on it' --json
 
-# 14. Move a ticket forward, then comment on it
+# 15. Move a ticket forward, then comment on it
 monday item set 67890 status=Done --json
 monday update create 67890 --body "Shipped in PR #1234" --json
 
-# 15. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
+# 16. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
 #     First-time setup auto-detects boards by Monday's stock template names.
 monday dev discover --apply --json         # writes ~/.monday-cli/config.toml
 monday dev sprint current --json           # the active sprint
 monday dev task list --mine --json         # my open tasks
 
-# 16. Outbound writes (v0.3 — webhooks + notifications)
+# 17. Outbound writes (v0.3 — webhooks + notifications)
 monday webhook list 12345 --json
 monday notification send --user 7 --target 67890 \
   --target-type item --text "PTAL" --json
@@ -202,7 +214,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.5.0",
+    "cli_version": "0.6.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -302,7 +314,27 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.5.0 (current — `monday-cli@0.5.0` on npm):**
+**v0.6.0 (current — `monday-cli@0.6.0` on npm):**
+the v0.5 surface PLUS files-shaped friendly `--set <file-col>=<path>`
+writes on `monday item set` + `monday item update` (single-item
+paths), closing the v0.4 → v0.5 → v0.6 carry-over of the inline
+form. Sibling-branch dispatch at the column-resolution boundary
+routes file `--set` to the v0.4-M31 `add_file_to_column` multipart
+wire; the friendly translator stays JSON-output-shaped for the 13
+existing writable types. **No breaking changes vs v0.5.0** — the
+v0.6 surface is additive (M38 only). Built as a single milestone
+(M38). See [CHANGELOG.md](./CHANGELOG.md) for the full
+per-milestone release notes.
+
+**OAuth deferral (unchanged from v0.5.0).** `monday auth login` is
+registered but the canonical Monday OAuth app is not registered in
+v0.6.0; the verb surfaces a clear `usage_error.details.reason:
+oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
+config + per-profile credentials cache work fully against API
+tokens; OAuth registration revisits in v0.6.x / v0.7 contingent on
+user demand.
+
+**v0.5.0 (the previous release):**
 the v0.4 surface PLUS the full team-writer surface
 (`monday user team-list/get/create/delete/add-members/remove-members`),
 the full Monday workdocs CRUD mutation surface — doc-level
@@ -310,20 +342,9 @@ the full Monday workdocs CRUD mutation surface — doc-level
 doc-block (`monday doc block-create/block-update/block-delete`),
 and doc-content import (`monday doc import-html/append-markdown`) —
 closing the v0.4-M32 workdocs-mutation deferral. **16 new CLI
-verbs across 9 wire mutations.** **No breaking changes vs v0.4.0**
-— every v0.5 surface is additive. Built incrementally across
-M34–M37. See [CHANGELOG.md](./CHANGELOG.md) for the full
-per-milestone release notes.
+verbs across 9 wire mutations.** Built incrementally across M34–M37.
 
-**OAuth deferral (unchanged from v0.4.0).** `monday auth login` is
-registered but the canonical Monday OAuth app is not registered in
-v0.5.0; the verb surfaces a clear `usage_error.details.reason:
-oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
-config + per-profile credentials cache work fully against API
-tokens; OAuth registration revisits in v0.5.x / v0.6 contingent on
-user demand.
-
-**v0.4.0 (the previous release):**
+**v0.4.0 (the prior release):**
 the v0.3 surface PLUS long-poll item activity streaming
 (`monday item watch <iid>` — NDJSON), parallel bulk dispatch
 (`monday item update --where ... --concurrency <N>`), asset uploads
@@ -333,7 +354,7 @@ workdocs CRUD mutation surface deferred to v0.5; shipped at v0.5),
 and shell completion (`monday completion bash|zsh|fish`). Built
 incrementally across M29–M33.
 
-**v0.3.0 (the prior release):**
+**v0.3.0 (the earlier release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -623,35 +644,62 @@ row `tags`, `board_relation`, `dependency`.
   D13 empirical-probe pinning (rejected at 500KB, OK at 250KB on
   both surfaces).
 
-**v0.6 (next):** **M38 picked at the v0.6 kickoff
-candidate-selection session = files-shaped friendly column
-writes** (`--set <file-col>=<path>` and `--set-raw
-<file-col>=<json>` — inline translator-boundary dispatch into
-the v0.4-M31 multipart wire; closes the v0.4 → v0.5 → v0.6
-carry-over of the inline form; `monday item upload` from
-v0.4-M31 remains the verb-shaped alternative path agents use
-today until M38 ships). **Carry-forward backlog** (unpicked
-candidates remain in cli-design.md §13 v0.5 slipped-candidates
-list pending future candidate-selection sessions): multi-level
+**What v0.6 added (M38; full per-milestone narrative in
+[CHANGELOG.md](./CHANGELOG.md)):**
+
+- **M38** — `monday item set <iid> <file-col>=<path>` +
+  `monday item update <iid> --set <file-col>=<path>` ship the
+  files-shaped friendly `--set` writer path, closing the v0.4 →
+  v0.5 → v0.6 carry-over of the inline form. Sibling-branch
+  dispatch at the column-resolution boundary routes file `--set`
+  to the v0.4-M31 `add_file_to_column` multipart wire; the
+  friendly translator stays JSON-output-shaped for the 13
+  existing writable types (per D1 closure). Mutex rules at M38:
+  exactly one file `--set` per call; mixing a file `--set` with
+  any value `--set` / `--set-raw` / `--name` surfaces `usage_
+  error.details.reason: "mixed_file_and_value_sets"`; 2+ file
+  `--set` entries surface `usage_error.details.reason: "multi_
+  file_set_unsupported"` (both deferred to v0.6.x per D2). The
+  bulk `item update --where ... --set <file-col>=<path>` and
+  `item create --set <file-col>=<path>` paths reject at the
+  resolution boundary with `details.reason: "file_set_on_bulk_
+  unsupported"` / `"file_set_on_create_unsupported"` (D5 / D6 —
+  defer to v0.6.x). `--set-raw <file-col>=<json>` STAYS REJECTED
+  per D3 — Monday's wire has no JSON-shape for
+  `change_column_value` on file columns; `monday item upload`
+  from v0.4-M31 remains the verb-shaped alternative path. **No
+  new ERROR_CODES** at M38 (registry stays at 29 — all
+  rejections route through existing `usage_error` /
+  `unsupported_column_type` / `not_found` / `validation_failed`
+  codes with `details.reason` discrimination).
+
+**v0.7 (next):** **Carry-forward backlog** (unpicked
+candidates remain in cli-design.md §13 slipped-candidates list
+pending future candidate-selection sessions): multi-level
 subitems remain conditional on Monday's data model surfacing
-them (slipped from v0.4 → v0.5 → v0.6 across two consecutive
-release-preps — Monday's `sub_items_board` still carries no
-`subtasks` column at API `2026-01`); cross-board `item move`
-value-overrides (Monday's `ColumnMappingInput` still carries
-no value slot — slipped twice for the same reason); resumable
-cross-board cursor pagination (per-board cursor-lifetime
-under aggregation needs design work); profile-scoped argument
-defaults (newly filed at the v0.6 kickoff candidate-selection
-session — extends `~/.monday-cli/config.toml` with a
-`[profiles.<name>.defaults]` table carrying scoping args;
+them (slipped from v0.4 → v0.5 → v0.6 → v0.7 across three
+consecutive release-preps — Monday's `sub_items_board` still
+carries no `subtasks` column at API `2026-01`); cross-board
+`item move` value-overrides (Monday's `ColumnMappingInput`
+still carries no value slot — slipped three times for the same
+reason); resumable cross-board cursor pagination (per-board
+cursor-lifetime under aggregation needs design work);
+profile-scoped argument defaults (filed at the v0.6 kickoff
+candidate-selection session — extends `~/.monday-cli/config.toml`
+with a `[profiles.<name>.defaults]` table carrying scoping args;
 requires a prerequisite §13 carve-out Decision at pre-flight
 distinguishing aliases-as-stored-command-strings (still
 non-goal) from defaults-as-stored-flag-values (carve-out)).
+**v0.6.x carve-outs** ride on top: bulk + create file `--set`
+paths (D5 / D6 deferrals); multi-file `--set` per call (D2);
+file-`--set` stdin support (D7); these defer to v0.6.x within
+the v0.6 series.
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
-full roadmap, [`docs/v0.5-plan.md`](./docs/v0.5-plan.md) for the
-v0.5 milestone history, [`docs/v0.4-plan.md`](./docs/v0.4-plan.md)
-for v0.4, [`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for v0.3, and
+full roadmap, [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) for the
+v0.6 milestone history, [`docs/v0.5-plan.md`](./docs/v0.5-plan.md)
+for v0.5, [`docs/v0.4-plan.md`](./docs/v0.4-plan.md) for v0.4,
+[`docs/v0.3-plan.md`](./docs/v0.3-plan.md) for v0.3, and
 [`docs/v0.2-plan.md`](./docs/v0.2-plan.md) for v0.2.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-release contract.
