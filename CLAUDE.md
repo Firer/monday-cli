@@ -29,13 +29,18 @@ humans are second-class. Built incrementally via Claude Code on top of
   3.1.2` folded into the version-bump commit per security.md
   "high = merge blocker").
 - **Next session:** v0.7 kickoff candidate-selection per R-NEW-75
-  framework. Carry-forward backlog: multi-level subitems / cross-
-  board move value-overrides / resumable cross-board cursor (all
-  slipped v0.6 → v0.7 at this release-prep per R-NEW-82's
-  4th-consecutive ratification) + profile-scoped argument
-  defaults + v0.6.x carve-outs (bulk + create file `--set` paths
-  per D5 / D6; multi-file `--set` per call per D2; file-`--set`
-  stdin support per D7).
+  framework — opens against the **v0.7-plan.md SKELETON** filed
+  forward on 2026-05-18 (see [`docs/v0.7-plan.md`](./docs/v0.7-plan.md)).
+  v0.7 scope: API pin 2026-01 → 2026-04 (M39) + `item set-description`
+  (M40) + `doc block-create-bulk` (M41) + v0.6.x bulk + create file
+  `--set` carve-out folds (M42 / M43). v0.8 SKELETON also filed
+  (Monday API 2026-07 + user-entity migration; opens after v0.7
+  ships). Out-of-scope across v0.7 + v0.8: AI surfaces / Enterprise-
+  gated APIs / notetaker meetings / niche surfaces (full lists in
+  each plan §1 "Out of scope"). Other carry-forward backlog (multi-
+  level subitems / cross-board move value-overrides / resumable
+  cross-board cursor / profile-scoped argument defaults / multi-file
+  + stdin file-`--set`) stays deferred per the same documents.
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —
@@ -44,17 +49,27 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — active plan;
-   v0.6 release-prep closed, ready for publish.
-3. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
+2. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — **SKELETON**
+   (filed forward 2026-05-18). v0.8 = Monday API 2026-07 pin +
+   user-entity migration (M44) + `user activity` (M45). Ratified
+   at v0.8 kickoff candidate-selection AFTER v0.7.0 ships.
+3. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — **SKELETON**
+   (filed forward 2026-05-18). v0.7 = Monday API 2026-04 pin +
+   item set-description (M40) + doc block-create-bulk (M41) +
+   v0.6.x bulk + create file `--set` carve-outs (M42 / M43).
+   Ratified at v0.7 kickoff candidate-selection (next session).
+4. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
+   (files-shaped friendly `--set`) with §22 R-class log
+   (R-v0.6-NEW-*).
+5. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
-4. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
+6. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
    with §22 R-class log (R-NEW-72 through R-NEW-84 graduated).
-5. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
+7. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
    with §22 R-class log (R-NEW-1 through R-NEW-43).
-6. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
+8. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
    (R20–R53).
-7. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
+9. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
    foundations.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)
