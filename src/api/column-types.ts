@@ -210,7 +210,7 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  * column_values` (`cli-design.md` §5.3 writer-expansion roadmap "files"
  * row + the escape-hatch contract).
  *
- * **Three write paths reach the multipart wire** post-v0.7-M42:
+ * **Four write paths reach the multipart wire** post-v0.7-M43:
  *
  *   - **v0.4-M31 verb-shaped**: `monday item upload <iid> --column
  *     <col> <file>` + `monday update upload <uid> <file>`. Direct
@@ -222,25 +222,37 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  *     action body that detects `column.type === 'file'` AFTER
  *     resolution + routes through `executeFileColumnSet`
  *     (`src/api/file-column-set.ts`), which itself wraps M31's
- *     `addFileToColumn` verbatim. Single-item at v0.6-M38; bulk
- *     `monday item update --where ... --set <file-col>=<path>`
- *     shipped at v0.7-M42 (D5 carve-out fold; per-item multipart
- *     fan-out via `runItemUpdateBulkFileDispatch` in
- *     `src/commands/item/update.ts`). Mutex rules at the
- *     resolution boundary (D2/D5/D6 closures — `monday item
- *     create --set <file-col>=<path>` rejects pending v0.7-M43;
- *     mixed-set rejects universally; multi-file-set rejects
- *     universally).
+ *     `addFileToColumn` verbatim. Single-item at v0.6-M38.
+ *   - **v0.7-M42 friendly translator (bulk)**: `monday item update
+ *     --where ... --set <file-col>=<path>` (D5 carve-out fold from
+ *     v0.6-M38). Per-item multipart fan-out via
+ *     `runItemUpdateBulkFileDispatch` in
+ *     `src/commands/item/update.ts` under `--concurrency` /
+ *     `--continue-on-error`.
+ *   - **v0.7-M43 friendly translator (create-time)**: `monday item
+ *     create --set <file-col>=<path>` (D6 carve-out fold from
+ *     v0.6-M38). Two-leg `create_item` (with bundled non-file
+ *     `column_values`) + `add_file_to_column` dispatch via
+ *     `runItemCreateFileDispatch` in `src/commands/item/create.ts`
+ *     under the §5.8 orphan-warn atomicity envelope (D1 closure).
+ *
+ * Mutex rules at the resolution boundary (D2 closures + folded
+ * D5/D6): multi-file `--set` rejects universally
+ * (`multi_file_set_unsupported`); mixed file + value `--set` /
+ * `--set-raw` / `--name` rejects on `'item_set'` /
+ * `'item_update_single'` / `'item_update_bulk'` callShapes
+ * (`mixed_file_and_value_sets`), SUPPRESSED on `'item_create'`
+ * per v0.7-M43 asymmetry (`create_item` natively bundles
+ * non-file `column_values` atomically into leg-1).
  *
  * The `--set-raw <file-col>=<json>` form STAYS REJECTED per D3
  * closure — Monday's wire has no JSON-shape for
  * `change_column_value` on file columns, and the escape-hatch
  * contract "user supplies the JSON `change_column_value` accepts"
  * doesn't compose with multipart. The rejection points at every
- * shipped write path: v0.4-M31 verb-shaped `monday item upload` +
- * v0.6-M38 single-item friendly `--set` + v0.7-M42 bulk friendly
- * `--set` (per-item multipart fan-out on `monday item update
- * --where ...`).
+ * shipped friendly write path: v0.4-M31 verb-shaped `monday item
+ * upload` + v0.6-M38 single-item friendly `--set` + v0.7-M42
+ * bulk friendly `--set` + v0.7-M43 create-time friendly `--set`.
  *
  * Currently one entry (`file`); the slot is plural because Monday may
  * surface other multipart-upload-shaped types in future API versions
@@ -337,13 +349,16 @@ export const getColumnRoadmapCategory = (
  *     path` is `null` (agents can't write at all; the column
  *     exists for read-side display / mirror sources only).
  *   - `'files_shaped'`: Monday writes the type via `add_file_to_
- *     column` (multipart upload). Three write paths post-v0.7-M42:
+ *     column` (multipart upload). Four write paths post-v0.7-M43:
  *     `monday item upload <iid> --column <col> <file>` (v0.4-M31;
  *     verb-shaped) + `monday item set <iid> <file-col>=<path>` /
  *     `monday item update <iid> --set <file-col>=<path>` (v0.6-M38;
  *     single-item friendly translator dispatch) + `monday item
  *     update --where ... --set <file-col>=<path>` (v0.7-M42; bulk
- *     friendly translator dispatch with per-item multipart fan-out).
+ *     friendly translator dispatch with per-item multipart fan-out)
+ *     + `monday item create --set <file-col>=<path>` (v0.7-M43;
+ *     create-time two-leg friendly translator dispatch under the
+ *     §5.8 orphan-warn atomicity envelope).
  *     `suggested_write_path` is a single human-readable string
  *     joining every shipped path with ` OR ` (R-v0.6-NEW-3 watch-
  *     item: lift to `readonly string[]` at the 2nd N>1 consumer).

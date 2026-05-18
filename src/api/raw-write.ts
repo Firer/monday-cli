@@ -191,16 +191,20 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *     `change_column_value`; the raw payload can't reach the
  *     right wire surface (Monday's wire has no JSON-shape for
  *     `change_column_value` on file columns). The friendly
- *     `--set <file-col>=<path>` form ships across three paths
+ *     `--set <file-col>=<path>` form ships across four paths
  *     reaching the multipart wire: v0.6-M38 single-item friendly
  *     (`monday item set` + `monday item update <iid>`); v0.7-M42
  *     bulk friendly (`monday item update --where ...` per-item
  *     fan-out under `--concurrency` / `--continue-on-error`);
- *     v0.4-M31 verb-shaped (`monday item upload <iid> --column
- *     <col> <file>`). The escape-hatch contract "user supplies
- *     JSON `change_column_value` accepts" doesn't compose with
- *     multipart, so `--set-raw <file-col>=<json>` stays rejected
- *     regardless. Hint enumerates every shipped path.
+ *     v0.7-M43 create-time friendly (`monday item create --set
+ *     <file-col>=<path>` two-leg `create_item` + `add_file_to_
+ *     column` dispatch under the §5.8 orphan-warn atomicity
+ *     envelope); v0.4-M31 verb-shaped (`monday item upload <iid>
+ *     --column <col> <file>`). The escape-hatch contract "user
+ *     supplies JSON `change_column_value` accepts" doesn't
+ *     compose with multipart, so `--set-raw <file-col>=<json>`
+ *     stays rejected regardless. Hint enumerates every shipped
+ *     path.
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the

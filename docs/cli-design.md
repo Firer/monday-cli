@@ -3532,11 +3532,12 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `--set-raw`'s escape-hatch contract (the user-supplied JSON
      reaches `change_column_value`, never `add_file_to_column`) —
      the friendly `--set` form ships across v0.6-M38 single-item
-     + v0.7-M42 bulk shapes. The translator-to-multipart dispatch
-     slipped from v0.4 → v0.5 → v0.6 across two consecutive
-     release-preps because neither cycle picked up the dispatch
-     design; M38 landed single-item (see §13 v0.6 entry) and M42
-     carved out the bulk variant at v0.7.
+     + v0.7-M42 bulk + v0.7-M43 create-time shapes. The
+     translator-to-multipart dispatch slipped from v0.4 → v0.5 →
+     v0.6 across two consecutive release-preps because neither
+     cycle picked up the dispatch design; M38 landed single-item
+     (see §13 v0.6 entry), M42 carved out the bulk variant at
+     v0.7, and M43 carved out the create-time variant at v0.7.
    No silent partial support — every translator either lands
    end-to-end or surfaces `unsupported_column_type` with a
    hint that points at `--set-raw` or the type's roadmap slot.

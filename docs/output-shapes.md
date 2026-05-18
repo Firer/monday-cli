@@ -2256,7 +2256,10 @@ multipart wire. v0.6-M38 shipped the single-item path (`monday
 item set` + `monday item update <iid>`); v0.7-M42 carved out the
 bulk `item update --where ... --set <file-col>=<path>` path into
 a per-item multipart fan-out (see "v0.7-M42 bulk file-column
-dispatch" below); v0.7-M43 (pending) lands the create-time path.
+dispatch" below); v0.7-M43 carved out the create-time `monday
+item create --set <file-col>=<path>` path into a two-leg
+`create_item` + `add_file_to_column` dispatch under the §5.8
+orphan-warn atomicity envelope (D1 closure).
 Mutex rules at the resolution boundary (D2/D5/D6 closures,
 universal across single + bulk):
 

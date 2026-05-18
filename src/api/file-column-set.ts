@@ -141,9 +141,10 @@
  * multipart wire. The existing rejection at
  * `raw-write.ts:translateRawColumnValue` stays unchanged; the
  * prose enumerates every shipped friendly write path (v0.6-M38
- * single-item, v0.7-M42 bulk, v0.4-M31 verb-shaped upload) so
- * agents reading the `--set-raw` rejection see the full set of
- * working alternatives rather than just the M38 single-item form.
+ * single-item, v0.7-M42 bulk, v0.7-M43 create-time, v0.4-M31
+ * verb-shaped upload) so agents reading the `--set-raw`
+ * rejection see the full set of working alternatives rather
+ * than just the M38 single-item form.
  *
  * **D7 closure — `<path>='-'` stdin support OUT OF SCOPE.**
  * Mirrors M31 `monday item upload`'s rejection rationale — no

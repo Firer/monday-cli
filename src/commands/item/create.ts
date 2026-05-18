@@ -1388,9 +1388,12 @@ const executeCreateSubitem = async (
 //   - leg-2: `'AddFileToColumn'` (from M31's
 //     `src/api/assets.ts:addFileToColumn`, threaded via M38's
 //     {@link executeFileColumnSet}).
-// No caller-overridable operationName slot — the helper takes
-// `dispatch` (top-level vs subitem) + `m38` (file column slot)
-// inputs only and routes accordingly. The IMPL body invokes the
+// No caller-overridable operationName slot — the helper selects
+// top-level vs subitem from `inputs.createMode.kind` (the
+// `CreateMode` discriminated union from `src/api/dry-run.ts`,
+// resolved by `resolveCreateMode` upstream) and pairs that
+// with `inputs.m38` (the file-column slot from
+// `preCheckM38FileDispatch`). The IMPL body invokes the
 // existing helpers verbatim rather than re-spelling the
 // operation names.
 //
