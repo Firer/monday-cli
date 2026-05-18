@@ -654,17 +654,28 @@ row `tags`, `board_relation`, `dependency`.
   dispatch at the column-resolution boundary routes file `--set`
   to the v0.4-M31 `add_file_to_column` multipart wire; the
   friendly translator stays JSON-output-shaped for the 13
-  existing writable types (per D1 closure). Mutex rules at M38:
-  exactly one file `--set` per call; mixing a file `--set` with
+  existing writable types (per D1 closure). Mutex rules
+  (post v0.7-M42 + v0.7-M43 carve-out folds): exactly one
+  file `--set` per call on every callShape (universal multi-
+  file mutex — 2+ entries surface `usage_error.details.reason:
+  "multi_file_set_unsupported"`); mixing a file `--set` with
   any value `--set` / `--set-raw` / `--name` surfaces `usage_
-  error.details.reason: "mixed_file_and_value_sets"`; 2+ file
-  `--set` entries surface `usage_error.details.reason: "multi_
-  file_set_unsupported"` (both deferred to v0.6.x per D2). The
-  bulk `item update --where ... --set <file-col>=<path>` and
-  `item create --set <file-col>=<path>` paths reject at the
-  resolution boundary with `details.reason: "file_set_on_bulk_
-  unsupported"` / `"file_set_on_create_unsupported"` (D5 / D6 —
-  defer to v0.6.x). `--set-raw <file-col>=<json>` STAYS REJECTED
+  error.details.reason: "mixed_file_and_value_sets"` on
+  `'item_set'` / `'item_update_single'` / `'item_update_bulk'`,
+  SUPPRESSED on `'item_create'` per v0.7-M43 D6 asymmetry
+  (`create_item` natively bundles non-file `column_values`
+  atomically into leg-1). The bulk `item update --where ...
+  --set <file-col>=<path>` path shipped at v0.7-M42 (D5
+  carve-out fold; per-item multipart fan-out under
+  `--concurrency` / `--continue-on-error`); the create-time
+  `item create --set <file-col>=<path>` path shipped at
+  v0.7-M43 (D6 carve-out fold; two-leg `create_item` +
+  `add_file_to_column` dispatch under the §5.8 orphan-warn
+  atomicity envelope). The v0.6-M38 literals
+  `"file_set_on_bulk_unsupported"` and
+  `"file_set_on_create_unsupported"` stay RESERVED in
+  docstrings + regression-guarded; the runtime path no longer
+  surfaces them. `--set-raw <file-col>=<json>` STAYS REJECTED
   per D3 — Monday's wire has no JSON-shape for
   `change_column_value` on file columns; `monday item upload`
   from v0.4-M31 remains the verb-shaped alternative path. **No

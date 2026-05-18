@@ -664,13 +664,15 @@ describe('translateColumnValue — future-roadmap types', () => {
   // specific version. Pinned column types from cli-design §5.3
   // writer-expansion roadmap have their own branches:
   //   - `time_tracking` → `deferred_to: "v0.3"` (start/stop verbs)
-  //   - `file` (files-shaped) → no `deferred_to` slot post-v0.7-M42:
+  //   - `file` (files-shaped) → no `deferred_to` slot post-v0.7-M43:
   //     the friendly `--set <file-col>=<path>` dispatch ships across
-  //     v0.6-M38 (single-item) + v0.7-M42 (bulk) via
+  //     v0.6-M38 (single-item) + v0.7-M42 (bulk) + v0.7-M43 (create-
+  //     time two-leg under §5.8 orphan-warn atomicity envelope) via
   //     `executeFileColumnSet` (`src/api/file-column-set.ts`)
   //     wrapping M31's `addFileToColumn` multipart fetcher (the
   //     bulk path fans the fetcher across matched items in
-  //     `runItemUpdateBulkFileDispatch`); the
+  //     `runItemUpdateBulkFileDispatch`; the create path runs the
+  //     two-leg sequence in `runItemCreateFileDispatch`); the
   //     UNSUPPORTED_TABLE.files_shaped row now fires ONLY on paths
   //     the friendly dispatch doesn't cover (item create per D6 →
   //     v0.7-M43; --set-raw per D3 permanent rejection).

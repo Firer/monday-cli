@@ -1857,18 +1857,22 @@ This asymmetry is at the AGENT-INPUT boundary, NOT the wire
 boundary (M31's asymmetry #3 above is wire-boundary-only —
 the multipart wire shape diverges from JSON; M38's asymmetry
 is that the agent's `--set` token transitions across two
-wire shapes based on column type). The mutex rules at M38's
-column-resolution boundary (no mixing file `--set` with value
-`--set` / `--set-raw` / `--name`; single file `--set` only;
-create rejects pending v0.7-M43; bulk ships at v0.7-M42 as a
-per-item multipart fan-out under `--concurrency`) keep the
-per-call atomicity guarantee intact — when a file `--set` fires,
-NO value `--set` / `--set-raw` / `--name` fires in the same call,
-and the wire dispatch is single-multipart-mutation atomic (per
-matched item on bulk). Documented
-inline in `src/api/file-column-set.ts`'s module docstring +
+wire shapes based on column type). The mutex rules at the
+column-resolution boundary preserve the per-call atomicity
+guarantee — single file `--set` only on every callShape
+(universal multi-file mutex); mixing with value `--set` /
+`--set-raw` / `--name` rejects on `'item_set'` /
+`'item_update_single'` / `'item_update_bulk'` (universal mixed
+mutex), SUPPRESSED on `'item_create'` per v0.7-M43 D6 asymmetry
+(`create_item` natively bundles non-file `column_values`
+atomically into leg-1). Single-item ships at v0.6-M38; bulk
+ships at v0.7-M42 as a per-item multipart fan-out under
+`--concurrency`; create-time ships at v0.7-M43 as a two-leg
+`create_item` + `add_file_to_column` dispatch under the §5.8
+orphan-warn atomicity envelope. Documented inline in
+`src/api/file-column-set.ts`'s module docstring +
 `cli-design.md` §5.3 step 4 / step 5 "File-column dispatch
-leg" + the §13 v0.6 entry.
+leg" + §5.8 atomicity discipline + the §13 v0.6 / v0.7 entries.
 
 ### Documentation cadence — inline + cross-link
 

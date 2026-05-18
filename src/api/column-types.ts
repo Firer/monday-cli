@@ -388,18 +388,22 @@ export interface NoncanonicalColumnTypeDetails {
    *   - `read_only_forever` types: `null` (no write path exists —
    *     the column exists for read-side display / mirror sources
    *     only).
-   *   - `files_shaped` types post-v0.7-M42: a single human-readable
+   *   - `files_shaped` types post-v0.7-M43: a single human-readable
    *     string joining every shipped write path with ` OR ` — the
    *     v0.6-M38 friendly `monday item set <iid> <file-col>=<path>` /
    *     `monday item update <iid> --set <file-col>=<path>` (single-
    *     item dispatch); the v0.7-M42 friendly `monday item update
    *     --where ... --set <file-col>=<path>` (bulk per-item multipart
-   *     fan-out); AND the v0.4-M31 verb-shaped `monday item upload
-   *     <iid> --column <col> <file>`. R-v0.6-NEW-3 watch-item: lift
-   *     to `readonly string[]` at the 2nd N>1 consumer for structured
-   *     enumeration. (At v0.7-M42 IMPL the string went from 2-path
-   *     to 3-path; R-v0.6-NEW-3 trigger remains pending until a
-   *     downstream consumer needs structured-array iteration.)
+   *     fan-out); the v0.7-M43 friendly `monday item create --set
+   *     <file-col>=<path>` (create-time two-leg dispatch under the
+   *     §5.8 orphan-warn atomicity envelope); AND the v0.4-M31
+   *     verb-shaped `monday item upload <iid> --column <col> <file>`.
+   *     R-v0.6-NEW-3 watch-item: lift to `readonly string[]` at the
+   *     2nd N>1 consumer for structured enumeration. (At v0.7-M42
+   *     IMPL the string went from 2-path to 3-path; at v0.7-M43
+   *     pre-flight it went to 4-path; R-v0.6-NEW-3 trigger remains
+   *     pending until a downstream consumer needs structured-array
+   *     iteration.)
    */
   readonly suggestedWritePath: string | null;
 }
