@@ -1631,11 +1631,15 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
         },
       );
       expect(out.exitCode).toBe(0);
-      const env = parseEnvelope(out.stdout) as EnvelopeShape;
+      const env = parseEnvelope(out.stdout);
       expect(env.ok).toBe(true);
-      expect(env.meta.dry_run).toBe(true);
-      expect(env.meta.source).toBe('none');
-      expect(env.planned_changes).toEqual([
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      expect(meta.source).toBe('none');
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      expect(envWithPlanned.planned_changes).toEqual([
         {
           operation: 'add_file_to_column',
           item_id: '12345',
@@ -1671,7 +1675,9 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
         },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
       expect(env.error?.code).toBe('usage_error');
       expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
     });
@@ -1700,7 +1706,9 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
         },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
       expect(env.error?.code).toBe('usage_error');
       expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
     });
@@ -1729,7 +1737,12 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
         },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { reason?: string; file_count?: number };
+        };
+      };
       expect(env.error?.code).toBe('usage_error');
       expect(env.error?.details?.reason).toBe('multi_file_set_unsupported');
       expect(env.error?.details?.file_count).toBe(2);

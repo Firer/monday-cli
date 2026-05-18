@@ -2263,12 +2263,14 @@ envelope). Mutex rejection shape:
   "ok": false,
   "error": {
     "code": "usage_error",
-    "message": "item update: --set <file-col>=<path> cannot be combined with --set / --set-raw / --name in the same call ...",
+    "message": "Mixing a file `--set <file-col>=<path>` with value `--set` / `--set-raw` / `--name` in the same call is not supported at v0.6-M38 ...",
     "details": {
       "reason": "mixed_file_and_value_sets",
-      "file_column_id": "files",
-      "value_column_ids": ["status_4"],
-      "hint": "split the call into two: `monday item update <iid> --set <file-col>=<path>` for the file write + `monday item update <iid> --set status=Done` for the value write. File-column dispatch goes through add_file_to_column (multipart) while value writes go through change_column_value (JSON) — they can't bundle into one wire mutation."
+      "column_id": "files",
+      "non_file_set_count": 1,
+      "set_raw_count": 0,
+      "has_name": false,
+      "hint": "run the file `--set` alone (e.g., `monday item set <iid> <file-col>=<path>`); apply value writes / rename in a separate call (e.g., `monday item update <iid> --set status=Done --name \"...\"`)."
     }
   }
 }

@@ -50,10 +50,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
-import {
-  resolveColumnWithRefresh,
-  type ResolverWarning,
-} from '../../api/columns.js';
+import type { ResolverWarning } from '../../api/columns.js';
 import type { MondayClient } from '../../api/client.js';
 import {
   selectMutation,
@@ -62,10 +59,11 @@ import {
 } from '../../api/column-values.js';
 import { executeItemMutation } from '../../api/item-mutation-execute.js';
 import {
-  enforceSingleFileColumnSet,
   executeFileColumnSet,
   fileColumnSetOutputSchema,
+  preCheckM38FileDispatch,
   type FileColumnSetOutput,
+  type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
 import { precheckLocalFile } from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
@@ -79,7 +77,11 @@ import {
 import { splitSetExpression } from '../../api/set-expression.js';
 import { buildResolutionContexts } from '../../api/resolution-context.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
-import { SourceAggregator } from '../../api/source-aggregator.js';
+import {
+  SourceAggregator,
+  mergeCacheAge,
+  mergeSource,
+} from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
@@ -430,77 +432,61 @@ export const itemUpdateCommand: CommandModule<
         const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
-        if (globalFlags.dryRun) {
-          // v0.6-M38 catch-and-route: planChanges' translator
-          // surfaces `unsupported_column_type` with
-          // `details.type === 'file'` for files-shaped columns;
-          // the action body intercepts that rejection and routes
-          // through the M38 mutex check + D4 dry-run envelope.
-          // Cleanly handles all four mutex outcomes (clean
-          // single-item / multi-file / mixed-set-and-other / no-op
-          // for non-file paths). Mirrors `item set` dry-run's
-          // catch-and-rewrap pattern (cli-design §5.3 step 5 + D4
-          // closure; R-v0.6-NEW-4 documents the shim).
-          let result;
-          try {
-            result = await planChanges({
-              client,
-              boardId,
-              itemId: dispatch.itemId,
-              setEntries,
-              ...(rawEntries.length === 0 ? {} : { rawEntries }),
-              ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
-              dateResolution,
-              peopleResolution,
-              tagResolution,
-              relationResolution,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-            });
-          } catch (err) {
-            if (
-              err instanceof ApiError &&
-              err.code === 'unsupported_column_type' &&
-              err.details?.type === 'file'
-            ) {
-              await runItemUpdateSingleFileDispatchDryRun({
-                client,
-                boardId,
-                itemId: dispatch.itemId,
-                setEntries,
-                rawEntries,
-                hasName: parsed.name !== undefined,
-                env: ctx.env,
-                noCache: globalFlags.noCache,
-                ctx,
-                programOpts: program.opts(),
-                apiVersion,
-              });
-              return;
-            }
-            throw err;
-          }
-          emitDryRun({
+        // v0.6-M38 mutex check at the column-resolution boundary
+        // (cli-design §5.3 step 5 "File-column dispatch leg —
+        // mutex rules"; D2/D5/D6 closures). Pre-checks setEntries'
+        // column types BEFORE calling `planChanges` /
+        // `resolveAndTranslate`, so the mutex rules fire upfront
+        // independent of translator-order side effects. The
+        // pre-check operates on setEntries only — `--set-raw
+        // <file-col>=<json>` rejection stays at
+        // `translateRawColumnValue` per D3 (permanent rejection;
+        // M38 dispatch never hijacks the --set-raw path).
+        const m38 = await preCheckM38FileDispatch({
+          client,
+          boardId,
+          setEntries,
+          setRawCount: rawEntries.length,
+          hasName: parsed.name !== undefined,
+          callShape: 'item_update_single',
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
+        if (m38.kind === 'file') {
+          // M38 dispatch path. The dry-run / live branches emit the
+          // D4 envelope / M31-shaped envelope respectively, threading
+          // the pre-check's resolver warnings + source aggregation
+          // into the final envelope (P3-1 — IMPL round-1 fix).
+          await runItemUpdateSingleFileDispatch({
+            client,
+            multipart,
             ctx,
             programOpts: program.opts(),
-            plannedChanges: result.plannedChanges as unknown as readonly Readonly<Record<string, unknown>>[],
-            source: result.source,
-            cacheAgeSeconds: result.cacheAgeSeconds,
-            warnings: result.warnings,
             apiVersion,
+            boardId,
+            itemId: dispatch.itemId,
+            m38,
+            isDryRun: globalFlags.dryRun,
+            retries: globalFlags.retry,
+            toEmit,
           });
           return;
         }
 
-        // Live update path — three-pass resolution + translation
-        // through the shared helper (R20 lift).
-        let resolutionResult;
-        try {
-          resolutionResult = await resolveAndTranslate({
+        if (globalFlags.dryRun) {
+          // m38.kind === 'json' — standard JSON translator path
+          // applies. The pre-check's resolver warnings + source
+          // aggregation seed the downstream planChanges run
+          // (downstream resolveAndTranslate hits cache for the
+          // already-resolved setEntries; source aggregation is
+          // correct per §6.1 — both legs counted).
+          const result = await planChanges({
             client,
             boardId,
+            itemId: dispatch.itemId,
             setEntries,
-            rawEntries,
+            ...(rawEntries.length === 0 ? {} : { rawEntries }),
+            ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
             dateResolution,
             peopleResolution,
             tagResolution,
@@ -508,31 +494,41 @@ export const itemUpdateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
-        } catch (err) {
-          if (
-            err instanceof ApiError &&
-            err.code === 'unsupported_column_type' &&
-            err.details?.type === 'file'
-          ) {
-            await runItemUpdateSingleFileDispatchLive({
-              client,
-              multipart,
-              ctx,
-              programOpts: program.opts(),
-              boardId,
-              itemId: dispatch.itemId,
-              setEntries,
-              rawEntries,
-              hasName: parsed.name !== undefined,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-              retries: globalFlags.retry,
-              toEmit,
-            });
-            return;
-          }
-          throw err;
+          // Downstream `planChanges` re-resolves setEntries (cache
+          // hit from the pre-check) so `result.warnings` re-emits any
+          // resolver warnings the pre-check observed; we use only
+          // downstream warnings to avoid duplicate emissions. Source
+          // aggregation merges the pre-check's leg into the dry-run
+          // envelope (planChanges doesn't accept `initialSource`).
+          emitDryRun({
+            ctx,
+            programOpts: program.opts(),
+            plannedChanges: result.plannedChanges as unknown as readonly Readonly<Record<string, unknown>>[],
+            source: mergeSource(m38.source, result.source),
+            cacheAgeSeconds: mergeCacheAge(m38.cacheAgeSeconds, result.cacheAgeSeconds),
+            warnings: result.warnings,
+            apiVersion,
+          });
+          return;
         }
+
+        // Live update path — three-pass resolution + translation
+        // through the shared helper (R20 lift). Pre-check already
+        // resolved setEntries (cache hit downstream).
+        const resolutionResult = await resolveAndTranslate({
+          client,
+          boardId,
+          setEntries,
+          rawEntries,
+          dateResolution,
+          peopleResolution,
+          tagResolution,
+          relationResolution,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+          ...(m38.source === undefined ? {} : { initialSource: m38.source }),
+          initialCacheAgeSeconds: m38.cacheAgeSeconds,
+        });
         const collectedWarnings: ResolverWarning[] = [
           ...resolutionResult.warnings,
         ];
@@ -750,6 +746,31 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     env: ctx.env,
     noCache: globalFlags.noCache,
   });
+
+  // 1.5) v0.6-M38 D5 closure — bulk file-set REJECTS at the
+  //      column-resolution boundary, BEFORE the items_page walker
+  //      + confirmation gate. The pre-check resolves setEntries
+  //      against the now-warm metadata cache and runs
+  //      `enforceSingleFileColumnSet({callShape: 'item_update_bulk'})`
+  //      which throws `'file_set_on_bulk_unsupported'` whenever
+  //      any setEntry is a `file`-typed column. `--set-raw
+  //      <file-col>=<json>` stays at `translateRawColumnValue`'s
+  //      D3 permanent rejection (the pre-check only inspects
+  //      setEntries; the standard path's `translateRawColumnValue`
+  //      handles --set-raw rejection unchanged).
+  if (setEntries.length > 0) {
+    await preCheckM38FileDispatch({
+      client,
+      boardId,
+      setEntries,
+      setRawCount: rawEntries.length,
+      hasName: parsed.name !== undefined,
+      callShape: 'item_update_bulk',
+      env: ctx.env,
+      noCache: globalFlags.noCache,
+    });
+  }
+
   const onColumnNotFound =
     meta.source === 'cache'
       ? async (): Promise<BoardMetadata> => {
@@ -897,40 +918,26 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       cacheAgeSeconds: meta.cacheAgeSeconds,
     });
     for (const itemId of matchedItemIds) {
-      let result;
-      try {
-        result = await planChanges({
-          client,
-          boardId,
-          itemId,
-          setEntries,
-          ...(rawEntries.length === 0 ? {} : { rawEntries }),
-          ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
-          dateResolution,
-          peopleResolution,
-          tagResolution,
-          relationResolution,
-          env: ctx.env,
-          noCache: globalFlags.noCache,
-        });
-      } catch (err) {
-        // v0.6-M38 D5 closure: bulk file-set REJECTS at the column-
-        // resolution boundary. planChanges' resolveAndTranslate
-        // surfaces `unsupported_column_type` with `details.type:
-        // 'file'` for files-shaped columns; the catch rewraps as
-        // `usage_error.details.reason: 'file_set_on_bulk_unsupported'`
-        // per D5. Fires on the FIRST matched item's planChanges
-        // call when any --set token resolves to a file column;
-        // subsequent items wouldn't reach this loop body anyway.
-        if (
-          err instanceof ApiError &&
-          err.code === 'unsupported_column_type' &&
-          err.details?.type === 'file'
-        ) {
-          throw buildBulkFileRejection(err);
-        }
-        throw err;
-      }
+      // v0.6-M38 D5 file-set rejection already fired at the pre-check
+      // above (step 1.5) — bulk file-set never reaches this loop body
+      // since `preCheckM38FileDispatch({callShape: 'item_update_bulk'})`
+      // throws `'file_set_on_bulk_unsupported'` before items_page
+      // walks. `--set-raw <file-col>=<json>` still rejects normally
+      // via `translateRawColumnValue`'s D3 permanent rejection.
+      const result = await planChanges({
+        client,
+        boardId,
+        itemId,
+        setEntries,
+        ...(rawEntries.length === 0 ? {} : { rawEntries }),
+        ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
+        dateResolution,
+        peopleResolution,
+        tagResolution,
+        relationResolution,
+        env: ctx.env,
+        noCache: globalFlags.noCache,
+      });
       for (const plan of result.plannedChanges) {
         allPlanned.push(plan as unknown as Readonly<Record<string, unknown>>);
       }
@@ -976,34 +983,23 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // is the narrowed subset used by foldResolverWarningsIntoError —
   // the helper's contract is to fold collision / stale_cache_refreshed
   // signals, not generic Warning types.
-  let resolutionResult;
-  try {
-    resolutionResult = await resolveAndTranslate({
-      client,
-      boardId,
-      setEntries,
-      rawEntries,
-      dateResolution,
-      peopleResolution,
-      tagResolution,
-      relationResolution,
-      env: ctx.env,
-      noCache: globalFlags.noCache,
-      initialSource: meta.source,
-      initialCacheAgeSeconds: meta.cacheAgeSeconds,
-    });
-  } catch (err) {
-    // v0.6-M38 D5 closure: bulk file-set REJECTS at the column-
-    // resolution boundary. Same rewrap as the dry-run loop above.
-    if (
-      err instanceof ApiError &&
-      err.code === 'unsupported_column_type' &&
-      err.details?.type === 'file'
-    ) {
-      throw buildBulkFileRejection(err);
-    }
-    throw err;
-  }
+  // v0.6-M38 D5 file-set rejection already fired at the pre-check
+  // above (step 1.5). resolveAndTranslate processes only non-file
+  // setEntries here.
+  const resolutionResult = await resolveAndTranslate({
+    client,
+    boardId,
+    setEntries,
+    rawEntries,
+    dateResolution,
+    peopleResolution,
+    tagResolution,
+    relationResolution,
+    env: ctx.env,
+    noCache: globalFlags.noCache,
+    initialSource: meta.source,
+    initialCacheAgeSeconds: meta.cacheAgeSeconds,
+  });
   const collectedWarnings: Warning[] = [
     ...filterResult.warnings,
     ...resolutionResult.warnings,
@@ -1242,169 +1238,74 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 // ALL file --set unconditionally.
 // ============================================================
 
-interface RunItemUpdateSingleFileDispatchDryRunInputs {
-  readonly client: MondayClient;
-  readonly boardId: string;
-  readonly itemId: string;
-  readonly setEntries: readonly { token: string; value: string }[];
-  readonly rawEntries: readonly ParsedSetRawExpression[];
-  readonly hasName: boolean;
-  readonly env: NodeJS.ProcessEnv;
-  readonly noCache: boolean;
-  readonly ctx: RunContext;
-  readonly programOpts: unknown;
-  readonly apiVersion: string;
-}
-
-const runItemUpdateSingleFileDispatchDryRun = async (
-  inputs: RunItemUpdateSingleFileDispatchDryRunInputs,
-): Promise<void> => {
-  // Re-resolve all setEntries + setRawEntries against the
-  // (now warm) metadata cache. The translator's rejection above
-  // confirmed at least one --set is a file column, but the mutex
-  // check needs to know which entries are file vs non-file +
-  // setRaw context + hasName to discriminate
-  // multi_file_set_unsupported vs mixed_file_and_value_sets per D2.
-  const resolvedSet = await Promise.all(
-    inputs.setEntries.map(async (entry) => {
-      const r = await resolveColumnWithRefresh({
-        client: inputs.client,
-        boardId: inputs.boardId,
-        token: entry.token,
-        includeArchived: true,
-        env: inputs.env,
-        noCache: inputs.noCache,
-      });
-      return {
-        columnId: r.match.column.id,
-        columnType: r.match.column.type,
-        rawValue: entry.value,
-      };
-    }),
-  );
-  const resolvedSetRaw = await Promise.all(
-    inputs.rawEntries.map(async (entry) => {
-      const r = await resolveColumnWithRefresh({
-        client: inputs.client,
-        boardId: inputs.boardId,
-        token: entry.token,
-        includeArchived: true,
-        env: inputs.env,
-        noCache: inputs.noCache,
-      });
-      return {
-        columnId: r.match.column.id,
-        columnType: r.match.column.type,
-      };
-    }),
-  );
-  const enforcement = enforceSingleFileColumnSet({
-    callShape: 'item_update_single',
-    setEntries: resolvedSet,
-    setRawEntries: resolvedSetRaw,
-    hasName: inputs.hasName,
-  });
-  /* c8 ignore next 4 — defensive: caller routes here only after
-     the translator rejected a file column, so kind === 'file' is
-     the only reachable outcome. */
-  if (enforcement.kind === 'json') {
-    throw new ApiError('internal_error', 'item update file dispatch: enforcement returned json kind unexpectedly');
-  }
-  const precheck = await precheckLocalFile(enforcement.rawValue);
-  // D4 dry-run envelope shape — single-entry planned_changes
-  // mirroring M31 `item upload --dry-run` verbatim; no file
-  // bytes loaded; `meta.source: 'none'`.
-  emitDryRun({
-    ctx: inputs.ctx,
-    programOpts: inputs.programOpts,
-    plannedChanges: [
-      {
-        operation: 'add_file_to_column',
-        item_id: inputs.itemId,
-        column_id: enforcement.columnId,
-        file_path: enforcement.rawValue,
-        filename: precheck.filename,
-        file_size_bytes: precheck.fileSizeBytes,
-      },
-    ],
-    source: 'none',
-    cacheAgeSeconds: null,
-    apiVersion: inputs.apiVersion,
-  });
-};
-
-interface RunItemUpdateSingleFileDispatchLiveInputs {
+/**
+ * Unified file-dispatch helper for `item update` single-item (live
+ * + dry-run). The action body's pre-check
+ * ({@link preCheckM38FileDispatch}) has already resolved setEntries
+ * + applied the mutex check + returned `kind: 'file'` with the
+ * resolved column ID, raw path, token, source aggregation, and
+ * resolver warnings; this helper takes that result + dispatches
+ * accordingly:
+ *
+ *   - Dry-run: emits the D4 envelope (`planned_changes:
+ *     [{operation: 'add_file_to_column', ...}]`; no file bytes
+ *     loaded; `meta.source: 'none'` per D4 — the file dispatch's
+ *     dry-run is local-derived, mirroring M31 `item upload
+ *     --dry-run`). The pre-check's source aggregation is discarded
+ *     in favour of D4's `'none'` slot (consistent with M31 dry-run).
+ *   - Live: runs {@link precheckLocalFile} + {@link executeFileColumnSet}
+ *     + invalidates the board cache + emits the M31-shaped envelope.
+ *     The pre-check's resolver warnings ride into the success
+ *     envelope's `warnings` slot (P3-1 round-1 fix); source stays
+ *     `'live'` (the multipart wire leg).
+ */
+interface RunItemUpdateSingleFileDispatchInputs {
   readonly client: MondayClient;
   readonly multipart: MultipartTransport;
   readonly ctx: RunContext;
   readonly programOpts: unknown;
+  readonly apiVersion: string;
   readonly boardId: string;
   readonly itemId: string;
-  readonly setEntries: readonly { token: string; value: string }[];
-  readonly rawEntries: readonly ParsedSetRawExpression[];
-  readonly hasName: boolean;
-  readonly env: NodeJS.ProcessEnv;
-  readonly noCache: boolean;
+  readonly m38: Extract<PreCheckM38FileDispatchResult, { kind: 'file' }>;
+  readonly isDryRun: boolean;
   readonly retries: number;
   readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
 }
 
-const runItemUpdateSingleFileDispatchLive = async (
-  inputs: RunItemUpdateSingleFileDispatchLiveInputs,
+const runItemUpdateSingleFileDispatch = async (
+  inputs: RunItemUpdateSingleFileDispatchInputs,
 ): Promise<void> => {
-  const resolvedSet = await Promise.all(
-    inputs.setEntries.map(async (entry) => {
-      const r = await resolveColumnWithRefresh({
-        client: inputs.client,
-        boardId: inputs.boardId,
-        token: entry.token,
-        includeArchived: true,
-        env: inputs.env,
-        noCache: inputs.noCache,
-      });
-      return {
-        columnId: r.match.column.id,
-        columnType: r.match.column.type,
-        rawValue: entry.value,
-        token: entry.token,
-      };
-    }),
-  );
-  const resolvedSetRaw = await Promise.all(
-    inputs.rawEntries.map(async (entry) => {
-      const r = await resolveColumnWithRefresh({
-        client: inputs.client,
-        boardId: inputs.boardId,
-        token: entry.token,
-        includeArchived: true,
-        env: inputs.env,
-        noCache: inputs.noCache,
-      });
-      return {
-        columnId: r.match.column.id,
-        columnType: r.match.column.type,
-      };
-    }),
-  );
-  const enforcement = enforceSingleFileColumnSet({
-    callShape: 'item_update_single',
-    setEntries: resolvedSet,
-    setRawEntries: resolvedSetRaw,
-    hasName: inputs.hasName,
-  });
-  /* c8 ignore next 4 */
-  if (enforcement.kind === 'json') {
-    throw new ApiError('internal_error', 'item update file dispatch: enforcement returned json kind unexpectedly');
+  const precheck = await precheckLocalFile(inputs.m38.rawValue);
+  if (inputs.isDryRun) {
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges: [
+        {
+          operation: 'add_file_to_column',
+          item_id: inputs.itemId,
+          column_id: inputs.m38.columnId,
+          file_path: inputs.m38.rawValue,
+          filename: precheck.filename,
+          file_size_bytes: precheck.fileSizeBytes,
+        },
+      ],
+      source: 'none',
+      cacheAgeSeconds: null,
+      warnings: inputs.m38.warnings,
+      apiVersion: inputs.apiVersion,
+    });
+    return;
   }
-  const precheck = await precheckLocalFile(enforcement.rawValue);
   const result = await executeFileColumnSet({
     client: inputs.client,
     multipart: inputs.multipart,
     itemId: inputs.itemId,
     entry: {
-      columnId: enforcement.columnId,
+      columnId: inputs.m38.columnId,
       columnType: 'file',
-      rawValue: enforcement.rawValue,
+      rawValue: inputs.m38.rawValue,
       filePath: precheck.filePath,
       filename: precheck.filename,
       fileSizeBytes: precheck.fileSizeBytes,
@@ -1413,29 +1314,25 @@ const runItemUpdateSingleFileDispatchLive = async (
     retries: inputs.retries,
   });
   // §8 single-leg cache invalidation BEFORE emit (mirrors M31).
-  await invalidateBoard(inputs.boardId, inputs.env);
+  await invalidateBoard(inputs.boardId, inputs.ctx.env);
   const data: FileColumnSetOutput = {
     operation: 'add_file_to_column',
     item_id: inputs.itemId,
-    column_id: enforcement.columnId,
+    column_id: inputs.m38.columnId,
     filename: precheck.filename,
     file_size_bytes: precheck.fileSizeBytes,
     asset: result.asset,
   };
-  // resolved_ids echo: token → resolved column ID for the file
-  // entry's token (mirrors `item set`'s single-token echo).
-  const matchingEntry = resolvedSet.find(
-    (r) => r.columnId === enforcement.columnId && r.columnType === 'file',
-  );
-  /* c8 ignore next 3 */
-  const resolvedIds: Readonly<Record<string, string>> =
-    matchingEntry === undefined ? {} : { [matchingEntry.token]: enforcement.columnId };
   emitMutation({
     ctx: inputs.ctx,
     data,
     schema: fileColumnSetOutputSchema,
     programOpts: inputs.programOpts,
-    warnings: [],
+    warnings: inputs.m38.warnings.map((w) => ({
+      code: w.code,
+      message: w.message,
+      details: w.details,
+    })),
     ...inputs.toEmit({
       data: result.asset,
       complexity: result.complexity,
@@ -1444,48 +1341,8 @@ const runItemUpdateSingleFileDispatchLive = async (
     source: 'live',
     cacheAgeSeconds: null,
     complexity: result.complexity,
-    resolvedIds,
+    resolvedIds: { [inputs.m38.token]: inputs.m38.columnId },
   });
 };
 
-/**
- * Rewraps a translator `unsupported_column_type` rejection on a
- * file-typed column as the v0.6-M38 D5 closure's
- * `file_set_on_bulk_unsupported` reason discriminator. Fires from
- * BOTH the bulk dry-run loop's first-iteration planChanges catch
- * AND the bulk live path's resolveAndTranslate catch — both reach
- * the translator's files-shaped rejection on the same code path.
- * The hint names the verb-shaped M31 fallback so agents have a
- * clear next step.
- */
-const buildBulkFileRejection = (err: ApiError): ApiError => {
-  const columnId =
-    typeof err.details?.column_id === 'string' ? err.details.column_id : null;
-  return new ApiError(
-    'usage_error',
-    `--set <file-col>=<path> is not supported on bulk \`item update ` +
-      `--where\` / \`--filter-json\` at v0.6-M38 (deferred to v0.6.x ` +
-      `per cli-design §13 v0.6 entry + v0.6-plan §3 M38 D5 closure). ` +
-      `Per-item file dispatch + \`--continue-on-error\` partial-success ` +
-      `envelope + \`--concurrency\` multipart-over-shared-transport ` +
-      `semantics each carry design dimensions worth their own milestone ` +
-      `cluster. Iterate matched items in your script and run single-item ` +
-      `\`monday item set <iid> <file-col>=<path>\` or \`monday item ` +
-      `upload <iid> --column <col> <file>\` (v0.4-M31; verb-shaped) ` +
-      `per item.`,
-    {
-      cause: err,
-      details: {
-        reason: 'file_set_on_bulk_unsupported',
-        ...(columnId === null ? {} : { column_id: columnId }),
-        deferred_to: 'v0.6.x',
-        hint:
-          'bulk file dispatch is not supported at v0.6-M38; iterate ' +
-          'matched items in your script and call `monday item set <iid> ' +
-          '<file-col>=<path>` per item, or use `monday item upload <iid> ' +
-          '--column <col> <file>` (v0.4-M31).',
-      },
-    },
-  );
-};
 

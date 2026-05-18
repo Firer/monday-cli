@@ -2183,7 +2183,12 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
       },
     );
     expect(out.exitCode).toBe(1);
-    const env = parseEnvelope(out.stderr);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { reason?: string; column_id?: string };
+      };
+    };
     expect(env.error?.code).toBe('usage_error');
     expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
     expect(env.error?.details?.column_id).toBe('attachments');
@@ -2213,7 +2218,9 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
       },
     );
     expect(out.exitCode).toBe(1);
-    const env = parseEnvelope(out.stderr);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { reason?: string } };
+    };
     expect(env.error?.code).toBe('usage_error');
     expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
   });

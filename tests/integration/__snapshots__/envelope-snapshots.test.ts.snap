@@ -2126,13 +2126,13 @@ exports[`envelope snapshot — item mutations > item create (top-level, single -
   },
   "meta": {
     "api_version": "2026-01",
-    "cache_age_seconds": null,
+    "cache_age_seconds": 0,
     "cli_version": "0.0.0-test",
     "complexity": null,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
-    "source": "live",
+    "source": "mixed",
   },
   "ok": true,
   "resolved_ids": {
@@ -2147,14 +2147,14 @@ exports[`envelope snapshot — item mutations > item create --dry-run (top-level
   "data": null,
   "meta": {
     "api_version": "2026-01",
-    "cache_age_seconds": null,
+    "cache_age_seconds": 0,
     "cli_version": "0.0.0-test",
     "complexity": null,
     "dry_run": true,
     "request_id": "fixed-req-id",
     "retrieved_at": "2026-04-30T10:00:00.000Z",
     "schema_version": "1",
-    "source": "live",
+    "source": "mixed",
   },
   "ok": true,
   "planned_changes": [

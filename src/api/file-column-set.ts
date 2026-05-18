@@ -142,6 +142,8 @@ import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
 import { buildBlobFromPath } from '../utils/file-source.js';
 import { addFileToColumn, assetSchema, type Asset } from './assets.js';
+import { resolveColumnWithRefresh, type ResolverWarning } from './columns.js';
+import { mergeSource, mergeCacheAge } from './source-aggregator.js';
 import type { Complexity } from '../utils/output/envelope.js';
 import type { MondayClient } from './client.js';
 import type { MultipartTransport } from './multipart-transport.js';
@@ -211,21 +213,22 @@ export type FileColumnSetOutput = z.infer<typeof fileColumnSetOutputSchema>;
  * `addFileToColumn` (`src/api/assets.ts`) verbatim — no new wire
  * mutation, no new transport seam.
  *
- * At pre-flight this is a stub signature; the runtime body lands
- * at M38 IMPL and reads:
+ * The runtime body (below in this module) reads:
  *
  *   1. Construct a `Blob` from the local file at
- *      `inputs.entry.filePath` (read bytes via `fs/promises.readFile`
- *      after the action body's pre-check confirmed R_OK + non-empty).
- *      `Blob.type` from `sniffContentType(inputs.entry.filename)`.
- *   2. Call `addFileToColumn({client, multipart, itemId: entry...,
- *      columnId: entry.columnId, file, filename: entry.filename,
- *      signal, retries})` — M31's fetcher already wraps the
- *      multipart dispatch in `withRetry(...)` + handles the
- *      file_too_large rewrap-inside-retry-thunk pattern.
- *   3. Project the result into `FileColumnSetOutput` shape with the
- *      `operation: 'add_file_to_column'` literal + agent-supplied
- *      slots echoed (item_id, column_id, filename, file_size_bytes).
+ *      `inputs.entry.filePath` via {@link buildBlobFromPath} (read
+ *      bytes via `fs/promises.readFile` + sniff content-type from
+ *      filename); the caller already ran {@link precheckLocalFile}
+ *      so the path is known good + size known non-zero.
+ *   2. Call `addFileToColumn({client, multipart, itemId, columnId,
+ *      file, filename, signal, retries})` — M31's fetcher already
+ *      wraps the multipart dispatch in `withRetry(...)` + handles
+ *      the file_too_large rewrap-inside-retry-thunk pattern.
+ *   3. Project the result into {@link FileColumnSetOutput} shape
+ *      with the `operation: 'add_file_to_column'` literal +
+ *      agent-supplied slots (item_id, column_id, filename,
+ *      file_size_bytes) — emitted by the action body after this
+ *      fetcher returns.
  */
 export interface ExecuteFileColumnSetInputs {
   readonly client: MondayClient;
@@ -581,4 +584,189 @@ export const enforceSingleFileColumnSet = (
     throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (clean)');
   }
   return { kind: 'file', columnId: fe.columnId, rawValue: fe.rawValue };
+};
+
+/**
+ * Argv-level setEntry shape (`<token>=<value>` split, pre-resolution).
+ * Used as input to {@link preCheckM38FileDispatch}.
+ */
+export interface ArgvSetEntry {
+  readonly token: string;
+  readonly value: string;
+}
+
+/**
+ * Result of {@link preCheckM38FileDispatch}. On the `'json'` branch
+ * the action body proceeds with the standard `resolveAndTranslate` /
+ * `planChanges` path (cache is warm from this pre-check). On the
+ * `'file'` branch the action body runs {@link precheckLocalFile} +
+ * {@link executeFileColumnSet} for the live path, or emits the D4
+ * dry-run envelope.
+ *
+ * `warnings` + `source` + `cacheAgeSeconds` aggregate the
+ * resolveColumnWithRefresh legs the pre-check fired; callers thread
+ * these into the downstream success envelope (json branch into the
+ * standard path's existing aggregation seeds; file branch into the
+ * file-dispatch envelope's `warnings` + `meta.source` slots).
+ */
+export type PreCheckM38FileDispatchResult =
+  | {
+      readonly kind: 'json';
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    }
+  | {
+      readonly kind: 'file';
+      readonly columnId: string;
+      readonly rawValue: string;
+      readonly token: string;
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    };
+
+export interface PreCheckM38FileDispatchInputs {
+  readonly client: MondayClient;
+  readonly boardId: string;
+  readonly setEntries: readonly ArgvSetEntry[];
+  /**
+   * Count of `--set-raw` entries the call carries. Only the count
+   * matters for the mutex check ("file --set + ANY --set-raw"); the
+   * setRawEntries' column types do NOT need pre-resolution here.
+   * `--set-raw <file-col>=<json>` rejection stays at
+   * `translateRawColumnValue` per D3 (permanent rejection); the
+   * pre-check never routes a `--set-raw` path through M38 dispatch.
+   */
+  readonly setRawCount: number;
+  readonly hasName: boolean;
+  readonly callShape:
+    | 'item_update_single'
+    | 'item_update_bulk'
+    | 'item_create';
+  readonly env?: NodeJS.ProcessEnv;
+  readonly noCache?: boolean;
+}
+
+/**
+ * Resolves `setEntries` column types and runs the v0.6-M38 mutex
+ * check (per cli-design §5.3 step 5 "File-column dispatch leg —
+ * mutex rules"). The discipline: **enforce mutex at the column-
+ * resolution boundary**, not at the translator-rejection boundary.
+ * Pre-flight P2-1 + IMPL round-1 P2-2 both surfaced the
+ * translator-order-dependent priority drift that this resolution-
+ * boundary check fixes.
+ *
+ * **Why the pre-check fires at the action-body level rather than
+ * inside `resolveAndTranslate`.** The shared resolver helper is
+ * used by 5 sites (item set, item update single + bulk, item
+ * create); the M38 dispatch only applies to 3 (item update single
+ * + bulk + item create — item set has its own column resolution at
+ * the action body level for the single-positional shape). Folding
+ * M38 dispatch into `resolveAndTranslate` would couple the
+ * resolver helper to the file-dispatch leg; the action-body level
+ * pre-check keeps `resolveAndTranslate` translator-only.
+ *
+ * **Discriminating friendly `--set` vs `--set-raw`** — the
+ * pre-check operates on setEntries only. `--set-raw <file-col>=<json>`
+ * rejections come from `translateRawColumnValue` (D3 permanent
+ * rejection); the pre-check returns `kind: 'json'` for `--set-raw`
+ * file paths and the standard path's `resolveAndTranslate` /
+ * `planChanges` then surfaces the D3 `unsupported_column_type`
+ * rejection. The pre-check NEVER hijacks `--set-raw` paths into
+ * M38 dispatch.
+ *
+ * **Source aggregation contract.** Each resolveColumnWithRefresh
+ * call returns its own `source` / `cacheAgeSeconds`; the pre-check
+ * aggregates across `setEntries`. On the `'json'` branch the
+ * downstream `resolveAndTranslate` will re-resolve setEntries
+ * (cache hit) and produce another aggregation leg — the action
+ * body merges both aggregations so the final envelope reflects
+ * every wire / cache leg that fired. The `meta.source` of a
+ * non-file path with a single `--set` may surface as `'mixed'`
+ * (live pre-check + cache downstream) rather than `'live'`; this
+ * is correct per §6.1 source-aggregation rules — the second leg
+ * IS a cache hit.
+ */
+export const preCheckM38FileDispatch = async (
+  inputs: PreCheckM38FileDispatchInputs,
+): Promise<PreCheckM38FileDispatchResult> => {
+  const resolved: {
+    readonly columnId: string;
+    readonly columnType: string;
+    readonly rawValue: string;
+    readonly token: string;
+  }[] = [];
+  let aggregateSource: 'live' | 'cache' | 'mixed' | undefined;
+  let aggregateCacheAge: number | null = null;
+  const warnings: ResolverWarning[] = [];
+  for (const entry of inputs.setEntries) {
+    const r = await resolveColumnWithRefresh({
+      client: inputs.client,
+      boardId: inputs.boardId,
+      token: entry.token,
+      includeArchived: true,
+      ...(inputs.env === undefined ? {} : { env: inputs.env }),
+      ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
+    });
+    resolved.push({
+      columnId: r.match.column.id,
+      columnType: r.match.column.type,
+      rawValue: entry.value,
+      token: entry.token,
+    });
+    aggregateSource = mergeSource(aggregateSource, r.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, r.cacheAgeSeconds);
+    warnings.push(...r.warnings);
+  }
+  // Synthesize setRawEntries inputs from the count — only length
+  // matters for the mutex check; columnId / columnType slots are
+  // unused on the mixed-set discriminator path.
+  const setRawEntries = Array.from(
+    { length: inputs.setRawCount },
+    () => ({ columnId: '', columnType: '' }),
+  );
+  const enforcement = enforceSingleFileColumnSet({
+    callShape: inputs.callShape,
+    setEntries: resolved.map((r) => ({
+      columnId: r.columnId,
+      columnType: r.columnType,
+      rawValue: r.rawValue,
+    })),
+    setRawEntries,
+    hasName: inputs.hasName,
+  });
+  if (enforcement.kind === 'json') {
+    return {
+      kind: 'json',
+      warnings,
+      source: aggregateSource,
+      cacheAgeSeconds: aggregateCacheAge,
+    };
+  }
+  // enforcement.kind === 'file'. Find the matching resolved entry
+  // for the file-column token (echo into resolved_ids downstream).
+  const fileResolved = resolved.find(
+    (r) =>
+      r.columnType === 'file' &&
+      r.columnId === enforcement.columnId &&
+      r.rawValue === enforcement.rawValue,
+  );
+  /* c8 ignore next 5 — defensive: enforcement returned the same
+     entry the pre-check passed in; the find must succeed. */
+  if (fileResolved === undefined) {
+    throw new ApiError(
+      'internal_error',
+      'preCheckM38FileDispatch: file entry not found in resolved set after enforcement',
+    );
+  }
+  return {
+    kind: 'file',
+    columnId: enforcement.columnId,
+    rawValue: enforcement.rawValue,
+    token: fileResolved.token,
+    warnings,
+    source: aggregateSource,
+    cacheAgeSeconds: aggregateCacheAge,
+  };
 };

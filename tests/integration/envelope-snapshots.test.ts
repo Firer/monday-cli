@@ -1508,22 +1508,12 @@ describe('envelope snapshot — item mutations', () => {
         { multipartTransport: multipart },
       );
       expect(out.exitCode).toBe(0);
-      // Filename + path slots are workdir-dependent; collapse for
-      // snapshot stability. The shape (`operation`, `column_id`,
-      // `asset.*`, envelope `meta`) is what the snapshot pins.
-      const env = parseEnvelope(out.stdout) as ReturnType<
-        typeof parseEnvelope
-      > & {
-        data?: Record<string, unknown>;
-      };
-      if (env.data !== undefined) {
-        env.data = {
-          ...env.data,
-          // Workdir-stable sentinel for path-bearing fields.
-          ...(env.data as Record<string, unknown>),
-        };
-      }
-      expect(env).toMatchSnapshot();
+      // The live dispatch envelope is workdir-stable — filename
+      // is basename-derived (`report.pdf`); file_size_bytes is
+      // the deterministic 17-byte fixture; asset.* echoes the
+      // cassette's `sampleFileAsset`. No sentinel substitution
+      // needed.
+      expect(parseEnvelope(out.stdout)).toMatchSnapshot();
     });
 
     it('item set <file-col>=<path> --dry-run (M38 D4 planned_changes envelope)', async () => {

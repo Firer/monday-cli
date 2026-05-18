@@ -72,10 +72,11 @@ import {
 } from '../../api/item-board-lookup.js';
 import {
   SourceAggregator,
-  mergeSourceWithPreflight,
   mergeCacheAge,
+  mergeSourceWithPreflight,
 } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
+import { preCheckM38FileDispatch } from '../../api/file-column-set.js';
 import { foldAndRemap } from '../../api/resolver-error-fold.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
@@ -786,53 +787,64 @@ export const itemCreateCommand: CommandModule<
         const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
+        // v0.6-M38 D6 closure — create-time file-set REJECTS at the
+        // column-resolution boundary. Pre-checks setEntries against
+        // the resolved create-mode board (subitems board for subitem
+        // create; --board for top-level) and fires
+        // `'file_set_on_create_unsupported'` before any planCreate /
+        // resolveAndTranslate call. `--set-raw <file-col>=<json>`
+        // stays at `translateRawColumnValue`'s D3 permanent rejection
+        // (the pre-check inspects setEntries only).
+        let m38Source: 'live' | 'cache' | 'mixed' | undefined;
+        let m38CacheAge: number | null = null;
+        if (setEntries.length > 0) {
+          const m38 = await preCheckM38FileDispatch({
+            client,
+            boardId: resolveBoardId,
+            setEntries,
+            setRawCount: rawEntries.length,
+            hasName: true,
+            callShape: 'item_create',
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          // `enforceSingleFileColumnSet({callShape: 'item_create'})`
+          // throws on any file entry, so reaching this point means
+          // `m38.kind === 'json'`. Capture the pre-check's source /
+          // cache-age for downstream aggregation (P3-1-equivalent
+          // round-1 fix — pre-check's wire-leg must surface on the
+          // create envelope's `meta.source`).
+          m38Source = m38.source;
+          m38CacheAge = m38.cacheAgeSeconds;
+        }
+
         if (globalFlags.dryRun) {
-          let result;
-          try {
-            result = await planCreate({
-              client,
-              mode: createMode,
-              name: parsed.name,
-              setEntries,
-              ...(rawEntries.length === 0 ? {} : { rawEntries }),
-              dateResolution,
-              peopleResolution,
-              tagResolution,
-              relationResolution,
-              env: ctx.env,
-              noCache: globalFlags.noCache,
-            });
-          } catch (err) {
-            // v0.6-M38 D6 closure: create-time file-set REJECTS at
-            // the column-resolution boundary. planCreate's
-            // resolveAndTranslate surfaces `unsupported_column_type`
-            // with `details.type === 'file'` for files-shaped
-            // columns; the catch rewraps as `usage_error.details.
-            // reason: 'file_set_on_create_unsupported'`. Monday's
-            // wire has no atomic create-with-file mutation at API
-            // `2026-01`; create-time file upload would require a
-            // non-atomic post-create `add_file_to_column` that
-            // breaks §5.8 state safety.
-            if (
-              err instanceof ApiError &&
-              err.code === 'unsupported_column_type' &&
-              err.details?.type === 'file'
-            ) {
-              throw buildCreateFileRejection(err);
-            }
-            throw err;
-          }
-          // Dry-run envelope source folds three legs (Codex M9 P2 #1):
+          const result = await planCreate({
+            client,
+            mode: createMode,
+            name: parsed.name,
+            setEntries,
+            ...(rawEntries.length === 0 ? {} : { rawEntries }),
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+          // Dry-run envelope source folds four legs (Codex M9 P2 #1
+          // + v0.6-M38 IMPL round-1 P3-1-equivalent fix):
           // pre-planner network calls (parent lookup + parent-board
-          // metadata + --relative-to verification) + planCreate's
+          // metadata + --relative-to verification) + the M38
+          // pre-check's column-resolution leg + planCreate's
           // column-resolution legs. `meta.source: "none"` is only
           // accurate when ZERO wire calls fired.
           const dryRunSource = mergeSourceWithPreflight(
-            result.source,
+            mergeSourceWithPreflight(result.source, m38Source),
             createModeResult.preflightSource,
           );
           const dryRunCacheAge = mergeCacheAge(
-            result.cacheAgeSeconds,
+            mergeCacheAge(m38CacheAge, result.cacheAgeSeconds),
             createModeResult.preflightCacheAgeSeconds,
           );
           emitDryRun({
@@ -853,34 +865,20 @@ export const itemCreateCommand: CommandModule<
         // Live create path. Three-pass resolution + translation
         // through the shared helper (R20 lift), then bundle into one
         // column_values map and fire the single-round-trip mutation
-        // per cli-design §5.8.
-        let resolutionResult;
-        try {
-          resolutionResult = await resolveAndTranslate({
-            client,
-            boardId: resolveBoardId,
-            setEntries,
-            rawEntries,
-            dateResolution,
-            peopleResolution,
-            tagResolution,
-            relationResolution,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
-        } catch (err) {
-          // v0.6-M38 D6 closure: same rewrap as the dry-run branch
-          // above. The catch fires when any --set token resolves to
-          // a file-typed column.
-          if (
-            err instanceof ApiError &&
-            err.code === 'unsupported_column_type' &&
-            err.details?.type === 'file'
-          ) {
-            throw buildCreateFileRejection(err);
-          }
-          throw err;
-        }
+        // per cli-design §5.8. v0.6-M38 D6 file-set rejection already
+        // fired at the pre-check above.
+        const resolutionResult = await resolveAndTranslate({
+          client,
+          boardId: resolveBoardId,
+          setEntries,
+          rawEntries,
+          dateResolution,
+          peopleResolution,
+          tagResolution,
+          relationResolution,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
         const collectedWarnings: ResolverWarning[] = [
           ...resolutionResult.warnings,
         ];
@@ -893,6 +891,13 @@ export const itemCreateCommand: CommandModule<
         // planner there can claim 'none' (no wire call); the class
         // shape only handles `EnvelopeSource = 'live'|'cache'|'mixed'`.
         const sourceAgg = new SourceAggregator();
+        // v0.6-M38 IMPL round-1 P3-1-equivalent fix: thread the M38
+        // pre-check's source/cacheAge into source aggregation so the
+        // live envelope's `meta.source` reflects the pre-check wire
+        // leg (a `live` BoardMetadata fetch when cache cold).
+        if (m38Source !== undefined) {
+          sourceAgg.record(m38Source, m38CacheAge);
+        }
         if (resolutionResult.source !== undefined) {
           sourceAgg.record(
             resolutionResult.source,
@@ -1157,47 +1162,4 @@ const executeCreateSubitem = async (
   };
 };
 
-/**
- * Rewraps a translator `unsupported_column_type` rejection on a
- * file-typed column as the v0.6-M38 D6 closure's
- * `file_set_on_create_unsupported` reason discriminator. Fires
- * from BOTH the dry-run `planCreate` catch AND the live
- * `resolveAndTranslate` catch — both reach the translator's
- * files-shaped rejection on the same code path. Monday's wire has
- * no atomic create-with-file mutation at API `2026-01`; create-
- * time file upload would force a non-atomic post-create
- * `add_file_to_column` that breaks §5.8 state safety. The hint
- * names the post-create two-step workflow so agents have a clear
- * next step.
- */
-const buildCreateFileRejection = (err: ApiError): ApiError => {
-  const columnId =
-    typeof err.details?.column_id === 'string' ? err.details.column_id : null;
-  return new ApiError(
-    'usage_error',
-    `--set <file-col>=<path> is not supported on \`monday item create\` ` +
-      `at v0.6-M38 (deferred to v0.6.x per cli-design §13 v0.6 entry + ` +
-      `v0.6-plan §3 M38 D6 closure). Monday's wire has no atomic ` +
-      `create-with-file mutation at API \`2026-01\`; create-time file ` +
-      `upload would require a non-atomic post-create ` +
-      `\`add_file_to_column\` that breaks §5.8 state safety. Create ` +
-      `the item first (with non-file \`--set\` values), then attach the ` +
-      `file with \`monday item set <iid> <file-col>=<path>\` (v0.6-M38; ` +
-      `friendly) or \`monday item upload <iid> --column <col> <file>\` ` +
-      `(v0.4-M31; verb-shaped).`,
-    {
-      cause: err,
-      details: {
-        reason: 'file_set_on_create_unsupported',
-        ...(columnId === null ? {} : { column_id: columnId }),
-        deferred_to: 'v0.6.x',
-        hint:
-          'create the item with non-file `--set` values, then attach ' +
-          'the file with `monday item set <iid> <file-col>=<path>` ' +
-          '(v0.6-M38) or `monday item upload <iid> --column <col> ' +
-          '<file>` (v0.4-M31).',
-      },
-    },
-  );
-};
 

@@ -3477,7 +3477,11 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       ],
     };
 
-    it("rejects bulk file --set with usage_error.details.reason: 'file_set_on_bulk_unsupported' (live path; --yes provided so the confirmation gate doesn't pre-empt)", async () => {
+    it("rejects bulk file --set with usage_error.details.reason: 'file_set_on_bulk_unsupported' (live path; pre-check fires BEFORE items_page walker + confirmation gate per the resolution-boundary discipline)", async () => {
+      // M38 pre-check fires BEFORE items_page walker — no ItemsPage
+      // cassette needed; the rejection short-circuits before the
+      // walker is invoked. The pre-check sees `setEntries` resolved
+      // against the board metadata and surfaces the D5 rejection.
       const out = await drive(
         [
           'item',
@@ -3497,34 +3501,18 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
               operation_name: 'BoardMetadata',
               response: { data: { boards: [fileBoard] } },
             },
-            // items_page walker — return one matched item so the
-            // loop enters resolveAndTranslate, where the file
-            // rejection fires.
-            {
-              operation_name: 'ItemsPage',
-              response: {
-                data: {
-                  boards: [
-                    {
-                      items_page: {
-                        cursor: null,
-                        items: [{ id: '12345' }],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
           ],
         },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
       expect(env.error?.code).toBe('usage_error');
       expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
     });
 
-    it("rejects bulk file --set on dry-run path with the same reason discriminator (D5 fires regardless of --yes / --dry-run)", async () => {
+    it("rejects bulk file --set on dry-run path with the same reason discriminator (D5 fires regardless of --yes / --dry-run; pre-check is path-uniform)", async () => {
       const out = await drive(
         [
           'item',
@@ -3544,26 +3532,13 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
               operation_name: 'BoardMetadata',
               response: { data: { boards: [fileBoard] } },
             },
-            {
-              operation_name: 'ItemsPage',
-              response: {
-                data: {
-                  boards: [
-                    {
-                      items_page: {
-                        cursor: null,
-                        items: [{ id: '12345' }],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
           ],
         },
       );
       expect(out.exitCode).toBe(1);
-      const env = parseEnvelope(out.stderr);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
       expect(env.error?.code).toBe('usage_error');
       expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
     });

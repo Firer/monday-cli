@@ -31,10 +31,7 @@ import {
   sampleItem,
   useItemTestEnv,
 } from './_item-fixtures.js';
-import {
-  createInlineMultipartFixtureTransport,
-  type MultipartInteraction,
-} from '../../fixtures/multipart-load.js';
+import { createInlineMultipartFixtureTransport } from '../../fixtures/multipart-load.js';
 
 const { drive, xdgRoot } = useItemTestEnv();
 
@@ -2011,11 +2008,15 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
         },
       );
       expect(out.exitCode).toBe(0);
-      const env = parseEnvelope(out.stdout) as EnvelopeShape;
+      const env = parseEnvelope(out.stdout);
       expect(env.ok).toBe(true);
-      expect(env.meta.dry_run).toBe(true);
-      expect(env.meta.source).toBe('none');
-      expect(env.planned_changes).toEqual([
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      expect(meta.source).toBe('none');
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      expect(envWithPlanned.planned_changes).toEqual([
         {
           operation: 'add_file_to_column',
           item_id: '12345',
