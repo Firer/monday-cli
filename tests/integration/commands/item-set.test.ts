@@ -1841,7 +1841,7 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     expect(env.error?.details?.read_only).toBe(true);
   });
 
-  it('--set-raw rejects files-shaped (file) at v0.6-M38 per D3 closure (no API call fires; rejection is permanent for --set-raw because Monday\'s wire has no JSON-shape for change_column_value on file columns; the friendly --set <file-col>=<path> form ships at M38 but --set-raw stays rejected)', async () => {
+  it('--set-raw rejects files-shaped (file) per D3 closure (permanent; no API call fires; the friendly --set <file-col>=<path> form ships across v0.6-M38 single-item + v0.7-M42 bulk + v0.4-M31 verb-shaped upload, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', async () => {
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [

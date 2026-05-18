@@ -183,19 +183,21 @@ export const parseSetRawExpression = (raw: string): ParsedSetRawExpression => {
  *     `read_only: true`. Monday computes these server-side; no
  *     payload (raw or friendly) is ever accepted.
  *   - **`files`-shaped** → `unsupported_column_type` rejection
- *     STAYS at v0.6-M38 per D3 closure. Monday writes via
+ *     STAYS per D3 closure (permanent). Monday writes via
  *     `add_file_to_column` (multipart upload), not
  *     `change_column_value`; the raw payload can't reach the
  *     right wire surface (Monday's wire has no JSON-shape for
- *     `change_column_value` on file columns). v0.6-M38 ships the
- *     friendly `--set <file-col>=<path>` form (dispatching into
- *     the multipart wire at the command action body — see
- *     `src/api/file-column-set.ts`); the escape-hatch contract
- *     "user supplies JSON `change_column_value` accepts" doesn't
- *     compose with multipart, so `--set-raw <file-col>=<json>`
- *     stays rejected. Hint points at the M38 friendly `--set`
- *     form OR `monday item upload` (v0.4-M31; verb-shaped
- *     multipart).
+ *     `change_column_value` on file columns). The friendly
+ *     `--set <file-col>=<path>` form ships across three paths
+ *     reaching the multipart wire: v0.6-M38 single-item friendly
+ *     (`monday item set` + `monday item update <iid>`); v0.7-M42
+ *     bulk friendly (`monday item update --where ...` per-item
+ *     fan-out under `--concurrency` / `--continue-on-error`);
+ *     v0.4-M31 verb-shaped (`monday item upload <iid> --column
+ *     <col> <file>`). The escape-hatch contract "user supplies
+ *     JSON `change_column_value` accepts" doesn't compose with
+ *     multipart, so `--set-raw <file-col>=<json>` stays rejected
+ *     regardless. Hint enumerates every shipped path.
  *
  * Anything else (writable + tentative-slipped + future where the API
  * accepts `change_column_value`) is accepted — the user took the

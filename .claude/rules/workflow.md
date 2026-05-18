@@ -77,6 +77,55 @@ only the wire-call leg + envelope emit live behind the c8-ignore.
 
 R-NEW-76 (graduated v0.5-M34 pre-flight).
 
+## Pre-IMPL contract-term checklist for cross-doc grep
+
+When a milestone's IMPL touches contract-term prose across multiple
+documentation layers (cli-design.md / output-shapes.md /
+v0.x-plan.md / source docstrings / runtime user-facing strings /
+test prose + assertions), the post-fix-up cross-doc grep
+(R-NEW-72) must run against a **per-milestone term checklist**
+defined at the pre-flight commit. Without the checklist, Codex
+fix-up rounds escalate as each round's broader sweep catches a
+new layer of adjacent prose that the prior round's narrower
+regex missed.
+
+**How to apply.**
+
+1. At the pre-flight commit (or first IMPL commit), enumerate
+   the full set of contract-term phrases the milestone's
+   shipped surface uses. Examples from v0.7-M42:
+     - State-current phrases that should appear post-IMPL:
+       `v0.7-M42`, `bulk friendly`, `per-item fan-out`,
+       `--continue-on-error`, `--concurrency`, `runItemUpdateBulkFileDispatch`,
+       `BulkFileSetData`, `item_update_bulk_file_set`.
+     - Pre-IMPL phrases that should NOT appear in current
+       prose post-IMPL (only in historical post-mortem entries):
+       `m42_preflight_stub`, `file_set_on_bulk_unsupported`,
+       `pre-flight stub`, `c8-ignored stub`, `lifts at M42 IMPL`,
+       `single-item only`, `two write paths`, `BOTH write paths`,
+       `defer to v0.6.x`, `bulk + create reject`,
+       `M38 bulk` (M38 only shipped single-item).
+2. After every Codex fix-up round, grep ALL "should not appear"
+   terms across `src/`, `docs/`, `tests/`. Each hit in a non-
+   historical context is a contract-term drift bug; fix before
+   the next Codex round.
+3. The pre-IMPL checklist replaces the round-N-specific term
+   discovery — instead of waiting for Codex to enumerate the
+   stale terms one round at a time (the historical pattern that
+   escalates 3-5 rounds), the IMPL author commits to the full
+   set upfront.
+
+**Threshold rule for graduating the checklist into a milestone's
+post-mortem.** A milestone with 3+ Codex W9-only rounds (prose
+drift dominating the fix-up cadence) should file a per-milestone
+contract-term checklist at close-docs naming the load-bearing
+phrases that ended up needing flips. The next milestone touching
+the same surface inherits the checklist + extends it.
+
+R-v0.7-NEW-4 (graduated v0.7-M42 IMPL — surfaced across 7 Codex
+rounds of escalating W9 prose drift; each round's sweep widened
+to catch what the prior round's narrower regex missed).
+
 ## Skip Codex review on mechanical / process-only clusters
 
 Clusters with zero production `src/**/*.ts` changes (R-class lifts

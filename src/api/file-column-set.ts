@@ -126,9 +126,10 @@
  * `change_column_value` accepts" doesn't compose with the
  * multipart wire. The existing rejection at
  * `raw-write.ts:translateRawColumnValue` stays unchanged; the
- * prose flips slightly to note "M38 ships the friendly `--set
- * <file-col>=<path>` form but `--set-raw` for files stays
- * rejected".
+ * prose enumerates every shipped friendly write path (v0.6-M38
+ * single-item, v0.7-M42 bulk, v0.4-M31 verb-shaped upload) so
+ * agents reading the `--set-raw` rejection see the full set of
+ * working alternatives rather than just the M38 single-item form.
  *
  * **D7 closure — `<path>='-'` stdin support OUT OF SCOPE.**
  * Mirrors M31 `monday item upload`'s rejection rationale — no

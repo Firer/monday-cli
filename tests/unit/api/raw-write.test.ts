@@ -289,7 +289,7 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
     },
   );
 
-  it('files-shaped type (file) → unsupported_column_type rejection STAYS at v0.6-M38 per D3 closure (no deferred_to slot — the rejection is permanent for --set-raw; v0.6-M38 ships the friendly --set <file-col>=<path> form on item set / item update, dispatching into the multipart wire at the action body, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', () => {
+  it('files-shaped type (file) → unsupported_column_type rejection STAYS per D3 closure (permanent — no deferred_to slot; the friendly --set <file-col>=<path> form ships across v0.6-M38 single-item + v0.7-M42 bulk + v0.4-M31 verb-shaped upload paths, but --set-raw stays rejected because Monday\'s wire has no JSON-shape for change_column_value on file columns)', () => {
     expect(() =>
       translateRawColumnValue(
         { id: 'attachments', type: 'file' },
