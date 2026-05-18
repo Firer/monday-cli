@@ -84,6 +84,30 @@ import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
+/**
+ * Dedupes resolver warnings by `code + message + details.token`.
+ * v0.6-M38 IMPL round-2 P3-1 fix: M38 pre-check + downstream
+ * resolveAndTranslate / planCreate can both observe the same
+ * `stale_cache_refreshed` / `column_token_collision` warning;
+ * dedupe ensures each surfaces exactly once. Same shape as the
+ * bulk-update `dedupeWarnings` helper.
+ */
+const dedupeCreateWarnings = (
+  warnings: readonly Warning[],
+): readonly Warning[] => {
+  const seen = new Set<string>();
+  const out: Warning[] = [];
+  for (const w of warnings) {
+    const tokenKey =
+      typeof w.details?.token === 'string' ? w.details.token : '';
+    const key = `${w.code}|${w.message}|${tokenKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
+  }
+  return out;
+};
+
 // ============================================================
 // GraphQL mutations. The parent lookup + relative-to lookup queries
 // live in api/item-board-lookup.ts (R23 lift).
@@ -797,6 +821,7 @@ export const itemCreateCommand: CommandModule<
         // (the pre-check inspects setEntries only).
         let m38Source: 'live' | 'cache' | 'mixed' | undefined;
         let m38CacheAge: number | null = null;
+        let m38Warnings: readonly ResolverWarning[] = [];
         if (setEntries.length > 0) {
           const m38 = await preCheckM38FileDispatch({
             client,
@@ -811,11 +836,14 @@ export const itemCreateCommand: CommandModule<
           // `enforceSingleFileColumnSet({callShape: 'item_create'})`
           // throws on any file entry, so reaching this point means
           // `m38.kind === 'json'`. Capture the pre-check's source /
-          // cache-age for downstream aggregation (P3-1-equivalent
-          // round-1 fix — pre-check's wire-leg must surface on the
-          // create envelope's `meta.source`).
+          // cache-age / warnings for downstream aggregation —
+          // round-1 P3-1-equivalent (wire-leg surfaces on
+          // `meta.source`) + round-2 P3-1 (resolver warnings ride
+          // into the envelope even when downstream cache-hits
+          // suppress re-emission).
           m38Source = m38.source;
           m38CacheAge = m38.cacheAgeSeconds;
+          m38Warnings = m38.warnings;
         }
 
         if (globalFlags.dryRun) {
@@ -847,6 +875,12 @@ export const itemCreateCommand: CommandModule<
             mergeCacheAge(m38CacheAge, result.cacheAgeSeconds),
             createModeResult.preflightCacheAgeSeconds,
           );
+          // Round-2 P3-1 fix: thread M38 pre-check warnings into
+          // the dry-run envelope. Pre-check's `stale_cache_refreshed`
+          // / `column_token_collision` survive even though
+          // downstream `planCreate`'s resolveAndTranslate cache-hits
+          // suppress re-emission. Dedupe inline by code+message+
+          // token (small N).
           emitDryRun({
             ctx,
             programOpts: program.opts(),
@@ -856,7 +890,7 @@ export const itemCreateCommand: CommandModule<
               >[],
             source: dryRunSource,
             cacheAgeSeconds: dryRunCacheAge,
-            warnings: result.warnings,
+            warnings: dedupeCreateWarnings([...m38Warnings, ...result.warnings]),
             apiVersion,
           });
           return;
@@ -879,9 +913,13 @@ export const itemCreateCommand: CommandModule<
           env: ctx.env,
           noCache: globalFlags.noCache,
         });
-        const collectedWarnings: ResolverWarning[] = [
+        // Round-2 P3-1 fix: include M38 pre-check warnings.
+        // Deduped by code+message+token via the same shape as
+        // bulk-update's `dedupeWarnings` helper.
+        const collectedWarnings: ResolverWarning[] = dedupeCreateWarnings([
+          ...m38Warnings,
           ...resolutionResult.warnings,
-        ];
+        ]) as ResolverWarning[];
         const resolvedIds = resolutionResult.resolvedIds;
         // Live envelope source aggregates four legs (Codex M9 P2 #1):
         // pre-planner network calls (parent lookup + parent metadata

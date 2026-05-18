@@ -2194,6 +2194,38 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
     expect(env.error?.details?.column_id).toBe('attachments');
   });
 
+  it("D3 invariant: item create `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_create_unsupported — Codex round-2 P3-2 pin)", async () => {
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'New item',
+        '--set-raw',
+        'attachments={"url":"https://example.com/x.pdf"}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    // `unsupported_column_type` maps to exit 2 (API error
+    // category per cli-design §6.5).
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { reason?: string } };
+    };
+    expect(env.error?.code).toBe('unsupported_column_type');
+    expect(env.error?.details?.reason).toBeUndefined();
+  });
+
   it('rejects file --set on item create dry-run path with the same reason (D6 applies to both paths)', async () => {
     const out = await drive(
       [

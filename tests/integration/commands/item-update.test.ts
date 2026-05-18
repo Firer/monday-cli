@@ -1747,5 +1747,164 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(env.error?.details?.reason).toBe('multi_file_set_unsupported');
       expect(env.error?.details?.file_count).toBe(2);
     });
+
+    it('archived file column on item update: throws column_archived (NOT M38 dispatch — Codex round-2 P2-1 pin; pre-check mirrors resolveAndTranslate archived-column guard)', async () => {
+      // Pre-IMPL round-1 + IMPL round-1 pre-check fix: passing
+      // `--set <archived-file-col>=<path>` reached the M38 dispatch
+      // path because the pre-check ran with `includeArchived: true`
+      // but didn't check `archived === true`. Round-2 P2-1 fix adds
+      // the archived guard inside preCheckM38FileDispatch.
+      const archivedFileBoard = {
+        ...sampleBoardMetadata,
+        columns: [
+          {
+            id: 'attachments',
+            title: 'Attachments',
+            type: 'file',
+            description: null,
+            archived: true,
+            settings_str: '{}',
+            width: null,
+          },
+        ],
+      };
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [archivedFileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { column_id?: string; reason?: string };
+        };
+      };
+      expect(env.error?.code).toBe('column_archived');
+      expect(env.error?.details?.column_id).toBe('attachments');
+      // No M38 reason discriminator — the archived-column rejection
+      // is contractually stable across write paths.
+      expect(env.error?.details?.reason).toBeUndefined();
+    });
+
+    it("D3 invariant: `--set-raw <file-col>=<json>` stays as unsupported_column_type (NO M38 reason discriminator hijack — Codex round-2 P3-2 pin)", async () => {
+      // Pre-check inspects only setEntries; `--set-raw` flows
+      // through translateRawColumnValue's D3 permanent rejection
+      // (`unsupported_column_type` + dual-path hint naming M38
+      // friendly + M31 verb-shaped). Pre-IMPL the catch-and-route
+      // pattern hijacked `--set-raw` rejection into M38
+      // `file_set_on_bulk_unsupported` / `file_set_on_create_unsupported`
+      // / internal_error; the round-1 resolution-boundary
+      // pre-check fix routes setRaw-only file rejections back
+      // through D3 cleanly.
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set-raw',
+          'attachments={"url":"https://example.com/x.pdf"}',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      // `unsupported_column_type` maps to exit 2 (API error
+      // category per cli-design §6.5) — same shape as item set's
+      // existing --set-raw files-shaped rejection test.
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('unsupported_column_type');
+      // The D3 rejection MUST NOT carry an M38 reason discriminator
+      // — the M38 details.reason slots are reserved for the
+      // friendly --set path rejections.
+      expect(env.error?.details?.reason).toBeUndefined();
+    });
+
+    it("mutex priority is resolution-boundary (not translator-order): `--set bad_date=invalid --set attachments=path` surfaces mixed_file_and_value_sets BEFORE the date translator error (Codex round-2 P3-2 pin for the P2-2 invariant)", async () => {
+      // Pre-IMPL with the catch-and-route pattern: argv-order
+      // translator iterates --set bad_date first, throws
+      // usage_error for the invalid date, mutex never fires. The
+      // round-1 resolution-boundary pre-check fix runs
+      // enforceSingleFileColumnSet BEFORE translation; mixed
+      // mutex fires first.
+      const dateBoard = {
+        ...sampleBoardMetadata,
+        columns: [
+          {
+            id: 'attachments',
+            title: 'Attachments',
+            type: 'file',
+            description: null,
+            archived: null,
+            settings_str: '{}',
+            width: null,
+          },
+          {
+            id: 'due',
+            title: 'Due',
+            type: 'date',
+            description: null,
+            archived: null,
+            settings_str: '{}',
+            width: null,
+          },
+        ],
+      };
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          'due=not-a-date',
+          '--set',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [dateBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
+    });
   });
 });

@@ -3512,6 +3512,60 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
     });
 
+    it("D3 invariant: bulk `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_bulk_unsupported — Codex round-2 P3-2 pin)", async () => {
+      // Pre-check inspects setEntries only; --set-raw rejection
+      // flows through resolveAndTranslate → translateRawColumnValue
+      // → D3 permanent rejection.
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set-raw',
+          'attachments={"url":"https://example.com/x.pdf"}',
+          '--yes',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+            // items_page is reached because pre-check has no
+            // setEntries to scan, then resolveAndTranslate runs
+            // and translateRawColumnValue rejects.
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      );
+      // `unsupported_column_type` maps to exit 2 (API error
+      // category per cli-design §6.5).
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('unsupported_column_type');
+      expect(env.error?.details?.reason).toBeUndefined();
+    });
+
     it("rejects bulk file --set on dry-run path with the same reason discriminator (D5 fires regardless of --yes / --dry-run; pre-check is path-uniform)", async () => {
       const out = await drive(
         [

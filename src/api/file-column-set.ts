@@ -143,6 +143,8 @@ import { ApiError } from '../utils/errors.js';
 import { buildBlobFromPath } from '../utils/file-source.js';
 import { addFileToColumn, assetSchema, type Asset } from './assets.js';
 import { resolveColumnWithRefresh, type ResolverWarning } from './columns.js';
+import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
+import { buildColumnArchivedError } from './resolution-pass.js';
 import { mergeSource, mergeCacheAge } from './source-aggregator.js';
 import type { Complexity } from '../utils/output/envelope.js';
 import type { MondayClient } from './client.js';
@@ -709,15 +711,39 @@ export const preCheckM38FileDispatch = async (
       ...(inputs.env === undefined ? {} : { env: inputs.env }),
       ...(inputs.noCache === undefined ? {} : { noCache: inputs.noCache }),
     });
+    aggregateSource = mergeSource(aggregateSource, r.source);
+    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, r.cacheAgeSeconds);
+    warnings.push(...r.warnings);
+
+    // Archived-column guard (mirrors `resolveAndTranslate`'s
+    // pass-(a) check). `includeArchived: true` above surfaces
+    // archived columns via the resolver rather than dropping them;
+    // the M38 dispatch must reject archived file columns with the
+    // stable `column_archived` error so agents key on the canonical
+    // shape regardless of write path. Round-2 P2-1 surfacing event:
+    // without this guard, `--set <archived_file_col>=<path>` on
+    // item update / create reached the M38 dispatch (emitting a
+    // successful file `planned_change` on dry-run, or local
+    // precheck + multipart dispatch on live) instead of the
+    // `column_archived` rejection.
+    if (r.match.column.archived === true) {
+      throw foldResolverWarningsIntoError(
+        buildColumnArchivedError({
+          columnId: r.match.column.id,
+          columnTitle: r.match.column.title,
+          columnType: r.match.column.type,
+          boardId: inputs.boardId,
+        }),
+        warnings,
+      );
+    }
+
     resolved.push({
       columnId: r.match.column.id,
       columnType: r.match.column.type,
       rawValue: entry.value,
       token: entry.token,
     });
-    aggregateSource = mergeSource(aggregateSource, r.source);
-    aggregateCacheAge = mergeCacheAge(aggregateCacheAge, r.cacheAgeSeconds);
-    warnings.push(...r.warnings);
   }
   // Synthesize setRawEntries inputs from the count — only length
   // matters for the mutex check; columnId / columnType slots are

@@ -494,19 +494,21 @@ export const itemUpdateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
-          // Downstream `planChanges` re-resolves setEntries (cache
-          // hit from the pre-check) so `result.warnings` re-emits any
-          // resolver warnings the pre-check observed; we use only
-          // downstream warnings to avoid duplicate emissions. Source
-          // aggregation merges the pre-check's leg into the dry-run
-          // envelope (planChanges doesn't accept `initialSource`).
+          // Round-2 P3-1 fix: thread the pre-check's resolver
+          // warnings into the dry-run envelope. A
+          // `stale_cache_refreshed` or `column_token_collision`
+          // emitted by the pre-check would otherwise be lost —
+          // downstream `planChanges` re-resolves against the
+          // now-warm cache and doesn't re-emit `stale_cache_refreshed`
+          // (the refresh already ran). Dedupe by code+message+token
+          // mirrors `dedupeWarnings` from the bulk path.
           emitDryRun({
             ctx,
             programOpts: program.opts(),
             plannedChanges: result.plannedChanges as unknown as readonly Readonly<Record<string, unknown>>[],
             source: mergeSource(m38.source, result.source),
             cacheAgeSeconds: mergeCacheAge(m38.cacheAgeSeconds, result.cacheAgeSeconds),
-            warnings: result.warnings,
+            warnings: dedupeWarnings([...m38.warnings, ...result.warnings]),
             apiVersion,
           });
           return;
@@ -529,9 +531,14 @@ export const itemUpdateCommand: CommandModule<
           ...(m38.source === undefined ? {} : { initialSource: m38.source }),
           initialCacheAgeSeconds: m38.cacheAgeSeconds,
         });
-        const collectedWarnings: ResolverWarning[] = [
+        // Round-2 P3-1 fix: thread pre-check's resolver warnings
+        // alongside downstream warnings, deduped by code+message+
+        // token — pre-check's `stale_cache_refreshed` would
+        // otherwise be lost (warm cache suppresses re-emit).
+        const collectedWarnings: ResolverWarning[] = dedupeWarnings([
+          ...m38.warnings,
           ...resolutionResult.warnings,
-        ];
+        ]) as ResolverWarning[];
         const resolvedIds = resolutionResult.resolvedIds;
         const sourceAgg = new SourceAggregator();
         if (resolutionResult.source !== undefined) {
@@ -758,8 +765,9 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //      D3 permanent rejection (the pre-check only inspects
   //      setEntries; the standard path's `translateRawColumnValue`
   //      handles --set-raw rejection unchanged).
+  let m38Warnings: readonly ResolverWarning[] = [];
   if (setEntries.length > 0) {
-    await preCheckM38FileDispatch({
+    const m38 = await preCheckM38FileDispatch({
       client,
       boardId,
       setEntries,
@@ -769,6 +777,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       env: ctx.env,
       noCache: globalFlags.noCache,
     });
+    // Round-2 P3-1 fix: capture pre-check warnings to thread
+    // them into the final envelope. The bulk `'item_update_bulk'`
+    // callShape throws on any file entry, so reaching this point
+    // means `m38.kind === 'json'`. Pre-check resolution warnings
+    // (column_token_collision / stale_cache_refreshed) survive
+    // even though downstream cache hits suppress re-emission.
+    m38Warnings = m38.warnings;
   }
 
   const onColumnNotFound =
@@ -840,6 +855,13 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   const emptyEnvelopeSource: 'live' | 'cache' | 'mixed' =
     meta.source === 'cache' ? 'mixed' : 'live';
   if (matchedItemIds.length === 0) {
+    // Round-2 P3-1 fix: thread M38 pre-check warnings into the
+    // empty-match envelope so a pre-check `stale_cache_refreshed`
+    // / `column_token_collision` survives the no-op short-circuit.
+    const emptyWarnings = dedupeWarnings([
+      ...filterResult.warnings,
+      ...m38Warnings,
+    ]);
     if (globalFlags.dryRun) {
       emitDryRun({
         ctx,
@@ -847,7 +869,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
         plannedChanges: [],
         source: emptyEnvelopeSource,
         cacheAgeSeconds: meta.cacheAgeSeconds,
-        warnings: filterResult.warnings,
+        warnings: emptyWarnings,
         apiVersion,
       });
       return;
@@ -860,7 +882,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       } satisfies BulkLiveData,
       schema: bulkLiveDataSchema,
       programOpts,
-      warnings: filterResult.warnings,
+      warnings: emptyWarnings,
       source: emptyEnvelopeSource,
       cacheAgeSeconds: meta.cacheAgeSeconds,
       apiVersion,
@@ -912,7 +934,14 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // the resolver-warning preservation pattern is meant to keep.
   if (globalFlags.dryRun) {
     const allPlanned: Readonly<Record<string, unknown>>[] = [];
-    const aggregatedWarnings: Warning[] = [...filterResult.warnings];
+    // Round-2 P3-1 fix: seed `aggregatedWarnings` with pre-check
+    // warnings so `stale_cache_refreshed` survives even though
+    // downstream per-item planChanges cache-hits suppress
+    // re-emission.
+    const aggregatedWarnings: Warning[] = [
+      ...filterResult.warnings,
+      ...m38Warnings,
+    ];
     const sourceAgg = new SourceAggregator({
       source: meta.source,
       cacheAgeSeconds: meta.cacheAgeSeconds,
@@ -1000,10 +1029,15 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     initialSource: meta.source,
     initialCacheAgeSeconds: meta.cacheAgeSeconds,
   });
-  const collectedWarnings: Warning[] = [
+  // Round-2 P3-1 fix: include M38 pre-check warnings in the live
+  // bulk envelope's aggregated warnings. Pre-check warnings are
+  // deduped against downstream resolveAndTranslate warnings so
+  // `stale_cache_refreshed` surfaces exactly once.
+  const collectedWarnings: Warning[] = dedupeWarnings([
     ...filterResult.warnings,
+    ...m38Warnings,
     ...resolutionResult.warnings,
-  ];
+  ]) as Warning[];
   const resolverWarnings: ResolverWarning[] = [...resolutionResult.warnings];
   const resolvedIds = resolutionResult.resolvedIds;
   // resolveAndTranslate was seeded with meta.source / meta.cacheAge
@@ -1224,18 +1258,17 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 };
 
 // ============================================================
-// v0.6-M38 file-column dispatch helpers (cli-design §5.3 step 5
-// "File-column dispatch leg" + v0.6-plan §3 M38 D2/D4/D5
-// closures). The single-item live + dry-run helpers below catch
-// the translator's `unsupported_column_type` rejection on a file
-// column, re-resolve all `--set` / `--set-raw` entries against
-// the (now warm) board-metadata cache to apply the mutex check
-// via `enforceSingleFileColumnSet`, and either dispatch
-// (clean path) or surface the appropriate D2 reason
-// discriminator. `buildBulkFileRejection` short-circuits the
-// bulk path's catch handler with `file_set_on_bulk_unsupported`
-// (D5) without re-resolution because the bulk callShape rejects
-// ALL file --set unconditionally.
+// v0.6-M38 file-column dispatch helper (cli-design §5.3 step 5
+// "File-column dispatch leg" + v0.6-plan §3 M38 D2/D4/D5/D6
+// closures). The action body's `preCheckM38FileDispatch` runs
+// at the column-resolution boundary BEFORE the dry-run / live
+// split, resolves `setEntries`' column types, applies the mutex
+// check via `enforceSingleFileColumnSet`, and returns either
+// `kind: 'json'` (proceed with standard planChanges /
+// resolveAndTranslate path) or `kind: 'file'` (call the helper
+// below to dispatch). Mutex violations (D2 multi-file / mixed,
+// D5 bulk, D6 create) throw `usage_error` from inside the
+// pre-check with the appropriate `details.reason` discriminator.
 // ============================================================
 
 /**
