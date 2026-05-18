@@ -1222,5 +1222,3 @@ const executeCreateSubitem = async (
     response,
   };
 };
-
-
