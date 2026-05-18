@@ -673,9 +673,12 @@ describe('translateColumnValue — future-roadmap types', () => {
   //     bulk path fans the fetcher across matched items in
   //     `runItemUpdateBulkFileDispatch`; the create path runs the
   //     two-leg sequence in `runItemCreateFileDispatch`); the
-  //     UNSUPPORTED_TABLE.files_shaped row now fires ONLY on paths
-  //     the friendly dispatch doesn't cover (item create per D6 →
-  //     v0.7-M43; --set-raw per D3 permanent rejection).
+  //     UNSUPPORTED_TABLE.files_shaped row now fires ONLY on the
+  //     `--set-raw <file-col>=<json>` path (D3 permanent rejection
+  //     — no JSON wire shape for add_file_to_column). Every
+  //     friendly file `--set` callShape, including `item create`
+  //     post v0.7-M43, branches BEFORE the translator at the
+  //     action-body level via the file-column-set sibling leg.
   // Both are tested in the dedicated describe blocks below.
   // M16 pre-flight reclassified `item_assignees` as read-only-forever.
   it.each([

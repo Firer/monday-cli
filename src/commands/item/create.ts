@@ -985,11 +985,14 @@ export const itemCreateCommand: CommandModule<
           return;
         }
 
-        // Live create path. Three-pass resolution + translation
-        // through the shared helper (R20 lift), then bundle into one
-        // column_values map and fire the single-round-trip mutation
-        // per cli-design §5.8. v0.6-M38 D6 file-set rejection already
-        // fired at the pre-check above.
+        // Live create path (JSON-only). Three-pass resolution +
+        // translation through the shared helper (R20 lift), then
+        // bundle into one column_values map and fire the single-
+        // round-trip mutation per cli-design §5.8. Reaching this
+        // block means the v0.7-M43 `file_create` dispatch helper
+        // did NOT apply (no file `--set` entries present) — the
+        // helper returned above; this remaining path is JSON-only
+        // single-round-trip.
         let resolutionResult;
         try {
           resolutionResult = await resolveAndTranslate({
