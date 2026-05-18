@@ -131,9 +131,14 @@ at `b9c5ff4`):**
   stub.
 - **R-NEW-72 carry-forward** (post-fix-up cross-doc grep with
   search path extensions per R-v0.5-NEW-19 + noun-stem regex
-  matching per v0.5-M37 lesson): pre-flight contract diff
-  surfaces no contract-flipping fix-ups yet; cadence applies
-  to Codex round fix-ups starting at round 1.
+  matching per v0.5-M37 lesson): rounds 1 + 2 of the M38
+  pre-flight Codex review both applied the cadence (9th + 10th
+  instances). Round-1 caught a trailing comment in
+  `tests/unit/api/column-values.test.ts`; round-2 swept
+  remaining "5th supporting" / "THREE to FIVE" / "2 → 4" stems
+  + identified historical v0.5-M37-era sites correctly left
+  untouched. Round-3 ratification surfaced no new contract-
+  flipping fix-ups.
 - **R-NEW-41 4th asymmetry filed** at `docs/architecture.md`
   "Wire-vs-CLI semantics documentation conventions": the M38
   translator-boundary dispatch asymmetry is distinct from
