@@ -3183,7 +3183,7 @@ describe('monday board column-create (integration, M16)', () => {
     expect(env.warnings[0]?.details?.suggested_write_path).toBeNull();
   });
 
-  it('live: --type file emits noncanonical_column_type warning with files_shaped category + `monday item upload` hint (v0.4-M31)', async () => {
+  it('live: --type file emits noncanonical_column_type warning with files_shaped category + names BOTH the v0.6-M38 friendly --set dispatch AND the v0.4-M31 verb-shaped `monday item upload` in the message + suggested_write_path', async () => {
     const out = await drive(
       ['board', 'column-create', '12345', '--type', 'file', '--title', 'Attachments', '--json'],
       {
@@ -3204,6 +3204,7 @@ describe('monday board column-create (integration, M16)', () => {
     const env = parseEnvelope(out.stdout) as EnvelopeShape & {
       warnings: readonly {
         code: string;
+        message?: string;
         details?: {
           category?: string;
           suggested_write_path?: string | null;
@@ -3225,6 +3226,16 @@ describe('monday board column-create (integration, M16)', () => {
       /monday item upload/,
     );
     expect(env.warnings[0]?.details?.suggested_write_path).toMatch(/v0\.4-M31/);
+    // v0.6-M38 Codex round-2 P2-1: warning MESSAGE prose also names
+    // both write paths + the --set-raw permanent rejection per D3.
+    // The message is what an agent reading the warning sees first;
+    // the suggested_write_path is for programmatic branching.
+    expect(env.warnings[0]?.message).toMatch(/v0\.6-M38/);
+    expect(env.warnings[0]?.message).toMatch(/v0\.4-M31/);
+    expect(env.warnings[0]?.message).toMatch(/monday item set/);
+    expect(env.warnings[0]?.message).toMatch(/monday item upload/);
+    expect(env.warnings[0]?.message).toMatch(/--set-raw/);
+    expect(env.warnings[0]?.message).toMatch(/REJECTED/);
   });
 
   it('live: omits description/defaults from the wire when those flags are absent', async () => {

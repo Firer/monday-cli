@@ -1936,14 +1936,24 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     });
   });
 
-  it('v0.6-M38 file-column friendly --set <file-col>=<path> --dry-run: dispatch leg pre-flight stub fires for dry-run too (per D4, M38 dispatch fires for BOTH dry-run and live paths; at pre-flight the stub throws `internal_error.details.reason: pre_flight_stub` BEFORE planChanges runs, so the file-column path never reaches the JSON translator that would surface `unsupported_column_type`)', async () => {
-    // Pre-flight pin: the M38 file-column dispatch check fires
-    // BEFORE the dry-run / live split at item set's action body
-    // (cli-design §5.3 step 5 + D4). At pre-flight the stub throws
-    // internal_error for BOTH paths; at IMPL the runtime body lands
-    // the dry-run envelope shape per D4 (planned_changes:
-    // [{operation: 'add_file_to_column', ...}]) without loading
-    // file bytes (size from fs.stat).
+  it('v0.6-M38 file-column friendly --set <file-col>=<path> --dry-run: dispatch leg pre-flight stub fires for dry-run too via catch-and-rewrap (per D4, M38 dispatch fires for BOTH dry-run and live paths; at pre-flight the dry-run path runs `planChanges`, which surfaces `unsupported_column_type` via the translator on a file-typed column; the action body catches and rewraps as `internal_error.details.reason: pre_flight_stub` matching the live path stub. The catch-and-rewrap collapses at M38 IMPL when the dry-run envelope per D4 lands.)', async () => {
+    // Pre-flight pin: the M38 file-column dispatch is wired on the
+    // dry-run path via catch-and-rewrap (cli-design §5.3 step 5 +
+    // D4). The dry-run branch enters `planChanges`, which routes
+    // through `translateColumnValueAsync` and surfaces
+    // `unsupported_column_type` for files-shaped columns via the
+    // `UNSUPPORTED_TABLE.files_shaped` row. The action body's catch
+    // detects the rejection (code + `details.type === 'file'` +
+    // friendly call shape) and re-throws `internal_error` with
+    // `reason: 'pre_flight_stub'` matching the live path's stub.
+    // The first-pass fix moved the column resolution upfront before
+    // the dry-run/live split, but that double-resolved metadata
+    // and flipped the dry-run envelope's `source` from `'live'` to
+    // `'mixed'` on non-file paths; the catch-and-rewrap preserves
+    // source-aggregation semantics. At M38 IMPL the rewrap collapses
+    // when the runtime body lands the dry-run envelope shape per
+    // D4 (planned_changes: [{operation: 'add_file_to_column', ...}])
+    // without loading file bytes (size from fs.stat).
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [

@@ -955,9 +955,16 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           #     `--set` / `--set-raw` against it
                                           #     surfaces `unsupported_column_type`.
                                           #   - `files`-shaped (`file`) → warning
-                                          #     notes write path is
-                                          #     `add_file_to_column`, deferred to
-                                          #     v0.4 (asset upload).
+                                          #     notes BOTH write paths reach
+                                          #     `add_file_to_column` (multipart):
+                                          #     the v0.6-M38 friendly `--set
+                                          #     <file-col>=<path>` dispatch on
+                                          #     `monday item set` / `monday item
+                                          #     update` (single-item only) AND the
+                                          #     v0.4-M31 verb-shaped `monday item
+                                          #     upload`. `--set-raw <file-col>=
+                                          #     <json>` stays rejected per D3
+                                          #     (permanent).
                                           # The command still proceeds in all
                                           # cases — Monday accepts non-writable
                                           # types and agents may legitimately want

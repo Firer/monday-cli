@@ -33,9 +33,14 @@
  *     the v0.2 escape hatch, accepts wire-shape correctness).
  *   - `read_only_forever` → no write path (the column exists only
  *     for read-side display / mirror sources).
- *   - `files_shaped` → `monday item upload` (v0.4-M31, multipart
- *     wire) for the agent-facing write path; `add_file_to_column`
- *     for the underlying Monday mutation.
+ *   - `files_shaped` → TWO write paths reach `add_file_to_column`
+ *     (multipart wire): the M38 friendly `--set <file-col>=<path>`
+ *     dispatch on `monday item set` / `monday item update`
+ *     (single-item only at M38; bulk + create defer to v0.6.x) AND
+ *     the M31 verb-shaped `monday item upload <iid> --column <col>
+ *     <file>`. `--set-raw <file-col>=<json>` STAYS REJECTED per D3
+ *     (permanent — `change_column_value` has no JSON-shape for file
+ *     columns).
  * The command STILL PROCEEDS in all cases — Monday accepts non-
  * writable types and agents may legitimately want them. The
  * categorisation lives in `api/column-types.ts` so the warning
@@ -468,11 +473,14 @@ const buildNoncanonicalMessage = (
       return (
         `Column type "${columnType}" was created successfully but the ` +
         `write path is \`add_file_to_column\` (multipart upload). ` +
-        `Use \`monday item upload <iid> --column <col> <file>\` ` +
-        `(v0.4-M31, multipart wire) to attach files; \`--set\` and ` +
-        `\`--set-raw\` against this column surface ` +
-        `unsupported_column_type since neither reaches the multipart ` +
-        `wire shape.`
+        `Two paths reach the multipart wire: the v0.6-M38 friendly ` +
+        `\`monday item set <iid> <file-col>=<path>\` / ` +
+        `\`monday item update <iid> --set <file-col>=<path>\` ` +
+        `dispatch (single-item only) AND the v0.4-M31 verb-shaped ` +
+        `\`monday item upload <iid> --column <col> <file>\`. ` +
+        `\`--set-raw <file-col>=<json>\` STAYS REJECTED per D3 — ` +
+        `permanent because \`change_column_value\` has no JSON-shape ` +
+        `for file columns.`
       );
   }
 };
