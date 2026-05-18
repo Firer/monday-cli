@@ -77,7 +77,10 @@ import {
 } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import { preCheckM38FileDispatch } from '../../api/file-column-set.js';
-import { foldAndRemap } from '../../api/resolver-error-fold.js';
+import {
+  foldAndRemap,
+  mergeResolverWarningsIntoError,
+} from '../../api/resolver-error-fold.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { assertResponseFieldPresent } from '../../api/response-root.js';
@@ -847,19 +850,29 @@ export const itemCreateCommand: CommandModule<
         }
 
         if (globalFlags.dryRun) {
-          const result = await planCreate({
-            client,
-            mode: createMode,
-            name: parsed.name,
-            setEntries,
-            ...(rawEntries.length === 0 ? {} : { rawEntries }),
-            dateResolution,
-            peopleResolution,
-            tagResolution,
-            relationResolution,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
+          let result;
+          try {
+            result = await planCreate({
+              client,
+              mode: createMode,
+              name: parsed.name,
+              setEntries,
+              ...(rawEntries.length === 0 ? {} : { rawEntries }),
+              dateResolution,
+              peopleResolution,
+              tagResolution,
+              relationResolution,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+            });
+          } catch (err) {
+            // Round-3 P3-1 fix: fold M38 pre-check warnings into
+            // the failure envelope's `details.resolver_warnings`.
+            if (err instanceof MondayCliError && m38Warnings.length > 0) {
+              throw mergeResolverWarningsIntoError(err, m38Warnings);
+            }
+            throw err;
+          }
           // Dry-run envelope source folds four legs (Codex M9 P2 #1
           // + v0.6-M38 IMPL round-1 P3-1-equivalent fix):
           // pre-planner network calls (parent lookup + parent-board
@@ -901,18 +914,28 @@ export const itemCreateCommand: CommandModule<
         // column_values map and fire the single-round-trip mutation
         // per cli-design §5.8. v0.6-M38 D6 file-set rejection already
         // fired at the pre-check above.
-        const resolutionResult = await resolveAndTranslate({
-          client,
-          boardId: resolveBoardId,
-          setEntries,
-          rawEntries,
-          dateResolution,
-          peopleResolution,
-          tagResolution,
-          relationResolution,
-          env: ctx.env,
-          noCache: globalFlags.noCache,
-        });
+        let resolutionResult;
+        try {
+          resolutionResult = await resolveAndTranslate({
+            client,
+            boardId: resolveBoardId,
+            setEntries,
+            rawEntries,
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+        } catch (err) {
+          // Round-3 P3-1 fix: fold M38 pre-check warnings into the
+          // live failure envelope's `details.resolver_warnings`.
+          if (err instanceof MondayCliError && m38Warnings.length > 0) {
+            throw mergeResolverWarningsIntoError(err, m38Warnings);
+          }
+          throw err;
+        }
         // Round-2 P3-1 fix: include M38 pre-check warnings.
         // Deduped by code+message+token via the same shape as
         // bulk-update's `dedupeWarnings` helper.

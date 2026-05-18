@@ -83,7 +83,10 @@ import {
   mergeSource,
 } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
-import { foldAndRemap } from '../../api/resolver-error-fold.js';
+import {
+  foldAndRemap,
+  mergeResolverWarningsIntoError,
+} from '../../api/resolver-error-fold.js';
 import { planChanges } from '../../api/dry-run.js';
 import { buildQueryParams } from '../../api/filters.js';
 import {
@@ -480,20 +483,35 @@ export const itemUpdateCommand: CommandModule<
           // (downstream resolveAndTranslate hits cache for the
           // already-resolved setEntries; source aggregation is
           // correct per §6.1 — both legs counted).
-          const result = await planChanges({
-            client,
-            boardId,
-            itemId: dispatch.itemId,
-            setEntries,
-            ...(rawEntries.length === 0 ? {} : { rawEntries }),
-            ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
-            dateResolution,
-            peopleResolution,
-            tagResolution,
-            relationResolution,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
+          let result;
+          try {
+            result = await planChanges({
+              client,
+              boardId,
+              itemId: dispatch.itemId,
+              setEntries,
+              ...(rawEntries.length === 0 ? {} : { rawEntries }),
+              ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
+              dateResolution,
+              peopleResolution,
+              tagResolution,
+              relationResolution,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+            });
+          } catch (err) {
+            // Round-3 P3-1 fix: fold M38 pre-check warnings into
+            // the failure envelope's `details.resolver_warnings`
+            // slot. The pre-check may have emitted
+            // `stale_cache_refreshed` / `column_token_collision`;
+            // if downstream `planChanges` throws (translator
+            // error, archived column, etc.), the error's own
+            // fold doesn't include the pre-check leg.
+            if (err instanceof MondayCliError && m38.warnings.length > 0) {
+              throw mergeResolverWarningsIntoError(err, m38.warnings);
+            }
+            throw err;
+          }
           // Round-2 P3-1 fix: thread the pre-check's resolver
           // warnings into the dry-run envelope. A
           // `stale_cache_refreshed` or `column_token_collision`
@@ -502,6 +520,13 @@ export const itemUpdateCommand: CommandModule<
           // now-warm cache and doesn't re-emit `stale_cache_refreshed`
           // (the refresh already ran). Dedupe by code+message+token
           // mirrors `dedupeWarnings` from the bulk path.
+          //
+          // **Round-3 P3-1 fix (error-path)**: the planChanges
+          // call itself is wrapped above (line 483); if it throws
+          // before returning, the error catch below folds
+          // `m38.warnings` into `details.resolver_warnings` so
+          // pre-check warnings ride into the failure envelope
+          // too.
           emitDryRun({
             ctx,
             programOpts: program.opts(),
@@ -517,20 +542,35 @@ export const itemUpdateCommand: CommandModule<
         // Live update path — three-pass resolution + translation
         // through the shared helper (R20 lift). Pre-check already
         // resolved setEntries (cache hit downstream).
-        const resolutionResult = await resolveAndTranslate({
-          client,
-          boardId,
-          setEntries,
-          rawEntries,
-          dateResolution,
-          peopleResolution,
-          tagResolution,
-          relationResolution,
-          env: ctx.env,
-          noCache: globalFlags.noCache,
-          ...(m38.source === undefined ? {} : { initialSource: m38.source }),
-          initialCacheAgeSeconds: m38.cacheAgeSeconds,
-        });
+        let resolutionResult;
+        try {
+          resolutionResult = await resolveAndTranslate({
+            client,
+            boardId,
+            setEntries,
+            rawEntries,
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+            ...(m38.source === undefined ? {} : { initialSource: m38.source }),
+            initialCacheAgeSeconds: m38.cacheAgeSeconds,
+          });
+        } catch (err) {
+          // Round-3 P3-1 fix: fold M38 pre-check warnings into the
+          // failure envelope's `details.resolver_warnings` slot. The
+          // pre-check may have emitted `stale_cache_refreshed` /
+          // `column_token_collision`; if downstream
+          // `resolveAndTranslate` throws (translator error, archived
+          // column post-cache-warm, etc.), the thrown error's own
+          // resolver-warnings fold doesn't include the pre-check leg.
+          if (err instanceof MondayCliError && m38.warnings.length > 0) {
+            throw mergeResolverWarningsIntoError(err, m38.warnings);
+          }
+          throw err;
+        }
         // Round-2 P3-1 fix: thread pre-check's resolver warnings
         // alongside downstream warnings, deduped by code+message+
         // token — pre-check's `stale_cache_refreshed` would
@@ -953,20 +993,33 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
       // throws `'file_set_on_bulk_unsupported'` before items_page
       // walks. `--set-raw <file-col>=<json>` still rejects normally
       // via `translateRawColumnValue`'s D3 permanent rejection.
-      const result = await planChanges({
-        client,
-        boardId,
-        itemId,
-        setEntries,
-        ...(rawEntries.length === 0 ? {} : { rawEntries }),
-        ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
-        dateResolution,
-        peopleResolution,
-        tagResolution,
-        relationResolution,
-        env: ctx.env,
-        noCache: globalFlags.noCache,
-      });
+      let result;
+      try {
+        result = await planChanges({
+          client,
+          boardId,
+          itemId,
+          setEntries,
+          ...(rawEntries.length === 0 ? {} : { rawEntries }),
+          ...(parsed.name === undefined ? {} : { nameChange: parsed.name }),
+          dateResolution,
+          peopleResolution,
+          tagResolution,
+          relationResolution,
+          env: ctx.env,
+          noCache: globalFlags.noCache,
+        });
+      } catch (err) {
+        // Round-3 P3-1 fix: fold M38 pre-check warnings into the
+        // per-item failure envelope so a pre-check
+        // `stale_cache_refreshed` rides into the error's
+        // `details.resolver_warnings` even when the per-item
+        // planChanges throws.
+        if (err instanceof MondayCliError && m38Warnings.length > 0) {
+          throw mergeResolverWarningsIntoError(err, m38Warnings);
+        }
+        throw err;
+      }
       for (const plan of result.plannedChanges) {
         allPlanned.push(plan as unknown as Readonly<Record<string, unknown>>);
       }
@@ -1015,20 +1068,30 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   // v0.6-M38 D5 file-set rejection already fired at the pre-check
   // above (step 1.5). resolveAndTranslate processes only non-file
   // setEntries here.
-  const resolutionResult = await resolveAndTranslate({
-    client,
-    boardId,
-    setEntries,
-    rawEntries,
-    dateResolution,
-    peopleResolution,
-    tagResolution,
-    relationResolution,
-    env: ctx.env,
-    noCache: globalFlags.noCache,
-    initialSource: meta.source,
-    initialCacheAgeSeconds: meta.cacheAgeSeconds,
-  });
+  let resolutionResult;
+  try {
+    resolutionResult = await resolveAndTranslate({
+      client,
+      boardId,
+      setEntries,
+      rawEntries,
+      dateResolution,
+      peopleResolution,
+      tagResolution,
+      relationResolution,
+      env: ctx.env,
+      noCache: globalFlags.noCache,
+      initialSource: meta.source,
+      initialCacheAgeSeconds: meta.cacheAgeSeconds,
+    });
+  } catch (err) {
+    // Round-3 P3-1 fix: fold M38 pre-check warnings into the
+    // bulk-live failure envelope's `details.resolver_warnings`.
+    if (err instanceof MondayCliError && m38Warnings.length > 0) {
+      throw mergeResolverWarningsIntoError(err, m38Warnings);
+    }
+    throw err;
+  }
   // Round-2 P3-1 fix: include M38 pre-check warnings in the live
   // bulk envelope's aggregated warnings. Pre-check warnings are
   // deduped against downstream resolveAndTranslate warnings so
@@ -1038,7 +1101,17 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     ...m38Warnings,
     ...resolutionResult.warnings,
   ]) as Warning[];
-  const resolverWarnings: ResolverWarning[] = [...resolutionResult.warnings];
+  // Round-3 P3-2 fix: include M38 pre-check warnings in
+  // `resolverWarnings`. This is the slot threaded into
+  // `foldAndRemap` for fail-fast bulk errors + partial-success
+  // results — without the pre-check leg, a pre-check
+  // `stale_cache_refreshed` is absent from per-item failure
+  // envelopes (and per-item partial-success records' error
+  // details).
+  const resolverWarnings: ResolverWarning[] = dedupeWarnings([
+    ...m38Warnings,
+    ...resolutionResult.warnings,
+  ]) as ResolverWarning[];
   const resolvedIds = resolutionResult.resolvedIds;
   // resolveAndTranslate was seeded with meta.source / meta.cacheAge
   // above, so resolutionResult.source is always defined post-helper.

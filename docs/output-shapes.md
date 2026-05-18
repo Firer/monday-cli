@@ -2247,11 +2247,11 @@ multipart wire (single-item path only — bulk + create reject).
 Mutex rules at the resolution boundary (D2/D5/D6 closures):
 
   - Exactly ONE file `--set` per call. 2+ file `--set` entries
-    reject with `usage_error.details.reason:
-    'multi_file_set_unsupported'`.
+    reject with `usage_error` carrying `'multi_file_set_unsupported'`
+    at `details.reason`.
   - NO mixing with value `--set` / `--set-raw` / `--name`.
-    Mixing rejects with `usage_error.details.reason:
-    'mixed_file_and_value_sets'`.
+    Mixing rejects with `usage_error` carrying
+    `'mixed_file_and_value_sets'` at `details.reason`.
 
 Envelope shape on success mirrors `item set` file-column dispatch
 verbatim (`operation: "add_file_to_column"` + wire `Asset`

@@ -3530,26 +3530,26 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    M27 / M31:
 
    - **Single file `--set` per call.** 2+ `--set <file-col>=<path>`
-     entries in the same call reject as `usage_error.details.
-     reason: 'multi_file_set_unsupported'` — defers multi-file
-     dispatch to v0.6.x.
+     entries in the same call reject as `usage_error` with
+     `'multi_file_set_unsupported'` — defers multi-file dispatch
+     to v0.6.x. The discriminator literal lives at
+     `details.reason`.
    - **No mixing with value flags.** File `--set` mixed with any
      value `--set` / `--set-raw` / `--name <n>` in the same call
      rejects as `usage_error` with
-     `details.reason: 'mixed_file_and_value_sets'` — mixing
+     `'mixed_file_and_value_sets'` at `details.reason` — mixing
      would force non-atomic multi-leg dispatch (one multipart
      round-trip per file column + one JSON round-trip per value
      column), breaking the existing atomicity guarantee.
    - **No `item create --set <file-col>=<path>`.** Rejects as
-     `usage_error` with
-     `details.reason: 'file_set_on_create_unsupported'` —
-     defers create-time file upload to v0.6.x (non-atomic post-
-     create wire shape would break §5.8 state safety).
+     `usage_error` with `'file_set_on_create_unsupported'` at
+     `details.reason` — defers create-time file upload to v0.6.x
+     (non-atomic post-create wire shape would break §5.8 state
+     safety).
    - **No bulk `item update --where ... --set <file-col>=<path>`.**
-     Rejects as `usage_error` with
-     `details.reason: 'file_set_on_bulk_unsupported'` — defers
-     per-item file dispatch + partial-success envelope to
-     v0.6.x.
+     Rejects as `usage_error` with `'file_set_on_bulk_unsupported'`
+     at `details.reason` — defers per-item file dispatch +
+     partial-success envelope to v0.6.x.
    - **No `--set <file-col>=-` stdin.** Rejects via the existing
      `<file>` path-string validation (mirrors M31 `monday item
      upload`'s rejection rationale — no clean `--filename`

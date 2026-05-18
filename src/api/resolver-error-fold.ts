@@ -76,6 +76,58 @@ interface ResolverDetailWarning {
  * pass-1 finding F2). Lifted shape covers every `MondayCliError`
  * subclass.
  */
+/**
+ * Merges new resolver warnings INTO an error's existing
+ * `details.resolver_warnings` rather than replacing it. Used by the
+ * v0.6-M38 IMPL round-3 P3-1 fix: when a downstream resolver helper
+ * has already folded its own warnings into the thrown error, the
+ * outer caller's pre-check warnings need to be APPENDED (not
+ * overwritten). Dedupes by `code + message + details.token` so a
+ * warning emitted by both pre-check + downstream surfaces once.
+ *
+ * Behaviour:
+ *   - If `additionalWarnings` is empty, returns `err` unchanged.
+ *   - Reads `err.details?.resolver_warnings` defensively (it may be
+ *     missing if the downstream didn't fold).
+ *   - Builds a deduped union of `additionalWarnings` first, then
+ *     existing warnings (pre-check warnings take precedence on key
+ *     collision — same shape either way per ResolverWarning's
+ *     deterministic per-resolution emission).
+ *   - Re-folds via {@link foldResolverWarningsIntoError} with the
+ *     combined list.
+ */
+export const mergeResolverWarningsIntoError = (
+  err: MondayCliError,
+  additionalWarnings: readonly ResolverWarning[],
+): MondayCliError => {
+  if (additionalWarnings.length === 0) return err;
+  const existingDetail = err.details?.resolver_warnings;
+  const existing: readonly ResolverDetailWarning[] = Array.isArray(existingDetail)
+    ? (existingDetail as readonly ResolverDetailWarning[])
+    : [];
+  // Dedupe by code+message+token. Existing warnings (downstream)
+  // come first so pre-check identical-key warnings dedupe against
+  // them.
+  const seen = new Set<string>();
+  const combined: ResolverWarning[] = [];
+  const addOne = (w: ResolverDetailWarning | ResolverWarning): void => {
+    const tokenValue = w.details.token;
+    const token = typeof tokenValue === 'string' ? tokenValue : '';
+    const key = `${w.code}|${w.message}|${token}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    // Cast: `ResolverDetailWarning.code` is `string`, while
+    // `ResolverWarning.code` is the narrow literal union. The
+    // wire data only ever carries one of those two codes (the
+    // producers are `column_token_collision` / `stale_cache_refreshed`
+    // emitters); the runtime check is a no-op at this scale.
+    combined.push(w as ResolverWarning);
+  };
+  for (const w of existing) addOne(w);
+  for (const w of additionalWarnings) addOne(w);
+  return foldResolverWarningsIntoError(err, combined);
+};
+
 export const foldResolverWarningsIntoError = (
   err: MondayCliError,
   resolverWarnings: readonly ResolverWarning[],
