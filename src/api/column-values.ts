@@ -1731,25 +1731,31 @@ const UNSUPPORTED_TABLE: Readonly<
     message: (columnId, type) =>
       `Column "${columnId}" has type "${type}", which Monday writes ` +
       `via add_file_to_column (multipart upload) rather than ` +
-      `change_column_value. The v0.6-M38 friendly --set ` +
-      `<file-col>=<path> form dispatches into the multipart wire on ` +
-      `\`monday item set\` + \`monday item update\` (single-item ` +
-      `only); this rejection row fires on paths the M38 dispatch ` +
-      `doesn't cover (item create, bulk item update --where). ` +
-      `Use \`monday item upload <iid> --column <col> <file>\` ` +
-      `(v0.4-M31; verb-shaped) OR \`monday item set <iid> ` +
-      `<file-col>=<path>\` / \`monday item update <iid> --set ` +
-      `<file-col>=<path>\` (v0.6-M38; friendly translator).`,
+      `change_column_value. The friendly --set <file-col>=<path> ` +
+      `form dispatches into the multipart wire on \`monday item ` +
+      `set\` + \`monday item update <iid>\` (v0.6-M38; single-item) ` +
+      `and \`monday item update --where ...\` (v0.7-M42; bulk per-` +
+      `item fan-out under --concurrency / --continue-on-error). ` +
+      `This rejection row fires only on paths the friendly dispatch ` +
+      `doesn't cover: \`monday item create --set <file-col>=<path>\` ` +
+      `(deferred to v0.7-M43 per cli-design §5.3 D6) and ` +
+      `\`--set-raw <file-col>=<json>\` (permanent rejection per D3 — ` +
+      `no JSON wire shape for add_file_to_column). Use \`monday ` +
+      `item upload <iid> --column <col> <file>\` (v0.4-M31; ` +
+      `verb-shaped) OR the friendly --set on update/set verbs.`,
     details: () => ({
       hint:
         'two write paths reach Monday\'s add_file_to_column ' +
         'multipart wire: `monday item upload <iid> --column <col> ' +
         '<file>` (v0.4-M31; verb-shaped) and `monday item set <iid> ' +
         '<file-col>=<path>` / `monday item update <iid> --set ' +
-        '<file-col>=<path>` (v0.6-M38; friendly translator ' +
-        'dispatch, single-item only). The bulk + create paths ' +
-        'reject file-shaped columns at v0.6-M38 — those defer to ' +
-        'v0.6.x per cli-design §5.3 + §13 v0.6 entry.',
+        '<file-col>=<path>` (v0.6-M38; single-item friendly ' +
+        'translator) / `monday item update --where ... --set ' +
+        '<file-col>=<path>` (v0.7-M42; bulk friendly translator + ' +
+        'per-item multipart fan-out). The create + --set-raw paths ' +
+        'still reject file-shaped columns: create defers to ' +
+        'v0.7-M43 per cli-design §5.3 D6; --set-raw is the permanent ' +
+        'D3 rejection.',
     }),
   },
   time_tracking: {

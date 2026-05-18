@@ -473,14 +473,18 @@ const buildNoncanonicalMessage = (
       return (
         `Column type "${columnType}" was created successfully but the ` +
         `write path is \`add_file_to_column\` (multipart upload). ` +
-        `Two paths reach the multipart wire: the v0.6-M38 friendly ` +
+        `Three paths reach the multipart wire: the v0.6-M38 friendly ` +
         `\`monday item set <iid> <file-col>=<path>\` / ` +
         `\`monday item update <iid> --set <file-col>=<path>\` ` +
-        `dispatch (single-item only) AND the v0.4-M31 verb-shaped ` +
-        `\`monday item upload <iid> --column <col> <file>\`. ` +
-        `\`--set-raw <file-col>=<json>\` STAYS REJECTED per D3 — ` +
-        `permanent because \`change_column_value\` has no JSON-shape ` +
-        `for file columns.`
+        `dispatch (single-item); the v0.7-M42 friendly \`monday item ` +
+        `update --where ... --set <file-col>=<path>\` dispatch ` +
+        `(bulk per-item fan-out under --concurrency / ` +
+        `--continue-on-error); AND the v0.4-M31 verb-shaped \`monday ` +
+        `item upload <iid> --column <col> <file>\`. \`monday item ` +
+        `create --set <file-col>=<path>\` still rejects (deferred to ` +
+        `v0.7-M43). \`--set-raw <file-col>=<json>\` STAYS REJECTED ` +
+        `per D3 — permanent because \`change_column_value\` has no ` +
+        `JSON-shape for file columns.`
       );
   }
 };

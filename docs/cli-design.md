@@ -1709,8 +1709,8 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # carrying 'mixed_file_and_value_sets' at details.reason;
                                           # 2+ file --set → usage_error carrying
                                           # 'multi_file_set_unsupported' at details.reason — multi-file
-                                          # dispatch defers to v0.6.x. --set-raw <file-col>=<json>
-                                          # stays REJECTED.
+                                          # dispatch defers to v0.7.x (unratified — carry-forward
+                                          # candidate). --set-raw <file-col>=<json> stays REJECTED.
 monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38; CARVED OUT at v0.7-M42 — pre-flight contract diff lands the argv + pre-check surface; IMPL body at v0.7-M42 IMPL)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # v0.7-M42 (D5 carve-out fold from v0.6-M38): file-column
@@ -1757,7 +1757,7 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # `data.summary.{matched,applied,failed}_count` invariant.
                                           # Monday's `concurrency_exceeded` retries via the existing
                                           # retry layer (§2.5) — no new error code surfaces.
-monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set REJECTED at v0.6-M38, defers to v0.6.x)
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set REJECTED at v0.6-M38; defers to v0.7-M43 per D6 carve-out fold — non-atomic post-create wire shape needs an atomicity-envelope decision)
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
                                           # entries → usage_error (covers --set + --set, --set-raw
@@ -3548,9 +3548,9 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
 
    - **Single file `--set` per call.** 2+ `--set <file-col>=<path>`
      entries in the same call reject as `usage_error` with
-     `'multi_file_set_unsupported'` — defers multi-file dispatch
-     to v0.6.x. The discriminator literal lives at
-     `details.reason`.
+     `'multi_file_set_unsupported'` — multi-file dispatch is an
+     unratified v0.7.x carry-forward candidate. The discriminator
+     literal lives at `details.reason`.
    - **No mixing with value flags.** File `--set` mixed with any
      value `--set` / `--set-raw` / `--name <n>` in the same call
      rejects as `usage_error` with
@@ -3560,9 +3560,9 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      column), breaking the existing atomicity guarantee.
    - **No `item create --set <file-col>=<path>`.** Rejects as
      `usage_error` with `'file_set_on_create_unsupported'` at
-     `details.reason` — defers create-time file upload to v0.6.x
-     (non-atomic post-create wire shape would break §5.8 state
-     safety).
+     `details.reason` — defers to v0.7-M43 per D6 carve-out fold
+     (non-atomic post-create wire shape needs an atomicity-
+     envelope decision per §5.8 state safety).
    - **Bulk `item update --where ... --set <file-col>=<path>` —
      CARVED OUT at v0.7-M42** (D5 fold from v0.6-M38). At v0.6-M38
      this rejected with `'file_set_on_bulk_unsupported'`; v0.7-M42
@@ -8721,10 +8721,12 @@ scoped idempotent changes, and post comments narrating its work.**
   ERROR_CODE (29 stays). Mutex rules at M38 (per §5.3 step 5
   "File-column dispatch leg"): single file `--set` only, no
   mixing with value `--set` / `--set-raw` / `--name`; bulk
-  `item update --where ... --set <file-col>=<path>` defers to
-  v0.6.x per D5; `item create --set <file-col>=<path>` defers
-  to v0.6.x per D6; `--set-raw <file-col>=<json>` STAYS
-  REJECTED per D3. M38 pre-flight stubs landed at
+  `item update --where ... --set <file-col>=<path>` deferred
+  D5 → **shipped at v0.7-M42** (per-item multipart fan-out
+  under `--concurrency` / `--continue-on-error`); `item create
+  --set <file-col>=<path>` deferred D6 → pending at v0.7-M43;
+  `--set-raw <file-col>=<json>` STAYS REJECTED per D3
+  (permanent). M38 pre-flight stubs landed at
   `0cb8b69..1a92955` (4 fix-up rounds + 1 ratification);
   M38 IMPL runtime bodies shipped end-to-end.
 

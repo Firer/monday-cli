@@ -935,10 +935,12 @@ warning-code registry:
 write_path: null` — no write path; covers mirror / formula /
 auto_number / creation_log / last_updated / item_id /
 item_assignees), `"files_shaped"` (suggests BOTH `monday item set
-<iid> <file-col>=<path>` (v0.6-M38; friendly translator dispatch,
-single-item only) AND `monday item upload <iid> --column <col>
-<file>` (v0.4-M31; verb-shaped multipart) joined with ` OR ` in
-the `suggested_write_path` string; currently `file` only).
+<iid> <file-col>=<path>` (v0.6-M38 single-item + v0.7-M42 bulk
+update friendly translator dispatch; bulk variant is `monday item
+update --where ... --set <file-col>=<path>`) AND `monday item
+upload <iid> --column <col> <file>` (v0.4-M31; verb-shaped
+multipart) joined with ` OR ` in the `suggested_write_path`
+string; currently `file` only).
 Adding a category
 value is SemVer-minor; removing/renaming is SemVer-major. The
 warning fires on dry-run too so the live call's behaviour is
@@ -2055,14 +2057,18 @@ Two shapes (mutually exclusive — exactly one per call):
   cli-design §5.3). Read-only-forever (mirror / formula /
   auto_number / creation_log / last_updated / item_id) →
   `unsupported_column_type` with `read_only: true`. Files-shaped
-  (file) → `unsupported_column_type` rejection STAYS at v0.6-M38
-  per D3 closure — PERMANENT for `--set-raw` because Monday's
-  wire has no JSON-shape for `change_column_value` on file
-  columns (`add_file_to_column` is multipart-only). The hint
-  names BOTH write paths reaching `add_file_to_column`: the v0.6-
-  M38 friendly `--set <file-col>=<path>` form (`monday item set` /
-  `monday item update`, single-item only) AND the v0.4-M31 verb-
+  (file) → `unsupported_column_type` rejection STAYS per D3
+  closure — PERMANENT for `--set-raw` because Monday's wire has
+  no JSON-shape for `change_column_value` on file columns
+  (`add_file_to_column` is multipart-only). The hint names every
+  write path reaching `add_file_to_column`: the v0.6-M38 friendly
+  `--set <file-col>=<path>` form on `monday item set` + `monday
+  item update <iid>` (single-item); the v0.7-M42 friendly form on
+  `monday item update --where ...` (bulk per-item fan-out under
+  `--concurrency` / `--continue-on-error`); AND the v0.4-M31 verb-
   shaped `monday item upload <iid> --column <col> <file>`.
+  `monday item create --set <file-col>=<path>` still rejects (D6
+  deferred to v0.7-M43).
 
 `--dry-run` returns a planned-change envelope (no API write):
 
