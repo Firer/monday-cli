@@ -3451,4 +3451,121 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     expect(out.stderr).toBe('');
     expect(out.stdout).toBe('');
   });
+
+  describe('v0.6-M38 bulk file-set rejection (D5 closure)', () => {
+    const fileBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'status_1',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+
+    it("rejects bulk file --set with usage_error.details.reason: 'file_set_on_bulk_unsupported' (live path; --yes provided so the confirmation gate doesn't pre-empt)", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          'attachments=./report.pdf',
+          '--yes',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+            // items_page walker — return one matched item so the
+            // loop enters resolveAndTranslate, where the file
+            // rejection fires.
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
+    });
+
+    it("rejects bulk file --set on dry-run path with the same reason discriminator (D5 fires regardless of --yes / --dry-run)", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          'attachments=./report.pdf',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
+    });
+  });
 });

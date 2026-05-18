@@ -7,7 +7,16 @@
  *     column, ambiguous column, unsupported column type, cache-miss
  *     refresh, validation_failed → column_archived remap.
  */
-import { describe, expect, it } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolveCacheRoot, writeEntry } from '../../../src/api/cache.js';
 import {
   assertEnvelopeContract,
@@ -22,6 +31,10 @@ import {
   sampleItem,
   useItemTestEnv,
 } from './_item-fixtures.js';
+import {
+  createInlineMultipartFixtureTransport,
+  type MultipartInteraction,
+} from '../../fixtures/multipart-load.js';
 
 const { drive, xdgRoot } = useItemTestEnv();
 
@@ -1878,15 +1891,9 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
     expect(env.error?.details).not.toHaveProperty('deferred_to');
   });
 
-  it('v0.6-M38 file-column friendly --set <file-col>=<path>: dispatch leg pre-flight stub fires (the runtime body lands at M38 IMPL; the pre-flight contract surface ships the c8-ignored stub at src/commands/item/set.ts to surface `internal_error` with reason: pre_flight_stub)', async () => {
-    // Pre-flight pin: friendly --set on a `file`-typed column
-    // resolves through the new M38 dispatch branch at item set's
-    // action body (cli-design §5.3 step 5 "File-column dispatch
-    // leg"). At pre-flight, the stub throws internal_error; at
-    // M38 IMPL, the runtime body shipping at executeFileColumnSet
-    // performs file pre-check + Blob construction + addFileToColumn
-    // dispatch + emitMutation with the fileColumnSetOutputSchema
-    // envelope.
+  describe('v0.6-M38 file-column friendly --set <file-col>=<path>', () => {
+    let workdir: string;
+    let reportPath: string;
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -1901,106 +1908,152 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
         },
       ],
     };
-    const out = await drive(
-      [
-        'item',
-        'set',
-        '12345',
-        'attachments=./report.pdf',
-        '--board',
-        '111',
-        '--json',
-      ],
-      {
-        interactions: [
-          {
-            operation_name: 'BoardMetadata',
-            response: { data: { boards: [fileBoard] } },
-          },
-        ],
-      },
-    );
-    // Pre-flight stub throws `internal_error` (exit 2); at IMPL the
-    // expectation flips to a successful add_file_to_column dispatch
-    // (exit 0 with the M31-shaped envelope).
-    expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr);
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.message).toMatch(/v0\.6-M38/u);
-    expect(env.error?.message).toMatch(/pre-flight/u);
-    expect(env.error?.details).toMatchObject({
-      column_id: 'attachments',
-      column_type: 'file',
-      deferred_to: 'v0.6-M38-impl',
-      reason: 'pre_flight_stub',
-    });
-  });
+    const sampleAsset = {
+      id: '555000111',
+      name: 'report.pdf',
+      url: 'https://files.monday.com/x/report.pdf',
+      public_url: 'https://share.monday.com/x',
+      file_extension: 'pdf',
+      file_size: 17,
+      created_at: '2026-06-01T10:30:00Z',
+      uploaded_by: { id: '1', name: 'Alice' },
+      original_geometry: null,
+      url_thumbnail: null,
+    };
 
-  it('v0.6-M38 file-column friendly --set <file-col>=<path> --dry-run: dispatch leg pre-flight stub fires for dry-run too via catch-and-rewrap (per D4, M38 dispatch fires for BOTH dry-run and live paths; at pre-flight the dry-run path runs `planChanges`, which surfaces `unsupported_column_type` via the translator on a file-typed column; the action body catches and rewraps as `internal_error.details.reason: pre_flight_stub` matching the live path stub. The catch-and-rewrap collapses at M38 IMPL when the dry-run envelope per D4 lands.)', async () => {
-    // Pre-flight pin: the M38 file-column dispatch is wired on the
-    // dry-run path via catch-and-rewrap (cli-design §5.3 step 5 +
-    // D4). The dry-run branch enters `planChanges`, which routes
-    // through `translateColumnValueAsync` and surfaces
-    // `unsupported_column_type` for files-shaped columns via the
-    // `UNSUPPORTED_TABLE.files_shaped` row. The action body's catch
-    // detects the rejection (code + `details.type === 'file'` +
-    // friendly call shape) and re-throws `internal_error` with
-    // `reason: 'pre_flight_stub'` matching the live path's stub.
-    // The first-pass fix moved the column resolution upfront before
-    // the dry-run/live split, but that double-resolved metadata
-    // and flipped the dry-run envelope's `source` from `'live'` to
-    // `'mixed'` on non-file paths; the catch-and-rewrap preserves
-    // source-aggregation semantics. At M38 IMPL the rewrap collapses
-    // when the runtime body lands the dry-run envelope shape per
-    // D4 (planned_changes: [{operation: 'add_file_to_column', ...}])
-    // without loading file bytes (size from fs.stat).
-    const fileBoard = {
-      ...sampleBoardMetadata,
-      columns: [
-        {
-          id: 'attachments',
-          title: 'Attachments',
-          type: 'file',
-          description: null,
-          archived: null,
-          settings_str: '{}',
-          width: null,
-        },
-      ],
-    };
-    const out = await drive(
-      [
-        'item',
-        'set',
-        '12345',
-        'attachments=./report.pdf',
-        '--board',
-        '111',
-        '--dry-run',
-        '--json',
-      ],
-      {
-        interactions: [
+    beforeEach(async () => {
+      workdir = await mkdtemp(join(tmpdir(), 'monday-cli-item-set-m38-'));
+      reportPath = join(workdir, 'report.pdf');
+      await writeFile(reportPath, 'PDF-bytes-fixture', 'utf8');
+    });
+    afterEach(async () => {
+      await rm(workdir, { recursive: true, force: true });
+    });
+
+    it('live: dispatches add_file_to_column via M31 multipart wire + emits the M31-shaped envelope (M38 D4/D5 single-item path; cli-design §5.3 step 5 "File-column dispatch leg")', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
           {
-            operation_name: 'BoardMetadata',
-            response: { data: { boards: [fileBoard] } },
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
           },
         ],
-      },
-    );
-    // Pre-flight stub throws `internal_error` (exit 2) regardless
-    // of dry-run; at IMPL the dry-run path flips to exit 0 with
-    // the M31-shaped `planned_changes` envelope per D4.
-    expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr);
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.message).toMatch(/v0\.6-M38/u);
-    expect(env.error?.message).toMatch(/pre-flight/u);
-    expect(env.error?.details).toMatchObject({
-      column_id: 'attachments',
-      column_type: 'file',
-      deferred_to: 'v0.6-M38-impl',
-      reason: 'pre_flight_stub',
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'set',
+          '12345',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          item_id: string;
+          column_id: string;
+          filename: string;
+          file_size_bytes: number;
+          asset: { id: string; name: string };
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
+        filename: 'report.pdf',
+        file_size_bytes: 17,
+        asset: { id: '555000111', name: 'report.pdf' },
+      });
+      expect(env.meta.source).toBe('live');
+      // Multipart wire fired once.
+      expect(multipart.requests).toHaveLength(1);
+      const req = multipart.requests[0]!;
+      expect(req.operationName).toBe('AddFileToColumn');
+      expect(req.filename).toBe('report.pdf');
+    });
+
+    it('dry-run: emits the D4 planned_changes envelope (operation: add_file_to_column; size from fs.stat; no file bytes loaded; meta.source: none) — mirrors M31 item upload --dry-run verbatim', async () => {
+      const out = await drive(
+        [
+          'item',
+          'set',
+          '12345',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape;
+      expect(env.ok).toBe(true);
+      expect(env.meta.dry_run).toBe(true);
+      expect(env.meta.source).toBe('none');
+      expect(env.planned_changes).toEqual([
+        {
+          operation: 'add_file_to_column',
+          item_id: '12345',
+          column_id: 'attachments',
+          file_path: reportPath,
+          filename: 'report.pdf',
+          file_size_bytes: 17,
+        },
+      ]);
+    });
+
+    it('rejects ENOENT path with usage_error.details.reason: file_not_readable (precheckLocalFile fires before the multipart wire — same shape as M31 item upload)', async () => {
+      const out = await drive(
+        [
+          'item',
+          'set',
+          '12345',
+          'attachments=./does-not-exist-here.pdf',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details).toMatchObject({
+        reason: 'file_not_readable',
+        errno_code: 'ENOENT',
+      });
     });
   });
 

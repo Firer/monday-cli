@@ -8632,8 +8632,9 @@ scoped idempotent changes, and post comments narrating its work.**
   `item update --where ... --set <file-col>=<path>` defers to
   v0.6.x per D5; `item create --set <file-col>=<path>` defers
   to v0.6.x per D6; `--set-raw <file-col>=<json>` STAYS
-  REJECTED per D3. M38 pre-flight stubs at this commit;
-  runtime body lands at M38 IMPL.
+  REJECTED per D3. M38 pre-flight stubs landed at
+  `0cb8b69..1a92955` (4 fix-up rounds + 1 ratification);
+  M38 IMPL runtime bodies shipped end-to-end.
 
 - **Carried forward from v0.4 + v0.5 release-prep slips**
   (each defers to its own v0.6.x candidate-selection session

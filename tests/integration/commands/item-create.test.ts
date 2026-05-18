@@ -2134,3 +2134,87 @@ describe('monday item create — dry-run', () => {
     ]);
   });
 });
+
+describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', () => {
+  const fileBoard = {
+    ...sampleBoardMetadata,
+    columns: [
+      {
+        id: 'attachments',
+        title: 'Attachments',
+        type: 'file',
+        description: null,
+        archived: null,
+        settings_str: '{}',
+        width: null,
+      },
+      {
+        id: 'status_1',
+        title: 'Status',
+        type: 'status',
+        description: null,
+        archived: null,
+        settings_str: '{}',
+        width: null,
+      },
+    ],
+  };
+
+  it("rejects file --set on item create live path with usage_error.details.reason: 'file_set_on_create_unsupported'", async () => {
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'New item',
+        '--set',
+        'attachments=./report.pdf',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
+    expect(env.error?.details?.column_id).toBe('attachments');
+  });
+
+  it('rejects file --set on item create dry-run path with the same reason (D6 applies to both paths)', async () => {
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'New item',
+        '--set',
+        'attachments=./report.pdf',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
+  });
+});

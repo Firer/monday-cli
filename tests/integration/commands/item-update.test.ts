@@ -23,7 +23,16 @@
  * past §15's 1,500-line threshold; the per-mode split mirrors R14's
  * per-verb split of the original `item.test.ts` (M5b session 4).
  */
-import { describe, expect, it } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   assertEnvelopeContract,
   FIXTURE_API_URL,
@@ -37,6 +46,9 @@ import {
   sampleItem,
   useItemTestEnv,
 } from './_item-fixtures.js';
+import {
+  createInlineMultipartFixtureTransport,
+} from '../../fixtures/multipart-load.js';
 
 const { drive, xdgRoot } = useItemTestEnv();
 
@@ -1486,5 +1498,241 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
     expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
     expect(env.error?.code).toBe('usage_error');
+  });
+
+  describe('v0.6-M38 file-column dispatch (cli-design §5.3 step 5 "File-column dispatch leg")', () => {
+    let workdir: string;
+    let reportPath: string;
+    const fileBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'attachments_2',
+          title: 'Second files',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'status_1',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const sampleAsset = {
+      id: '555000222',
+      name: 'report.pdf',
+      url: 'https://files.monday.com/x/report.pdf',
+      public_url: 'https://share.monday.com/x',
+      file_extension: 'pdf',
+      file_size: 17,
+      created_at: '2026-06-01T10:30:00Z',
+      uploaded_by: { id: '1', name: 'Alice' },
+      original_geometry: null,
+      url_thumbnail: null,
+    };
+
+    beforeEach(async () => {
+      workdir = await mkdtemp(join(tmpdir(), 'monday-cli-item-update-m38-'));
+      reportPath = join(workdir, 'report.pdf');
+      await writeFile(reportPath, 'PDF-bytes-fixture', 'utf8');
+    });
+    afterEach(async () => {
+      await rm(workdir, { recursive: true, force: true });
+    });
+
+    it('live single-item: dispatches add_file_to_column via M31 multipart wire + emits the M31-shaped envelope', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          column_id: string;
+          asset: { id: string };
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
+        filename: 'report.pdf',
+        file_size_bytes: 17,
+      });
+      expect(multipart.requests).toHaveLength(1);
+    });
+
+    it('dry-run single-item: emits D4 planned_changes envelope (no wire mutation)', async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape;
+      expect(env.ok).toBe(true);
+      expect(env.meta.dry_run).toBe(true);
+      expect(env.meta.source).toBe('none');
+      expect(env.planned_changes).toEqual([
+        {
+          operation: 'add_file_to_column',
+          item_id: '12345',
+          column_id: 'attachments',
+          file_path: reportPath,
+          filename: 'report.pdf',
+          file_size_bytes: 17,
+        },
+      ]);
+    });
+
+    it("rejects file --set + value --set with usage_error.details.reason: 'mixed_file_and_value_sets' (D2 mixed leg)", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          'status_1=Done',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
+    });
+
+    it("rejects file --set + --name with usage_error.details.reason: 'mixed_file_and_value_sets'", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--name',
+          'Renamed',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
+    });
+
+    it("rejects 2 file --set entries with usage_error.details.reason: 'multi_file_set_unsupported' (D2 multi leg)", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          `attachments_2=${reportPath}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('multi_file_set_unsupported');
+      expect(env.error?.details?.file_count).toBe(2);
+    });
   });
 });

@@ -86,6 +86,13 @@ import {
   projectedItemSchema,
   type ProjectedItem,
 } from '../../api/item-projection.js';
+import {
+  executeFileColumnSet,
+  fileColumnSetOutputSchema,
+  type FileColumnSetOutput,
+} from '../../api/file-column-set.js';
+import { precheckLocalFile } from '../../utils/file-source.js';
+import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 const CHANGE_SIMPLE_COLUMN_VALUE_MUTATION = `
@@ -131,8 +138,19 @@ interface ChangeColumnResponse {
   readonly change_column_value: unknown;
 }
 
-export const itemSetOutputSchema = projectedItemSchema;
-export type ItemSetOutput = ProjectedItem;
+/**
+ * Output envelope union — projected-item for the JSON translator
+ * path (text / status / dropdown / date / people / etc.) +
+ * file-dispatch envelope for the v0.6-M38 friendly `--set
+ * <file-col>=<path>` path. Agents discriminate on the `operation`
+ * field: present (`'add_file_to_column'`) → file dispatch shape;
+ * absent → projected-item shape (mirrors §6.2 single-record).
+ */
+export const itemSetOutputSchema = z.union([
+  projectedItemSchema,
+  fileColumnSetOutputSchema,
+]);
+export type ItemSetOutput = ProjectedItem | FileColumnSetOutput;
 
 const inputSchema = z
   .object({
@@ -199,10 +217,8 @@ export const itemSetCommand: CommandModule<
           ...(setExpr === undefined ? {} : { setExpr }),
           ...(opts as Readonly<Record<string, unknown>>),
         });
-        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
-          ctx,
-          program.opts(),
-        );
+        const { client, globalFlags, apiVersion, multipart, toEmit } =
+          resolveClient(ctx, program.opts());
 
         // Exactly one of setExpr / setRaw is present (zod refinement
         // enforces XOR). Discriminate to keep the downstream code
@@ -236,25 +252,41 @@ export const itemSetCommand: CommandModule<
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
-          // M38 pre-flight: the friendly `--set <file-col>=<path>`
-          // dispatch fires for BOTH dry-run and live paths per the
-          // cli-design §5.3 step 5 contract. At pre-flight the live
-          // path's dispatch check (below) catches files-shaped
-          // columns AFTER `resolveColumnWithRefresh`; the dry-run
-          // path's column resolution lives INSIDE `planChanges` (so
-          // pre-resolving here would double-count the resolution leg
-          // in the dry-run envelope's `source` / `cache_age_seconds`
-          // aggregation). The catch-and-rewrap below intercepts the
-          // translator's `UNSUPPORTED_TABLE.files_shaped` rejection
-          // (`unsupported_column_type` with `details.type === 'file'`)
-          // and rewraps as the M38 pre-flight stub for friendly
-          // `--set` paths — `--set-raw <file-col>=<json>` stays
-          // `unsupported_column_type` per D3 (permanent rejection;
-          // Monday's wire has no JSON-shape for `change_column_value`
-          // on file columns). At M38 IMPL the rewrap collapses: the
-          // dispatch fires upfront with the dry-run envelope shape
-          // per D4 (`planned_changes: [{operation:
-          // 'add_file_to_column', ...}]`; no file bytes loaded).
+          // v0.6-M38 (cli-design §5.3 step 5 "File-column dispatch
+          // leg" + D4 closure). Friendly `--set <file-col>=<path>`
+          // fires for BOTH dry-run and live paths. The dry-run
+          // entry point routes through `planChanges`, which runs
+          // column resolution inside the planner; if the resolved
+          // column has `type === 'file'`, the translator's
+          // `UNSUPPORTED_TABLE.files_shaped` row surfaces
+          // `unsupported_column_type` with `details.type: 'file'`
+          // + `details.column_id`. The action body catches and
+          // rewraps as the D4 dry-run envelope shape (a single-
+          // entry `planned_changes` matching M31 `item upload
+          // --dry-run` verbatim; size from local `fs.stat()` via
+          // `precheckLocalFile`; no file bytes loaded into memory;
+          // `meta.source: 'none'`).
+          //
+          // **Why catch-and-rewrap over upfront column resolution.**
+          // First-pass M38 pre-flight fix moved column resolution
+          // upfront BEFORE the dry-run / live split, which caused
+          // the dry-run envelope's `source` to flip from `'live'`
+          // to `'mixed'` on non-file paths via `planChanges`'
+          // second resolution hitting cache (caught by
+          // `tests/integration/envelope-snapshots.test.ts` as a
+          // snapshot regression). The catch-and-rewrap pattern
+          // preserves source aggregation semantics for non-file
+          // paths (resolution + planner state read happen exactly
+          // once via `planChanges`) and only diverts to the D4
+          // envelope when the translator's pre-existing
+          // files-shaped rejection fires. R-v0.6-NEW-4 documents
+          // the shim pattern + alternative trade-offs.
+          //
+          // `--set-raw <file-col>=<json>` stays REJECTED at
+          // `raw-write.ts:translateRawColumnValue` per D3
+          // (permanent rejection — Monday's wire has no JSON-shape
+          // for `change_column_value` on file columns; the
+          // catch-and-rewrap only fires when `!isRaw`).
           let result;
           try {
             result = await planChanges({
@@ -271,37 +303,50 @@ export const itemSetCommand: CommandModule<
               noCache: globalFlags.noCache,
             });
           } catch (err) {
-            /* c8 ignore start — pre-flight stub; rewrap collapses at v0.6-M38 IMPL */
             if (
               !isRaw &&
+              friendly !== null &&
               err instanceof ApiError &&
               err.code === 'unsupported_column_type' &&
               err.details?.type === 'file'
             ) {
-              const details = err.details;
-              throw new ApiError(
-                'internal_error',
-                `item set: v0.6-M38 file-column --set dispatch is wired ` +
-                  `at pre-flight; runtime body lands at M38 IMPL. The ` +
-                  `dispatch routes from the friendly --set <file-col>=<path> ` +
-                  `boundary into Monday's add_file_to_column multipart wire ` +
-                  `via executeFileColumnSet (src/api/file-column-set.ts).`,
-                {
-                  details: {
-                    column_id: details.column_id,
-                    column_type: details.type,
-                    deferred_to: 'v0.6-M38-impl',
-                    reason: 'pre_flight_stub',
-                    hint:
-                      'this dispatch leg is contract-pinned at v0.6-M38 ' +
-                      'pre-flight but the runtime body lands at IMPL. Use ' +
-                      '`monday item upload <iid> --column <col> <file>` ' +
-                      '(v0.4-M31; verb-shaped multipart) in the meantime.',
+              const columnId = err.details.column_id;
+              /* c8 ignore next 4 */
+              if (typeof columnId !== 'string') {
+                throw err;
+              }
+              const precheck = await precheckLocalFile(friendly.value);
+              emitDryRun({
+                ctx,
+                programOpts: program.opts(),
+                plannedChanges: [
+                  {
+                    operation: 'add_file_to_column',
+                    item_id: parsed.itemId,
+                    column_id: columnId,
+                    // `file_path` is the **argv-derived** path the
+                    // agent passed (relative or absolute) per cli-
+                    // design §6.4 + M31 `item upload --dry-run`
+                    // sample shape (`./report.pdf`). The resolved
+                    // absolute path lives in `details.file_path`
+                    // on `usage_error.details.reason:
+                    // 'file_not_readable'` / `'file_empty'`
+                    // rejections (where it's useful for diagnosing
+                    // path-resolution mismatches).
+                    file_path: friendly.value,
+                    filename: precheck.filename,
+                    file_size_bytes: precheck.fileSizeBytes,
                   },
-                },
-              );
+                ],
+                // D4: dry-run for the file-column dispatch is
+                // local-derived; no wire mutation fires. `'none'`
+                // mirrors M31 `item upload --dry-run`.
+                source: 'none',
+                cacheAgeSeconds: null,
+                apiVersion,
+              });
+              return;
             }
-            /* c8 ignore stop */
             throw err;
           }
           emitDryRun({
@@ -356,52 +401,76 @@ export const itemSetCommand: CommandModule<
         // `addFileToColumn` fetcher (wrapped by
         // `executeFileColumnSet` in `src/api/file-column-set.ts`).
         //
-        // The dry-run path's analogue lives in the catch-and-rewrap
-        // above the dry-run emit (planChanges' translator surfaces
-        // `unsupported_column_type` for files-shaped columns; the
-        // catch rewraps as the same M38 pre-flight stub). Both
-        // paths collapse at M38 IMPL when the runtime body lands.
-        //
-        // At pre-flight, the dispatch leg's runtime body is a
-        // c8-ignored stub throwing `internal_error`. Runtime body
-        // lands at M38 IMPL — at which point the stub is replaced
-        // by: (a) file pre-check (`fs.stat` + `fs.access(R_OK)` +
-        // non-empty; mirrors M31 `item upload`); (b) `Blob`
-        // construction with sniffed content-type; (c)
-        // `addFileToColumn(...)` dispatch via the resolved
-        // multipart transport; (d) `emitMutation` with the
-        // `fileColumnSetOutputSchema` envelope shape (mirrors
-        // M31 `item upload` envelope verbatim).
-        //
         // The `--set-raw <file-col>=<json>` rejection stays
         // unchanged per D3 — `translateRawColumnValue` (below)
         // surfaces `unsupported_column_type` for files-shaped types
         // because Monday's wire has no JSON-shape for
         // `change_column_value` on file columns.
         if (resolution.match.column.type === 'file' && !isRaw) {
-          /* c8 ignore start — pre-flight stub; runtime body lands at v0.6-M38 IMPL */
-          throw new ApiError(
-            'internal_error',
-            `item set: v0.6-M38 file-column --set dispatch is wired ` +
-              `at pre-flight; runtime body lands at M38 IMPL. The ` +
-              `dispatch routes from the friendly --set <file-col>=<path> ` +
-              `boundary into Monday's add_file_to_column multipart wire ` +
-              `via executeFileColumnSet (src/api/file-column-set.ts).`,
-            {
-              details: {
-                column_id: resolution.match.column.id,
-                column_type: resolution.match.column.type,
-                deferred_to: 'v0.6-M38-impl',
-                reason: 'pre_flight_stub',
-                hint:
-                  'this dispatch leg is contract-pinned at v0.6-M38 ' +
-                  'pre-flight but the runtime body lands at IMPL. Use ' +
-                  '`monday item upload <iid> --column <col> <file>` ' +
-                  '(v0.4-M31; verb-shaped multipart) in the meantime.',
-              },
+          /* c8 ignore next 3 — defensive: !isRaw means friendly is
+             non-null per the discriminator above; type-narrow for TS. */
+          if (friendly === null) {
+            throw new UsageError('item set: friendly narrowing failed (file dispatch)');
+          }
+          // Local file pre-check via `precheckLocalFile` (lifted at
+          // R-v0.6-NEW-1; 3-consumer helper). Runs AFTER column
+          // resolution + archive check so a non-`file` column or
+          // archived-column rejection doesn't pay for the stat call
+          // — mirrors M31 `item upload`'s "pre-check before bytes"
+          // discipline (the bytes load happens inside
+          // `executeFileColumnSet` via `buildBlobFromPath`).
+          const precheck = await precheckLocalFile(friendly.value);
+          const result = await executeFileColumnSet({
+            client,
+            multipart,
+            itemId: parsed.itemId,
+            entry: {
+              columnId: resolution.match.column.id,
+              columnType: 'file',
+              rawValue: friendly.value,
+              filePath: precheck.filePath,
+              filename: precheck.filename,
+              fileSizeBytes: precheck.fileSizeBytes,
             },
-          );
-          /* c8 ignore stop */
+            signal: ctx.signal,
+            retries: globalFlags.retry,
+          });
+          // §8 single-leg cache invalidation. Fired BEFORE
+          // `emitMutation` so a cache-unlink failure surfaces
+          // through the runner's catch-all rather than double-
+          // emitting after the success envelope already hit stdout
+          // (mirrors M31 `item upload`'s ordering per the §8
+          // single-leg invalidation pattern).
+          await invalidateBoard(boardId, ctx.env);
+          const data: FileColumnSetOutput = {
+            operation: 'add_file_to_column',
+            item_id: parsed.itemId,
+            column_id: resolution.match.column.id,
+            filename: precheck.filename,
+            file_size_bytes: precheck.fileSizeBytes,
+            asset: result.asset,
+          };
+          emitMutation({
+            ctx,
+            data,
+            schema: fileColumnSetOutputSchema,
+            programOpts: program.opts(),
+            warnings: resolverWarnings.map((w) => ({
+              code: w.code,
+              message: w.message,
+              details: w.details,
+            })),
+            ...toEmit({
+              data: result.asset,
+              complexity: result.complexity,
+              stats: { attempts: 1, totalBackoffMs: 0 },
+            }),
+            source: 'live',
+            cacheAgeSeconds: null,
+            complexity: result.complexity,
+            resolvedIds: { [token]: resolution.match.column.id },
+          });
+          return;
         }
 
         // Translator + mutation-selection + live mutation all share

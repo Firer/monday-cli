@@ -787,19 +787,41 @@ export const itemCreateCommand: CommandModule<
           buildResolutionContexts({ client, ctx, globalFlags });
 
         if (globalFlags.dryRun) {
-          const result = await planCreate({
-            client,
-            mode: createMode,
-            name: parsed.name,
-            setEntries,
-            ...(rawEntries.length === 0 ? {} : { rawEntries }),
-            dateResolution,
-            peopleResolution,
-            tagResolution,
-            relationResolution,
-            env: ctx.env,
-            noCache: globalFlags.noCache,
-          });
+          let result;
+          try {
+            result = await planCreate({
+              client,
+              mode: createMode,
+              name: parsed.name,
+              setEntries,
+              ...(rawEntries.length === 0 ? {} : { rawEntries }),
+              dateResolution,
+              peopleResolution,
+              tagResolution,
+              relationResolution,
+              env: ctx.env,
+              noCache: globalFlags.noCache,
+            });
+          } catch (err) {
+            // v0.6-M38 D6 closure: create-time file-set REJECTS at
+            // the column-resolution boundary. planCreate's
+            // resolveAndTranslate surfaces `unsupported_column_type`
+            // with `details.type === 'file'` for files-shaped
+            // columns; the catch rewraps as `usage_error.details.
+            // reason: 'file_set_on_create_unsupported'`. Monday's
+            // wire has no atomic create-with-file mutation at API
+            // `2026-01`; create-time file upload would require a
+            // non-atomic post-create `add_file_to_column` that
+            // breaks §5.8 state safety.
+            if (
+              err instanceof ApiError &&
+              err.code === 'unsupported_column_type' &&
+              err.details?.type === 'file'
+            ) {
+              throw buildCreateFileRejection(err);
+            }
+            throw err;
+          }
           // Dry-run envelope source folds three legs (Codex M9 P2 #1):
           // pre-planner network calls (parent lookup + parent-board
           // metadata + --relative-to verification) + planCreate's
@@ -832,18 +854,33 @@ export const itemCreateCommand: CommandModule<
         // through the shared helper (R20 lift), then bundle into one
         // column_values map and fire the single-round-trip mutation
         // per cli-design §5.8.
-        const resolutionResult = await resolveAndTranslate({
-          client,
-          boardId: resolveBoardId,
-          setEntries,
-          rawEntries,
-          dateResolution,
-          peopleResolution,
-          tagResolution,
-          relationResolution,
-          env: ctx.env,
-          noCache: globalFlags.noCache,
-        });
+        let resolutionResult;
+        try {
+          resolutionResult = await resolveAndTranslate({
+            client,
+            boardId: resolveBoardId,
+            setEntries,
+            rawEntries,
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            env: ctx.env,
+            noCache: globalFlags.noCache,
+          });
+        } catch (err) {
+          // v0.6-M38 D6 closure: same rewrap as the dry-run branch
+          // above. The catch fires when any --set token resolves to
+          // a file-typed column.
+          if (
+            err instanceof ApiError &&
+            err.code === 'unsupported_column_type' &&
+            err.details?.type === 'file'
+          ) {
+            throw buildCreateFileRejection(err);
+          }
+          throw err;
+        }
         const collectedWarnings: ResolverWarning[] = [
           ...resolutionResult.warnings,
         ];
@@ -1118,5 +1155,49 @@ const executeCreateSubitem = async (
     },
     response,
   };
+};
+
+/**
+ * Rewraps a translator `unsupported_column_type` rejection on a
+ * file-typed column as the v0.6-M38 D6 closure's
+ * `file_set_on_create_unsupported` reason discriminator. Fires
+ * from BOTH the dry-run `planCreate` catch AND the live
+ * `resolveAndTranslate` catch — both reach the translator's
+ * files-shaped rejection on the same code path. Monday's wire has
+ * no atomic create-with-file mutation at API `2026-01`; create-
+ * time file upload would force a non-atomic post-create
+ * `add_file_to_column` that breaks §5.8 state safety. The hint
+ * names the post-create two-step workflow so agents have a clear
+ * next step.
+ */
+const buildCreateFileRejection = (err: ApiError): ApiError => {
+  const columnId =
+    typeof err.details?.column_id === 'string' ? err.details.column_id : null;
+  return new ApiError(
+    'usage_error',
+    `--set <file-col>=<path> is not supported on \`monday item create\` ` +
+      `at v0.6-M38 (deferred to v0.6.x per cli-design §13 v0.6 entry + ` +
+      `v0.6-plan §3 M38 D6 closure). Monday's wire has no atomic ` +
+      `create-with-file mutation at API \`2026-01\`; create-time file ` +
+      `upload would require a non-atomic post-create ` +
+      `\`add_file_to_column\` that breaks §5.8 state safety. Create ` +
+      `the item first (with non-file \`--set\` values), then attach the ` +
+      `file with \`monday item set <iid> <file-col>=<path>\` (v0.6-M38; ` +
+      `friendly) or \`monday item upload <iid> --column <col> <file>\` ` +
+      `(v0.4-M31; verb-shaped).`,
+    {
+      cause: err,
+      details: {
+        reason: 'file_set_on_create_unsupported',
+        ...(columnId === null ? {} : { column_id: columnId }),
+        deferred_to: 'v0.6.x',
+        hint:
+          'create the item with non-file `--set` values, then attach ' +
+          'the file with `monday item set <iid> <file-col>=<path>` ' +
+          '(v0.6-M38) or `monday item upload <iid> --column <col> ' +
+          '<file>` (v0.4-M31).',
+      },
+    },
+  );
 };
 

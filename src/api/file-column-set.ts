@@ -3,11 +3,12 @@
  * writer-expansion roadmap "files" row + §13 v0.6 entry,
  * `v0.6-plan.md` §3 M38).
  *
- * **Status: pre-flight stubs (v0.6-M38 pre-flight contract diff).**
- * Runtime bodies land at M38 IMPL; pre-flight ships the dispatch
- * type signatures + the per-mutex-rejection error shape + the stub
- * fetcher signature wrapping M31's `addFileToColumn` (no new wire
- * fetcher — M38 reuses the v0.4-M31 multipart wire verbatim).
+ * **Status: runtime bodies shipped at v0.6-M38 IMPL.** The dispatch
+ * type signatures + the per-mutex-rejection error shape + the
+ * fetcher wrapping M31's `addFileToColumn` all landed at pre-flight;
+ * IMPL swaps the c8-ignored stub bodies for runtime logic. No new
+ * wire fetcher (M38 reuses the v0.4-M31 multipart wire verbatim);
+ * no new transport seam.
  *
  * **Wire surface.** Zero net change. When `monday item set <iid>
  * <file-col>=<path>` OR `monday item update <iid> --set
@@ -56,25 +57,24 @@
  * through safely-by-construction since the dispatch goes through
  * the existing fetcher rather than a re-implementation).
  *
- * **Projected consumer counts at M38 IMPL** (pre-flight ships
- * the dispatch stub; the runtime body that actually consumes
- * these helpers lands at M38 IMPL):
+ * **Consumer counts at M38 IMPL** (runtime bodies land here in
+ * this commit; pre-flight stubs collapsed):
  *
- *   - `addFileToColumn` projected at M38 IMPL: 1 → 2 (M31's `item
- *     upload` action body + M38's `executeFileColumnSet` runtime
- *     body). Today (pre-flight) still 1 consumer — the M38 stub
- *     throws `internal_error` before reaching the fetcher.
- *   - `MultipartTransport` via `ResolvedClient.multipart` projected
- *     at M38 IMPL: 1 → 2 (test seam pattern). Today still 1.
- *   - `sniffContentType` from `src/utils/mime.ts` projected at M38
- *     IMPL: 2 → 3 (M31's `item upload` + `update upload` + M38's
- *     `executeFileColumnSet` runtime body). Today still 2.
- *     **R-NEW-58 IMPL-kickoff lift target**: extract the file-
- *     pre-check + Blob-construction pattern (M31's `item upload`
- *     action body lines 188-261) into a shared
- *     `src/utils/file-source.ts` helper at the 3rd consumer
- *     trigger; IMPL kickoff scan applies the lift ahead-of-feat
- *     per R-NEW-29's M25 cadence.
+ *   - `addFileToColumn` (M31): 2 consumers (M31's `item upload`
+ *     action body + M38's `executeFileColumnSet` runtime body).
+ *   - `MultipartTransport` via `ResolvedClient.multipart`: 2
+ *     consumers (the same test seam pattern; M31's two upload
+ *     verbs + M38's dispatch share the slot).
+ *   - `sniffContentType` from `src/utils/mime.ts`: 2 consumers
+ *     post-lift (M31's `item upload` + M31's `update upload` —
+ *     both via {@link buildBlobFromPath}; M38 routes through
+ *     `buildBlobFromPath` rather than calling `sniffContentType`
+ *     directly).
+ *   - **R-v0.6-NEW-1 SHIPPED at IMPL kickoff**: the file-pre-check
+ *     + Blob-construction pattern lifted to `src/utils/file-source
+ *     .ts` (`precheckLocalFile` + `buildBlobFromPath` — 3 consumers
+ *     post-lift: M31's `item upload`, M31's `update upload`, M38's
+ *     `executeFileColumnSet`).
  *
  * **Mutex rules (D2 closure).** Enforced at the column-resolution
  * boundary (parse-time can't know — column types only resolve
@@ -140,7 +140,8 @@
 
 import { z } from 'zod';
 import { ApiError } from '../utils/errors.js';
-import { assetSchema, type Asset } from './assets.js';
+import { buildBlobFromPath } from '../utils/file-source.js';
+import { addFileToColumn, assetSchema, type Asset } from './assets.js';
 import type { Complexity } from '../utils/output/envelope.js';
 import type { MondayClient } from './client.js';
 import type { MultipartTransport } from './multipart-transport.js';
@@ -251,12 +252,18 @@ export interface ExecuteFileColumnSetResult {
 }
 
 /**
- * Pre-flight stub. Runtime body lands at M38 IMPL.
- *
- * The IMPL body reads the local file at `inputs.entry.filePath`,
- * constructs a Blob with a sniffed content-type, and dispatches
- * via M31's `addFileToColumn` fetcher (cli-design §5.3 + the
+ * Reads the local file at `inputs.entry.filePath`, constructs a Blob
+ * via {@link buildBlobFromPath} (with `Content-Type` sniffed from the
+ * filename), and dispatches the multipart upload through M31's
+ * {@link addFileToColumn} fetcher (cli-design §5.3 step 5 + the
  * module docstring above pin the load-bearing design).
+ *
+ * **Status: runtime body shipped at v0.6-M38 IMPL.** Wraps M31's
+ * fetcher verbatim — same `operationName: 'AddFileToColumn'`, same
+ * `withRetry(...)` retry semantics, same rewrap-inside-retry-thunk
+ * pattern for `file_too_large` (R-v0.4-W2 axis 7 carries through
+ * safely-by-construction since the dispatch goes through the
+ * existing fetcher rather than a re-implementation).
  *
  * The action-body caller (in `item set` / `item update`) is
  * responsible for:
@@ -266,38 +273,41 @@ export interface ExecuteFileColumnSetResult {
  *   2. Resolving columns via `resolveColumnWithRefresh`.
  *   3. Calling {@link enforceSingleFileColumnSet} to detect the
  *      file-column dispatch leg + enforce the mutex rules.
- *   4. If a {@link FileColumnSetEntry} is returned, calling THIS
- *      fetcher (IMPL body) for the wire dispatch.
- *   5. Emitting the envelope per `fileColumnSetOutputSchema`.
- *
- * Status flips to "runtime body shipped at v0.6-M38 IMPL" at the
- * IMPL feat commit.
+ *   4. Running {@link precheckLocalFile} from
+ *      `src/utils/file-source.ts` on the agent-supplied path to
+ *      build a {@link FileColumnSetEntry} (the precheck surfaces
+ *      `usage_error.details.reason: 'file_not_readable'` /
+ *      `'file_empty'` before any wire activity per the M31
+ *      ordering invariant).
+ *   5. Calling this fetcher for the wire dispatch.
+ *   6. Emitting the envelope per `fileColumnSetOutputSchema`
+ *      (mirrors M31 `item upload` envelope verbatim).
  */
-/* c8 ignore start — pre-flight stub; runtime body lands at v0.6-M38 IMPL */
 export const executeFileColumnSet = async (
   inputs: ExecuteFileColumnSetInputs,
 ): Promise<ExecuteFileColumnSetResult> => {
-  // Pre-flight stub: drains the inputs so TypeScript sees them
-  // consumed + the lint check sees the awaited Promise.resolve()
-  // (IMPL body awaits the multipart dispatch in its place).
-  await Promise.resolve();
-  void inputs;
-  throw new ApiError(
-    'internal_error',
-    'executeFileColumnSet: pre-flight stub. Runtime body lands at v0.6-M38 IMPL.',
-    {
-      details: {
-        deferred_to: 'v0.6-M38-impl',
-        reason: 'pre_flight_stub',
-        hint:
-          'this surface is wired but not implemented at pre-flight. ' +
-          'The IMPL session swaps the stub for a runtime body wrapping ' +
-          'addFileToColumn from src/api/assets.ts.',
-      },
-    },
-  );
+  const blob = await buildBlobFromPath({
+    filePath: inputs.entry.filePath,
+    filename: inputs.entry.filename,
+    fileSizeBytes: inputs.entry.fileSizeBytes,
+  });
+  const result = await addFileToColumn({
+    client: inputs.client,
+    multipart: inputs.multipart,
+    itemId: inputs.itemId,
+    columnId: inputs.entry.columnId,
+    file: blob,
+    filename: inputs.entry.filename,
+    signal: inputs.signal,
+    retries: inputs.retries,
+  });
+  return {
+    asset: result.asset,
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: result.complexity,
+  };
 };
-/* c8 ignore stop */
 
 /**
  * Mutex enforcement at the column-resolution boundary. Takes the
@@ -305,33 +315,38 @@ export const executeFileColumnSet = async (
  * entry + the `--name` presence flag + the call shape (single-item
  * vs bulk vs create), and either:
  *
- *   - Returns the single resolved {@link FileColumnSetEntry} when
- *     a clean file-column dispatch path applies (exactly one file
- *     `--set`, no other value flags, single-item non-create call),
- *     paired with the agent-supplied raw value (the path) for
- *     downstream file-pre-check.
- *   - Returns `null` when NO file-column entries exist (the
- *     standard JSON translator path applies; action body proceeds
- *     unchanged).
- *   - Throws `ApiError('usage_error', ...)` with the appropriate
+ *   - Returns `{ kind: 'json' }` when NO file-column entries are
+ *     present in `setEntries` — the standard JSON translator path
+ *     applies and the action body proceeds unchanged.
+ *   - Returns `{ kind: 'file', columnId, rawValue }` when a clean
+ *     file-column dispatch path applies (exactly one file `--set`,
+ *     no other value flags, single-item non-create call). The
+ *     caller runs {@link buildBlobFromPath} via
+ *     {@link precheckLocalFile} from `src/utils/file-source.ts` to
+ *     build a {@link FileColumnSetEntry} + invokes
+ *     {@link executeFileColumnSet}.
+ *   - Throws `ApiError('usage_error', ...)` with a
  *     `details.reason` discriminator when a mutex violation is
- *     detected (mixed file + value, multi-file, file-on-create,
- *     file-on-bulk). At pre-flight the stub throws
- *     `internal_error` instead; the IMPL body replaces the stub
- *     with the runtime mutex-check logic that surfaces
- *     `usage_error` for true violations.
+ *     detected: `'file_set_on_bulk_unsupported'` (D5 closure),
+ *     `'file_set_on_create_unsupported'` (D6 closure),
+ *     `'multi_file_set_unsupported'` (D2 multi-file leg),
+ *     `'mixed_file_and_value_sets'` (D2 mixed leg).
  *
- * The function is a pure check — no I/O, no side effects. The
- * caller passes resolved column types + flag presence flags only.
+ * Pure synchronous check — no I/O, no side effects. The caller
+ * resolves columns first (via `resolveColumnWithRefresh` or the
+ * existing `resolveAndTranslate` helper's resolution leg) and
+ * passes the resolved column types here.
  *
- * **Pre-flight scope.** The runtime body lands at M38 IMPL; the
- * pre-flight stub throws `internal_error` to surface "the dispatch
- * is wired but not implemented yet" cleanly. Per R-NEW-76
- * graduated discipline, the stub's `c8 ignore start` block-wrap
- * is positioned AFTER the caller's `parseArgv` so invalid argv
- * surfaces `usage_error` from the parse boundary, NOT
- * `internal_error` from the c8-ignored throw.
+ * **Status: runtime body shipped at v0.6-M38 IMPL.** Per R-NEW-76
+ * graduated discipline, callers invoke `parseArgv` BEFORE this
+ * function so argv-level failures surface as `usage_error` from
+ * the parse boundary (this function itself runs AFTER argv parse
+ * + column resolution).
  */
+export type FileColumnSetEnforcementResult =
+  | { readonly kind: 'json' }
+  | { readonly kind: 'file'; readonly columnId: string; readonly rawValue: string };
+
 export interface EnforceSingleFileColumnSetInputs {
   /**
    * The call shape — determines which mutex rejections apply.
@@ -382,39 +397,188 @@ export interface EnforceSingleFileColumnSetInputs {
 }
 
 /**
- * Pre-flight stub. Runtime body lands at M38 IMPL.
+ * Iterates `inputs.setEntries`, identifies entries with
+ * `columnType === 'file'`, applies the mutex rules per D2 / D5 / D6
+ * closures, and returns either `{ kind: 'json' }` (no file entries),
+ * `{ kind: 'file', columnId, rawValue }` (clean dispatch path), or
+ * throws `ApiError('usage_error', ...)` on a mutex violation.
  *
- * Returns `null` when NO file-column entries are present (the
- * standard JSON translator path applies). Returns a
- * {@link FileColumnSetEntry} when a clean file-column dispatch
- * path applies. Throws `ApiError('usage_error', ...)` on mutex
- * violations at IMPL; the pre-flight stub throws `internal_error`
- * to surface "the surface is wired but not implemented" cleanly.
+ * Mutex priority (ratified at M38 pre-flight, applied here in IMPL):
  *
- * The IMPL body iterates `inputs.setEntries`, identifies entries
- * with `columnType === 'file'`, applies the mutex rules per
- * D2 / D5 / D6 closures, and returns the single resolved entry
- * (path validation deferred to a SEPARATE step at the action body
- * — this function is pure-check).
+ *   1. **callShape gates first** — `'item_update_bulk'` rejects ALL
+ *      file `--set` entries with `'file_set_on_bulk_unsupported'`
+ *      (D5; defers per-item file dispatch + concurrency interaction
+ *      to v0.6.x). `'item_create'` rejects with
+ *      `'file_set_on_create_unsupported'` (D6; defers create-time
+ *      file upload to v0.6.x — non-atomic post-create wire shape
+ *      breaks §5.8 state safety).
+ *   2. **multi-file leg** — 2+ file `--set` entries on a non-rejected
+ *      callShape surface `'multi_file_set_unsupported'` (M38 defers
+ *      multi-file dispatch to v0.6.x).
+ *   3. **mixed leg** — 1 file `--set` + any value `--set` /
+ *      `--set-raw` / `--name` surface `'mixed_file_and_value_sets'`
+ *      (mixing forces non-atomic multi-leg dispatch that breaks the
+ *      existing atomicity contract).
+ *   4. **clean leg** — 1 file `--set`, no other value flags, single-
+ *      item non-create call → return `{ kind: 'file', columnId,
+ *      rawValue }` for downstream {@link precheckLocalFile} +
+ *      {@link executeFileColumnSet}.
+ *
+ * The function is sync + pure. No I/O. Path validation lives at a
+ * SEPARATE step (`precheckLocalFile` from `src/utils/file-source.ts`)
+ * that the caller runs AFTER this function returns a `kind: 'file'`
+ * result.
  */
-/* c8 ignore start — pre-flight stub; runtime body lands at v0.6-M38 IMPL */
 export const enforceSingleFileColumnSet = (
   inputs: EnforceSingleFileColumnSetInputs,
-): null => {
-  void inputs;
-  throw new ApiError(
-    'internal_error',
-    'enforceSingleFileColumnSet: pre-flight stub. Runtime body lands at v0.6-M38 IMPL.',
-    {
-      details: {
-        deferred_to: 'v0.6-M38-impl',
-        reason: 'pre_flight_stub',
-        hint:
-          'this surface is wired but not implemented at pre-flight. ' +
-          'The IMPL session swaps the stub for the runtime mutex-check + ' +
-          'file-column entry construction logic per cli-design §5.3 + D2/D5/D6.',
-      },
-    },
+): FileColumnSetEnforcementResult => {
+  const fileSetEntries = inputs.setEntries.filter(
+    (e) => e.columnType === 'file',
   );
+  if (fileSetEntries.length === 0) {
+    return { kind: 'json' };
+  }
+
+  // callShape gates first (D5 / D6 closures). The hint names the
+  // verb-shaped M31 fallback (`monday item upload`) which IS allowed
+  // on bulk + create-time flows via separate scripting.
+  if (inputs.callShape === 'item_update_bulk') {
+    const fe = fileSetEntries[0];
+    /* c8 ignore next 3 */
+    if (fe === undefined) {
+      throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (bulk)');
+    }
+    throw new ApiError(
+      'usage_error',
+      `--set <file-col>=<path> is not supported on bulk \`item update ` +
+        `--where\` / \`--filter-json\` at v0.6-M38 (deferred to v0.6.x ` +
+        `per cli-design §13 v0.6 entry + v0.6-plan §3 M38 D5 closure). ` +
+        `Per-item file dispatch + \`--continue-on-error\` partial-success ` +
+        `envelope + \`--concurrency\` multipart-over-shared-transport ` +
+        `semantics each carry design dimensions worth their own milestone ` +
+        `cluster. Run the file write per matched item via single-item ` +
+        `\`monday item set <iid> <file-col>=<path>\` or \`monday item ` +
+        `upload <iid> --column <col> <file>\` (v0.4-M31; verb-shaped).`,
+      {
+        details: {
+          reason: 'file_set_on_bulk_unsupported',
+          column_id: fe.columnId,
+          deferred_to: 'v0.6.x',
+          hint:
+            'bulk file dispatch is not supported at v0.6-M38; iterate ' +
+            'matched items in your script and call `monday item set ' +
+            '<iid> <file-col>=<path>` per item, or use `monday item ' +
+            'upload <iid> --column <col> <file>` (v0.4-M31).',
+        },
+      },
+    );
+  }
+  if (inputs.callShape === 'item_create') {
+    const fe = fileSetEntries[0];
+    /* c8 ignore next 3 */
+    if (fe === undefined) {
+      throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (create)');
+    }
+    throw new ApiError(
+      'usage_error',
+      `--set <file-col>=<path> is not supported on \`monday item create\` ` +
+        `at v0.6-M38 (deferred to v0.6.x per cli-design §13 v0.6 entry + ` +
+        `v0.6-plan §3 M38 D6 closure). Monday's wire has no atomic ` +
+        `create-with-file mutation at API \`2026-01\`; file upload at ` +
+        `create time would require a non-atomic post-create ` +
+        `\`add_file_to_column\` that breaks §5.8 state safety. Create ` +
+        `the item first, then attach the file with \`monday item set ` +
+        `<iid> <file-col>=<path>\` or \`monday item upload <iid> ` +
+        `--column <col> <file>\` (v0.4-M31; verb-shaped).`,
+      {
+        details: {
+          reason: 'file_set_on_create_unsupported',
+          column_id: fe.columnId,
+          deferred_to: 'v0.6.x',
+          hint:
+            'create the item with non-file `--set` values, then attach ' +
+            'the file with `monday item set <iid> <file-col>=<path>` ' +
+            '(v0.6-M38) or `monday item upload <iid> --column <col> ' +
+            '<file>` (v0.4-M31).',
+        },
+      },
+    );
+  }
+
+  // Multi-file leg (D2). 2+ file `--set` entries on a non-bulk /
+  // non-create call shape — defers to v0.6.x.
+  if (fileSetEntries.length > 1) {
+    throw new ApiError(
+      'usage_error',
+      `Multi-file \`--set <file-col>=<path>\` is not supported at ` +
+        `v0.6-M38 (${String(fileSetEntries.length)} file \`--set\` ` +
+        `entries detected; deferred to v0.6.x per cli-design §5.3 + ` +
+        `v0.6-plan §3 M38 D2 closure). Monday's ` +
+        `\`add_file_to_column\` mutation is single-column per call on ` +
+        `the wire; multi-file dispatch + concurrent multipart over the ` +
+        `shared transport carry design dimensions worth their own ` +
+        `milestone. Pass exactly one \`--set <file-col>=<path>\` per ` +
+        `call; for multiple uploads, run separate calls.`,
+      {
+        details: {
+          reason: 'multi_file_set_unsupported',
+          file_count: fileSetEntries.length,
+          file_column_ids: fileSetEntries.map((e) => e.columnId),
+          deferred_to: 'v0.6.x',
+          hint:
+            'pass exactly one `--set <file-col>=<path>` per call; ' +
+            'run separate calls for multiple file uploads.',
+        },
+      },
+    );
+  }
+
+  // Mixed leg (D2). 1 file `--set` + any value `--set` / `--set-raw`
+  // / `--name` — surfaces because Monday's wire has no atomic combo
+  // of multipart `add_file_to_column` + JSON `change_column_value` /
+  // `change_multiple_column_values` (mixing forces non-atomic
+  // multi-leg dispatch that breaks the §5.3 atomicity contract).
+  const nonFileSetCount = inputs.setEntries.length - fileSetEntries.length;
+  const setRawCount = inputs.setRawEntries.length;
+  if (nonFileSetCount > 0 || setRawCount > 0 || inputs.hasName) {
+    const fe = fileSetEntries[0];
+    /* c8 ignore next 3 */
+    if (fe === undefined) {
+      throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (mixed)');
+    }
+    throw new ApiError(
+      'usage_error',
+      `Mixing a file \`--set <file-col>=<path>\` with value \`--set\` / ` +
+        `\`--set-raw\` / \`--name\` in the same call is not supported at ` +
+        `v0.6-M38 (per cli-design §5.3 + v0.6-plan §3 M38 D2 closure). ` +
+        `Monday's wire has no atomic combo of multipart ` +
+        `\`add_file_to_column\` + JSON \`change_column_value\` / ` +
+        `\`change_multiple_column_values\`; mixing would force a non-` +
+        `atomic multi-leg dispatch that breaks the existing atomicity ` +
+        `contract. Run the file dispatch in its own call.`,
+      {
+        details: {
+          reason: 'mixed_file_and_value_sets',
+          column_id: fe.columnId,
+          non_file_set_count: nonFileSetCount,
+          set_raw_count: setRawCount,
+          has_name: inputs.hasName,
+          hint:
+            'run the file `--set` alone (e.g., `monday item set <iid> ' +
+            '<file-col>=<path>`); apply value writes / rename in a ' +
+            'separate call (e.g., `monday item update <iid> --set ' +
+            'status=Done --name "..."`).',
+        },
+      },
+    );
+  }
+
+  // Clean dispatch leg. Single file `--set`, no other value flags
+  // on a single-item non-create call shape.
+  const fe = fileSetEntries[0];
+  /* c8 ignore next 3 */
+  if (fe === undefined) {
+    throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (clean)');
+  }
+  return { kind: 'file', columnId: fe.columnId, rawValue: fe.rawValue };
 };
-/* c8 ignore stop */

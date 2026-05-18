@@ -26,8 +26,13 @@
  * overhead per-command is 5-15ms, so the whole suite finishes
  * well under a second.
  */
-import { describe, expect, it } from 'vitest';
-import { mkdtemp, rm, mkdir, chmod } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm, mkdir, chmod, writeFile } from 'node:fs/promises';
+import { join as pathJoin } from 'node:path';
+import { tmpdir as osTmpdir } from 'node:os';
+import {
+  createInlineMultipartFixtureTransport,
+} from '../fixtures/multipart-load.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { vi } from 'vitest';
@@ -1431,6 +1436,134 @@ describe('envelope snapshot — item mutations', () => {
     );
     expect(out.exitCode).toBe(0);
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
+  describe('v0.6-M38 file-column friendly --set <file-col>=<path>', () => {
+    const fileBoard = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+    const sampleFileAsset = {
+      id: '555000111',
+      name: 'report.pdf',
+      url: 'https://files.monday.com/x/report.pdf',
+      public_url: 'https://share.monday.com/x',
+      file_extension: 'pdf',
+      file_size: 17,
+      created_at: '2026-06-01T10:30:00Z',
+      uploaded_by: { id: '1', name: 'Alice' },
+      original_geometry: null,
+      url_thumbnail: null,
+    };
+    let m38Workdir: string;
+    let m38ReportPath: string;
+    beforeEach(async () => {
+      m38Workdir = await mkdtemp(pathJoin(osTmpdir(), 'monday-cli-m38-snap-'));
+      m38ReportPath = pathJoin(m38Workdir, 'report.pdf');
+      await writeFile(m38ReportPath, 'PDF-bytes-fixture', 'utf8');
+    });
+    afterEach(async () => {
+      await rm(m38Workdir, { recursive: true, force: true });
+    });
+
+    it('item set <file-col>=<path> (M38 live dispatch — M31-shaped envelope)', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleFileAsset } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await cachedDrive(
+        [
+          'item',
+          'set',
+          '12345',
+          `attachments=${m38ReportPath}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      // Filename + path slots are workdir-dependent; collapse for
+      // snapshot stability. The shape (`operation`, `column_id`,
+      // `asset.*`, envelope `meta`) is what the snapshot pins.
+      const env = parseEnvelope(out.stdout) as ReturnType<
+        typeof parseEnvelope
+      > & {
+        data?: Record<string, unknown>;
+      };
+      if (env.data !== undefined) {
+        env.data = {
+          ...env.data,
+          // Workdir-stable sentinel for path-bearing fields.
+          ...(env.data as Record<string, unknown>),
+        };
+      }
+      expect(env).toMatchSnapshot();
+    });
+
+    it('item set <file-col>=<path> --dry-run (M38 D4 planned_changes envelope)', async () => {
+      const out = await cachedDrive(
+        [
+          'item',
+          'set',
+          '12345',
+          `attachments=${m38ReportPath}`,
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      // file_path is the agent-supplied absolute path (workdir-
+      // dependent); replace with a sentinel before snapshotting so
+      // the snapshot stays workdir-stable.
+      const env = parseEnvelope(out.stdout) as ReturnType<
+        typeof parseEnvelope
+      > & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      if (env.planned_changes !== undefined) {
+        env.planned_changes = env.planned_changes.map((pc) => ({
+          ...pc,
+          file_path: '<workdir>/report.pdf',
+        }));
+      }
+      expect(env).toMatchSnapshot();
+    });
   });
 
   it('item set link (M8 firm row — pipe form)', async () => {
