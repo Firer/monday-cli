@@ -1632,8 +1632,9 @@ const runItemUpdateSingleFileDispatch = async (
  *   - Success: `{ item_id, ok: true, asset: { id, name, ... } }`
  *   - Failure: `{ item_id, ok: false, error: { code, message } }`
  *
- * The shape lands at the pre-flight contract diff (this commit);
- * runtime body lifts at M42 IMPL.
+ * Schema landed at the v0.7-M42 pre-flight contract diff
+ * (`160330b`); runtime body shipped at v0.7-M42 IMPL (`22df2fa`)
+ * + R1 fix-up (`968b154`).
  */
 export const bulkFileSetResultSchema = z.object({
   item_id: z.string().min(1),

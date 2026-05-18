@@ -730,16 +730,19 @@ describe('translateColumnValue — future-roadmap types', () => {
     }
   });
 
-  it('file (files-shaped) → unsupported_column_type with NO deferred_to slot (v0.6-M38: rejection row fires only for item create + bulk paths — the friendly --set form ships at M38 dispatching at the action body level before this row fires; the rejection itself has no `deferred_to` because the create + bulk paths defer to v0.6.x rather than to a specific future release)', () => {
+  it('file (files-shaped) → unsupported_column_type with NO deferred_to slot (v0.7-M42 post-IMPL: rejection row fires only for item create + --set-raw paths — the friendly --set form ships at v0.6-M38 single-item + v0.7-M42 bulk, both dispatching at the action body level before this row fires; the rejection itself has no `deferred_to` because the remaining create + --set-raw rejection paths defer to v0.7-M43 + the permanent D3 rejection respectively)', () => {
     // cli-design §5.3 writer-expansion roadmap row: files-shaped
     // types use add_file_to_column (multipart upload). v0.6-M38
-    // ships the friendly `--set <file-col>=<path>` form on `monday
-    // item set` + `monday item update` (single-item only); this
-    // UNSUPPORTED_TABLE.files_shaped row fires ONLY on paths the M38
-    // dispatch doesn't cover (item create per D6; bulk item update
-    // --where per D5; --set-raw per D3). No `deferred_to` slot —
-    // the rejection here surfaces alternative-path hints rather
-    // than a future-version deferral.
+    // shipped the friendly `--set <file-col>=<path>` form on
+    // `monday item set` + `monday item update <iid>` (single-item);
+    // v0.7-M42 IMPL carved out `monday item update --where ...`
+    // bulk dispatch as the per-item multipart fan-out. This
+    // UNSUPPORTED_TABLE.files_shaped row fires ONLY on paths the
+    // file-column dispatch doesn't cover (item create per D6 —
+    // deferred to v0.7-M43; --set-raw per D3 — permanent
+    // rejection). No `deferred_to` slot — the rejection here
+    // surfaces alternative-path hints rather than a future-version
+    // deferral.
     expect(() => translate('file', 'whatever', 'col_z')).toThrow(
       /add_file_to_column/u,
     );
@@ -752,11 +755,12 @@ describe('translateColumnValue — future-roadmap types', () => {
         column_id: 'col_z',
         type: 'file',
       });
-      // v0.6-M38: the UNSUPPORTED_TABLE.files_shaped row no longer
-      // carries `deferred_to` — the friendly --set form ships at M38
-      // (so the rejection isn't a future-version deferral); the
-      // remaining create + bulk + --set-raw rejection paths defer to
-      // v0.6.x candidate-selection rather than a pinned milestone.
+      // v0.7-M42 post-IMPL: the UNSUPPORTED_TABLE.files_shaped row
+      // no longer carries `deferred_to` — the friendly --set form
+      // ships at v0.6-M38 single-item + v0.7-M42 bulk (so the
+      // rejection isn't a future-version deferral); the remaining
+      // create rejection defers to v0.7-M43 + --set-raw stays at
+      // the permanent D3 rejection.
       expect(err.details).not.toHaveProperty('deferred_to');
     }
   });
