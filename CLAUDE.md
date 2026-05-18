@@ -204,6 +204,23 @@ agent-reachable at IMPL.
   into `src/api/assets.ts` as a sibling export) fires AHEAD
   of feat per R-NEW-29's M25 cadence at M38 IMPL kickoff.
 
+**Four new R-class candidates filed post-Codex-rounds**
+(`docs/v0.6-plan.md` §22, "Additional R-class candidates
+surfaced during M38 pre-flight Codex review rounds"):
+**R-v0.6-NEW-4** (catch-and-rewrap pre-flight stub shim — 1
+instance from round-1 P2-1's `item set --dry-run` fix; LOW;
+code lift at 2nd consumer) + **R-v0.6-NEW-5** (discriminator-
+literal Markdown-rendering preservation — 1 instance from
+round-4 P2-1 cli-design.md mutex-rules line-breaks; LOW;
+template extension at 2nd-3rd consumer) + **R-v0.6-NEW-6**
+(dry-run / live-path dispatch-stub mirror discipline — 1
+instance from round-1 P2-1 surfacing; LOW; Codex pre-flight
+template W{N} audit-point candidate at 2nd-3rd consumer) +
+**R-v0.6-NEW-7** (self-referential bookkeeping metadata cycle
+/ R-NEW-84 sub-class — 2 instances at M38 round-3 + round-5
+P3-1; LOW; graduate to CLAUDE.md "Workflow rules" carve-out
+or fold into R-NEW-84's permanent entry at 3rd consumer).
+
 **Next session**: M38 IMPL. Swap the c8-ignored stubs at
 `src/api/file-column-set.ts` for runtime bodies
 (`executeFileColumnSet` calls M31's `addFileToColumn` after
