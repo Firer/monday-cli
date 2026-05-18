@@ -3452,7 +3452,7 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     expect(out.stdout).toBe('');
   });
 
-  describe('v0.6-M38 bulk file-set rejection (D5 closure)', () => {
+  describe('v0.7-M42 bulk file `--set` carve-out fold (D5 closure from v0.6-M38) — pre-flight contract diff', () => {
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -3477,11 +3477,21 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       ],
     };
 
-    it("rejects bulk file --set with usage_error.details.reason: 'file_set_on_bulk_unsupported' (live path; pre-check fires BEFORE items_page walker + confirmation gate per the resolution-boundary discipline)", async () => {
-      // M38 pre-check fires BEFORE items_page walker — no ItemsPage
-      // cassette needed; the rejection short-circuits before the
-      // walker is invoked. The pre-check sees `setEntries` resolved
-      // against the board metadata and surfaces the D5 rejection.
+    it("reaches the v0.7-M42 pre-flight stub on the bulk live path — argv + pre-check + items_page + confirmation are shipped contract; per-item dispatch throws internal_error with details.reason: 'm42_preflight_stub' (was 'file_set_on_bulk_unsupported' at v0.6-M38)", async () => {
+      // v0.7-M42 pre-flight contract diff: the v0.6-M38 D5 rejection
+      // is carved out. Bulk file --set now traverses the FULL
+      // shipped argv + pre-check + items_page + confirmation path,
+      // then hits the per-item dispatch stub which throws
+      // `internal_error` (exit 2). The stub-throw is the only
+      // observable behaviour at pre-flight; the runtime body lifts
+      // at M42 IMPL.
+      //
+      // Why the items_page cassette is required now: bulk file
+      // dispatch reaches the items_page walker (the carve-out fold
+      // pushed the rejection past the walker). The walker resolves
+      // matched items so the confirmation gate sees a real count;
+      // --yes satisfies the gate; then the per-item dispatch stub
+      // fires.
       const out = await drive(
         [
           'item',
@@ -3501,15 +3511,37 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
               operation_name: 'BoardMetadata',
               response: { data: { boards: [fileBoard] } },
             },
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }, { id: '23456' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
           ],
         },
       );
-      expect(out.exitCode).toBe(1);
+      expect(out.exitCode).toBe(2);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: { code: string; details?: { reason?: string } };
+        error?: {
+          code: string;
+          message: string;
+          details?: { reason?: string; milestone?: string; matched_count?: number };
+        };
       };
-      expect(env.error?.code).toBe('usage_error');
-      expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details?.reason).toBe('m42_preflight_stub');
+      expect(env.error?.details?.milestone).toBe('v0.7-M42');
+      expect(env.error?.details?.matched_count).toBe(2);
+      expect(env.error?.message).toMatch(/v0\.7-M42/);
     });
 
     it("D3 invariant: bulk `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_bulk_unsupported — Codex round-2 P3-2 pin)", async () => {
@@ -3566,7 +3598,11 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(env.error?.details?.reason).toBeUndefined();
     });
 
-    it("rejects bulk file --set on dry-run path with the same reason discriminator (D5 fires regardless of --yes / --dry-run; pre-check is path-uniform)", async () => {
+    it("reaches the v0.7-M42 pre-flight stub on the bulk --dry-run path too — stub-throw is path-uniform (was 'file_set_on_bulk_unsupported' at v0.6-M38)", async () => {
+      // The carve-out fold flips the bulk-file path on BOTH --yes
+      // and --dry-run shapes. The pre-flight stub fires uniformly
+      // (the stub doesn't branch on --dry-run; that branching lives
+      // in the runtime body landing at M42 IMPL).
       const out = await drive(
         [
           'item',
@@ -3586,15 +3622,30 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
               operation_name: 'BoardMetadata',
               response: { data: { boards: [fileBoard] } },
             },
+            {
+              operation_name: 'ItemsPage',
+              response: {
+                data: {
+                  boards: [
+                    {
+                      items_page: {
+                        cursor: null,
+                        items: [{ id: '12345' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
           ],
         },
       );
-      expect(out.exitCode).toBe(1);
+      expect(out.exitCode).toBe(2);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
         error?: { code: string; details?: { reason?: string } };
       };
-      expect(env.error?.code).toBe('usage_error');
-      expect(env.error?.details?.reason).toBe('file_set_on_bulk_unsupported');
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details?.reason).toBe('m42_preflight_stub');
     });
   });
 });

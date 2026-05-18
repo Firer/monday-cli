@@ -21,7 +21,7 @@ import {
   fileColumnSetOutputSchema,
   type FileColumnSetEntry,
 } from '../../../src/api/file-column-set.js';
-import { ApiError } from '../../../src/utils/errors.js';
+import type { ApiError } from '../../../src/utils/errors.js';
 
 const sampleAsset = {
   id: '555000111',
@@ -174,41 +174,31 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     });
   });
 
-  it("throws usage_error.details.reason: 'file_set_on_bulk_unsupported' on item_update_bulk callShape (D5 closure)", () => {
-    expect(() =>
-      enforceSingleFileColumnSet({
-        callShape: 'item_update_bulk',
-        setEntries: [
-          {
-            columnId: 'attachments',
-            columnType: 'file',
-            rawValue: './report.pdf',
-          },
-        ],
-        setRawEntries: [],
-        hasName: false,
-      }),
-    ).toThrow(ApiError);
-    try {
-      enforceSingleFileColumnSet({
-        callShape: 'item_update_bulk',
-        setEntries: [
-          {
-            columnId: 'attachments',
-            columnType: 'file',
-            rawValue: './report.pdf',
-          },
-        ],
-        setRawEntries: [],
-        hasName: false,
-      });
-    } catch (err) {
-      const ae = err as ApiError;
-      expect(ae.code).toBe('usage_error');
-      expect(ae.details?.reason).toBe('file_set_on_bulk_unsupported');
-      expect(ae.details?.column_id).toBe('attachments');
-      expect(ae.details?.deferred_to).toBe('v0.6.x');
-    }
+  it("returns kind: 'file_bulk' on item_update_bulk callShape for a clean single-file dispatch (v0.7-M42 D5 carve-out fold; was 'file_set_on_bulk_unsupported' at v0.6-M38)", () => {
+    // v0.7-M42 pre-flight contract diff: the v0.6-M38 D5 bulk-file
+    // rejection is carved out. Clean bulk-file dispatch returns the
+    // new `kind: 'file_bulk'` variant for the action body's per-item
+    // multipart fan-out. The `'file_set_on_bulk_unsupported'`
+    // discriminator literal stays RESERVED (no test should assert
+    // its surfacing on the clean path); multi-file + mixed gates
+    // STILL apply on bulk per the universal mutex rules.
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_update_bulk',
+      setEntries: [
+        {
+          columnId: 'attachments',
+          columnType: 'file',
+          rawValue: './report.pdf',
+        },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result).toEqual({
+      kind: 'file_bulk',
+      columnId: 'attachments',
+      rawValue: './report.pdf',
+    });
   });
 
   it("throws usage_error.details.reason: 'file_set_on_create_unsupported' on item_create callShape (D6 closure)", () => {
@@ -335,7 +325,13 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     }
   });
 
-  it('bulk gate fires BEFORE multi-file gate (priority: callShape → multi → mixed)', () => {
+  it('multi-file gate fires on item_update_bulk callShape (universal rule survives v0.7-M42 D5 carve-out fold; was bulk-gate-first at v0.6-M38)', () => {
+    // v0.7-M42 pre-flight: with the D5 bulk-file rejection carved
+    // out, the universal multi-file gate is the FIRST mutex check
+    // applied on the bulk callShape (no more bulk-specific
+    // short-circuit). The 'file_set_on_bulk_unsupported'
+    // discriminator literal stays RESERVED but no test should
+    // assert its surfacing.
     try {
       enforceSingleFileColumnSet({
         callShape: 'item_update_bulk',
@@ -349,7 +345,9 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
       throw new Error('expected ApiError');
     } catch (err) {
       const ae = err as ApiError;
-      expect(ae.details?.reason).toBe('file_set_on_bulk_unsupported');
+      expect(ae.details?.reason).toBe('multi_file_set_unsupported');
+      expect(ae.details?.file_count).toBe(2);
+      expect(ae.details?.deferred_to).toBe('v0.7.x');
     }
   });
 
@@ -370,5 +368,65 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
       const ae = err as ApiError;
       expect(ae.details?.reason).toBe('multi_file_set_unsupported');
     }
+  });
+
+  it("throws usage_error.details.reason: 'mixed_file_and_value_sets' on item_update_bulk callShape with file + value --set (v0.7-M42 — mixed mutex stays universal on bulk)", () => {
+    // v0.7-M42 carve-out fold flips the BULK-FILE rejection ONLY;
+    // the universal mixed-leg mutex still rejects mixing file
+    // `--set` with value `--set` / `--set-raw` / `--name` on bulk
+    // shapes. Verifies the mutex is a universal rule, not single-
+    // item-only.
+    try {
+      enforceSingleFileColumnSet({
+        callShape: 'item_update_bulk',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
+          { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('mixed_file_and_value_sets');
+      expect(ae.details?.non_file_set_count).toBe(1);
+    }
+  });
+
+  it("throws usage_error.details.reason: 'mixed_file_and_value_sets' on item_update_bulk callShape with file --set + --name (v0.7-M42 — mixed mutex stays universal on bulk)", () => {
+    // Bulk + file + --name combo: same universal mixed-leg rule.
+    try {
+      enforceSingleFileColumnSet({
+        callShape: 'item_update_bulk',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
+        ],
+        setRawEntries: [],
+        hasName: true,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('mixed_file_and_value_sets');
+      expect(ae.details?.has_name).toBe(true);
+    }
+  });
+
+  it("returns kind: 'json' on item_update_bulk callShape when no file --set entries present (v0.7-M42 — pre-check passes through to JSON path)", () => {
+    // Bulk + value-only --set: pre-check returns `kind: 'json'`
+    // and the standard JSON translator path continues. No carve-
+    // out fold visible — JSON bulk is unchanged from v0.6.
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_update_bulk',
+      setEntries: [
+        { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result).toEqual({ kind: 'json' });
   });
 });

@@ -1711,14 +1711,26 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # 'multi_file_set_unsupported' at details.reason — multi-file
                                           # dispatch defers to v0.6.x. --set-raw <file-col>=<json>
                                           # stays REJECTED.
-monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38, defers to v0.6.x)
+monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38; CARVED OUT at v0.7-M42 — pre-flight contract diff lands the argv + pre-check surface; IMPL body at v0.7-M42 IMPL)
                                           # bulk update — at least one of --name / --set / --set-raw required
-                                          # v0.6-M38: file-column --set REJECTED on the bulk path —
-                                          # `--set <file-col>=<path>` surfaces usage_error
-                                          # (details.reason: 'file_set_on_bulk_unsupported') at the
-                                          # resolution boundary. Per-item file dispatch + partial-
-                                          # success envelope + --concurrency shared-transport semantics
-                                          # defer to v0.6.x candidate-selection.
+                                          # v0.7-M42 (D5 carve-out fold from v0.6-M38): file-column
+                                          # `--set <file-col>=<path>` is now ACCEPTED on the bulk
+                                          # path — per-item multipart fan-out over the --where /
+                                          # --filter-json-resolved item-id set. Single file --set
+                                          # per call (multi-file mutex still rejects per universal
+                                          # rule); mixing with value --set / --set-raw / --name
+                                          # rejects per the universal mixed-leg mutex. --concurrency
+                                          # 1..32 reuses v0.4-M30's dispatchParallel selector over a
+                                          # shared MultipartTransport. Pre-check is single upfront
+                                          # local file validation (file_not_readable / file_empty
+                                          # whole-call-abort per cli-design §5.8 atomicity); per-item
+                                          # wire failures partition between fail-fast (default —
+                                          # first failure aborts) and --continue-on-error (per-item
+                                          # data.results[] with {item_id, ok, asset?, error?}).
+                                          # **PRE-FLIGHT STATUS:** argv + pre-check + items_page +
+                                          # confirmation are shipped contract; per-item dispatch
+                                          # body is c8-ignored at pre-flight, throws internal_error
+                                          # with details.reason: 'm42_preflight_stub' until M42 IMPL.
                                           # live (non-empty match): requires --yes unless --dry-run is set
                                           # --dry-run takes precedence over --yes when both are passed
                                           # --continue-on-error (v0.3-M25): opt-in to the per-item
@@ -3547,10 +3559,25 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `details.reason` — defers create-time file upload to v0.6.x
      (non-atomic post-create wire shape would break §5.8 state
      safety).
-   - **No bulk `item update --where ... --set <file-col>=<path>`.**
-     Rejects as `usage_error` with `'file_set_on_bulk_unsupported'`
-     at `details.reason` — defers per-item file dispatch +
-     partial-success envelope to v0.6.x.
+   - **Bulk `item update --where ... --set <file-col>=<path>` —
+     CARVED OUT at v0.7-M42** (D5 fold from v0.6-M38). At v0.6-M38
+     this rejected with `'file_set_on_bulk_unsupported'`; v0.7-M42
+     accepts the path and fans out per-item multipart dispatch
+     across the `--where` / `--filter-json`-resolved item-id set.
+     Single file `--set` per call (the universal multi-file mutex
+     still applies); mixing with value `--set` / `--set-raw` /
+     `--name` rejects per the universal mixed-leg mutex.
+     `--concurrency 1..32` reuses v0.4-M30's `dispatchParallel`
+     selector over a shared `MultipartTransport`. Single upfront
+     local file pre-check (one path × N items); per-item wire
+     failures partition between fail-fast (default — first failure
+     aborts with `details.applied_to` decoration) and
+     `--continue-on-error` (per-item `data.results[]` with
+     `{item_id, ok, asset?, error?}`). The
+     `'file_set_on_bulk_unsupported'` discriminator literal stays
+     RESERVED across the codebase — do not reuse for a different
+     rejection reason; agent scripts that branch on it will fall
+     through to the new dispatch path on v0.7-M42 and later.
    - **No `--set <file-col>=-` stdin.** Rejects via the existing
      `<file>` path-string validation (mirrors M31 `monday item
      upload`'s rejection rationale — no clean `--filename`
@@ -4110,6 +4137,66 @@ cross-surface candidates — each would lift `item search`, `item
 update --where`, and `item upsert` simultaneously so the three
 surfaces stay in lockstep. Lifting any of them in upsert alone
 would create inconsistent filter semantics across the surfaces.
+
+**v0.7-M42 bulk file `--set` per-item dispatch atomicity (D5
+carve-out fold from v0.6-M38).** The bulk file `--set` path
+(`monday item update --where ... --set <file-col>=<path>`)
+introduces a per-item multipart dispatch shape that doesn't fit
+the single-mutation atomicity model above. The contract:
+
+1. **Single upfront local file pre-check, BEFORE any wire
+   round-trip.** One file path applies across N matched items;
+   the `precheckLocalFile` call (size, readability, mime-sniff)
+   fires ONCE before the per-item dispatch loop starts. A failed
+   pre-check surfaces upfront as `usage_error` with
+   `details.reason: 'file_not_readable'` /
+   `'file_empty'` (mirrors M31 single-item shape) — this is
+   whole-call-abort regardless of `--continue-on-error`. The
+   pre-check is local-only (no Monday wire activity), so the
+   atomicity-before-wire discipline of §5.8 above is preserved
+   verbatim: by the time the first `add_file_to_column` round-
+   trip fires, every input that COULD have been pre-validated
+   locally already has been.
+
+2. **Per-item wire dispatch via `executeFileColumnSet` (M31
+   wire reused).** Each matched item gets its own multipart
+   `add_file_to_column` round-trip; `--concurrency 1..32`
+   reuses v0.4-M30's `dispatchParallel` selector over a shared
+   `MultipartTransport`. The dispatch is NOT atomic across
+   items by construction — Monday's wire has no multi-item
+   `add_file_to_column` shape — so the envelope models per-item
+   outcomes explicitly:
+
+   - **`--continue-on-error` ABSENT (default — fail-fast).**
+     First per-item failure aborts the loop; the error
+     envelope carries `details.applied_to: [<item_ids>]`
+     decoration listing items that successfully attached the
+     file BEFORE the failure (mirrors v0.1 fail-fast bulk
+     update's `details.applied_to` shape).
+   - **`--continue-on-error` SET (M25-shaped partial
+     success).** Every matched item is attempted regardless
+     of per-item outcome; success envelope carries
+     `data.results[]` with per-record
+     `{item_id, ok, asset?, error?}` entries (mirrors M25's
+     `partialSuccessBulkUpdateResultSchema` with `asset`
+     replacing `item`). `data.summary.{applied_count,
+     failed_count}` aggregates the per-record outcomes;
+     `matched_count = applied_count + failed_count` invariant
+     holds.
+
+3. **Cache invalidation fires ONCE post-dispatch.** A single
+   `invalidateBoard(boardId)` call after the dispatch loop
+   completes covers every matched item — one board's cache
+   is the unit of invalidation, not per-item (mirrors M38
+   single-item dispatch's invalidate timing).
+
+The bulk-file path is NOT a §5.8 atomicity exception — the
+atomicity-before-wire rule still applies at the local pre-check
+boundary. What changes is that per-item wire outcomes can
+diverge (some items get the file, some don't, on a partial
+batch under `--continue-on-error`); the envelope makes that
+divergence visible per-record rather than collapsing to a
+single ok/error outcome.
 
 ### 5.9 The `dev` namespace
 

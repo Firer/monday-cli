@@ -28,30 +28,48 @@ humans are second-class. Built incrementally via Claude Code on top of
   `npm audit` 0 vulnerabilities (audit-fix `fast-uri 3.1.0 →
   3.1.2` folded into the version-bump commit per security.md
   "high = merge blocker").
-- **Next session:** v0.7-M42 pre-flight — **bulk file `--set`
-  carve-out fold** (v0.6-M38 D5 closure). M39 D1 closed at
-  the v0.7-kickoff candidate-selection session 2026-05-18 (this
-  commit): **sequence-shuffle ship order to M42 → M43 →
-  (re-probe SDK 15.x) → M39 → M40 → M41.** M42 + M43 are pure
-  v0.6.x carve-out folds reusing v0.4-M31's multipart wire surface
-  — independent of the API pin bump — so they ship under the
-  current 2026-01 / SDK-14.0.0 pin while SDK 15.x has 4-6 more
-  weeks to publish (latest publish at kickoff: 14.0.0,
-  2026-03-18). M42 pre-flight contract diff lands per the standard
-  workflow.md pre-flight discipline; the 4 open decisions
-  (`--concurrency` semantics / per-item asset envelope slot /
-  per-item file pre-check timing / ERROR_CODES delta) close at
-  the M42 pre-flight contract diff commit. At M43 close, re-probe
-  `npm view @mondaydotcomorg/api versions --json | tail` + decide
-  M39 D1 between (a) SDK 15.x lift if shipped / (b) string-literal
-  override on SDK 14.0.0 + hand-rolled zod schemas per the
-  "Boundary-typing trap" pattern / (c) continued wait. Full v0.7
-  scope (M39-M43) unchanged from SKELETON — only the ordering
-  flipped. v0.8 SKELETON stays unratified (opens after v0.7.0
-  publishes). Other carry-forward backlog (multi-level subitems
-  / cross-board move value-overrides / resumable cross-board
-  cursor / profile-scoped argument defaults / multi-file + stdin
-  file-`--set`) stays deferred.
+- **Next session:** v0.7-M42 **IMPL** — runtime body for the
+  bulk file `--set` per-item dispatch (closes the v0.7-M42
+  pre-flight stub at this commit). M42 pre-flight contract
+  diff ratified at this commit; D1-D4 closed inline in
+  v0.7-plan §3 M42 entry:
+  - **D1 — `--concurrency` semantics.** Reuse v0.4-M30's
+    `dispatchParallel` over a shared `MultipartTransport`
+    (1..32 range). No new probe required (D1 closes by
+    inheritance from M30 + M31 probe coverage).
+  - **D2 — Per-item asset envelope slot.** Mirrors M25
+    partial-success shape with `asset` slot replacing `item`;
+    `operation: 'item_update_bulk_file_set'` literal
+    discriminator. Schemas (`bulkFileSetResultSchema` +
+    `bulkFileSetDataSchema`) defined at pre-flight in
+    `src/commands/item/update.ts`.
+  - **D3 — Pre-check timing.** Single upfront
+    `precheckLocalFile(rawValue)` call BEFORE the dispatch
+    loop (one path × N items); whole-call-abort
+    `usage_error.details.reason: 'file_not_readable'` /
+    `'file_empty'` regardless of `--continue-on-error` per
+    cli-design §5.8 atomicity discipline.
+  - **D4 — ERROR_CODES delta.** ZERO net change; registry
+    stays at 29. `'file_set_on_bulk_unsupported'` literal
+    stays RESERVED across the codebase (no longer surfaces
+    from runtime path post-carve-out).
+
+  IMPL Codex review estimate 4-5 fix-up rounds (one or two
+  above median per v0.7-plan §3 M42 entry — partial-success +
+  concurrency + multipart triangle typically surfaces multiple
+  design dimensions per round). M43 pre-flight follows after
+  M42 close-docs. At M43 close, re-probe
+  `npm view @mondaydotcomorg/api versions --json | tail` +
+  decide M39 D1 between (a) SDK 15.x lift if shipped /
+  (b) string-literal override on SDK 14.0.0 + hand-rolled
+  zod schemas per the "Boundary-typing trap" pattern /
+  (c) continued wait. Full v0.7 scope (M39-M43) unchanged
+  from SKELETON; only ordering flipped + M42 D-list closed
+  at pre-flight. v0.8 SKELETON stays unratified (opens after
+  v0.7.0 publishes). Other carry-forward backlog (multi-level
+  subitems / cross-board move value-overrides / resumable
+  cross-board cursor / profile-scoped argument defaults /
+  multi-file + stdin file-`--set`) stays deferred.
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —
