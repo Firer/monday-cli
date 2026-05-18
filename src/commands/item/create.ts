@@ -50,7 +50,10 @@
 import { z } from 'zod';
 import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
-import { resolveClient } from '../../api/resolve-client.js';
+import {
+  resolveClient,
+  type EmitFromNetworkResult,
+} from '../../api/resolve-client.js';
 import { BoardIdSchema, ItemIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import { ApiError, MondayCliError, UsageError } from '../../utils/errors.js';
@@ -64,8 +67,11 @@ import {
   parseSetRawExpression,
   type ParsedSetRawExpression,
 } from '../../api/raw-write.js';
-import { splitSetExpression } from '../../api/set-expression.js';
-import { buildResolutionContexts } from '../../api/resolution-context.js';
+import { splitSetExpression, type SetExpression } from '../../api/set-expression.js';
+import {
+  buildResolutionContexts,
+  type ResolutionContexts,
+} from '../../api/resolution-context.js';
 import {
   lookupItemBoard,
   lookupItemBoardWithHierarchy,
@@ -76,7 +82,12 @@ import {
   mergeSourceWithPreflight,
 } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
-import { preCheckM38FileDispatch } from '../../api/file-column-set.js';
+import {
+  preCheckM38FileDispatch,
+  type PreCheckM38FileDispatchResult,
+} from '../../api/file-column-set.js';
+import type { MultipartTransport } from '../../api/multipart-transport.js';
+import type { RunContext } from '../../cli/run.js';
 import {
   foldAndRemap,
   mergeResolverWarningsIntoError,
@@ -765,10 +776,8 @@ export const itemCreateCommand: CommandModule<
         const parsed = parseArgv(itemCreateCommand.inputSchema, {
           ...(opts as Readonly<Record<string, unknown>>),
         });
-        const { client, globalFlags, apiVersion, toEmit } = resolveClient(
-          ctx,
-          program.opts(),
-        );
+        const { client, globalFlags, apiVersion, multipart, toEmit } =
+          resolveClient(ctx, program.opts());
 
         const dispatch = validateInputShape(parsed);
 
@@ -814,17 +823,33 @@ export const itemCreateCommand: CommandModule<
         const { dateResolution, peopleResolution, tagResolution, relationResolution } =
           buildResolutionContexts({ client, ctx, globalFlags });
 
-        // v0.6-M38 D6 closure — create-time file-set REJECTS at the
-        // column-resolution boundary. Pre-checks setEntries against
-        // the resolved create-mode board (subitems board for subitem
-        // create; --board for top-level) and fires
-        // `'file_set_on_create_unsupported'` before any planCreate /
-        // resolveAndTranslate call. `--set-raw <file-col>=<json>`
-        // stays at `translateRawColumnValue`'s D3 permanent rejection
-        // (the pre-check inspects setEntries only).
+        // v0.6-M38 / v0.7-M43 D6 closure — create-time file-set
+        // dispatch routes through the column-resolution boundary's
+        // pre-check. Pre-checks setEntries against the resolved
+        // create-mode board (subitems board for subitem create;
+        // --board for top-level), then returns one of:
+        //   - `kind: 'json'` — no file column in `--set` (existing
+        //     bundled-create path runs below).
+        //   - `kind: 'file_create'` — clean single-file `--set`
+        //     entry; branches into the v0.7-M43 two-leg dispatch
+        //     helper {@link runItemCreateFileDispatch} (carve-out
+        //     fold from v0.6-M38's permanent rejection).
+        //   - Throws `usage_error` with
+        //     `details.reason: 'multi_file_set_unsupported'` on 2+
+        //     file `--set` entries (universal mutex rule). The
+        //     `'mixed_file_and_value_sets'` rule is SUPPRESSED on
+        //     `'item_create'` callShape per the v0.7-M43 D6 mixed-
+        //     rule asymmetry — `create_item` natively bundles
+        //     non-file `column_values` atomically into leg-1.
+        // `--set-raw <file-col>=<json>` stays at
+        // `translateRawColumnValue`'s D3 permanent rejection (the
+        // pre-check inspects setEntries only).
         let m38Source: 'live' | 'cache' | 'mixed' | undefined;
         let m38CacheAge: number | null = null;
         let m38Warnings: readonly ResolverWarning[] = [];
+        let m38FileCreate:
+          | Extract<PreCheckM38FileDispatchResult, { kind: 'file_create' }>
+          | undefined;
         if (setEntries.length > 0) {
           const m38 = await preCheckM38FileDispatch({
             client,
@@ -836,17 +861,52 @@ export const itemCreateCommand: CommandModule<
             env: ctx.env,
             noCache: globalFlags.noCache,
           });
-          // `enforceSingleFileColumnSet({callShape: 'item_create'})`
-          // throws on any file entry, so reaching this point means
-          // `m38.kind === 'json'`. Capture the pre-check's source /
-          // cache-age / warnings for downstream aggregation —
-          // round-1 P3-1-equivalent (wire-leg surfaces on
-          // `meta.source`) + round-2 P3-1 (resolver warnings ride
-          // into the envelope even when downstream cache-hits
-          // suppress re-emission).
           m38Source = m38.source;
           m38CacheAge = m38.cacheAgeSeconds;
           m38Warnings = m38.warnings;
+          if (m38.kind === 'file_create') {
+            m38FileCreate = m38;
+          }
+        }
+
+        // v0.7-M43 D6 carve-out fold — branch into the two-leg
+        // dispatch helper. Pre-flight stub throws `internal_error`
+        // with `details.reason: 'm43_preflight_stub'` (the wire
+        // legs live behind a c8 ignore until M43 IMPL lifts the
+        // runtime body per R-NEW-76 parseArgv-BEFORE-c8 discipline).
+        // Reaching this branch means argv parse + shape validation
+        // + duplicate-token check + create-mode resolution + M38
+        // pre-check all succeeded — only the wire dispatch (leg-1
+        // `create_item` + leg-2 `add_file_to_column` + the D1
+        // atomicity-envelope) is c8-ignored.
+        if (m38FileCreate !== undefined) {
+          await runItemCreateFileDispatch({
+            parsed,
+            client,
+            multipart,
+            ctx,
+            programOpts: program.opts(),
+            apiVersion,
+            createMode,
+            resolveBoardId,
+            setEntries,
+            rawEntries,
+            m38: m38FileCreate,
+            preflightSource: createModeResult.preflightSource,
+            preflightCacheAgeSeconds:
+              createModeResult.preflightCacheAgeSeconds,
+            metaSource: m38Source,
+            metaCacheAgeSeconds: m38CacheAge,
+            preflightWarnings: m38Warnings,
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            isDryRun: globalFlags.dryRun,
+            noCache: globalFlags.noCache,
+            toEmit,
+          });
+          return;
         }
 
         if (globalFlags.dryRun) {
@@ -1221,4 +1281,239 @@ const executeCreateSubitem = async (
     },
     response,
   };
+};
+
+// ============================================================
+// v0.7-M43 create-time file `--set` dispatch helper (D6 carve-out
+// fold from v0.6-M38).
+//
+// **Status: pre-flight contract diff at this commit; runtime body
+// lifts at v0.7-M43 IMPL.** The signature ships as contract at
+// pre-flight so callers + tests can pin the input shape; the body
+// is c8-ignored and throws `internal_error` with
+// `details.reason: 'm43_preflight_stub'` until IMPL replaces it.
+// All upstream argv parse + shape validation + duplicate-token
+// check + create-mode resolution + M38 pre-check fire BEFORE this
+// helper per R-NEW-76 (parseArgv-BEFORE-c8 discipline) and are
+// shipped contract.
+//
+// **D-list closures (v0.7-plan §3 M43 entry):**
+//
+//   - **D1 — Atomicity-envelope shape.** Orphan-warn at IMPL —
+//     leg-2 failure surfaces `internal_error` with
+//     `details.reason: 'create_then_file_upload_partial_failure'`
+//     + `details.created_item_id` echoing leg-1's freshly-created
+//     item ID + `details.column_id` + `details.hint` directing
+//     agents to `monday item set <iid> <file-col>=<path>` (retry
+//     leg-2 only) or `monday item delete <iid>` (rollback if the
+//     agent prefers a clean retry of the whole two-leg path). The
+//     pre-flight probe for cleanup-on-failure (rollback viability
+//     of option (a)) was inconclusive — phase-1 introspection
+//     confirmed `delete_item(item_id: ID) → OBJECT/Item` wire
+//     shape (rollback IS expressible) but phase-2 empirical
+//     rollback-viability step could not run because the token
+//     lacked `create_item` permission in a fresh sandbox
+//     workspace/board (Monday "User unauthorized to perform
+//     action" rejection); attempting against shared/existing
+//     boards was blocked by the harness auto-classifier as
+//     correctly modifying-shared-state. Defaulting to (b) under
+//     uncertainty preserves the agent's recovery handle without
+//     introducing a destructive `delete_item` cleanup leg whose
+//     own failure mode is unaccounted for. M43 IMPL revisits if
+//     a user-authorized probe sandbox surfaces concrete rollback-
+//     reliability data.
+//   - **D2 — Dry-run envelope shape.** Two `planned_changes`
+//     entries per call: (1) `operation: 'create_item'` (mirroring
+//     v0.2-M9's dry-run shape) carrying `name` + bundled
+//     non-file `column_values` from the resolveAndTranslate leg
+//     + the create-mode dispatch (top-level board / subitem
+//     parent); (2) `operation: 'add_file_to_column'` (mirroring
+//     M31's dry-run shape) carrying `column_id` + `file_path` +
+//     `filename` + `file_size_bytes` from the local pre-check.
+//     `source` aggregates the pre-planner network legs (parent
+//     lookup + parent-board metadata for subitems + `--relative-
+//     to` verification) + the M38 pre-check leg + the
+//     resolveAndTranslate leg — mirrors the existing JSON-path
+//     dry-run aggregation in the action body verbatim. No
+//     multipart wire round-trip fires on dry-run.
+//   - **D3 — ERROR_CODES delta.** Zero net change. Registry stays
+//     at 29 codes. Atomicity failures route through `internal_
+//     error` (existing) with `details.reason:
+//     'create_then_file_upload_partial_failure'` discriminator;
+//     leg-2 column resolution / validation failures route
+//     through existing `column_archived` / `validation_failed`
+//     / `not_found` / `file_too_large` per M31's pinned surface
+//     (M43 reuses M31's `addFileToColumn` fetcher verbatim so
+//     leg-2 failure shapes are inherited).
+//
+// **Wire surface (IMPL).** Two-leg dispatch:
+//   1. `create_item` (or `create_subitem` for subitem path) with
+//      bundled `column_values` from translated non-file `--set` /
+//      `--set-raw` entries — leg-1 returns the new `item.id`.
+//   2. `add_file_to_column(item_id, column_id, file)` multipart
+//      via M31's {@link addFileToColumn} fetcher (through
+//      {@link executeFileColumnSet}) — leg-2 returns the
+//      `asset` record on success; on failure, surface atomicity
+//      envelope per D1 closure (orphan-warn, echoing leg-1's
+//      item ID).
+//
+// **Reuse from existing surfaces.** Leg-1 reuses the existing
+// `executeCreateItem` / `executeCreateSubitem` helpers in this
+// file (no new wire op). Leg-2 reuses M38's `executeFileColumnSet`
+// + R-v0.6-NEW-1's `precheckLocalFile` / `buildBlobFromPath`
+// (3rd-consumer inheritance scheduled to tip to 4th at IMPL).
+//
+// **Pre-flight contract-term checklist (R-v0.7-NEW-4 inherited
+// from v0.7-M42).**
+//
+//   - State-current terms post-IMPL: `v0.7-M43`, `file_create`,
+//     `create+file two-leg`, `runItemCreateFileDispatch`,
+//     `create_then_file_upload_partial_failure`,
+//     `details.created_item_id` (orphan-warn echo).
+//   - Pre-IMPL framing terms — allowed contexts post-IMPL are
+//     (a) historical post-mortem entries in `docs/v0.6-plan.md`
+//     M38 D6 prose; (b) reserved-literal docstrings (the M38
+//     file-column-set.ts docstring + this helper's prose both
+//     name `'file_set_on_create_unsupported'` as RESERVED); (c)
+//     regression-guard tests asserting the literal does NOT
+//     appear in runtime output post-IMPL. All other occurrences
+//     of `file_set_on_create_unsupported` / `deferred_to: 'v0.7-
+//     M43'` / `D6 closure` / `--set <file-col>=<path> is not
+//     supported on monday item create` / `non-atomic post-create
+//     wire shape breaks §5.8 state safety` / `defer to v0.7-M43`
+//     are drift bugs.
+// ============================================================
+
+interface RunItemCreateFileDispatchInputs {
+  readonly parsed: ParsedInput;
+  readonly client: MondayClient;
+  readonly multipart: MultipartTransport;
+  readonly ctx: RunContext;
+  readonly programOpts: unknown;
+  readonly apiVersion: string;
+  readonly createMode: CreateMode;
+  readonly resolveBoardId: string;
+  readonly setEntries: readonly SetExpression[];
+  readonly rawEntries: readonly ParsedSetRawExpression[];
+  readonly m38: Extract<
+    PreCheckM38FileDispatchResult,
+    { kind: 'file_create' }
+  >;
+  /**
+   * Source contribution from the pre-planner network legs
+   * (parent lookup + parent-board metadata + --relative-to
+   * verification). Threaded into leg-1 + leg-2 envelope source
+   * aggregation per D2 closure so `meta.source` reflects every
+   * wire leg that fired.
+   */
+  readonly preflightSource: 'live' | 'cache' | 'mixed' | undefined;
+  readonly preflightCacheAgeSeconds: number | null;
+  /**
+   * Source contribution from the M38 pre-check leg (column
+   * resolution against `resolveBoardId`). Already-aggregated by
+   * `preCheckM38FileDispatch`; threaded here so the helper can
+   * fold it into leg-1 + leg-2 source aggregation without
+   * re-resolving.
+   */
+  readonly metaSource: 'live' | 'cache' | 'mixed' | undefined;
+  readonly metaCacheAgeSeconds: number | null;
+  /**
+   * Resolver warnings from the M38 pre-check leg
+   * (`stale_cache_refreshed` / `column_token_collision`). Threaded
+   * into the success + failure envelopes via the same dedupe
+   * pattern as the existing JSON path.
+   */
+  readonly preflightWarnings: readonly ResolverWarning[];
+  readonly dateResolution: ResolutionContexts['dateResolution'];
+  readonly peopleResolution: ResolutionContexts['peopleResolution'];
+  readonly tagResolution: ResolutionContexts['tagResolution'];
+  readonly relationResolution: ResolutionContexts['relationResolution'];
+  readonly isDryRun: boolean;
+  readonly noCache: boolean;
+  /**
+   * Envelope-meta closure from `resolveClient(...)`. M43 IMPL
+   * threads it into the leg-1 success envelope so the existing
+   * `complexity` / `apiVersion` / `cacheAgeSeconds` / `source`
+   * fields surface on the create envelope (mirrors
+   * `emitMutation`'s usage in the JSON path above).
+   */
+  readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
+}
+
+/**
+ * Two-leg create-time file dispatch helper. Pre-flight stub —
+ * runtime body lifts at v0.7-M43 IMPL.
+ *
+ * The throw below intentionally surfaces `internal_error` (exit 2)
+ * with `details.reason: 'm43_preflight_stub'` so an agent invoking
+ * the carved-out path sees a clear "not yet implemented" signal
+ * AND a structured `details.reason` slot for branching, rather
+ * than silent success / corrupted state. The argv parse + shape
+ * validation + duplicate-token check + create-mode resolution +
+ * M38 pre-check are shipped contract — reaching this throw means
+ * the carve-out fold path was correctly entered.
+ */
+const runItemCreateFileDispatch = async (
+  inputs: RunItemCreateFileDispatchInputs,
+): Promise<void> => {
+  /* c8 ignore start — v0.7-M43 pre-flight stub. Runtime body
+     lifts at M43 IMPL; the c8-ignore boundary lives at the
+     wire dispatch leg only per R-NEW-76. All upstream argv
+     parse + shape validation + duplicate-token check + create-
+     mode resolution + M38 pre-check fired before reaching this
+     point and are shipped contract. */
+  // Anchors the `async` signature so M43 IMPL doesn't have to
+  // re-shape callers when it adds the real `await
+  // precheckLocalFile(...)` / `await executeCreateItem(...)` /
+  // `await executeFileColumnSet(...)` legs. The `await`
+  // resolves immediately; the throw below is the only
+  // observable behaviour at pre-flight.
+  await Promise.resolve();
+  // Reference inputs once so TS doesn't flag them as unused on
+  // the pre-flight stub; IMPL replaces this whole body. The throw
+  // below is the only observable behaviour at pre-flight.
+  void inputs.parsed;
+  void inputs.client;
+  void inputs.multipart;
+  void inputs.ctx;
+  void inputs.programOpts;
+  void inputs.apiVersion;
+  void inputs.createMode;
+  void inputs.resolveBoardId;
+  void inputs.setEntries;
+  void inputs.rawEntries;
+  void inputs.preflightSource;
+  void inputs.preflightCacheAgeSeconds;
+  void inputs.metaSource;
+  void inputs.metaCacheAgeSeconds;
+  void inputs.preflightWarnings;
+  void inputs.dateResolution;
+  void inputs.peopleResolution;
+  void inputs.tagResolution;
+  void inputs.relationResolution;
+  void inputs.isDryRun;
+  void inputs.noCache;
+  void inputs.toEmit;
+  throw new ApiError(
+    'internal_error',
+    'v0.7-M43 create-time file `--set` dispatch is not yet implemented; ' +
+      'pre-flight contract diff only at this commit (runtime body lands ' +
+      'at M43 IMPL). The argv shape + pre-check are shipped — reaching ' +
+      'this throw means the carve-out fold path was correctly entered.',
+    {
+      details: {
+        reason: 'm43_preflight_stub',
+        milestone: 'v0.7-M43',
+        column_id: inputs.m38.columnId,
+        hint:
+          'this command path is reserved for v0.7-M43 IMPL (create-time ' +
+          'file `--set` carve-out fold); the pre-flight contract diff ' +
+          '(current commit) ships only the argv + pre-check surface. ' +
+          'Create the item without the file (`monday item create --board ' +
+          '<bid> --name "..."`), then attach the file with `monday item ' +
+          'set <iid> <file-col>=<path>` (v0.6-M38) until IMPL ships.',
+      },
+    },
+  );
+  /* c8 ignore stop */
 };

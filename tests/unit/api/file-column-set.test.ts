@@ -201,27 +201,103 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     });
   });
 
-  it("throws usage_error.details.reason: 'file_set_on_create_unsupported' on item_create callShape (D6 closure)", () => {
+  it("returns kind: 'file_create' on item_create callShape (v0.7-M43 D6 carve-out fold; was 'file_set_on_create_unsupported' usage_error at v0.6-M38)", () => {
+    // v0.7-M43 pre-flight: the v0.6-M38 D6 rejection
+    // (`'file_set_on_create_unsupported'`) folded — clean single-file
+    // create-time dispatch now returns `kind: 'file_create'` for the
+    // action body's two-leg `create_item` then `add_file_to_column`
+    // helper {@link runItemCreateFileDispatch}. `--name` is allowed
+    // here (required on create); the mixed-rule suppression on
+    // `'item_create'` callShape lets the clean path through. The
+    // `'file_set_on_create_unsupported'` literal stays RESERVED in
+    // docstrings (a separate test below regression-guards that it
+    // never appears in the runtime throw path).
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_create',
+      setEntries: [
+        {
+          columnId: 'attachments',
+          columnType: 'file',
+          rawValue: './report.pdf',
+        },
+      ],
+      setRawEntries: [],
+      hasName: true,
+    });
+    expect(result).toEqual({
+      kind: 'file_create',
+      columnId: 'attachments',
+      rawValue: './report.pdf',
+    });
+  });
+
+  it("v0.7-M43 mixed-rule asymmetry: item_create + file --set + non-file value --set + --name returns kind: 'file_create' (mixed gate SUPPRESSED on create per D6)", () => {
+    // The mixed-rule suppression on `'item_create'` callShape
+    // (v0.7-M43 D6 asymmetry) lets non-file value --set entries
+    // through because `create_item` natively bundles them into
+    // leg-1's `column_values` atomically. The action body splits
+    // entries into file (routes to leg-2) vs non-file (bundles
+    // into leg-1) — the enforcement layer just signals the dispatch
+    // kind here.
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_create',
+      setEntries: [
+        {
+          columnId: 'attachments',
+          columnType: 'file',
+          rawValue: './report.pdf',
+        },
+        { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
+      ],
+      setRawEntries: [],
+      hasName: true,
+    });
+    expect(result).toEqual({
+      kind: 'file_create',
+      columnId: 'attachments',
+      rawValue: './report.pdf',
+    });
+  });
+
+  it("v0.7-M43 regression-guard: 'file_set_on_create_unsupported' literal NEVER appears in enforcement throws (literal RESERVED post-D6 fold)", () => {
+    // R-v0.7-NEW-4 contract-term checklist (graduated v0.7-M42 IMPL):
+    // pre-IMPL framing literals stay reserved post-fold so future
+    // contract drift can't silently re-introduce them. Assert across
+    // the clean path (`file_create` return), the mixed-suppressed
+    // path (still `file_create`), and the universal multi-file path
+    // (`multi_file_set_unsupported` throw — distinct literal).
+    const clean = enforceSingleFileColumnSet({
+      callShape: 'item_create',
+      setEntries: [
+        { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
+      ],
+      setRawEntries: [],
+      hasName: true,
+    });
+    expect(JSON.stringify(clean)).not.toContain(
+      'file_set_on_create_unsupported',
+    );
+    let multiThrowMsg = '';
+    let multiDetails: unknown = null;
     try {
       enforceSingleFileColumnSet({
         callShape: 'item_create',
         setEntries: [
-          {
-            columnId: 'attachments',
-            columnType: 'file',
-            rawValue: './report.pdf',
-          },
+          { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
+          { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
         ],
         setRawEntries: [],
-        hasName: false,
+        hasName: true,
       });
-      throw new Error('expected ApiError');
     } catch (err) {
       const ae = err as ApiError;
-      expect(ae.code).toBe('usage_error');
-      expect(ae.details?.reason).toBe('file_set_on_create_unsupported');
-      expect(ae.details?.column_id).toBe('attachments');
+      multiThrowMsg = ae.message;
+      multiDetails = ae.details;
     }
+    expect(multiThrowMsg).not.toContain('file_set_on_create_unsupported');
+    expect(JSON.stringify(multiDetails)).not.toContain(
+      'file_set_on_create_unsupported',
+    );
   });
 
   it("throws usage_error.details.reason: 'multi_file_set_unsupported' for 2+ file --set entries (D2 multi leg)", () => {

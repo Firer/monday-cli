@@ -31,8 +31,55 @@ humans are second-class. Built incrementally via Claude Code on top of
   `npm audit` 0 vulnerabilities (audit-fix `fast-uri 3.1.0 →
   3.1.2` folded into the version-bump commit per security.md
   "high = merge blocker").
-- **Next session:** v0.7-M43 **pre-flight** — create-time
-  file `--set` carve-out fold (D6 closure from v0.6-M38).
+- **Next session:** v0.7-M43 **IMPL** — runtime body for two-leg
+  create+file dispatch. **M43 pre-flight contract diff landed
+  this session (pre-Codex review).** D1-D3 closed:
+  - **D1 — Atomicity envelope: (b) orphan-warn.** Leg-2 failure
+    surfaces `internal_error` with `details.reason:
+    'create_then_file_upload_partial_failure'` +
+    `details.created_item_id` echoing leg-1's orphan +
+    `details.column_id` + `details.cause` (M31 wire failure
+    surface) + `details.hint` directing agents to retry leg-2
+    only (`monday item set <iid> <file-col>=<path>`) OR
+    rollback (`monday item delete <iid>`). Closure rationale:
+    pre-flight rollback-viability probe could not run
+    empirically (token lacked `create_item` permission on a
+    token-created sandbox workspace + existing-board attempts
+    correctly blocked by harness modify-shared-state guards).
+    Defaulting to (b) under uncertainty preserves the agent's
+    recovery handle without introducing a destructive
+    `delete_item` cleanup leg whose own failure mode is
+    unaccounted for. M43 IMPL revisits if user-authorized probe
+    surfaces concrete rollback-reliability data.
+  - **D2 — Dry-run envelope:** two `planned_changes` entries
+    (`operation: 'create_item'` / `'create_subitem'` with
+    bundled non-file `column_values`, then `operation:
+    'add_file_to_column'` with file pre-check echo).
+  - **D3 — ERROR_CODES delta:** zero. Registry stays at 29.
+    Atomicity failures route through existing `internal_error`
+    with the new `create_then_file_upload_partial_failure`
+    `details.reason` discriminator.
+
+  Pre-flight stubs: `enforceSingleFileColumnSet` +
+  `preCheckM38FileDispatch` extended with `kind: 'file_create'`
+  variant; `runItemCreateFileDispatch` helper stub in
+  `src/commands/item/create.ts` (mirrors M42's
+  `runItemUpdateBulkFileDispatch` shape) throws
+  `internal_error` with `details.reason: 'm43_preflight_stub'`
+  per R-NEW-76 (parseArgv-BEFORE-c8 discipline). Existing
+  v0.6-M38 integration + unit tests asserting
+  `'file_set_on_create_unsupported'` flipped to assert the
+  stub envelope + regression-guard the v0.6 literal's absence;
+  mixed-rule SUPPRESSION on `'item_create'` callShape (D6
+  asymmetry — `create_item` bundles non-file `column_values`
+  atomically into leg-1) unit-tested. M43 inherits the
+  R-v0.7-NEW-4 pre-IMPL contract-term checklist (graduated
+  v0.7-M42 IMPL R7); the full M43 checklist is committed
+  inline at `docs/v0.7-plan.md` §3 M43 entry. Apply from
+  R1 onwards as the post-fix-up grep checklist to short-
+  circuit the W9 prose-escalation pattern M42 absorbed across
+  8 rounds.
+
   M42 **SHIPPED** at `22df2fa..08ae263` (R0 IMPL + 8 Codex
   fix-up rounds: R1 behavioral [foldAndRemap + SourceAggregator
   + partial-success invalidate]; R2-R8 W9 prose sweep —
@@ -43,20 +90,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   ships with `foldAndRemap` per-item + `SourceAggregator` over
   metadata + M38 pre-check + walk + dispatch legs + fail-fast
   partial-success invalidate + full envelope
-  (`operation: 'item_update_bulk_file_set'`). M43 pre-flight
-  decisions to close inline at the next session:
-  - **D1 — Atomicity envelope shape.** Three candidates:
-    (a) Best-effort rollback (delete_item cleanup leg if
-    file fails); (b) Orphan-warn (`internal_error` with
-    `details.created_item_id`); (c) Leave-as-is. Empirical
-    cleanup-on-failure probe required at pre-flight per
-    v0.7-plan §3 M43 entry.
-  - **D2 — Dry-run envelope shape.** Mirrors M38 dry-run +
-    second `planned_changes` entry for the post-create file
-    leg.
-  - **D3 — ERROR_CODES delta.** Likely zero. Atomicity
-    failures route through `internal_error` with
-    `details.reason: 'create_then_file_upload_partial_failure'`.
+  (`operation: 'item_update_bulk_file_set'`).
 
   IMPL Codex review estimate 4-5 fix-up rounds (similar profile
   to M42 — non-atomic two-leg). M43 close-docs re-probes
@@ -64,18 +98,12 @@ humans are second-class. Built incrementally via Claude Code on top of
   decides M39 D1 between (a) SDK 15.x lift if shipped /
   (b) string-literal override on SDK 14.0.0 + hand-rolled zod
   schemas per the "Boundary-typing trap" pattern / (c) continued
-  wait. M43 should APPLY the new "Pre-IMPL contract-term
-  checklist for cross-doc grep" discipline (workflow.md;
-  R-v0.7-NEW-4 graduated at v0.7-M42 IMPL R7) so the W9 prose-
-  escalation pattern doesn't repeat — enumerate state-current
-  + pre-IMPL-framing terms at the M43 pre-flight commit + use
-  as the post-fix-up grep checklist. Full v0.7 scope (M39-M43)
-  unchanged from SKELETON. v0.8 SKELETON stays unratified
-  (opens after v0.7.0 publishes). Other carry-forward backlog
-  (multi-level subitems / cross-board move value-overrides /
-  resumable cross-board cursor / profile-scoped argument
-  defaults / multi-file `--set` / stdin file-`--set`) stays
-  deferred.
+  wait. Full v0.7 scope (M39-M43) unchanged from SKELETON.
+  v0.8 SKELETON stays unratified (opens after v0.7.0
+  publishes). Other carry-forward backlog (multi-level subitems
+  / cross-board move value-overrides / resumable cross-board
+  cursor / profile-scoped argument defaults / multi-file
+  `--set` / stdin file-`--set`) stays deferred.
 
 For every shipped milestone's narrative, post-mortem, Codex round
 detail, and R-class refactor backlog, **read the plan docs** —

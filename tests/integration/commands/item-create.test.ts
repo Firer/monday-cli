@@ -2135,7 +2135,7 @@ describe('monday item create — dry-run', () => {
   });
 });
 
-describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', () => {
+describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; was v0.6-M38 rejection)', () => {
   const fileBoard = {
     ...sampleBoardMetadata,
     columns: [
@@ -2160,7 +2160,15 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
     ],
   };
 
-  it("rejects file --set on item create live path with usage_error.details.reason: 'file_set_on_create_unsupported'", async () => {
+  it("routes file --set on item create live path into the v0.7-M43 stub helper (was 'file_set_on_create_unsupported' at v0.6-M38)", async () => {
+    // v0.7-M43 pre-flight contract diff: the v0.6-M38 D6 rejection
+    // (`'file_set_on_create_unsupported'`) folded — the action body
+    // now routes the clean path to the stub helper
+    // `runItemCreateFileDispatch`. The stub throws `internal_error`
+    // with `details.reason: 'm43_preflight_stub'` (exit 2) until
+    // M43 IMPL lifts the runtime body. The argv + pre-check surface
+    // is shipped contract at this commit; reaching the stub
+    // throw means the carve-out fold path was correctly entered.
     const out = await drive(
       [
         'item',
@@ -2182,16 +2190,24 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
         ],
       },
     );
-    expect(out.exitCode).toBe(1);
+    expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: {
         code: string;
-        details?: { reason?: string; column_id?: string };
+        details?: { reason?: string; column_id?: string; milestone?: string };
       };
     };
-    expect(env.error?.code).toBe('usage_error');
-    expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe('m43_preflight_stub');
+    expect(env.error?.details?.milestone).toBe('v0.7-M43');
     expect(env.error?.details?.column_id).toBe('attachments');
+    // R-v0.7-NEW-4 regression-guard: the v0.6-M38 literal stays
+    // RESERVED post-fold. Asserting absence across the full
+    // envelope catches any silent re-introduction of the
+    // pre-IMPL discriminator.
+    expect(JSON.stringify(env)).not.toContain(
+      'file_set_on_create_unsupported',
+    );
   });
 
   it("D3 invariant: item create `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_create_unsupported — Codex round-2 P3-2 pin)", async () => {
@@ -2226,7 +2242,14 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
     expect(env.error?.details?.reason).toBeUndefined();
   });
 
-  it('rejects file --set on item create dry-run path with the same reason (D6 applies to both paths)', async () => {
+  it('routes file --set on item create dry-run path into the same v0.7-M43 stub helper (D6 fold applies to dry-run too; was D6 rejection at v0.6-M38)', async () => {
+    // v0.7-M43 pre-flight: the dry-run path reaches the same stub
+    // helper (the helper inspects `isDryRun` to branch the IMPL
+    // body, but the pre-flight stub throws regardless). M43 IMPL
+    // will branch the dry-run path into the D2 two-`planned_changes`
+    // envelope shape (`operation: 'create_item'` + `operation:
+    // 'add_file_to_column'`) without burning multipart wire round-
+    // trips; pre-flight just pins the routing.
     const out = await drive(
       [
         'item',
@@ -2249,11 +2272,14 @@ describe('monday item create — v0.6-M38 file-column rejection (D6 closure)', (
         ],
       },
     );
-    expect(out.exitCode).toBe(1);
+    expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: { code: string; details?: { reason?: string } };
     };
-    expect(env.error?.code).toBe('usage_error');
-    expect(env.error?.details?.reason).toBe('file_set_on_create_unsupported');
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe('m43_preflight_stub');
+    expect(JSON.stringify(env)).not.toContain(
+      'file_set_on_create_unsupported',
+    );
   });
 });

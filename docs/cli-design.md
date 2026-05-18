@@ -967,9 +967,11 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           #     `--concurrency` /
                                           #     `--continue-on-error`); AND the
                                           #     v0.4-M31 verb-shaped `monday item
-                                          #     upload`. `monday item create
-                                          #     --set <file-col>=<path>` still
-                                          #     rejects (D6 deferred to v0.7-M43).
+                                          #     upload`; AND v0.7-M43 `monday
+                                          #     item create --set <file-col>=
+                                          #     <path>` (create-time two-leg
+                                          #     dispatch under the orphan-warn
+                                          #     atomicity envelope per §5.8).
                                           #     `--set-raw <file-col>=<json>`
                                           #     stays rejected per D3 (permanent).
                                           # The command still proceeds in all
@@ -1768,21 +1770,31 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # `data.summary.{matched,applied,failed}_count` invariant.
                                           # Monday's `concurrency_exceeded` retries via the existing
                                           # retry layer (§2.5) — no new error code surfaces.
-monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set REJECTED at v0.6-M38; defers to v0.7-M43 per D6 carve-out fold — non-atomic post-create wire shape needs an atomicity-envelope decision)
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set carve-out fold at v0.7-M43 — create-time two-leg dispatch under §5.8 orphan-warn atomicity envelope)
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
                                           # entries → usage_error (covers --set + --set, --set-raw
                                           # + --set-raw, and --set + --set-raw permutations;
                                           # resolution-time enforced — see §5.3)
-                                          # v0.6-M38: file-column --set REJECTED on item create —
-                                          # `--set <file-col>=<path>` surfaces usage_error
-                                          # (details.reason: 'file_set_on_create_unsupported') at the
-                                          # resolution boundary. Defers to v0.7-M43 per D6 carve-out
-                                          # fold — non-atomic post-create wire shape needs an
-                                          # atomicity-envelope decision per §5.8 state safety.
+                                          # v0.7-M43: file-column --set CARVE-OUT FOLD on item
+                                          # create — `--set <file-col>=<path>` routes through a
+                                          # two-leg dispatch (create_item / create_subitem with
+                                          # bundled non-file column_values, then
+                                          # add_file_to_column for the file entry). The pair is
+                                          # non-atomic by construction; leg-2 failure surfaces
+                                          # internal_error with details.created_item_id echoing
+                                          # leg-1's orphan + a hint to retry leg-2 only OR
+                                          # `monday item delete` to clean up (§5.8 orphan-warn
+                                          # atomicity envelope, D1 closure). Multi-file --set
+                                          # stays rejected (universal mutex). The pre-v0.7-M43
+                                          # rejection literal `'file_set_on_create_unsupported'`
+                                          # is RESERVED post-fold (regression-guarded).
                                           # --set / --set-raw values bundle into the single
                                           # create_item / create_subitem mutation — single
-                                          # round-trip, no post-create fallback (see §5.8)
+                                          # round-trip on the JSON-only path; on the file-set
+                                          # path, non-file --set / --set-raw values bundle into
+                                          # leg-1 atomically while the file entry routes to
+                                          # leg-2 (see §5.8)
                                           # --parent <iid> → create_subitem; column resolution
                                           # targets the subitems board, not the parent's board.
                                           # Classic boards only — multi-level boards rejected
@@ -3570,18 +3582,29 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      `'multi_file_set_unsupported'` — multi-file dispatch is an
      unratified v0.7.x carry-forward candidate. The discriminator
      literal lives at `details.reason`.
-   - **No mixing with value flags.** File `--set` mixed with any
-     value `--set` / `--set-raw` / `--name <n>` in the same call
-     rejects as `usage_error` with
-     `'mixed_file_and_value_sets'` at `details.reason` — mixing
-     would force non-atomic multi-leg dispatch (one multipart
-     round-trip per file column + one JSON round-trip per value
-     column), breaking the existing atomicity guarantee.
-   - **No `item create --set <file-col>=<path>`.** Rejects as
-     `usage_error` with `'file_set_on_create_unsupported'` at
-     `details.reason` — defers to v0.7-M43 per D6 carve-out fold
-     (non-atomic post-create wire shape needs an atomicity-
-     envelope decision per §5.8 state safety).
+   - **No mixing with value flags on update / set callShapes.**
+     File `--set` mixed with any value `--set` / `--set-raw` /
+     `--name <n>` in the same call rejects as `usage_error` with
+     `'mixed_file_and_value_sets'` at `details.reason` on
+     `'item_set'` / `'item_update_single'` / `'item_update_bulk'`
+     callShapes — mixing would force non-atomic multi-leg
+     dispatch (one multipart round-trip per file column + one JSON
+     round-trip per value column), breaking the existing atomicity
+     guarantee. **SUPPRESSED on `'item_create'`** per v0.7-M43 D6
+     mixed-rule asymmetry — `create_item` natively bundles
+     non-file `column_values` atomically into leg-1, and `--name`
+     is required on create (not an opt-in rename).
+   - **`item create --set <file-col>=<path>` — CARVED OUT at
+     v0.7-M43** (D6 fold from v0.6-M38). At v0.6-M38 this rejected
+     with `'file_set_on_create_unsupported'`; v0.7-M43 accepts the
+     path and dispatches a two-leg `create_item` + `add_file_to_column`
+     sequence under the §5.8 orphan-warn atomicity envelope (D1
+     closure). Non-file `--set` / `--set-raw` entries bundle into
+     leg-1's `column_values`; the file entry routes to leg-2.
+     The universal multi-file mutex still applies. The
+     `'file_set_on_create_unsupported'` literal stays RESERVED in
+     docstrings + regression-guarded in tests; the runtime path
+     no longer surfaces it.
    - **Bulk `item update --where ... --set <file-col>=<path>` —
      CARVED OUT at v0.7-M42** (D5 fold from v0.6-M38). At v0.6-M38
      this rejected with `'file_set_on_bulk_unsupported'`; v0.7-M42
@@ -3757,7 +3780,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. Only `monday item create --set <file-col>=<path>` still rejects (deferred to v0.7-M43 — D6 carve-out fold, atomicity-envelope shape pending). Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helper. Mutex rules (universal across single + bulk): single file `--set` only; no mixing with value `--set` / `--set-raw` / `--name`. `--set-raw <file-col>=<json>` stays REJECTED (no JSON wire shape for `add_file_to_column`). |
+| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk + M43 friendly `--set` create) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. **v0.7-M43** carved out the create-time path — `monday item create --set <file-col>=<path>` now dispatches a two-leg `create_item` + `add_file_to_column` sequence under the §5.8 orphan-warn atomicity envelope (D1 closure); non-file `--set` / `--set-raw` entries bundle into leg-1 atomically, the file entry routes to leg-2. Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helper, and the create path adds `runItemCreateFileDispatch` (`src/commands/item/create.ts`) as the two-leg helper. Mutex rules: single file `--set` only on every callShape (universal multi-file mutex); mixing with value `--set` / `--set-raw` / `--name` rejects on `'item_set'` / `'item_update_single'` / `'item_update_bulk'` (universal mixed mutex), SUPPRESSED on `'item_create'` (M43 D6 asymmetry — `create_item` natively bundles non-file `column_values` atomically). `--set-raw <file-col>=<json>` stays REJECTED on every callShape (no JSON wire shape for `add_file_to_column`; D3 permanent rejection at `translateRawColumnValue`). |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -4225,6 +4248,116 @@ diverge (some items get the file, some don't, on a partial
 batch under `--continue-on-error`); the envelope makes that
 divergence visible per-record rather than collapsing to a
 single ok/error outcome.
+
+**v0.7-M43 create-time file `--set` two-leg atomicity (D6
+carve-out fold from v0.6-M38).** The create-time file `--set`
+path (`monday item create --board <bid> --name <n> --set
+<file-col>=<path>`) introduces a two-leg dispatch shape that
+doesn't fit the single-mutation atomicity model above. Monday
+has no atomic create-with-file mutation at API `2026-01`; file
+upload at create time requires `create_item` followed by
+`add_file_to_column` in two separate wire round-trips. The
+contract:
+
+1. **Single upfront local file pre-check, BEFORE any wire
+   round-trip.** The `precheckLocalFile` call (size,
+   readability, mime-sniff) fires ONCE before either wire leg
+   starts. A failed pre-check surfaces upfront as `usage_error`
+   with `details.reason: 'file_not_readable'` /
+   `'file_empty'` (mirrors M31 / M38 / M42 single-item shape) —
+   whole-call-abort. The pre-check is local-only (no Monday
+   wire activity), so the atomicity-before-wire discipline of
+   §5.8 above is preserved verbatim: by the time the first wire
+   leg fires, every input that COULD have been pre-validated
+   locally already has been.
+
+2. **Mixed `--set` partitioning at leg-1.** Non-file `--set` /
+   `--set-raw` entries bundle into leg-1's
+   `create_item.column_values` (or `create_subitem.column_values`)
+   via the existing `bundleColumnValues` helper — leg-1 stays
+   atomic for the item + every non-file column. The single file
+   `--set` entry routes to leg-2's `add_file_to_column`
+   multipart dispatch. The mixed-rule SUPPRESSION on
+   `'item_create'` callShape (per `file-column-set.ts:
+   enforceSingleFileColumnSet`) lets non-file values through
+   the mutex check; the universal multi-file rule
+   (`'multi_file_set_unsupported'`) STILL rejects 2+ file
+   `--set` entries (Monday's wire is single-column per
+   `add_file_to_column` call regardless of dispatch shape).
+   `--set-raw <file-col>=<json>` stays at
+   `translateRawColumnValue`'s D3 permanent rejection (no JSON
+   wire shape for files).
+
+3. **Leg-1 `create_item` (or `create_subitem`).** Atomic on
+   the wire — the new item with bundled non-file column values
+   ships in one mutation. On success, leg-1 returns the new
+   `item.id` which threads into leg-2.
+
+4. **Leg-2 `add_file_to_column` via `executeFileColumnSet`
+   (M31 wire reused).** Multipart round-trip — same `withRetry`
+   semantics + `file_too_large` rewrap-inside-retry-thunk
+   pattern as M31's `item upload`. On success, leg-2 returns
+   the `asset` record that surfaces on the envelope.
+
+5. **D1 atomicity envelope — orphan-warn on leg-2 failure.**
+   When leg-1 succeeds but leg-2 fails (the only non-trivial
+   failure mode — leg-1 failure aborts before any state
+   change), the envelope surfaces:
+   - `ok: false`
+   - `error.code: 'internal_error'`
+   - `error.details.reason: 'create_then_file_upload_partial_failure'`
+   - `error.details.created_item_id: <leg-1's new item id>`
+     (the orphan handle agents need to drive their own cleanup
+     OR retry leg-2 alone)
+   - `error.details.column_id: <leg-2's column id>`
+   - `error.details.cause: { code, message, ... }` carrying
+     leg-2's underlying error shape (`column_archived` /
+     `validation_failed` / `not_found` / `file_too_large` per
+     M31's pinned surface)
+   - `error.details.hint:` directing agents to `monday item set
+     <iid> <file-col>=<path>` (retry leg-2 only against the
+     orphan) OR `monday item delete <iid>` (rollback the
+     orphan if the agent prefers a clean retry of the whole
+     two-leg path).
+
+   The rollback path (option (a) — automatic `delete_item`
+   cleanup leg) was considered at pre-flight but defaulted to
+   orphan-warn (option (b)) under uncertainty about rollback
+   reliability. The pre-flight rollback-viability probe could
+   not run empirically (token lacked `create_item` permission
+   in a fresh sandbox workspace; existing-board attempts
+   correctly blocked by harness modify-shared-state guards).
+   Defaulting to (b) preserves the agent's recovery handle
+   without introducing a destructive `delete_item` cleanup leg
+   whose own failure mode is unaccounted for. M43 IMPL revisits
+   if a user-authorized probe sandbox surfaces concrete
+   rollback-reliability data.
+
+6. **Dry-run envelope — two `planned_changes` entries.**
+   `--dry-run` emits both legs without burning either wire
+   round-trip:
+   - Entry 1: `operation: 'create_item'` (or `'create_subitem'`)
+     carrying `item_name` + bundled non-file `column_values`
+     from the resolveAndTranslate leg + the create-mode
+     dispatch (top-level board / subitem parent).
+   - Entry 2: `operation: 'add_file_to_column'` carrying
+     `column_id` + `file_path` + `filename` + `file_size_bytes`
+     from the local pre-check.
+   The envelope's `source` aggregates the pre-planner network
+   legs (parent lookup + parent-board metadata for subitems +
+   `--relative-to` verification) + the M38 pre-check leg + the
+   resolveAndTranslate leg, mirroring the existing JSON-path
+   dry-run aggregation in the action body verbatim.
+
+The create-time two-leg path is NOT a §5.8 atomicity exception
+in the strict sense — the atomicity-before-wire rule still
+applies at the local pre-check boundary, and each individual
+wire leg is atomic on Monday's side. What changes is that
+the pair of legs is non-atomic by construction: leg-1's item
+may persist even when leg-2 fails. The orphan-warn envelope
+shape makes that divergence visible + actionable per-call
+rather than collapsing to a single ok/error outcome that
+hides the orphan.
 
 ### 5.9 The `dev` namespace
 
@@ -8748,7 +8881,12 @@ scoped idempotent changes, and post comments narrating its work.**
   `item update --where ... --set <file-col>=<path>` deferred
   D5 → **shipped at v0.7-M42** (per-item multipart fan-out
   under `--concurrency` / `--continue-on-error`); `item create
-  --set <file-col>=<path>` deferred D6 → pending at v0.7-M43;
+  --set <file-col>=<path>` deferred D6 → **carved out at
+  v0.7-M43** (two-leg `create_item` + `add_file_to_column`
+  dispatch under the §5.8 orphan-warn atomicity envelope;
+  D1 closure defaulted to orphan-warn under uncertainty about
+  rollback-leg reliability — pre-flight probe couldn't run
+  empirically due to token permissions);
   `--set-raw <file-col>=<json>` STAYS REJECTED per D3
   (permanent). M38 pre-flight stubs landed at
   `0cb8b69..1a92955` (4 fix-up rounds + 1 ratification);
@@ -8762,11 +8900,17 @@ scoped idempotent changes, and post comments narrating its work.**
     item multipart fan-out under `--concurrency` /
     `--continue-on-error`; closes the v0.6-deferred surface).
   - `item create --set <file-col>=<path>` — deferred from M38
-    per D6; pending at v0.7-M43 per the D6 carve-out fold.
-    Conditional on Monday surfacing an atomic create-with-file
-    wire shape (no such mutation exists at API `2026-01`); M43
-    pre-flight will pin the atomicity-envelope shape per
-    §5.8 state safety.
+    per D6 → **carved out at v0.7-M43** (two-leg `create_item`
+    + `add_file_to_column` dispatch under the §5.8 orphan-warn
+    atomicity envelope, D1 closure). Monday's wire still has no
+    atomic create-with-file mutation at API `2026-01`; the
+    two-leg shape pairs leg-1 atomicity (item + bundled
+    non-file `column_values`) with leg-2 atomicity (the file
+    upload) under an orphan-warn envelope when leg-2 fails after
+    leg-1 succeeds. Non-file `--set` / `--set-raw` entries
+    bundle into leg-1; the file entry routes to leg-2. M43
+    pre-flight stubs (this commit) ship the argv + pre-check +
+    routing surface; M43 IMPL lifts the runtime body.
   - `<path>='-'` stdin for file `--set` — surface deferred
     from M38 per D7; v0.7.x candidate once a `--filename`
     companion shape is pinned.

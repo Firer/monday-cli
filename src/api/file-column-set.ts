@@ -99,10 +99,22 @@
  *     path so the action body can branch into the per-item
  *     multipart fan-out. Multi-file / mixed mutex rules STILL
  *     apply on bulk (those are universal).
- *   - `item create --set <file-col>=<path>` REJECTED at resolution-
- *     time per D6 closure — carve-out fold to v0.7-M43. Non-atomic
- *     post-create wire shape would break §5.8 state safety
- *     without the M43 atomicity-envelope shape.
+ *   - `item create --set <file-col>=<path>` — **CARVED OUT at
+ *     v0.7-M43** (D6 fold). At v0.6-M38 this was REJECTED with
+ *     `'file_set_on_create_unsupported'`; v0.7-M43's pre-flight
+ *     contract diff returns
+ *     `{ kind: 'file_create', columnId, rawValue }` from
+ *     {@link enforceSingleFileColumnSet} on the clean dispatch
+ *     path so the action body can branch into the two-leg
+ *     dispatch (`create_item` then `add_file_to_column`).
+ *     Multi-file mutex rule STILL applies on create (universal).
+ *     The mixed rule is callShape-aware: on `'item_create'` the
+ *     `--name` arm + non-file value `--set` / `--set-raw` arms
+ *     are SUPPRESSED (leg-1 `create_item` natively bundles
+ *     `column_values` atomically + `item_name` is required on
+ *     create); the D3 `--set-raw <file-col>=<json>` rejection
+ *     at `raw-write.ts:translateRawColumnValue` stays in force
+ *     (separate enforcement layer).
  *
  * Rejection surfaces share the `usage_error.details.reason`
  * discriminator pattern from M14 / M27 / M31:
@@ -113,10 +125,12 @@
  *   - `'multi_file_set_unsupported'` — 2+ file `--set` entries
  *     in same call. Applies on single-item AND bulk call shapes
  *     (universal mutex rule).
- *   - `'file_set_on_create_unsupported'` — `item create --set
- *     <file-col>=<path>` (carve-out fold to v0.7-M43).
  *   - `'file_set_on_bulk_unsupported'` — **NO LONGER SURFACES**
  *     at v0.7-M42 onwards. Historical reference only; the
+ *     discriminator literal stays reserved across the codebase
+ *     (do not reuse for a different rejection reason).
+ *   - `'file_set_on_create_unsupported'` — **NO LONGER SURFACES**
+ *     at v0.7-M43 onwards. Historical reference only; the
  *     discriminator literal stays reserved across the codebase
  *     (do not reuse for a different rejection reason).
  *
@@ -350,20 +364,29 @@ export const executeFileColumnSet = async (
  *     clean bulk file-column dispatch path applies (v0.7-M42 D5
  *     carve-out fold). Action body branches into the per-item
  *     multipart fan-out helper.
+ *   - Returns `{ kind: 'file_create', columnId, rawValue }` when a
+ *     clean create-time file-column dispatch path applies
+ *     (v0.7-M43 D6 carve-out fold). Action body branches into the
+ *     two-leg `create_item` then `add_file_to_column` dispatch
+ *     helper.
  *   - Throws `ApiError('usage_error', ...)` with a
  *     `details.reason` discriminator when a mutex violation is
- *     detected: `'file_set_on_create_unsupported'` (D6 carve-out
- *     fold to v0.7-M43), `'multi_file_set_unsupported'` (D2
- *     multi-file leg — universal; applies on single + bulk),
- *     `'mixed_file_and_value_sets'` (D2 mixed leg — universal;
- *     applies on single + bulk).
+ *     detected: `'multi_file_set_unsupported'` (D2 multi-file leg
+ *     — universal; applies on single + bulk + create) OR
+ *     `'mixed_file_and_value_sets'` (D2 mixed leg — universal on
+ *     non-create callShapes; SUPPRESSED on `'item_create'` per
+ *     the D6 mixed-rule asymmetry since `create_item` natively
+ *     bundles `column_values` atomically + `item_name` is
+ *     required on create).
  *
- * The `'file_set_on_bulk_unsupported'` literal (v0.6-M38 D5
- * rejection) NO LONGER SURFACES from this function as of v0.7-M42
- * — the carve-out fold returns `kind: 'file_bulk'` on clean bulk-
- * file paths instead. The literal stays RESERVED in docstrings as
- * historical reference; do not re-introduce it as a runtime
- * rejection without a fresh contract decision.
+ * Both `'file_set_on_bulk_unsupported'` (v0.6-M38 D5) and
+ * `'file_set_on_create_unsupported'` (v0.6-M38 D6) literals NO
+ * LONGER SURFACE from this function as of v0.7-M42 / v0.7-M43
+ * respectively — the carve-out folds return
+ * `kind: 'file_bulk'` / `kind: 'file_create'` on clean dispatch
+ * paths instead. The literals stay RESERVED in docstrings as
+ * historical reference; do not re-introduce as runtime rejections
+ * without fresh contract decisions.
  *
  * Pure synchronous check — no I/O, no side effects. The caller
  * resolves columns first (via `resolveColumnWithRefresh` or the
@@ -388,7 +411,19 @@ export type FileColumnSetEnforcementResult =
   // happens at the action layer (one local file pre-check upfront +
   // N parallel/sequential `executeFileColumnSet` calls per matched
   // item).
-  | { readonly kind: 'file_bulk'; readonly columnId: string; readonly rawValue: string };
+  | { readonly kind: 'file_bulk'; readonly columnId: string; readonly rawValue: string }
+  // v0.7-M43 carve-out fold (D6 closure). Create-time `monday item
+  // create --set <file-col>=<path>` returns this variant on the clean
+  // dispatch path so the action body branches into the two-leg
+  // helper (`create_item` then `add_file_to_column`). The slot shape
+  // mirrors `kind: 'file'` — resolved column ID + agent-supplied raw
+  // path; the action body bundles the non-file `--set` / `--set-raw`
+  // entries into leg-1's `create_item.column_values`, then dispatches
+  // leg-2 against the freshly-created item ID. Atomicity-envelope
+  // shape per cli-design §5.8 — orphan-warn surfaces leg-1's item
+  // ID via `internal_error.details.created_item_id` when leg-2 fails
+  // (D1 closure).
+  | { readonly kind: 'file_create'; readonly columnId: string; readonly rawValue: string };
 
 export interface EnforceSingleFileColumnSetInputs {
   /**
@@ -412,9 +447,18 @@ export interface EnforceSingleFileColumnSetInputs {
    *     universal — file column dispatch is single-column per
    *     wire call regardless of how many items the fan-out
    *     spans).
-   *   - `'item_create'` — `monday item create`. Any file `--set`
-   *     rejects with `'file_set_on_create_unsupported'` (D6
-   *     carve-out fold to v0.7-M43).
+   *   - `'item_create'` — `monday item create`. At v0.6-M38 this
+   *     rejected with `'file_set_on_create_unsupported'`;
+   *     v0.7-M43 carves out the D6 closure — clean single-file
+   *     create-time dispatch returns `kind: 'file_create'` for the
+   *     action body's two-leg `create_item` then
+   *     `add_file_to_column` helper. Multi-file gate STILL rejects
+   *     (universal). Mixed-rule SUPPRESSED on create per D6
+   *     asymmetry (`create_item` natively bundles non-file
+   *     `column_values` atomically + `--name` is required on
+   *     create). `--set-raw <file-col>=<json>` stays rejected at
+   *     `raw-write.ts:translateRawColumnValue` per D3 (separate
+   *     enforcement layer).
    */
   readonly callShape:
     | 'item_set'
@@ -454,32 +498,39 @@ export interface EnforceSingleFileColumnSetInputs {
  * throws `ApiError('usage_error', ...)` on a mutex violation.
  *
  * Mutex priority (ratified at M38 pre-flight; updated at v0.7-M42
- * pre-flight to fold the D5 bulk carve-out):
+ * + v0.7-M43 pre-flights to fold the D5 bulk + D6 create carve-outs):
  *
- *   1. **callShape gate — create only** — `'item_create'` rejects
- *      with `'file_set_on_create_unsupported'` (D6 carve-out fold
- *      to v0.7-M43 — non-atomic post-create wire shape breaks §5.8
- *      state safety without the M43 atomicity-envelope shape).
- *      `'item_update_bulk'` NO LONGER short-circuits at this gate
- *      — the universal multi-file / mixed gates run first below,
- *      and clean bulk-file dispatch returns
- *      `{ kind: 'file_bulk', ... }` at the bottom.
+ *   1. **callShape gate — NONE remaining post-v0.7-M43** — both
+ *      `'item_update_bulk'` (D5 fold at v0.7-M42) and `'item_create'`
+ *      (D6 fold at v0.7-M43) short-circuit-throws have been removed.
+ *      Every callShape falls through to the universal multi-file
+ *      gate + a callShape-aware mixed gate, then returns a per-
+ *      callShape `kind` on the clean path.
  *   2. **multi-file leg** — 2+ file `--set` entries (any callShape)
  *      surface `'multi_file_set_unsupported'`. Universal rule:
  *      Monday's `add_file_to_column` is single-column per call on
  *      the wire regardless of fan-out shape.
  *   3. **mixed leg** — 1 file `--set` + any value `--set` /
- *      `--set-raw` / `--name` (any callShape) surface
- *      `'mixed_file_and_value_sets'`. Universal rule: mixing
- *      forces non-atomic multi-leg dispatch across the multipart +
- *      JSON wire surfaces.
- *   4. **clean leg** — 1 file `--set`, no other value flags:
- *      - `'item_update_single'` → return `{ kind: 'file', columnId,
- *        rawValue }` for downstream {@link precheckLocalFile} +
- *        {@link executeFileColumnSet} (M38 path; unchanged).
+ *      `--set-raw` / `--name` surfaces `'mixed_file_and_value_sets'`
+ *      on `'item_set'` / `'item_update_single'` / `'item_update_bulk'`.
+ *      Universal rule on those callShapes: mixing forces non-atomic
+ *      multi-leg dispatch across the multipart + JSON wire surfaces.
+ *      **SUPPRESSED on `'item_create'`** per v0.7-M43 D6 mixed-rule
+ *      asymmetry — `create_item` natively bundles non-file
+ *      `column_values` atomically into leg-1, and `--name` is
+ *      required on create.
+ *   4. **clean leg** — 1 file `--set`, no mutex violation:
+ *      - `'item_update_single'` / `'item_set'` → return
+ *        `{ kind: 'file', columnId, rawValue }` for downstream
+ *        {@link precheckLocalFile} + {@link executeFileColumnSet}
+ *        (M38 path; unchanged).
  *      - `'item_update_bulk'` → return `{ kind: 'file_bulk',
  *        columnId, rawValue }` for the action body's per-item
  *        multipart fan-out (v0.7-M42 D5 carve-out fold).
+ *      - `'item_create'` → return `{ kind: 'file_create', columnId,
+ *        rawValue }` for the action body's two-leg `create_item`
+ *        then `add_file_to_column` helper (v0.7-M43 D6 carve-out
+ *        fold).
  *
  * The function is sync + pure. No I/O. Path validation lives at a
  * SEPARATE step (`precheckLocalFile` from `src/utils/file-source.ts`)
@@ -496,44 +547,17 @@ export const enforceSingleFileColumnSet = (
     return { kind: 'json' };
   }
 
-  // callShape gate — create only (D6 carve-out fold to v0.7-M43).
-  // The v0.6-M38 `'item_update_bulk'` short-circuit-throw has been
-  // FOLDED at v0.7-M42 (D5): bulk file `--set` now falls through to
-  // the universal multi-file / mixed gates below, then returns
-  // `{ kind: 'file_bulk', ... }` on the clean path. The hint names
-  // the verb-shaped M31 fallback (`monday item upload`) which IS
-  // still allowed on create-time flows via separate scripting.
-  if (inputs.callShape === 'item_create') {
-    const fe = fileSetEntries[0];
-    /* c8 ignore next 3 */
-    if (fe === undefined) {
-      throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (create)');
-    }
-    throw new ApiError(
-      'usage_error',
-      `--set <file-col>=<path> is not supported on \`monday item create\` ` +
-        `(deferred to v0.7-M43 per cli-design §13 v0.7 entry + v0.7-plan ` +
-        `§3 M43 — create-time file \`--set\` carve-out fold). Monday's ` +
-        `wire has no atomic create-with-file mutation at API \`2026-01\`; ` +
-        `file upload at create time requires a non-atomic post-create ` +
-        `\`add_file_to_column\` two-leg dispatch whose atomicity-envelope ` +
-        `shape lands at v0.7-M43. Create the item first, then attach the ` +
-        `file with \`monday item set <iid> <file-col>=<path>\` or \`monday ` +
-        `item upload <iid> --column <col> <file>\` (v0.4-M31; verb-shaped).`,
-      {
-        details: {
-          reason: 'file_set_on_create_unsupported',
-          column_id: fe.columnId,
-          deferred_to: 'v0.7-M43',
-          hint:
-            'create the item with non-file `--set` values, then attach ' +
-            'the file with `monday item set <iid> <file-col>=<path>` ' +
-            '(v0.6-M38) or `monday item upload <iid> --column <col> ' +
-            '<file>` (v0.4-M31).',
-        },
-      },
-    );
-  }
+  // callShape gate — NO callShape short-circuits at this layer
+  // post v0.7-M43. The v0.6-M38 `'item_create'` short-circuit-throw
+  // (`'file_set_on_create_unsupported'`) FOLDED at v0.7-M43 (D6):
+  // create-time file `--set` falls through to the universal multi-
+  // file gate + a callShape-aware mixed gate, then returns
+  // `{ kind: 'file_create', ... }` on the clean path. The discriminator
+  // literal `'file_set_on_create_unsupported'` stays RESERVED in
+  // docstrings + regression-guard tests; do not re-introduce it as a
+  // runtime rejection without a fresh contract decision. (Parallels
+  // the v0.7-M42 fold of `'file_set_on_bulk_unsupported'` for
+  // `'item_update_bulk'`.)
 
   // Multi-file leg (D2 multi). 2+ file `--set` entries on any
   // callShape — applies universally (single-item AND bulk) because
@@ -572,9 +596,27 @@ export const enforceSingleFileColumnSet = (
   // of multipart `add_file_to_column` + JSON `change_column_value` /
   // `change_multiple_column_values` (mixing forces non-atomic
   // multi-leg dispatch that breaks the §5.3 atomicity contract).
+  //
+  // v0.7-M43 callShape carve-out (D6 mixed-rule asymmetry): on
+  // `'item_create'` the two-leg dispatch (`create_item` with bundled
+  // non-file column_values then `add_file_to_column`) absorbs the
+  // mixed scenarios into leg-1 atomicity for the non-file values +
+  // leg-2 atomicity for the file. `--name` is REQUIRED on create
+  // (not an opt-in rename like on update), so the universal `hasName`
+  // arm would auto-reject every M43 path; suppress on `'item_create'`.
+  // Non-file value `--set` + `--set-raw` entries are ALSO allowed on
+  // create-time mixed (they bundle into leg-1's `column_values`); the
+  // separate D3 `--set-raw <file-col>=<json>` rejection still applies
+  // at `raw-write.ts:translateRawColumnValue` for `file`-typed raw
+  // tokens, so the action-body path stays safe. The non-create
+  // callShapes ('item_set' / 'item_update_single' / 'item_update_bulk')
+  // keep the universal mixed rule unchanged.
   const nonFileSetCount = inputs.setEntries.length - fileSetEntries.length;
   const setRawCount = inputs.setRawEntries.length;
-  if (nonFileSetCount > 0 || setRawCount > 0 || inputs.hasName) {
+  const mixedApplies =
+    inputs.callShape !== 'item_create' &&
+    (nonFileSetCount > 0 || setRawCount > 0 || inputs.hasName);
+  if (mixedApplies) {
     const fe = fileSetEntries[0];
     /* c8 ignore next 3 */
     if (fe === undefined) {
@@ -607,12 +649,16 @@ export const enforceSingleFileColumnSet = (
     );
   }
 
-  // Clean dispatch leg. Single file `--set`, no other value flags.
-  // Discriminator: `'item_update_single'` → `kind: 'file'` (M38
-  // single-item path; unchanged). `'item_update_bulk'` →
-  // `kind: 'file_bulk'` (v0.7-M42 D5 carve-out fold; action body's
-  // per-item multipart fan-out). `'item_set'` shares the single-
-  // item shape per the original `'item_set'` callShape semantics.
+  // Clean dispatch leg. Single file `--set`, no mutex violation.
+  // Discriminators:
+  //   - `'item_update_single'` / `'item_set'` → `kind: 'file'`
+  //     (M38 single-item path; unchanged).
+  //   - `'item_update_bulk'` → `kind: 'file_bulk'` (v0.7-M42 D5
+  //     carve-out fold; action body's per-item multipart fan-out).
+  //   - `'item_create'` → `kind: 'file_create'` (v0.7-M43 D6
+  //     carve-out fold; action body's two-leg `create_item` then
+  //     `add_file_to_column` dispatch with orphan-warn atomicity
+  //     envelope per D1 closure).
   const fe = fileSetEntries[0];
   /* c8 ignore next 3 */
   if (fe === undefined) {
@@ -620,6 +666,9 @@ export const enforceSingleFileColumnSet = (
   }
   if (inputs.callShape === 'item_update_bulk') {
     return { kind: 'file_bulk', columnId: fe.columnId, rawValue: fe.rawValue };
+  }
+  if (inputs.callShape === 'item_create') {
+    return { kind: 'file_create', columnId: fe.columnId, rawValue: fe.rawValue };
   }
   return { kind: 'file', columnId: fe.columnId, rawValue: fe.rawValue };
 };
@@ -670,6 +719,26 @@ export type PreCheckM38FileDispatchResult =
   // update.ts`).
   | {
       readonly kind: 'file_bulk';
+      readonly columnId: string;
+      readonly rawValue: string;
+      readonly token: string;
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    }
+  // v0.7-M43 carve-out fold (D6 closure). Mirrors `kind: 'file'`
+  // verbatim; the action body branches on `kind` and routes
+  // `'file_create'` into the two-leg create-then-file helper
+  // {@link runItemCreateFileDispatch} (in `commands/item/create.ts`).
+  // The non-file `--set` / `--set-raw` entries that the mixed-rule
+  // suppression on `'item_create'` callShape passes through (see
+  // {@link enforceSingleFileColumnSet}) are NOT carried on this
+  // result — the action body holds the original `--set` / `--set-raw`
+  // token lists and bundles them into leg-1's `create_item.column_values`
+  // independently. The pre-check returns only the file-column slot
+  // (the load-bearing input to the two-leg dispatch helper).
+  | {
+      readonly kind: 'file_create';
       readonly columnId: string;
       readonly rawValue: string;
       readonly token: string;
@@ -840,6 +909,17 @@ export const preCheckM38FileDispatch = async (
   if (enforcement.kind === 'file_bulk') {
     return {
       kind: 'file_bulk',
+      columnId: enforcement.columnId,
+      rawValue: enforcement.rawValue,
+      token: fileResolved.token,
+      warnings,
+      source: aggregateSource,
+      cacheAgeSeconds: aggregateCacheAge,
+    };
+  }
+  if (enforcement.kind === 'file_create') {
+    return {
+      kind: 'file_create',
       columnId: enforcement.columnId,
       rawValue: enforcement.rawValue,
       token: fileResolved.token,

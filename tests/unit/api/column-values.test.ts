@@ -733,19 +733,18 @@ describe('translateColumnValue — future-roadmap types', () => {
     }
   });
 
-  it('file (files-shaped) → unsupported_column_type with NO deferred_to slot (v0.7-M42 post-IMPL: rejection row fires only for item create + --set-raw paths — the friendly --set form ships at v0.6-M38 single-item + v0.7-M42 bulk, both dispatching at the action body level before this row fires; the rejection itself has no `deferred_to` because the remaining create + --set-raw rejection paths defer to v0.7-M43 + the permanent D3 rejection respectively)', () => {
+  it('file (files-shaped) → unsupported_column_type with NO deferred_to slot (v0.7-M43 post-pre-flight: rejection row fires ONLY for --set-raw paths — the friendly --set form ships on every callShape now, all dispatching at the action body level before this row fires; the rejection itself has no `deferred_to` because the remaining --set-raw rejection is permanent per D3)', () => {
     // cli-design §5.3 writer-expansion roadmap row: files-shaped
     // types use add_file_to_column (multipart upload). v0.6-M38
     // shipped the friendly `--set <file-col>=<path>` form on
     // `monday item set` + `monday item update <iid>` (single-item);
-    // v0.7-M42 IMPL carved out `monday item update --where ...`
-    // bulk dispatch as the per-item multipart fan-out. This
-    // UNSUPPORTED_TABLE.files_shaped row fires ONLY on paths the
-    // file-column dispatch doesn't cover (item create per D6 —
-    // deferred to v0.7-M43; --set-raw per D3 — permanent
-    // rejection). No `deferred_to` slot — the rejection here
-    // surfaces alternative-path hints rather than a future-version
-    // deferral.
+    // v0.7-M42 carved out `monday item update --where ...` bulk
+    // dispatch; v0.7-M43 carved out `monday item create` create-
+    // time dispatch. This UNSUPPORTED_TABLE.files_shaped row now
+    // fires ONLY on the `--set-raw <file-col>=<json>` path (D3
+    // permanent rejection — no JSON wire shape for
+    // add_file_to_column). No `deferred_to` slot — the remaining
+    // rejection is permanent.
     expect(() => translate('file', 'whatever', 'col_z')).toThrow(
       /add_file_to_column/u,
     );
@@ -758,25 +757,26 @@ describe('translateColumnValue — future-roadmap types', () => {
         column_id: 'col_z',
         type: 'file',
       });
-      // v0.7-M42 post-IMPL: the UNSUPPORTED_TABLE.files_shaped row
-      // no longer carries `deferred_to` — the friendly --set form
-      // ships at v0.6-M38 single-item + v0.7-M42 bulk (so the
-      // rejection isn't a future-version deferral); the remaining
-      // create rejection defers to v0.7-M43 + --set-raw stays at
-      // the permanent D3 rejection.
+      // The UNSUPPORTED_TABLE.files_shaped row carries no
+      // `deferred_to` — the friendly --set form ships on every
+      // callShape (so the rejection isn't a future-version
+      // deferral); the remaining --set-raw rejection is permanent
+      // per D3.
       expect(err.details).not.toHaveProperty('deferred_to');
-      // Codex IMPL R6 P2-1 regression guard: the `details.hint`
-      // must enumerate every shipped write path including the
-      // v0.7-M42 bulk friendly form. Pre-fix the hint said
-      // "two write paths" and omitted the bulk variant, leaving
-      // agents with stale remediation guidance.
+      // Regression guard: the `details.hint` must enumerate every
+      // shipped write path including the v0.7-M42 bulk friendly
+      // form + the v0.7-M43 create-time friendly form. Stale
+      // remediation guidance (mentioning only some paths) lies to
+      // agents about which alternatives exist.
       const hint = (err.details as { hint?: string }).hint;
-      expect(hint).toMatch(/three write paths/u);
+      expect(hint).toMatch(/four write paths/u);
       expect(hint).toMatch(/monday item set/u);
       expect(hint).toMatch(/monday item update --where/u);
+      expect(hint).toMatch(/monday item create/u);
       expect(hint).toMatch(/monday item upload/u);
       expect(hint).toMatch(/v0\.6-M38/u);
       expect(hint).toMatch(/v0\.7-M42/u);
+      expect(hint).toMatch(/v0\.7-M43/u);
       expect(hint).toMatch(/v0\.4-M31/u);
     }
   });

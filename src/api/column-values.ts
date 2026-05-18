@@ -1622,24 +1622,27 @@ export const bundleColumnValues = (
  *   - **`files`-shaped** (currently `file` only) — Monday writes via
  *     `add_file_to_column` (multipart upload) rather than
  *     `change_column_value`. The friendly dispatch ships across
- *     three call shapes: v0.6-M38 single-item (`monday item set` +
+ *     four call shapes: v0.6-M38 single-item (`monday item set` +
  *     `monday item update <iid>`); v0.7-M42 bulk (`monday item
  *     update --where ...`, per-item multipart fan-out under
- *     `--concurrency` / `--continue-on-error`); both branch off
+ *     `--concurrency` / `--continue-on-error`); v0.7-M43 create-
+ *     time (`monday item create --set <file-col>=<path>`, two-leg
+ *     `create_item` + `add_file_to_column` dispatch under the
+ *     §5.8 orphan-warn atomicity envelope); all three branch off
  *     ahead of the translator at the action body level via the
- *     sibling dispatch leg in `src/api/file-column-set.ts`. The
- *     rejection table row here fires ONLY for paths the friendly
- *     dispatch doesn't cover — `item create` (D6 carve-out fold
- *     deferred to v0.7-M43; `create_item.column_values` is
- *     JSON-only and can't accept a multipart file part) + the
- *     `--set-raw <file-col>=<json>` form (D3 permanent rejection
- *     — `change_column_value` has no JSON wire shape for file
- *     columns). The friendly translator's dispatch-routed entries
- *     never hit this `UNSUPPORTED_TABLE.files_shaped` row —
- *     they branch off ahead of the translator call. Hint points
- *     at every shipped write path: `monday item upload` (v0.4-
+ *     sibling dispatch legs in `src/api/file-column-set.ts` +
+ *     `src/commands/item/create.ts`. The rejection table row
+ *     here fires ONLY for the `--set-raw <file-col>=<json>` form
+ *     (D3 permanent rejection — `change_column_value` has no
+ *     JSON wire shape for file columns). The friendly
+ *     translator's dispatch-routed entries (every callShape's
+ *     `--set <file-col>=<path>`) never hit this
+ *     `UNSUPPORTED_TABLE.files_shaped` row — they branch off
+ *     ahead of the translator call. Hint points at every
+ *     shipped friendly write path: `monday item upload` (v0.4-
  *     M31; verb-shaped multipart) + the v0.6-M38 single-item
- *     friendly form + the v0.7-M42 bulk friendly form.
+ *     friendly form + the v0.7-M42 bulk friendly form + the
+ *     v0.7-M43 create-time friendly form.
  *   - **`time_tracking`** — verb-shaped extension (start/stop, not
  *     value writes); v0.3-deferred. Carry `deferred_to: "v0.3"`;
  *     hint points at the upcoming verb surface.
@@ -1734,31 +1737,35 @@ const UNSUPPORTED_TABLE: Readonly<
       `Column "${columnId}" has type "${type}", which Monday writes ` +
       `via add_file_to_column (multipart upload) rather than ` +
       `change_column_value. The friendly --set <file-col>=<path> ` +
-      `form dispatches into the multipart wire on \`monday item ` +
-      `set\` + \`monday item update <iid>\` (v0.6-M38; single-item) ` +
-      `and \`monday item update --where ...\` (v0.7-M42; bulk per-` +
-      `item fan-out under --concurrency / --continue-on-error). ` +
-      `This rejection row fires only on paths the friendly dispatch ` +
-      `doesn't cover: \`monday item create --set <file-col>=<path>\` ` +
-      `(deferred to v0.7-M43 per cli-design §5.3 D6) and ` +
-      `\`--set-raw <file-col>=<json>\` (permanent rejection per D3 — ` +
+      `form dispatches into the multipart wire on every shipped ` +
+      `callShape: \`monday item set\` + \`monday item update <iid>\` ` +
+      `(v0.6-M38; single-item), \`monday item update --where ...\` ` +
+      `(v0.7-M42; bulk per-item fan-out under --concurrency / ` +
+      `--continue-on-error), AND \`monday item create\` ` +
+      `(v0.7-M43; two-leg create_item + add_file_to_column ` +
+      `dispatch under the §5.8 orphan-warn atomicity envelope). ` +
+      `This rejection row fires only on the \`--set-raw ` +
+      `<file-col>=<json>\` form (permanent rejection per D3 — ` +
       `no JSON wire shape for add_file_to_column). Use \`monday ` +
       `item upload <iid> --column <col> <file>\` (v0.4-M31; ` +
-      `verb-shaped) OR the friendly --set on update/set verbs.`,
+      `verb-shaped) OR the friendly --set on any shipping verb.`,
     details: () => ({
       hint:
-        'three write paths reach Monday\'s add_file_to_column ' +
+        'four write paths reach Monday\'s add_file_to_column ' +
         'multipart wire: (a) `monday item set <iid> <file-col>=' +
         '<path>` / `monday item update <iid> --set <file-col>=' +
         '<path>` (v0.6-M38; single-item friendly translator); ' +
         '(b) `monday item update --where ... --set <file-col>=' +
         '<path>` (v0.7-M42; bulk friendly translator + per-item ' +
         'multipart fan-out under --concurrency / --continue-on-' +
-        'error); (c) `monday item upload <iid> --column <col> ' +
-        '<file>` (v0.4-M31; verb-shaped). The create + --set-raw ' +
-        'paths still reject file-shaped columns: create defers to ' +
-        'v0.7-M43 per cli-design §5.3 D6; --set-raw is the permanent ' +
-        'D3 rejection.',
+        'error); (c) `monday item create --set <file-col>=' +
+        '<path>` (v0.7-M43; create-time two-leg friendly ' +
+        'translator under the §5.8 orphan-warn atomicity ' +
+        'envelope); (d) `monday item upload <iid> --column ' +
+        '<col> <file>` (v0.4-M31; verb-shaped). Only the ' +
+        '`--set-raw <file-col>=<json>` form reaches this ' +
+        'rejection row at runtime (permanent D3 rejection — ' +
+        'no JSON wire shape for add_file_to_column).',
     }),
   },
   time_tracking: {

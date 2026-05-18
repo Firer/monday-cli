@@ -2065,10 +2065,13 @@ Two shapes (mutually exclusive — exactly one per call):
   `--set <file-col>=<path>` form on `monday item set` + `monday
   item update <iid>` (single-item); the v0.7-M42 friendly form on
   `monday item update --where ...` (bulk per-item fan-out under
-  `--concurrency` / `--continue-on-error`); AND the v0.4-M31 verb-
-  shaped `monday item upload <iid> --column <col> <file>`.
-  `monday item create --set <file-col>=<path>` still rejects (D6
-  deferred to v0.7-M43).
+  `--concurrency` / `--continue-on-error`); the v0.7-M43 friendly
+  form on `monday item create --set <file-col>=<path>` (two-leg
+  `create_item` + `add_file_to_column` dispatch under the §5.8
+  orphan-warn atomicity envelope); AND the v0.4-M31 verb-shaped
+  `monday item upload <iid> --column <col> <file>`. Only the
+  `--set-raw <file-col>=<json>` form still rejects (permanent
+  D3 rejection).
 
 `--dry-run` returns a planned-change envelope (no API write):
 
@@ -2257,15 +2260,29 @@ dispatch" below); v0.7-M43 (pending) lands the create-time path.
 Mutex rules at the resolution boundary (D2/D5/D6 closures,
 universal across single + bulk):
 
-  - Exactly ONE file `--set` per call. 2+ file `--set` entries
-    reject with `usage_error` carrying `'multi_file_set_unsupported'`
-    at `details.reason`.
-  - NO mixing with value `--set` / `--set-raw` / `--name`.
-    Mixing rejects with `usage_error` carrying
-    `'mixed_file_and_value_sets'` at `details.reason`.
-  - `item create --set <file-col>=<path>` still rejects with
-    `usage_error.details.reason: 'file_set_on_create_unsupported'`
-    (D6 carve-out fold deferred to v0.7-M43).
+  - Exactly ONE file `--set` per call on every callShape
+    (universal multi-file mutex). 2+ file `--set` entries reject
+    with `usage_error` carrying `'multi_file_set_unsupported'` at
+    `details.reason`.
+  - Mixing file `--set` with value `--set` / `--set-raw` /
+    `--name` rejects on `'item_set'` / `'item_update_single'` /
+    `'item_update_bulk'` with `usage_error.details.reason:
+    'mixed_file_and_value_sets'`. **SUPPRESSED on `'item_create'`**
+    per v0.7-M43 D6 asymmetry — `create_item` natively bundles
+    non-file `column_values` atomically into leg-1, and `--name`
+    is required on create (the action body partitions setEntries:
+    non-file → leg-1's `column_values`, file → leg-2's
+    `add_file_to_column`).
+  - `item create --set <file-col>=<path>` is **shipped at
+    v0.7-M43** (D6 carve-out fold from v0.6-M38) as a two-leg
+    dispatch (`create_item` then `add_file_to_column`) under the
+    §5.8 orphan-warn atomicity envelope. Leg-2 failure surfaces
+    `internal_error` with `details.reason:
+    'create_then_file_upload_partial_failure'` +
+    `details.created_item_id` echo + recovery hint. The
+    pre-v0.7-M43 literal `'file_set_on_create_unsupported'`
+    stays RESERVED in docstrings + regression-guarded in tests
+    (the runtime path no longer surfaces it).
 
 Envelope shape on success mirrors `item set` file-column dispatch
 verbatim (`operation: "add_file_to_column"` + wire `Asset`
