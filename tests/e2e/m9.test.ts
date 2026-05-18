@@ -98,10 +98,16 @@ describe('M9 e2e — item create top-level (live)', () => {
   it('round-trips --board + --name + --set; envelope carries the projected new item + resolved_ids', async () => {
     const cassette: Cassette = {
       interactions: [
-        // First --set token resolution → BoardMetadata fetch.
+        // M38 IMPL added `preCheckM38FileDispatch` upstream of the
+        // standard translator path, so `--no-cache` produces two
+        // BoardMetadata fetches: one from the pre-check, one from
+        // the downstream `planChanges` re-resolve (the cache write
+        // is suppressed under `--no-cache`, so the downstream leg
+        // can't cache-hit).
         {
           operation_name: 'BoardMetadata',
           response: { data: { boards: [sampleBoardMetadata] } },
+          repeat: 2,
         },
         {
           operation_name: 'ItemCreateTopLevel',

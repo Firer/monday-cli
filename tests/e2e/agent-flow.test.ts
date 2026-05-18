@@ -339,12 +339,13 @@ describe('M6 e2e — agent flow (v0.1 fallback path + M18 v0.2 extension)', () =
       const createEnv = parseEnvelope(createResult.stdout) as EnvelopeShape & {
         data: { id: string; name: string };
       };
-      // Cold-start `item create` — no cache yet. Metadata leg is
-      // live; mutation leg is live. M3 source aggregation reports
-      // `meta.source: 'live'` when both legs come from live data.
-      // The cache file gets populated as a side-effect for the
-      // subsequent spawns.
-      assertEnvelopeContract(createEnv, { source: 'live' });
+      // Cold-start `item create` — no cache yet. M38 IMPL added
+      // `preCheckM38FileDispatch` upstream of the standard translator
+      // path: the pre-check's BoardMetadata fetch is live and warms
+      // the cache; the downstream `planChanges` re-resolve hits cache;
+      // the mutation is live. M3 source aggregation reports
+      // `meta.source: 'mixed'` because the cache leg is now counted.
+      assertEnvelopeContract(createEnv, { source: 'mixed' });
       expect(createEnv.data.id).toBe('5001');
       expect(createEnv.data.name).toBe('Refactor login');
       expect(createResult.stdout).not.toContain(LEAK_CANARY);

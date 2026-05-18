@@ -260,9 +260,16 @@ describe('M5b e2e — item update (multi --set + --name, atomic)', () => {
     };
     const cassette: Cassette = {
       interactions: [
+        // M38 IMPL added `preCheckM38FileDispatch` upstream of the
+        // standard translator path on `item update`, so `--no-cache`
+        // produces two BoardMetadata fetches: one from the pre-check,
+        // one from the downstream `planChanges` re-resolve (the cache
+        // write is suppressed under `--no-cache`, so the downstream
+        // leg can't cache-hit).
         {
           operation_name: 'BoardMetadata',
           response: { data: { boards: [sampleBoardMetadata] } },
+          repeat: 2,
         },
         {
           operation_name: 'ItemUpdateMulti',
