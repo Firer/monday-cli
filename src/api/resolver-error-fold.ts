@@ -89,10 +89,14 @@ interface ResolverDetailWarning {
  *   - If `additionalWarnings` is empty, returns `err` unchanged.
  *   - Reads `err.details?.resolver_warnings` defensively (it may be
  *     missing if the downstream didn't fold).
- *   - Builds a deduped union of `additionalWarnings` first, then
- *     existing warnings (pre-check warnings take precedence on key
- *     collision — same shape either way per ResolverWarning's
- *     deterministic per-resolution emission).
+ *   - Builds a deduped union with existing (downstream) warnings
+ *     FIRST, then `additionalWarnings`. Identical-key
+ *     `additionalWarnings` entries dedupe against the
+ *     already-seen existing entries — same shape either way per
+ *     ResolverWarning's deterministic per-resolution emission, so
+ *     the order matters only for cosmetic reading: downstream's
+ *     resolver-warning leg surfaces before the outer caller's
+ *     pre-check leg.
  *   - Re-folds via {@link foldResolverWarningsIntoError} with the
  *     combined list.
  */

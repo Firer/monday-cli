@@ -1706,10 +1706,11 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # translator path into add_file_to_column (multipart).
                                           # Mutex rules at M38: exactly one file --set per call; mixing
                                           # with any value --set / --set-raw / --name → usage_error
-                                          # (details.reason: 'mixed_file_and_value_sets'); 2+ file
-                                          # --set → usage_error (details.reason:
-                                          # 'multi_file_set_unsupported' — multi-file dispatch defers
-                                          # to v0.6.x). --set-raw <file-col>=<json> stays REJECTED.
+                                          # carrying 'mixed_file_and_value_sets' at details.reason;
+                                          # 2+ file --set → usage_error carrying
+                                          # 'multi_file_set_unsupported' at details.reason — multi-file
+                                          # dispatch defers to v0.6.x. --set-raw <file-col>=<json>
+                                          # stays REJECTED.
 monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38, defers to v0.6.x)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # v0.6-M38: file-column --set REJECTED on the bulk path —
