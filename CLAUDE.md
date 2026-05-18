@@ -206,6 +206,25 @@ when another action body adopts a pre-check-then-downstream
 warning-aggregation shape (likely v0.6.x bulk file-set lift OR
 v0.7 multi-leg dispatch — both inherit the same shape).
 
+**Three more R-class candidates filed at the post-M38-IMPL
+refactor-audit** (`docs/v0.6-plan.md` §22, full entries):
+**R-v0.6-NEW-9** (`sampleFileBoard` test fixture lift to
+`_item-fixtures.ts`; 6 supporting instances across the M38
+test surface; MEDIUM priority — at the 3-consumer lift
+threshold + ~84 lines of test-fixture boilerplate; lift target
+is a factory taking optional shape hints per-site) + **R-v0.6-
+NEW-10** (`dedupeWarnings` cross-site lift — `item/update.ts`
++ `item/create.ts` carry byte-identical helpers under
+different names; 2 consumers — watch-item at rule-of-three;
+lift target is `src/api/resolver-error-fold.ts` sibling to
+`mergeResolverWarningsIntoError`) + **R-v0.6-NEW-11**
+(`withMergeResolverWarnings` async wrapper for the
+merge-helper call pattern; 6 supporting instances across
+update + create catch handlers; LOW priority — the inline
+4-line pattern is readable + the wrapper would only shave
+1 line per site net while introducing a "withX" helper;
+fires at 8th consumer OR a v0.6.x site).
+
 **Next session**: **v0.6 release-prep**. Mirrors v0.4 / v0.5
 release-prep cluster shape verbatim: envelope-snapshot refresh
 probe (likely zero-diff since IMPL refreshed M38 snapshots in

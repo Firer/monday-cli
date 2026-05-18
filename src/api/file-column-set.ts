@@ -57,8 +57,9 @@
  * through safely-by-construction since the dispatch goes through
  * the existing fetcher rather than a re-implementation).
  *
- * **Consumer counts at M38 IMPL** (runtime bodies land here in
- * this commit; pre-flight stubs collapsed):
+ * **Consumer counts post v0.6-M38 IMPL close** (runtime bodies
+ * shipped at `e749931` + the R-v0.6-NEW-1 lift at `3c2a9b0`;
+ * pre-flight stubs collapsed):
  *
  *   - `addFileToColumn` (M31): 2 consumers (M31's `item upload`
  *     action body + M38's `executeFileColumnSet` runtime body).
