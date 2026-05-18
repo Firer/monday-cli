@@ -955,16 +955,23 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           #     `--set` / `--set-raw` against it
                                           #     surfaces `unsupported_column_type`.
                                           #   - `files`-shaped (`file`) → warning
-                                          #     notes BOTH write paths reach
+                                          #     notes every write path reaching
                                           #     `add_file_to_column` (multipart):
                                           #     the v0.6-M38 friendly `--set
                                           #     <file-col>=<path>` dispatch on
                                           #     `monday item set` / `monday item
-                                          #     update` (single-item only) AND the
+                                          #     update <iid>` (single-item);
+                                          #     the v0.7-M42 friendly form on
+                                          #     `monday item update --where ...`
+                                          #     (bulk per-item fan-out under
+                                          #     `--concurrency` /
+                                          #     `--continue-on-error`); AND the
                                           #     v0.4-M31 verb-shaped `monday item
-                                          #     upload`. `--set-raw <file-col>=
-                                          #     <json>` stays rejected per D3
-                                          #     (permanent).
+                                          #     upload`. `monday item create
+                                          #     --set <file-col>=<path>` still
+                                          #     rejects (D6 deferred to v0.7-M43).
+                                          #     `--set-raw <file-col>=<json>`
+                                          #     stays rejected per D3 (permanent).
                                           # The command still proceeds in all
                                           # cases — Monday accepts non-writable
                                           # types and agents may legitimately want

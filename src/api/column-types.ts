@@ -222,10 +222,15 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  *     action body that detects `column.type === 'file'` AFTER
  *     resolution + routes through `executeFileColumnSet`
  *     (`src/api/file-column-set.ts`), which itself wraps M31's
- *     `addFileToColumn` verbatim. Single-item only at M38; mutex
- *     rules at the resolution boundary (D2/D5/D6 closures —
- *     bulk + create paths reject; mixed-set rejects; multi-file-
- *     set rejects).
+ *     `addFileToColumn` verbatim. Single-item at v0.6-M38; bulk
+ *     `monday item update --where ... --set <file-col>=<path>`
+ *     shipped at v0.7-M42 (D5 carve-out fold; per-item multipart
+ *     fan-out via `runItemUpdateBulkFileDispatch` in
+ *     `src/commands/item/update.ts`). Mutex rules at the
+ *     resolution boundary (D2/D5/D6 closures — `monday item
+ *     create --set <file-col>=<path>` rejects pending v0.7-M43;
+ *     mixed-set rejects universally; multi-file-set rejects
+ *     universally).
  *
  * The `--set-raw <file-col>=<json>` form STAYS REJECTED at v0.6-M38
  * per D3 closure — Monday's wire has no JSON-shape for

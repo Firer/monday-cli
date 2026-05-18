@@ -33,12 +33,15 @@
  *     the v0.2 escape hatch, accepts wire-shape correctness).
  *   - `read_only_forever` → no write path (the column exists only
  *     for read-side display / mirror sources).
- *   - `files_shaped` → TWO write paths reach `add_file_to_column`
- *     (multipart wire): the M38 friendly `--set <file-col>=<path>`
- *     dispatch on `monday item set` / `monday item update`
- *     (single-item only at M38; bulk + create defer to v0.6.x) AND
- *     the M31 verb-shaped `monday item upload <iid> --column <col>
- *     <file>`. `--set-raw <file-col>=<json>` STAYS REJECTED per D3
+ *   - `files_shaped` → three write paths reach `add_file_to_column`
+ *     (multipart wire): the v0.6-M38 friendly `--set <file-col>=<path>`
+ *     dispatch on `monday item set` / `monday item update <iid>`
+ *     (single-item); the v0.7-M42 friendly form on `monday item update
+ *     --where ... --set <file-col>=<path>` (bulk per-item fan-out under
+ *     `--concurrency` / `--continue-on-error`); AND the v0.4-M31 verb-
+ *     shaped `monday item upload <iid> --column <col> <file>`. `monday
+ *     item create --set <file-col>=<path>` still rejects (D6 deferred to
+ *     v0.7-M43). `--set-raw <file-col>=<json>` STAYS REJECTED per D3
  *     (permanent — `change_column_value` has no JSON-shape for file
  *     columns).
  * The command STILL PROCEEDS in all cases — Monday accepts non-
