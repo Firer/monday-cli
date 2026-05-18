@@ -137,11 +137,15 @@ import type { Warning } from '../../utils/output/envelope.js';
 /**
  * Output envelope union — projected-item for the JSON translator
  * path (text / status / dropdown / date / people / etc.) +
- * file-dispatch envelope for the v0.6-M38 friendly `--set
- * <file-col>=<path>` path (single-item shape only; bulk file
- * dispatch rejects per D5). Agents discriminate on the `operation`
- * field: present (`'add_file_to_column'`) → file dispatch shape;
- * absent → projected-item shape.
+ * file-dispatch envelope for the friendly `--set <file-col>=<path>`
+ * path. The file-dispatch shape ships across v0.6-M38 (single-item
+ * — `operation: 'add_file_to_column'`) and v0.7-M42 (bulk —
+ * `operation: 'item_update_bulk_file_set'`; the per-item fan-out's
+ * `data.results[i].asset` slots wrap M31's `Asset` projection). The
+ * union below admits only the single-item shape because the bulk
+ * variant is emitted via its own `bulkFileSetDataSchema` at the
+ * `runItemUpdateBulkFileDispatch` helper; agents discriminate on
+ * `operation` (present + literal value identifies the variant).
  */
 export const itemUpdateOutputSchema = z.union([
   projectedItemSchema,

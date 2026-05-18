@@ -99,12 +99,28 @@ regex missed.
        `--continue-on-error`, `--concurrency`, `runItemUpdateBulkFileDispatch`,
        `BulkFileSetData`, `item_update_bulk_file_set`.
      - Pre-IMPL phrases that should NOT appear in current
-       prose post-IMPL (only in historical post-mortem entries):
+       prose post-IMPL. Allowed contexts: (a) historical post-
+       mortem entries (`docs/v0.{N-1}-plan.md` section bodies);
+       (b) reserved-literal docstrings (the M42 helper docstring
+       explicitly notes `'m42_preflight_stub'` / `'file_set_on_
+       bulk_unsupported'` literals stay RESERVED); (c) regression-
+       guard test assertions (`expect(...).not.toContain(...)`
+       on the literal). All OTHER occurrences are drift bugs. The
+       v0.7-M42 checklist:
        `m42_preflight_stub`, `file_set_on_bulk_unsupported`,
        `pre-flight stub`, `c8-ignored stub`, `lifts at M42 IMPL`,
-       `single-item only`, `two write paths`, `BOTH write paths`,
-       `defer to v0.6.x`, `bulk + create reject`,
-       `M38 bulk` (M38 only shipped single-item).
+       `single-item only` / `single-item shape only` /
+       `single-item path only`, `two write paths` / `BOTH write
+       paths` / `two paths reach` / `both M38 + M31` /
+       `M38 + M31 only`, `defer to v0.6.x` / `defers to v0.6.x` /
+       `v0.6.x candidate-selection`, `bulk + create reject` /
+       `bulk + create defer` / `bulk + create paths`,
+       `M38 bulk` / `M38 ships bulk` (M38 only shipped single-
+       item — bulk is v0.7-M42), `form ships at M38` /
+       `friendly form ships at M38` (incomplete — should name
+       both shipping milestones), `bulk file dispatch rejects per D5`
+       / `bulk file --set rejects` (was true at v0.6-M38; post-
+       v0.7-M42 IMPL is false).
 2. After every Codex fix-up round, grep ALL "should not appear"
    terms across `src/`, `docs/`, `tests/`. Each hit in a non-
    historical context is a contract-term drift bug; fix before

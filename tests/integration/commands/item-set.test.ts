@@ -1881,10 +1881,11 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
       error?: { code: string; details?: { deferred_to?: string } };
     };
     expect(env.error?.code).toBe('unsupported_column_type');
-    // v0.6-M38: no `deferred_to` slot — the --set-raw rejection for
-    // file columns is permanent per D3. The hint widens to name
-    // both M38 (friendly --set) + M31 (verb-shaped upload) write
-    // paths.
+    // Per D3 closure (permanent): the --set-raw rejection for
+    // file columns has no `deferred_to` slot. The hint enumerates
+    // every shipped multipart write path: v0.6-M38 single-item
+    // friendly + v0.7-M42 bulk friendly + v0.4-M31 verb-shaped
+    // upload.
     expect(env.error?.details).not.toHaveProperty('deferred_to');
   });
 

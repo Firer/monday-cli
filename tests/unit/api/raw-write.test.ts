@@ -310,10 +310,13 @@ describe('translateRawColumnValue — error paths (post-resolution gates)', () =
         column_id: 'attachments',
         type: 'file',
       });
-      // v0.6-M38: no `deferred_to` slot — the --set-raw rejection
-      // for file columns is permanent per D3 closure. The friendly
-      // `--set <file-col>=<path>` form ships at M38 but --set-raw
-      // stays rejected (no JSON wire shape for add_file_to_column).
+      // Per D3 closure (permanent): the --set-raw rejection for
+      // file columns has no `deferred_to` slot. The friendly
+      // `--set <file-col>=<path>` form ships across v0.6-M38
+      // single-item + v0.7-M42 bulk paths; v0.4-M31 verb-shaped
+      // `monday item upload` is the third write path. --set-raw
+      // stays rejected because Monday's wire has no JSON-shape
+      // for change_column_value on file columns.
       expect(err.details).not.toHaveProperty('deferred_to');
       expect(err.details).not.toHaveProperty('read_only');
     }

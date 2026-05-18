@@ -3510,13 +3510,15 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      for the dispatch routing decision. The verb-shaped path
      (`monday item upload`, v0.4-M31) stays as the alternative for
      `item upload <iid> --column <col> <file>` ergonomics. The
-     `--set-raw <file-col>=<json>` form stays REJECTED at M38 per
+     `--set-raw <file-col>=<json>` form stays REJECTED per
      `--set-raw`'s escape-hatch contract (the user-supplied JSON
      reaches `change_column_value`, never `add_file_to_column`) —
-     M38 ships the friendly `--set` form ONLY. The translator-to-
-     multipart dispatch slipped from v0.4 → v0.5 → v0.6 across two
-     consecutive release-preps because neither cycle picked up the
-     dispatch design; M38 landed it (see §13 v0.6 entry).
+     the friendly `--set` form ships across v0.6-M38 single-item
+     + v0.7-M42 bulk shapes. The translator-to-multipart dispatch
+     slipped from v0.4 → v0.5 → v0.6 across two consecutive
+     release-preps because neither cycle picked up the dispatch
+     design; M38 landed single-item (see §13 v0.6 entry) and M42
+     carved out the bulk variant at v0.7.
    No silent partial support — every translator either lands
    end-to-end or surfaces `unsupported_column_type` with a
    hint that points at `--set-raw` or the type's roadmap slot.
@@ -3678,9 +3680,12 @@ lands in v0.2's M8 writer-expansion milestone. Contract:
     `--set-raw <file-col>=<json>` goes through
     `change_column_value` / `change_multiple_column_values`,
     neither of which accepts `add_file_to_column`-shaped
-    payloads, so the raw form stays rejected. Hint
-    points at the v0.6-M38 friendly `--set <file-col>=<path>`
-    form OR the verb-shaped `monday item upload` (v0.4-M31).
+    payloads, so the raw form stays rejected. Hint enumerates
+    every shipped multipart write path: v0.6-M38 single-item
+    friendly `--set <file-col>=<path>`; v0.7-M42 bulk friendly
+    `--set <file-col>=<path>` (per-item fan-out under
+    `--concurrency` / `--continue-on-error`); v0.4-M31 verb-
+    shaped `monday item upload`.
   Every other type (writable + tentative-slipped + future where
   the API accepts `change_column_value`) is accepted by
   `--set-raw`; the user owns wire-shape correctness.

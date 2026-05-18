@@ -34,9 +34,12 @@
  *         multipart wire at the command action body) but keeps
  *         `--set-raw` rejected — the escape-hatch contract
  *         "user supplies JSON `change_column_value` accepts"
- *         doesn't compose with multipart. Hint points at the
- *         v0.6-M38 friendly `--set` form OR `monday item upload`
- *         (v0.4-M31; verb-shaped multipart).
+ *         doesn't compose with multipart. Hint enumerates every
+ *         shipped multipart write path: v0.6-M38 single-item
+ *         friendly `--set` form on `monday item set` + `monday
+ *         item update <iid>`; v0.7-M42 bulk friendly `--set`
+ *         form on `monday item update --where ...` (per-item
+ *         fan-out); v0.4-M31 verb-shaped `monday item upload`.
  *     Otherwise builds a `TranslatedColumnValue` with `payload:
  *     { format: 'rich', value: <parsed> }` so the existing
  *     `selectMutation` dispatcher handles it uniformly.
