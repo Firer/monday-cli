@@ -701,10 +701,14 @@ with a `[profiles.<name>.defaults]` table carrying scoping args;
 requires a prerequisite §13 carve-out Decision at pre-flight
 distinguishing aliases-as-stored-command-strings (still
 non-goal) from defaults-as-stored-flag-values (carve-out)).
-**v0.6.x carve-outs** ride on top: bulk + create file `--set`
-paths (D5 / D6 deferrals); multi-file `--set` per call (D2);
-file-`--set` stdin support (D7); these defer to v0.6.x within
-the v0.6 series.
+**Carry-forward carve-outs from v0.6-M38**: bulk file `--set`
+path (D5) shipped at v0.7-M42 (per-item multipart fan-out under
+`--concurrency` / `--continue-on-error`); create-time file
+`--set` path (D6) shipped at v0.7-M43 (two-leg `create_item` +
+`add_file_to_column` dispatch under the §5.8 orphan-warn
+atomicity envelope). Multi-file `--set` per call (D2) and
+file-`--set` stdin support (D7) remain deferred — v0.7.x /
+future candidates.
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) for the
