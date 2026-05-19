@@ -23,115 +23,130 @@ humans are second-class. Built incrementally via Claude Code on top of
 - **package.json version:** `0.6.0`.
 - **Live numbers:** 4124 tests + 1 skipped across 172 files (was
   4115 + 1 at v0.7-M43 pre-flight baseline; +9 from the v0.7-M43
-  IMPL R0 test surface flip — 12 IMPL tests replacing 3 pre-flight
+  IMPL test surface flip — 12 IMPL tests replacing 3 pre-flight
   stub assertions, covering the two-leg happy path top-level +
   subitem, D6 mixed-set asymmetry, dry-run two-`planned_changes`,
   D1 orphan-warn envelope, leg-1 failure w/ + w/o F4 remap,
   translation reject, atomicity-before-wire ENOENT, regression-
-  guards); coverage 98.79 / 95.65 / 99.16 / 99.08 (stmts /
-  branches / fns / lines) at the 95 / 95.45 / 95 / 95 floor
-  (branches margin **0.20pp** — v0.7-M43 IMPL absorbed
-  the 0.17pp drop across the new helper's leg-1 / leg-2 catch
-  arms + cause-projection conditional + sourceAgg
-  `metaSource !== undefined` arm; defensive non-CliError
-  re-throws + the cause-details / metaSource unreachable arms
-  c8-ignored per testing.md preferred block-wrap form; the two
-  preflight-warnings catch arms collapse the `&& length > 0`
-  guard for a smaller branch surface than the JSON path's
-  pattern at `create.ts:1010-1022`; was 0.37pp at v0.7-M43
-  pre-flight baseline — pre-flight stub body was c8-ignored
-  so no branches absorption fired then); **29 ERROR_CODES**;
-  **117 commands**; `npm audit` 1 moderate
+  guards across all 4 emit surfaces); coverage 98.79 / 95.65 /
+  99.16 / 99.08 (stmts / branches / fns / lines) at the
+  95 / 95.45 / 95 / 95 floor (branches margin **0.20pp** — v0.7-
+  M43 IMPL absorbed the 0.17pp drop across the new helper's leg-1
+  / leg-2 catch arms; defensive non-CliError re-throws + the
+  cause-details / metaSource unreachable arms c8-ignored per
+  testing.md preferred form; the two preflight-warnings catch
+  arms collapse the `&& length > 0` guard for a smaller branch
+  surface than the JSON path's pattern at `create.ts:1010-1022`;
+  was 0.37pp at v0.7-M43 pre-flight baseline — pre-flight stub
+  body was c8-ignored so no branches absorption fired then; full
+  breakdown in `docs/v0.7-plan.md` §3 M43 "Coverage residual");
+  **29 ERROR_CODES**; **117 commands**; `npm audit` 1 moderate
   (`brace-expansion 5.0.2 → 5.0.5`; not a merge blocker per
   security.md "high = merge blocker"; defer to v0.7 release-
   prep audit-fix or earlier if a Codex round flags it).
-- **Next session:** v0.7-M43 **close-docs + v0.7-M39 pre-flight**
-  (per kickoff ship order M42 → M43 → re-probe SDK 15.x → M39 →
-  M40 → M41). **M43 IMPL R0 SHIPPED at `5cf4365`**; Codex IMPL
-  review in progress at the current session (round-by-round
-  summary lands at close-docs; behavioural findings 0 P1 across
-  rounds, only W9 prose-drift fix-ups iterating toward
-  convergence — mirrors the M42 R2-R8 asymptotic W9 sweep).
-  Pre-flight contract diff cluster SHIPPED at `28f117c..ea71b55`
-  (7 commits: R0 contract diff + R1-R5 Codex pre-flight fix-ups
-  + §22 watch-items annotation close-out; cycle CONVERGED at R5
-  with 0 P1 across all 5 rounds — every finding was prose-drift
-  on the contract-term surface). D1-D3 closed:
+- **Next session:** v0.7-M39 **pre-flight** (API pin bump
+  `2026-01` → `2026-04` + mass-flip of `2026-01` literals across
+  docs/probes/cassettes + envelope-snapshot refresh; per kickoff
+  ship order M42 → M43 → re-probe SDK 15.x → **M39** → M40 → M41).
+  At M43 close-docs (this commit) the SDK 15.x re-probe ran:
+  `npm view @mondaydotcomorg/api versions --json` returns latest
+  `14.0.0` — **SDK 15.x is NOT YET published**. M39 D1 fallback
+  enumeration carries forward to M39 pre-flight:
+  (a) SDK 15.x lift — STILL BLOCKED (re-probe at M39 kickoff);
+  (b) string-literal override on SDK 14.0.0 + hand-rolled zod
+  schemas per the "Boundary-typing trap" pattern — viable
+  (override cost-scrutiny from v0.7 kickoff candidate-selection
+  surfaced this as cheaper than initially framed: per-request
+  `API-Version` header at `src/api/transport.ts:99` is already
+  parameterised + overridable, hand-rolled zod schemas routine
+  per the `.claude/rules/monday-api.md` "Boundary-typing trap");
+  (c) continued wait + sequence-shuffle to ship more milestones
+  first — applied at v0.7 kickoff (M42 + M43 first, M39 third);
+  no more independent milestones remain to shuffle to. M39
+  pre-flight session decides between (b) string-literal override
+  and (c) one more wait cycle.
+
+- **M43 SHIPPED at `5cf4365..c217011`** (R0 IMPL + R1-R3 Codex
+  IMPL fix-up commits + R4 CONVERGED with zero findings). The
+  v0.6-M38 → v0.7-M43 D6 fold lands the create-time file `--set`
+  two-leg dispatch under the §5.8 orphan-warn atomicity envelope.
+  Pre-flight contract diff cluster at `28f117c..ea71b55` (R0 + 5
+  Codex pre-flight rounds, CONVERGED at R5); IMPL cluster at
+  `5cf4365..c217011` (R0 + 4 Codex IMPL rounds, CONVERGED at R4).
+  Behavioural findings: 0 P1 across all 9 rounds (pre-flight 5
+  + IMPL 4); only W9 prose-drift fix-ups iterated to convergence.
+  The R-v0.7-NEW-4 inherited contract-term checklist (graduated
+  v0.7-M42 IMPL R7) short-circuited M43 IMPL's W9 cycle from
+  M42's 8 rounds down to 4 — graduation earned its keep.
+
+  D1-D3 closures + implementation summary:
   - **D1 — Atomicity envelope: (b) orphan-warn.** Leg-2 failure
     surfaces `internal_error` with `details.reason:
     'create_then_file_upload_partial_failure'` +
     `details.created_item_id` echoing leg-1's orphan +
     `details.column_id` + `details.cause` (M31 wire failure
-    surface) + `details.hint` directing agents to retry leg-2
-    only (`monday item set <iid> <file-col>=<path>`) OR
-    rollback (`monday item delete <iid>`). Closure rationale:
-    pre-flight rollback-viability probe could not run
+    surface, JSON projection) + `details.hint` directing agents
+    to retry leg-2 only (`monday item set <iid> <file-col>=<path>`)
+    OR rollback (`monday item delete <iid> --yes`). Closure
+    rationale: pre-flight rollback-viability probe could not run
     empirically (token lacked `create_item` permission on a
     token-created sandbox workspace + existing-board attempts
     correctly blocked by harness modify-shared-state guards).
-    Defaulting to (b) under uncertainty preserves the agent's
-    recovery handle without introducing a destructive
-    `delete_item` cleanup leg whose own failure mode is
-    unaccounted for. M43 IMPL revisits if user-authorized probe
-    surfaces concrete rollback-reliability data.
+    Defaulting to (b) preserves the agent's recovery handle
+    without introducing a destructive `delete_item` cleanup leg
+    whose own failure mode is unaccounted for. Future milestone
+    can lift to (a) automatic rollback if a user-authorized
+    probe sandbox surfaces concrete rollback-reliability data.
   - **D2 — Dry-run envelope:** two `planned_changes` entries
     (`operation: 'create_item'` / `'create_subitem'` with
     bundled non-file `column_values`, then `operation:
-    'add_file_to_column'` with file pre-check echo).
-  - **D3 — ERROR_CODES delta:** zero. Registry stays at 29.
-    Atomicity failures route through existing `internal_error`
-    with the new `create_then_file_upload_partial_failure`
-    `details.reason` discriminator.
+    'add_file_to_column'` with file pre-check echo; no
+    `item_id` on entry-2 — the item doesn't exist at dry-run
+    time).
+  - **D3 — ERROR_CODES delta:** zero net change. Registry stays
+    at 29. Atomicity failures route through existing
+    `internal_error` with the new
+    `create_then_file_upload_partial_failure` `details.reason`
+    discriminator (M43 added the 5th supporting instance of
+    R-v0.6-NEW-2's discriminator pattern, hitting the 5-consumer
+    graduation threshold).
 
-  IMPL R0 runtime body at `5cf4365`: lifted the formerly
-  c8-ignored stub at `runItemCreateFileDispatch` for the two-leg
-  dispatch under the §5.8 orphan-warn atomicity envelope. Single
-  upfront
-  `precheckLocalFile` → partition setEntries by token
-  (non-file → leg-1 `column_values`, file → leg-2
-  `add_file_to_column`) → dry-run runs planCreate +
-  appends entry-2; live runs `resolveAndTranslate` + leg-1
-  `executeCreateItem` / `executeCreateSubitem` + leg-2
-  `executeFileColumnSet`; leg-2 failure surfaces orphan-warn
-  envelope w/ `details.{reason: 'create_then_file_upload_partial_failure',
-  created_item_id, column_id, cause, hint}`; leg-1 failure
-  routes through F4 remap (no orphan); single `invalidateBoard`
-  on full success only. Test surface flipped from 3 pre-flight
-  stub assertions to 12 IMPL tests. R-v0.6-NEW-1 4th-consumer
-  site for `precheckLocalFile` (no new lift; 5-consumer
-  graduation not yet hit). R-v0.7-NEW-5 INLINE decision
-  documented in the helper docstring + close-docs §22 entry
-  pending (M43's leg-2 catch is structurally distinct from the
-  fail-fast bulk pattern — always-internal-error outer code +
-  details.cause JSON projection vs preserve-remapped-code with
-  typed re-throw). M43 inherits the R-v0.7-NEW-4 pre-IMPL
-  contract-term checklist (graduated v0.7-M42 IMPL R7); applied
-  as the post-fix-up grep checklist from R1 onwards to short-
-  circuit the W9 prose-escalation pattern M42 absorbed across
-  8 rounds.
+  R-class outcomes at M43 IMPL:
+  - **R-v0.6-NEW-1** (file pre-check + Blob helper) graduated
+    at the 5-consumer threshold (M42 4th + M43 5th confirmed
+    `5cf4365`). Helper scaled cleanly to consumer-5 with zero
+    internal-shape changes.
+  - **R-v0.7-NEW-5** (fail-fast error-decoration block lift)
+    INLINE at M43 IMPL — M43's leg-2 catch is structurally
+    distinct from the fail-fast bulk pattern (always-`internal_
+    error` outer code + `details.cause` JSON projection vs
+    preserve-remapped-code with typed re-throw). Lift stays
+    deferred at 2 consumers; cited as the 1st "considered but
+    not tipped" event under R-NEW-58's consumer-threshold gating.
+  - **R-NEW-76** (parseArgv-BEFORE-c8) graduated from "stub-
+    anchored ordering invariant" to "wire-dispatch-anchored
+    ordering invariant" — post-IMPL the c8 boundary is gone but
+    the ordering itself stays load-bearing (argv-level failures
+    surface as `usage_error` not `internal_error`).
+  - **R-v0.7-NEW-4** (pre-IMPL contract-term checklist) extended
+    with a "round-agnostic framing" sub-rule (M43 R3 surfaced
+    round-counter staleness as a new W9 sub-category; close-docs
+    landed the workflow.md extension request).
 
-  M42 **SHIPPED** at `22df2fa..08ae263` (R0 IMPL + 8 Codex
-  fix-up rounds: R1 behavioral [foldAndRemap + SourceAggregator
-  + partial-success invalidate]; R2-R8 W9 prose sweep —
+  Full M43 narrative + post-mortem + R-class log update at
+  `docs/v0.7-plan.md` §3 M43 entry + §22 R-class register.
+
+- **M42 SHIPPED** at `22df2fa..08ae263` (R0 IMPL + 8 Codex
+  fix-up rounds: R1 behavioral; R2-R8 W9 prose sweep —
   asymptotic convergence with the R7 workflow.md graduation
   of "Pre-IMPL contract-term checklist for cross-doc grep"
-  intended to short-circuit the pattern at v0.7-M43 onwards).
-  Per-item multipart fan-out helper `runItemUpdateBulkFileDispatch`
-  ships with `foldAndRemap` per-item + `SourceAggregator` over
-  metadata + M38 pre-check + walk + dispatch legs + fail-fast
-  partial-success invalidate + full envelope
-  (`operation: 'item_update_bulk_file_set'`).
+  intended to short-circuit the pattern at v0.7-M43 onwards
+  — M43 IMPL validated this at R4 convergence).
 
-  IMPL Codex review estimate 4-5 fix-up rounds (similar profile
-  to M42 — non-atomic two-leg). M43 close-docs re-probes
-  `npm view @mondaydotcomorg/api versions --json | tail` +
-  decides M39 D1 between (a) SDK 15.x lift if shipped /
-  (b) string-literal override on SDK 14.0.0 + hand-rolled zod
-  schemas per the "Boundary-typing trap" pattern / (c) continued
-  wait. Full v0.7 scope (M39-M43) unchanged from SKELETON.
-  v0.8 SKELETON stays unratified (opens after v0.7.0
-  publishes). Other carry-forward backlog (multi-level subitems
-  / cross-board move value-overrides / resumable cross-board
+  Full v0.7 scope (M39-M43) unchanged from SKELETON. v0.8
+  SKELETON stays unratified (opens after v0.7.0 publishes).
+  Other carry-forward backlog (multi-level subitems /
+  cross-board move value-overrides / resumable cross-board
   cursor / profile-scoped argument defaults / multi-file
   `--set` / stdin file-`--set`) stays deferred.
 
