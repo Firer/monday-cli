@@ -21,19 +21,28 @@ humans are second-class. Built incrementally via Claude Code on top of
   at https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
   Previous: `monday-cli@0.5.0` (2026-05-17T20:55:05Z).
 - **package.json version:** `0.6.0`.
-- **Live numbers:** 4113 tests + 1 skipped across 172 files; coverage
-  98.86 / 95.82 / 99.16 / 99.15 (stmts / branches / fns / lines) at
-  the 95 / 95.45 / 95 / 95 floor (branches margin **0.37pp**, was
-  1.01pp at v0.6.0 baseline — v0.7-M42 IMPL absorbed the 0.64pp
-  drop across foldAndRemap-decorated ApiError ctor + SourceAggregator
-  seed-vs-record arms; full breakdown in `docs/v0.7-plan.md` §3 M42
-  "Coverage residual"); **29 ERROR_CODES**; **117 commands**;
-  `npm audit` 0 vulnerabilities (audit-fix `fast-uri 3.1.0 →
-  3.1.2` folded into the version-bump commit per security.md
-  "high = merge blocker").
+- **Live numbers:** 4115 tests + 1 skipped across 172 files (was
+  4113 + 1 at v0.6.0 / v0.7-M42 baseline; +2 from v0.7-M43
+  pre-flight `kind: 'file_create'` clean-path unit test + the
+  multi-file-on-create regression-guard); coverage 98.85 / 95.82
+  / 99.16 / 99.14 (stmts / branches / fns / lines) at the
+  95 / 95.45 / 95 / 95 floor (branches margin **0.37pp**
+  unchanged from v0.7-M42 IMPL baseline — M43 pre-flight stub
+  helper body is c8-ignored, so no further branches absorption;
+  was 1.01pp at v0.6.0 baseline — v0.7-M42 IMPL absorbed the
+  0.64pp drop across foldAndRemap-decorated ApiError ctor +
+  SourceAggregator seed-vs-record arms; full breakdown in
+  `docs/v0.7-plan.md` §3 M42 "Coverage residual"); **29
+  ERROR_CODES**; **117 commands**; `npm audit` 0 vulnerabilities
+  (audit-fix `fast-uri 3.1.0 → 3.1.2` folded into the
+  version-bump commit per security.md "high = merge blocker").
 - **Next session:** v0.7-M43 **IMPL** — runtime body for two-leg
-  create+file dispatch. **M43 pre-flight contract diff landed
-  this session (pre-Codex review).** D1-D3 closed:
+  create+file dispatch. **M43 pre-flight contract diff cluster
+  SHIPPED at `28f117c..ea71b55`** (7 commits: R0 contract diff
+  + R1-R5 Codex pre-flight fix-ups + §22 watch-items annotation
+  close-out; cycle CONVERGED at R5 with 0 P1 across all 5
+  rounds — every finding was prose-drift on the contract-term
+  surface). D1-D3 closed:
   - **D1 — Atomicity envelope: (b) orphan-warn.** Leg-2 failure
     surfaces `internal_error` with `details.reason:
     'create_then_file_upload_partial_failure'` +
