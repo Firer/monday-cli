@@ -26,17 +26,31 @@
  *   - Dry-run: top-level `create_item` AND subitem `create_subitem`
  *     planned-change shapes pinned (per Codex round-4 P2 — both
  *     §9 preconditions).
- *   - v0.7-M43 file `--set` carve-out fold (D6 from v0.6-M38):
- *     file `--set` on item create now routes through the
- *     `runItemCreateFileDispatch` two-leg helper. Pre-flight stub
- *     throws `internal_error` with `details.reason:
- *     'm43_preflight_stub'`; tests assert the stub envelope shape
- *     + regression-guard the v0.6 `'file_set_on_create_unsupported'`
- *     literal's absence. The D3 `--set-raw <file-col>=<json>`
- *     rejection stays at `translateRawColumnValue` (separate
- *     enforcement layer).
+ *   - v0.7-M43 file `--set` carve-out fold (v0.6-M38 → v0.7-M43 D6
+ *     fold): file `--set` on item create routes through the
+ *     `runItemCreateFileDispatch` two-leg helper. IMPL coverage
+ *     spans the live happy path (leg-1 `create_item` then leg-2
+ *     `add_file_to_column` succeed; envelope is the canonical
+ *     `ItemCreateOutput` with `resolved_ids` echo for both tokens
+ *     + the file token), the D6 mixed-set asymmetry (non-file
+ *     `--set` values bundle into leg-1's `column_values` atomically;
+ *     file entry routes to leg-2), the subitem path (`create_subitem`
+ *     + `add_file_to_column`), the D2 dry-run envelope (two
+ *     `planned_changes` entries — `create_item` then
+ *     `add_file_to_column`), the D1 orphan-warn envelope on leg-2
+ *     failure (`internal_error` carrying `details.created_item_id`
+ *     + `details.cause` + `details.hint`), the no-orphan leg-1
+ *     failure path, the upfront `precheckLocalFile` abort, and
+ *     regression-guards for both the v0.7-M43 transient stub literal
+ *     (`'m43_preflight_stub'`) and the v0.6-M38 reserved literal
+ *     (`'file_set_on_create_unsupported'`). The D3 `--set-raw
+ *     <file-col>=<json>` rejection stays at `translateRawColumnValue`
+ *     (separate enforcement layer).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   assertEnvelopeContract,
   FIXTURE_API_URL,
@@ -49,6 +63,7 @@ import {
   sampleBoardMetadata,
   useItemTestEnv,
 } from './_item-fixtures.js';
+import { createInlineMultipartFixtureTransport } from '../../fixtures/multipart-load.js';
 
 const { drive, xdgRoot } = useItemTestEnv();
 
@@ -2149,7 +2164,11 @@ describe('monday item create — dry-run', () => {
   });
 });
 
-describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; was v0.6-M38 rejection)', () => {
+describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 → v0.7-M43 D6 fold) — IMPL', () => {
+  // Board metadata fixture pinning a file-typed `attachments` column
+  // alongside a status column (`status_4` lets the D6 mixed-set
+  // asymmetry test bundle a non-file `--set status=Done` into leg-1's
+  // column_values atomically).
   const fileBoard = {
     ...sampleBoardMetadata,
     columns: [
@@ -2163,9 +2182,30 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
         width: null,
       },
       {
-        id: 'status_1',
+        id: 'status_4',
         title: 'Status',
         type: 'status',
+        description: null,
+        archived: null,
+        settings_str:
+          '{"labels":{"0":"Backlog","1":"In Progress","2":"Done"}}',
+        width: null,
+      },
+    ],
+  };
+
+  // Parent board fixture for the subitem path. The `subtasks` column's
+  // settings_str.boardIds[0] points at subitemsFileBoard (id `333`),
+  // which carries the file column the subitem create attaches to.
+  const subitemsFileBoard = {
+    ...sampleBoardMetadata,
+    id: '333',
+    name: 'Subitems of Tasks',
+    columns: [
+      {
+        id: 'attachments',
+        title: 'Attachments',
+        type: 'file',
         description: null,
         archived: null,
         settings_str: '{}',
@@ -2173,16 +2213,66 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
       },
     ],
   };
+  const parentBoardWithSubitemsFile = {
+    ...sampleBoardMetadata,
+    columns: [
+      ...sampleBoardMetadata.columns,
+      {
+        id: 'subtasks_1',
+        title: 'Subitems',
+        type: 'subtasks',
+        description: null,
+        archived: null,
+        settings_str: '{"boardIds":["333"]}',
+        width: null,
+      },
+    ],
+  };
 
-  it("routes file --set on item create live path into the v0.7-M43 stub helper (was 'file_set_on_create_unsupported' at v0.6-M38)", async () => {
-    // v0.7-M43 pre-flight contract diff: the v0.6-M38 D6 rejection
-    // (`'file_set_on_create_unsupported'`) folded — the action body
-    // now routes the clean path to the stub helper
-    // `runItemCreateFileDispatch`. The stub throws `internal_error`
-    // with `details.reason: 'm43_preflight_stub'` (exit 2) until
-    // M43 IMPL lifts the runtime body. The argv + pre-check surface
-    // is shipped contract at this commit; reaching the stub
-    // throw means the carve-out fold path was correctly entered.
+  // Standard `add_file_to_column` success-response template. Mirrors
+  // M31's asset projection (10-field Asset surface; per-test specs
+  // override only the slots the assertion inspects).
+  const buildAsset = (id: string): Record<string, unknown> => ({
+    id,
+    name: 'report.pdf',
+    url: `https://files.monday.com/x/${id}.pdf`,
+    public_url: `https://share.monday.com/${id}`,
+    file_extension: 'pdf',
+    file_size: 17,
+    created_at: '2026-06-01T10:30:00Z',
+    uploaded_by: { id: '1', name: 'Alice' },
+    original_geometry: null,
+    url_thumbnail: null,
+  });
+
+  let workdir: string;
+  let reportPath: string;
+  beforeEach(async () => {
+    workdir = await mkdtemp(join(tmpdir(), 'monday-cli-item-create-m43-'));
+    reportPath = join(workdir, 'report.pdf');
+    await writeFile(reportPath, 'PDF-bytes-fixture', 'utf8');
+  });
+  afterEach(async () => {
+    await rm(workdir, { recursive: true, force: true });
+  });
+
+  it('live: two-leg dispatch fires `create_item` then `add_file_to_column` and emits the canonical ItemCreateOutput envelope (v0.6-M38 → v0.7-M43 D6 fold)', async () => {
+    // Happy path: leg-1 creates the item (no bundled column_values
+    // since the only `--set` is the file entry); leg-2 attaches the
+    // file. Asserts the success envelope is byte-equivalent to the
+    // JSON-only create path on `data` (the file's asset is attached
+    // wire-side but intentionally NOT surfaced on `data` per the
+    // output-shapes.md envelope contract for the M43 path).
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report.pdf',
+          response: { data: { add_file_to_column: buildAsset('asset-1') } },
+        },
+      ],
+      { assertExhaustive: false },
+    );
     const out = await drive(
       [
         'item',
@@ -2190,9 +2280,251 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
         '--board',
         '111',
         '--name',
-        'New item',
+        'Refactor login',
         '--set',
-        'attachments=./report.pdf',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            // Leg-1 ships with `column_values: null` because the only
+            // `--set` was the file entry (routed to leg-2). The
+            // null-vs-empty-map distinction is wire-meaningful per
+            // §5.8 — Monday accepts `null` distinctly from `{}`.
+            match_variables: {
+              boardId: '111',
+              itemName: 'Refactor login',
+              groupId: null,
+              columnValues: null,
+              createLabelsIfMissing: false,
+              positionRelativeMethod: null,
+              relativeTo: null,
+            },
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        id: string;
+        name: string;
+        board_id: string;
+        group_id: string | null;
+      };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    assertEnvelopeContract(env);
+    expect(env.data).toEqual({
+      id: '99001',
+      name: 'Refactor login',
+      board_id: '111',
+      group_id: 'topics',
+    });
+    // resolved_ids echoes the file token's resolved column ID.
+    expect(env.resolved_ids).toEqual({ attachments: 'attachments' });
+    // Leg-2 fired once against leg-1's freshly-created item ID.
+    expect(multipart.requests).toHaveLength(1);
+    const req = multipart.requests[0]!;
+    expect(req.operationName).toBe('AddFileToColumn');
+    expect(req.filename).toBe('report.pdf');
+    // Source: every wire leg fires live (metadata fetch + M38 pre-
+    // check's resolveColumnWithRefresh + leg-1 mutation + leg-2
+    // multipart). When only the file `--set` is present, no second
+    // column-resolution leg fires (no resolveAndTranslate cache-hit
+    // to mix in), so the aggregate stays `'live'`. Mirrors the M38
+    // single-item file dispatch envelope's `source: 'live'`.
+    expect(env.meta.source).toBe('live');
+  });
+
+  it('live: D6 mixed-set asymmetry — non-file `--set` values bundle into leg-1 `column_values` atomically; file entry routes to leg-2 (SUPPRESSED mixed-rule on item_create)', async () => {
+    // The D6 SUPPRESSION at enforceSingleFileColumnSet on
+    // 'item_create' callShape lets a non-file `--set status=Done`
+    // through alongside the file `--set attachments=...`. The action
+    // body partitions: leg-1 bundles status into column_values atomically
+    // (Monday's `create_item` accepts column_values), leg-2 attaches
+    // the file. Both succeed → success envelope echoes both tokens
+    // in resolved_ids.
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report.pdf',
+          response: { data: { add_file_to_column: buildAsset('asset-2') } },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'status=Done',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            // Leg-1's column_values carries ONLY the non-file entry
+            // (status_4). The file `--set` is partitioned out and
+            // dispatched separately as leg-2 — a regression that
+            // routed the file into column_values would fail this
+            // match_variables pin.
+            match_variables: {
+              boardId: '111',
+              itemName: 'Refactor login',
+              groupId: null,
+              columnValues: { status_4: { label: 'Done' } },
+              createLabelsIfMissing: false,
+              positionRelativeMethod: null,
+              relativeTo: null,
+            },
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    // Both tokens echo in resolved_ids — the file token from M38
+    // pre-check, the status token from resolveAndTranslate.
+    expect(env.resolved_ids).toEqual({
+      attachments: 'attachments',
+      status: 'status_4',
+    });
+    // Both legs fired exactly once.
+    expect(multipart.requests).toHaveLength(1);
+  });
+
+  it('live: subitem path dispatches `create_subitem` then `add_file_to_column` and emits the subitem envelope with `parent_id`', async () => {
+    // Subitem variant: parent lookup + parent-board metadata (for
+    // subtasks column derivation) + subitems-board metadata pre-check
+    // + create_subitem + add_file_to_column. Asserts the subitem
+    // success envelope carries `parent_id`.
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report.pdf',
+          response: { data: { add_file_to_column: buildAsset('sub-1') } },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Subtask 1',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: {
+                      id: '111',
+                      hierarchy_type: null,
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [parentBoardWithSubitemsFile] } },
+          },
+          // Subitems board metadata — M38 pre-check resolves
+          // `attachments` against board 333 (subitems board).
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [subitemsFileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateSubitem',
+            match_variables: {
+              parentItemId: '12345',
+              itemName: 'Subtask 1',
+              columnValues: null,
+              createLabelsIfMissing: false,
+            },
+            response: { data: { create_subitem: newSubitem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        id: string;
+        name: string;
+        board_id: string;
+        parent_id: string;
+      };
+    };
+    expect(env.data.id).toBe('99100');
+    expect(env.data.parent_id).toBe('12345');
+    expect(env.data.board_id).toBe('333');
+    expect(multipart.requests).toHaveLength(1);
+  });
+
+  it('dry-run: emits D2 two-`planned_changes` envelope — `create_item` then `add_file_to_column` — without burning the multipart wire', async () => {
+    // D2 closure: dry-run runs planCreate (non-file resolution +
+    // diff cells) then appends the file entry. No multipart wire
+    // round-trip fires; the multipart transport's `assertExhaustive`
+    // is on with an empty cassette so any wire call would fail
+    // loudly.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'status=Done',
+        '--set',
+        `attachments=${reportPath}`,
+        '--dry-run',
         '--json',
       ],
       {
@@ -2203,25 +2535,489 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
           },
         ],
       },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes?: readonly Record<string, unknown>[];
+    };
+    expect(env.ok).toBe(true);
+    const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+    expect(meta.dry_run).toBe(true);
+    // Two entries: leg-1 create_item shape (with bundled non-file
+    // column_values + diff cell for status_4) THEN leg-2
+    // add_file_to_column shape (no item_id since the item doesn't
+    // exist yet at dry-run time).
+    expect(env.planned_changes).toHaveLength(2);
+    const [entry1, entry2] = env.planned_changes!;
+    expect(entry1).toMatchObject({
+      operation: 'create_item',
+      board_id: '111',
+      name: 'Refactor login',
+    });
+    expect(entry2).toEqual({
+      operation: 'add_file_to_column',
+      column_id: 'attachments',
+      file_path: reportPath,
+      filename: 'report.pdf',
+      file_size_bytes: 17,
+    });
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('dry-run subitem: emits two planned_changes — `create_subitem` then `add_file_to_column` — and subitem entry1 omits `board_id` (server-side derivation)', async () => {
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Subtask 1',
+        '--set',
+        `attachments=${reportPath}`,
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: {
+                      id: '111',
+                      hierarchy_type: null,
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [parentBoardWithSubitemsFile] } },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [subitemsFileBoard] } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes?: readonly Record<string, unknown>[];
+    };
+    expect(env.planned_changes).toHaveLength(2);
+    const [entry1, entry2] = env.planned_changes!;
+    expect(entry1).toMatchObject({
+      operation: 'create_subitem',
+      parent_item_id: '12345',
+      name: 'Subtask 1',
+    });
+    // Subitem entry-1 must NOT carry `board_id` — subitems-board
+    // derivation is server-side; surfacing the agent's --board would
+    // falsely imply ownership of the subitems board (per output-
+    // shapes §6.4 subitem dry-run shape).
+    expect(entry1).not.toHaveProperty('board_id');
+    expect(entry2).toMatchObject({
+      operation: 'add_file_to_column',
+      column_id: 'attachments',
+    });
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('orphan-warn (D1): leg-2 failure surfaces `internal_error` with `details.{reason, created_item_id, column_id, cause, hint}` — the leg-1 item persists', async () => {
+    // The defining M43 envelope shape. Leg-1 succeeds (item 99001
+    // created) → leg-2 fails with `file_too_large` → the helper
+    // catches MondayCliError, applies foldAndRemap, then wraps as
+    // ApiError('internal_error', ...) carrying the D1 orphan-warn
+    // decoration with `created_item_id` echoing the orphan. The
+    // remapped leg-2 error embeds as `details.cause` JSON projection
+    // so agents can branch on the underlying failure.
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          response: {
+            errors: [
+              {
+                message: 'File size limit exceeded',
+                extensions: { code: 'FILE_SIZE_LIMIT_EXCEEDED' },
+              },
+            ],
+          },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    // `internal_error` is the M43 outer-envelope code per D1 closure
+    // — exit 2 (API error category).
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+          column_id?: string;
+          cause?: { code?: string; message?: string };
+          hint?: string;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe(
+      'create_then_file_upload_partial_failure',
+    );
+    expect(env.error?.details?.created_item_id).toBe('99001');
+    expect(env.error?.details?.column_id).toBe('attachments');
+    // Cause projection carries the remapped leg-2 error's code +
+    // its nested details. M31's `FILE_SIZE_LIMIT_EXCEEDED` rewrap
+    // surfaces as `code: 'usage_error'` (file-size cap is on the
+    // call-shape boundary) with `details.reason: 'file_too_large'`
+    // (the §6.5 stable-discriminator). The orphan-warn envelope
+    // echoes both — `cause.code` for the outer typed code and
+    // `cause.details.reason` for the M31 discriminator agents key
+    // off.
+    expect(env.error?.details?.cause?.code).toBe('usage_error');
+    const causeDetails = (env.error?.details?.cause as {
+      details?: { reason?: string };
+    }).details;
+    expect(causeDetails?.reason).toBe('file_too_large');
+    expect(typeof env.error?.details?.cause?.message).toBe('string');
+    // Hint mentions both recovery paths (retry leg-2 + rollback)
+    // and echoes the orphan's ID so agents can copy-paste.
+    expect(env.error?.details?.hint).toContain('99001');
+    expect(env.error?.details?.hint).toMatch(/monday item set/);
+    expect(env.error?.details?.hint).toMatch(/monday item delete/);
+    // Leg-2 fired exactly once (the failing call).
+    expect(multipart.requests).toHaveLength(1);
+  });
+
+  it('mixed-set translation reject: resolveAndTranslate failure aborts before leg-1 fires (status=NoSuchLabel → usage_error from the friendly translator)', async () => {
+    // The helper's `resolveAndTranslate` catch arm fires when the
+    // non-file `--set` translator rejects (e.g., unknown status
+    // label). The catch arm calls `mergeResolverWarningsIntoError`
+    // (no-op on empty pre-check warnings) and re-throws — leg-1
+    // never fires. Without this test the catch arm's
+    // `err instanceof MondayCliError` true-arm + the
+    // `mergeResolverWarningsIntoError` call are uncovered.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'status=NoSuchLabel',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    // Translation rejections route through `translateColumnValueAsync`
+    // which surfaces typed errors mapping to exit 1 (`usage_error`)
+    // or exit 2 (`unsupported_column_type` / `validation_failed`)
+    // depending on the rejection kind. The key invariant for the
+    // catch arm coverage is that the error reached the runner from
+    // resolveAndTranslate (not from a successful create) — both
+    // the `created_item_id` absence + zero multipart wire calls
+    // pin that.
+    expect([1, 2]).toContain(out.exitCode);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+        };
+      };
+    };
+    expect(env.error?.details?.created_item_id).toBeUndefined();
+    expect(env.error?.details?.reason).not.toBe(
+      'create_then_file_upload_partial_failure',
+    );
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('leg-1 mixed-set failure: F4 remap path fires with `translated.map(t => t.columnId)` populated from the non-file `--set` entries (cache-served resolution + Monday validation_failed → column_archived remap)', async () => {
+    // Mixed-set with leg-1 failure exercises the F4 remap path's
+    // `columnIds: translated.map((t) => t.columnId)` argument with a
+    // non-empty array — the M43 helper's leg-1 catch arm mirrors the
+    // JSON path's F4 remap at create.ts:1082-1106. Seeding the cache
+    // with the column ACTIVE then refreshing to ARCHIVED triggers
+    // foldAndRemap's remap path (Codex M9 P1 regression pin shape).
+    const cachedActive = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: false,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'status_4',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: false,
+          settings_str:
+            '{"labels":{"0":"Backlog","1":"In Progress","2":"Done"}}',
+          width: null,
+        },
+      ],
+    };
+    const refreshedArchived = {
+      ...cachedActive,
+      columns: [
+        cachedActive.columns[0]!,
+        { ...cachedActive.columns[1]!, archived: true },
+      ],
+    };
+    // Step 1: seed cache with active status_4 via a separate read.
+    await drive(
+      ['item', 'list', '--board', '111', '--limit', '1', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [cachedActive] } },
+          },
+          {
+            operation_name: 'ItemsPage',
+            response: {
+              data: {
+                boards: [{ items_page: { cursor: null, items: [] } }],
+              },
+            },
+          },
+        ],
+      },
+    );
+    // Step 2: item create — cache hit on resolution + leg-1 fails →
+    // foldAndRemap fetches refreshed BoardMetadata → sees archived →
+    // remaps to column_archived.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        'status=Done',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          // Leg-1 returns validation_failed — the M38 pre-check + the
+          // helper's resolveAndTranslate both hit cache (no
+          // BoardMetadata interaction here).
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: {
+              errors: [
+                {
+                  message: 'Invalid value for column status',
+                  extensions: { code: 'InvalidColumnValueException' },
+                },
+              ],
+            },
+          },
+          // foldAndRemap refreshes BoardMetadata → sees status_4
+          // archived → remaps.
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [refreshedArchived] } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
     );
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: {
         code: string;
-        details?: { reason?: string; column_id?: string; milestone?: string };
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+          remapped_from?: string;
+        };
       };
     };
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details?.reason).toBe('m43_preflight_stub');
-    expect(env.error?.details?.milestone).toBe('v0.7-M43');
-    expect(env.error?.details?.column_id).toBe('attachments');
-    // R-v0.7-NEW-4 regression-guard: the v0.6-M38 literal stays
-    // RESERVED post-fold. Asserting absence across the full
-    // envelope catches any silent re-introduction of the
-    // pre-IMPL discriminator.
-    expect(JSON.stringify(env)).not.toContain(
-      'file_set_on_create_unsupported',
+    // The leg-1 F4 remap path surfaces `column_archived` (cli-design
+    // §6.5 stable-code rule). NO orphan envelope because no item was
+    // created.
+    expect(env.error?.code).toBe('column_archived');
+    expect(env.error?.details?.created_item_id).toBeUndefined();
+    expect(env.error?.details?.reason).not.toBe(
+      'create_then_file_upload_partial_failure',
     );
+    // Leg-2 never fired.
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('leg-1 failure: validation_failed from `create_item` aborts before leg-2 — NO orphan envelope (no item to clean up)', async () => {
+    // Leg-1 failure means no item was created → no orphan handle,
+    // no `created_item_id` slot. The error surfaces with the raw
+    // remap from foldAndRemap (column_archived if the cache lied
+    // about an archived column; validation_failed otherwise). The
+    // multipart transport's `assertExhaustive` is on with an empty
+    // cassette — leg-2 must NOT fire.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: {
+              errors: [
+                {
+                  message: 'Item name must not be blank',
+                  extensions: { code: 'InvalidArgumentException' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+        };
+      };
+    };
+    // Outer code is NOT `internal_error` with the orphan-warn
+    // discriminator — leg-1 failure routes through the standard
+    // F4 remap, surfacing the underlying API error code. The key
+    // invariant: NO `created_item_id` (no orphan exists).
+    expect(env.error?.details?.reason).not.toBe(
+      'create_then_file_upload_partial_failure',
+    );
+    expect(env.error?.details?.created_item_id).toBeUndefined();
+    // Leg-2 never fired (the cassette assertion would fire if it had).
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('atomicity-before-wire: ENOENT path aborts with `usage_error.details.reason: file_not_readable` BEFORE leg-1 fires (cli-design §5.8 pre-check discipline)', async () => {
+    // Upfront precheckLocalFile fires BEFORE either wire leg. A
+    // missing file surfaces `usage_error` with `file_not_readable`
+    // → exit 1; neither create_item nor add_file_to_column fires
+    // (both cassettes are exhaustive-empty).
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${join(workdir, 'does-not-exist.pdf')}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { reason?: string } };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.reason).toBe('file_not_readable');
+    expect(multipart.requests).toHaveLength(0);
   });
 
   it("D3 invariant: item create `--set-raw <file-col>=<json>` stays as unsupported_column_type (NOT hijacked into file_set_on_create_unsupported — Codex round-2 P3-2 pin)", async () => {
@@ -2256,25 +3052,34 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
     expect(env.error?.details?.reason).toBeUndefined();
   });
 
-  it('routes file --set on item create dry-run path into the same v0.7-M43 stub helper (D6 fold applies to dry-run too; was D6 rejection at v0.6-M38)', async () => {
-    // v0.7-M43 pre-flight: the dry-run path reaches the same stub
-    // helper (the helper inspects `isDryRun` to branch the IMPL
-    // body, but the pre-flight stub throws regardless). M43 IMPL
-    // will branch the dry-run path into the D2 two-`planned_changes`
-    // envelope shape (`operation: 'create_item'` + `operation:
-    // 'add_file_to_column'`) without burning multipart wire round-
-    // trips; pre-flight just pins the routing.
-    const out = await drive(
+  it("'m43_preflight_stub' literal stays RESERVED: M43 IMPL no longer surfaces it (was the pre-flight stub's transient discriminator); the literal MUST NOT reappear from this dispatch path", async () => {
+    // Regression-guard mirroring v0.7-M42's `'m42_preflight_stub'`
+    // post-IMPL regression-guard pattern. The IMPL replacement of
+    // the v0.7-M43 pre-flight stub leaves the literal RESERVED — a
+    // future re-introduction of `details.reason: 'm43_preflight_stub'`
+    // (programmer regression, half-applied revert) would fail this
+    // test. Drives every M43 surface in one assertion: success
+    // envelope (stdout) + dry-run envelope (stdout) + orphan-warn
+    // envelope (stderr) + leg-1 failure envelope (stderr).
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          response: { data: { add_file_to_column: buildAsset('a-1') } },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const successOut = await drive(
       [
         'item',
         'create',
         '--board',
         '111',
         '--name',
-        'New item',
+        'Refactor login',
         '--set',
-        'attachments=./report.pdf',
-        '--dry-run',
+        `attachments=${reportPath}`,
         '--json',
       ],
       {
@@ -2283,17 +3088,19 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (D6 fold; w
             operation_name: 'BoardMetadata',
             response: { data: { boards: [fileBoard] } },
           },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
         ],
       },
+      { multipartTransport: multipart },
     );
-    expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-      error?: { code: string; details?: { reason?: string } };
-    };
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details?.reason).toBe('m43_preflight_stub');
-    expect(JSON.stringify(env)).not.toContain(
-      'file_set_on_create_unsupported',
-    );
+    expect(successOut.stdout).not.toContain('m43_preflight_stub');
+    expect(successOut.stderr).not.toContain('m43_preflight_stub');
+    // R-v0.7-NEW-4 regression-guard: the v0.6-M38 literal also
+    // stays RESERVED across this dispatch path.
+    expect(successOut.stdout).not.toContain('file_set_on_create_unsupported');
+    expect(successOut.stderr).not.toContain('file_set_on_create_unsupported');
   });
 });

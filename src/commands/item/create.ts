@@ -99,6 +99,8 @@ import {
 } from '../../api/source-aggregator.js';
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import {
+  executeFileColumnSet,
+  type FileColumnSetEntry,
   preCheckM38FileDispatch,
   type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
@@ -112,6 +114,8 @@ import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
+import { precheckLocalFile } from '../../utils/file-source.js';
+import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
 /**
@@ -885,16 +889,16 @@ export const itemCreateCommand: CommandModule<
           }
         }
 
-        // v0.7-M43 D6 carve-out fold — branch into the two-leg
-        // dispatch helper. Pre-flight stub throws `internal_error`
-        // with `details.reason: 'm43_preflight_stub'` (the wire
-        // legs live behind a c8 ignore until M43 IMPL lifts the
-        // runtime body per R-NEW-76 parseArgv-BEFORE-c8 discipline).
+        // v0.6-M38 → v0.7-M43 D6 fold — branch into the two-leg
+        // dispatch helper. {@link runItemCreateFileDispatch} runs
+        // the upfront `precheckLocalFile` + partitions setEntries
+        // (non-file → leg-1 `column_values`, file → leg-2
+        // `add_file_to_column`) + dispatches leg-1 `create_item`
+        // / `create_subitem` then leg-2 `add_file_to_column` under
+        // the §5.8 orphan-warn atomicity envelope (D1 closure).
         // Reaching this branch means argv parse + shape validation
         // + duplicate-token check + create-mode resolution + M38
-        // pre-check all succeeded — only the wire dispatch (leg-1
-        // `create_item` + leg-2 `add_file_to_column` + the D1
-        // atomicity-envelope) is c8-ignored.
+        // pre-check all succeeded.
         if (m38FileCreate !== undefined) {
           await runItemCreateFileDispatch({
             parsed,
@@ -920,6 +924,7 @@ export const itemCreateCommand: CommandModule<
             relationResolution,
             isDryRun: globalFlags.dryRun,
             noCache: globalFlags.noCache,
+            retries: globalFlags.retry,
             toEmit,
           });
           return;
@@ -1303,87 +1308,92 @@ const executeCreateSubitem = async (
 };
 
 // ============================================================
-// v0.7-M43 create-time file `--set` dispatch helper (D6 carve-out
-// fold from v0.6-M38).
+// v0.7-M43 create-time file `--set` dispatch helper (v0.6-M38 →
+// v0.7-M43 D6 fold).
 //
-// **Status: pre-flight contract diff at this commit; runtime body
-// lifts at v0.7-M43 IMPL.** The signature ships as contract at
-// pre-flight so callers + tests can pin the input shape; the body
-// is c8-ignored and throws `internal_error` with
-// `details.reason: 'm43_preflight_stub'` until IMPL replaces it.
-// All upstream argv parse + shape validation + duplicate-token
-// check + create-mode resolution + M38 pre-check fire BEFORE this
-// helper per R-NEW-76 (parseArgv-BEFORE-c8 discipline) and are
-// shipped contract.
+// **Status: runtime body shipped at v0.7-M43 IMPL.** All upstream
+// argv parse + shape validation + duplicate-token check + create-
+// mode resolution + M38 pre-check fire BEFORE this helper per
+// R-NEW-76 (parseArgv-BEFORE-c8 discipline graduated at v0.5-M34)
+// and are shipped contract; the helper takes the resolved file-
+// column dispatch slot from {@link preCheckM38FileDispatch} +
+// the resolved create-mode + the original `setEntries` /
+// `rawEntries` lists, partitions setEntries (non-file → leg-1's
+// `column_values`, file → leg-2's `add_file_to_column`), and
+// drives the two-leg dispatch under the §5.8 orphan-warn
+// atomicity envelope.
 //
-// **D-list closures (v0.7-plan §3 M43 entry):**
+// **D-list closures (v0.7-plan §3 M43 entry).**
 //
-//   - **D1 — Atomicity-envelope shape.** Orphan-warn at IMPL —
-//     leg-2 failure surfaces `internal_error` with
-//     `details.reason: 'create_then_file_upload_partial_failure'`
-//     + `details.created_item_id` echoing leg-1's freshly-created
-//     item ID + `details.column_id` + `details.cause` carrying
-//     leg-2's underlying error shape (M31 wire failure surface
+//   - **D1 — Atomicity-envelope shape: orphan-warn.** Leg-2
+//     failure surfaces `internal_error` with `details.reason:
+//     'create_then_file_upload_partial_failure'` + `details.
+//     created_item_id` echoing leg-1's freshly-created item ID
+//     + `details.column_id` + `details.cause` carrying leg-2's
+//     underlying error shape (M31 wire failure surface
 //     inheritance: `column_archived` / `validation_failed` /
-//     `not_found` / `file_too_large`) + `details.hint` directing
-//     agents to `monday item set <iid> <file-col>=<path>` (retry
-//     leg-2 only) or `monday item delete <iid>` (rollback if the
-//     agent prefers a clean retry of the whole two-leg path). The
-//     pre-flight probe for cleanup-on-failure (rollback viability
-//     of option (a)) was inconclusive — phase-1 introspection
-//     confirmed `delete_item(item_id: ID) → OBJECT/Item` wire
-//     shape (rollback IS expressible) but phase-2 empirical
+//     `not_found` / `file_too_large`) + `details.hint`
+//     directing agents to `monday item set <iid> <file-col>=
+//     <path>` (retry leg-2 only against the orphan) or `monday
+//     item delete <iid> --yes` (rollback the orphan if the
+//     agent prefers a clean retry of the whole two-leg path).
+//     The pre-flight probe for cleanup-on-failure (rollback
+//     viability of option (a) — automatic `delete_item`) was
+//     inconclusive — phase-1 introspection confirmed
+//     `delete_item(item_id: ID) → OBJECT/Item` wire shape
+//     (rollback IS expressible) but phase-2 empirical
 //     rollback-viability step could not run because the token
 //     lacked `create_item` permission in a fresh sandbox
 //     workspace/board (Monday "User unauthorized to perform
 //     action" rejection); attempting against shared/existing
 //     boards was blocked by the harness auto-classifier as
-//     correctly modifying-shared-state. Defaulting to (b) under
-//     uncertainty preserves the agent's recovery handle without
-//     introducing a destructive `delete_item` cleanup leg whose
-//     own failure mode is unaccounted for. M43 IMPL revisits if
-//     a user-authorized probe sandbox surfaces concrete rollback-
-//     reliability data.
-//   - **D2 — Dry-run envelope shape.** Two `planned_changes`
-//     entries per call: (1) `operation: 'create_item'` (mirroring
-//     v0.2-M9's dry-run shape) carrying `name` + bundled
-//     non-file `column_values` from the resolveAndTranslate leg
-//     + the create-mode dispatch (top-level board / subitem
+//     correctly modifying-shared-state. Defaulting to (b)
+//     preserves the agent's recovery handle without introducing
+//     a destructive `delete_item` cleanup leg whose own failure
+//     mode is unaccounted for. The v0.7-M43 IMPL holds at (b);
+//     a future milestone can lift to (a) if a user-authorized
+//     probe sandbox surfaces concrete rollback-reliability data.
+//   - **D2 — Dry-run envelope shape: two `planned_changes`.**
+//     `--dry-run` emits two entries without burning either wire
+//     round-trip: (1) `operation: 'create_item'` (mirroring
+//     v0.2-M9's dry-run shape) carrying `name` + bundled non-
+//     file `column_values` from the resolveAndTranslate leg +
+//     the create-mode dispatch (top-level board / subitem
 //     parent); (2) `operation: 'add_file_to_column'` (mirroring
 //     M31's dry-run shape) carrying `column_id` + `file_path` +
 //     `filename` + `file_size_bytes` from the local pre-check.
 //     `source` aggregates the pre-planner network legs (parent
-//     lookup + parent-board metadata for subitems + `--relative-
-//     to` verification) + the M38 pre-check leg + the
-//     resolveAndTranslate leg — mirrors the existing JSON-path
-//     dry-run aggregation in the action body verbatim. No
-//     multipart wire round-trip fires on dry-run.
-//   - **D3 — ERROR_CODES delta.** Zero net change. Registry stays
-//     at 29 codes. Atomicity failures route through `internal_
-//     error` (existing) with `details.reason:
+//     lookup + parent-board metadata for subitems +
+//     `--relative-to` verification) + the M38 pre-check leg +
+//     the planner's resolveAndTranslate leg, mirroring the
+//     existing JSON-path dry-run aggregation in the action body
+//     verbatim. No multipart wire round-trip fires on dry-run.
+//   - **D3 — ERROR_CODES delta: zero net change.** Registry
+//     stays at 29 codes. Atomicity failures route through
+//     `internal_error` (existing) with `details.reason:
 //     'create_then_file_upload_partial_failure'` discriminator;
 //     leg-2 column resolution / validation failures route
 //     through existing `column_archived` / `validation_failed`
-//     / `not_found` / `file_too_large` per M31's pinned surface
-//     (M43 reuses M31's `addFileToColumn` fetcher verbatim so
-//     leg-2 failure shapes are inherited).
+//     / `not_found` / `file_too_large` per M31's pinned
+//     surface (M43 reuses M31's `addFileToColumn` fetcher
+//     verbatim through {@link executeFileColumnSet} so leg-2
+//     failure shapes are inherited).
 //
-// **Wire surface (IMPL).** Two-leg dispatch:
-//   1. `create_item` (or `create_subitem` for subitem path) with
-//      bundled `column_values` from translated non-file `--set` /
-//      `--set-raw` entries — leg-1 returns the new `item.id`.
-//   2. `add_file_to_column(item_id, column_id, file)` multipart
-//      via M31's {@link addFileToColumn} fetcher (through
+// **Wire surface.** Two-leg dispatch:
+//   1. `create_item` (or `create_subitem` for subitem path)
+//      with bundled `column_values` from translated non-file
+//      `--set` / `--set-raw` entries — leg-1 returns the new
+//      `item.id` which threads into leg-2's `item_id`
+//      parameter.
+//   2. `add_file_to_column(item_id, column_id, file)`
+//      multipart via M31's `addFileToColumn` fetcher (through
 //      {@link executeFileColumnSet}) — leg-2 returns the
-//      `asset` record on success; on failure, surface atomicity
-//      envelope per D1 closure (orphan-warn, echoing leg-1's
-//      item ID).
+//      `asset` record on success; on failure, surface the D1
+//      orphan-warn envelope echoing leg-1's item ID.
 //
-// **operationName parity contract (W2 audit-point).** M43 IMPL
-// reuses three existing named GraphQL operations verbatim — no
-// new operations introduced at this milestone. The IMPL helper
-// MUST pin them to match the inline doc/operationName parity per
-// `client.raw(doc, vars, { operationName: 'Foo' })`:
+// **operationName parity contract (W2 audit-point).** Three
+// existing named GraphQL operations are reused verbatim — no
+// new operations introduced at this milestone:
 //   - leg-1 top-level: `'ItemCreateTopLevel'` (from
 //     {@link executeCreateItem} above in this file).
 //   - leg-1 subitem: `'ItemCreateSubitem'` (from
@@ -1391,40 +1401,37 @@ const executeCreateSubitem = async (
 //   - leg-2: `'AddFileToColumn'` (from M31's
 //     `src/api/assets.ts:addFileToColumn`, threaded via M38's
 //     {@link executeFileColumnSet}).
-// No caller-overridable operationName slot — the helper selects
-// top-level vs subitem from `inputs.createMode.kind` (the
-// `CreateMode` discriminated union from `src/api/dry-run.ts`,
-// resolved by `resolveCreateMode` upstream) and pairs that
-// with `inputs.m38` (the file-column slot from
-// `preCheckM38FileDispatch`). The IMPL body invokes the
-// existing helpers verbatim rather than re-spelling the
-// operation names.
+// No caller-overridable operationName slot — the helper
+// selects top-level vs subitem from `inputs.createMode.kind`
+// (the `CreateMode` discriminated union from
+// `src/api/dry-run.ts`, resolved by `resolveCreateMode`
+// upstream) and pairs that with `inputs.m38` (the file-column
+// slot from `preCheckM38FileDispatch`). The runtime body
+// invokes the existing helpers verbatim rather than
+// re-spelling the operation names.
 //
 // **Reuse from existing surfaces.** Leg-1 reuses the existing
 // `executeCreateItem` / `executeCreateSubitem` helpers in this
-// file (no new wire op). Leg-2 reuses M38's `executeFileColumnSet`
-// + R-v0.6-NEW-1's `precheckLocalFile` / `buildBlobFromPath`
-// (3rd-consumer inheritance scheduled to tip to 4th at IMPL).
+// file (no new wire op). Leg-2 reuses M38's
+// {@link executeFileColumnSet} +
+// {@link precheckLocalFile} / `buildBlobFromPath` from
+// `src/utils/file-source.ts` (R-v0.6-NEW-1 4th-consumer site;
+// 5-consumer graduation threshold not yet hit).
 //
-// **Pre-flight contract-term checklist (R-v0.7-NEW-4 inherited
-// from v0.7-M42).**
-//
-//   - State-current terms post-IMPL: `v0.7-M43`, `file_create`,
-//     `create+file two-leg`, `runItemCreateFileDispatch`,
-//     `create_then_file_upload_partial_failure`,
-//     `details.created_item_id` (orphan-warn echo).
-//   - Pre-IMPL framing terms — allowed contexts post-IMPL are
-//     (a) historical post-mortem entries in `docs/v0.6-plan.md`
-//     M38 D6 prose; (b) reserved-literal docstrings (the M38
-//     file-column-set.ts docstring + this helper's prose both
-//     name `'file_set_on_create_unsupported'` as RESERVED); (c)
-//     regression-guard tests asserting the literal does NOT
-//     appear in runtime output post-IMPL. All other occurrences
-//     of `file_set_on_create_unsupported` / `deferred_to: 'v0.7-
-//     M43'` / `D6 closure` / `--set <file-col>=<path> is not
-//     supported on monday item create` / `non-atomic post-create
-//     wire shape breaks §5.8 state safety` / `defer to v0.7-M43`
-//     are drift bugs.
+// **R-v0.7-NEW-5 inline decision.** The fail-fast error-
+// decoration block (`if (err.code === 'usage_error') {
+// throw UsageError(...) } else { throw ApiError(...) }` with
+// stale-cache remap + per-record `applied_count` / `applied_
+// to` / `failed_at_item` / `matched_count` decoration) at
+// JSON-bulk `update.ts:1334-1361` + file-bulk
+// `runItemUpdateBulkFileDispatch` does NOT tip to its 3rd
+// consumer at v0.7-M43 IMPL: M43's leg-2 catch is structurally
+// distinct (always-`internal_error` outer code with the
+// remapped error embedded as a `details.cause` JSON projection,
+// vs preserve-remapped-code with typed re-throw + decoration).
+// The lift stays deferred at 2 consumers; v0.7-plan §22
+// R-v0.7-NEW-5 carries the rationale + future-consumer
+// triggers.
 // ============================================================
 
 interface RunItemCreateFileDispatchInputs {
@@ -1474,89 +1481,451 @@ interface RunItemCreateFileDispatchInputs {
   readonly isDryRun: boolean;
   readonly noCache: boolean;
   /**
-   * Envelope-meta closure from `resolveClient(...)`. M43 IMPL
-   * threads it into the leg-1 success envelope so the existing
-   * `complexity` / `apiVersion` / `cacheAgeSeconds` / `source`
-   * fields surface on the create envelope (mirrors
-   * `emitMutation`'s usage in the JSON path above).
+   * Retry budget for leg-2's multipart dispatch (threaded into
+   * {@link executeFileColumnSet} → M31's `addFileToColumn`
+   * `withRetry(...)` thunk). Leg-1's `create_item` /
+   * `create_subitem` retry is handled implicitly by the client
+   * (configured via `globalFlags.retry` at `resolveClient(...)`);
+   * this slot covers leg-2's multipart transport, which has its
+   * own retry pump separate from the client.
+   */
+  readonly retries: number;
+  /**
+   * Envelope-meta closure from `resolveClient(...)`. Threads
+   * leg-1's `complexity` + `apiVersion` slots into the success
+   * envelope (mirrors `emitMutation`'s usage in the JSON path
+   * above). `source` + `cacheAgeSeconds` are overridden by the
+   * aggregator's result at emit time so the spread order is
+   * deliberate.
    */
   readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
 }
 
 /**
- * Two-leg create-time file dispatch helper. Pre-flight stub —
- * runtime body lifts at v0.7-M43 IMPL.
+ * Two-leg create-time file dispatch helper. Runs:
  *
- * The throw below intentionally surfaces `internal_error` (exit 2)
- * with `details.reason: 'm43_preflight_stub'` so an agent invoking
- * the carved-out path sees a clear "not yet implemented" signal
- * AND a structured `details.reason` slot for branching, rather
- * than silent success / corrupted state. The argv parse + shape
- * validation + duplicate-token check + create-mode resolution +
- * M38 pre-check are shipped contract — reaching this throw means
- * the carve-out fold path was correctly entered.
+ *   1. Single upfront {@link precheckLocalFile} on the file `--set`
+ *      raw value. Local-only; failure surfaces `usage_error` with
+ *      `details.reason: 'file_not_readable'` / `'file_empty'`
+ *      BEFORE either wire leg fires (atomicity-before-wire
+ *      discipline per cli-design §5.8).
+ *   2. Partitions `inputs.setEntries` by `token`: the entry whose
+ *      `token === inputs.m38.token` routes to leg-2; every other
+ *      entry routes to leg-1's `column_values`. `inputs.rawEntries`
+ *      route to leg-1 verbatim — `--set-raw <file-col>=<json>` is
+ *      rejected upstream at `translateRawColumnValue` per D3
+ *      permanent rejection, so by this point no raw entry targets
+ *      a file column.
+ *   3. **Dry-run branch.** Invokes {@link planCreate} on the
+ *      non-file entries (handles resolution + diff cell build),
+ *      then appends a synthetic entry-2
+ *      `operation: 'add_file_to_column'` carrying `column_id` +
+ *      `file_path` (argv-derived) + `filename` + `file_size_bytes`
+ *      from the upfront pre-check. Emits both entries together
+ *      via `emitDryRun`; no multipart wire round-trip fires.
+ *      Entry-2 omits `item_id` (the item doesn't exist yet at
+ *      dry-run time).
+ *   4. **Live branch.** `resolveAndTranslate` on the non-file
+ *      entries yields the leg-1 `column_values`; leg-1 invokes
+ *      `executeCreateItem` / `executeCreateSubitem` depending on
+ *      `inputs.createMode.kind`; leg-2 builds a
+ *      {@link FileColumnSetEntry} from the pre-check + leg-1's
+ *      new item ID and invokes {@link executeFileColumnSet}.
+ *      On full success, a single
+ *      {@link invalidateBoard} fires (mirroring M38 single-item
+ *      + M42 bulk file-dispatch invalidate timing — leg-2
+ *      mutates the file column's asset state wire-side).
+ *   5. **Leg-1 failure.** Routes through {@link foldAndRemap} to
+ *      surface `column_archived` on cache-served file-column
+ *      resolution against an archived column (mirrors the JSON
+ *      path's F4 remap above). No orphan handle because no item
+ *      was created.
+ *   6. **Leg-2 failure (orphan-warn per D1).** Catches
+ *      `MondayCliError`, applies {@link foldAndRemap} to surface
+ *      `column_archived` etc., then wraps the remapped error in
+ *      a fresh `ApiError('internal_error', ...)` carrying
+ *      `details.reason: 'create_then_file_upload_partial_failure'`
+ *      + `details.created_item_id` + `details.column_id` +
+ *      `details.cause` (JSON projection of the remapped error) +
+ *      `details.hint` (retry-leg-2-only / rollback). The board
+ *      cache is NOT invalidated on leg-2 failure — leg-1's
+ *      `create_item` doesn't affect cached board metadata
+ *      (mirrors the JSON-only create path's no-invalidate), and
+ *      leg-2 failure means no file mutation occurred wire-side.
  */
 const runItemCreateFileDispatch = async (
   inputs: RunItemCreateFileDispatchInputs,
 ): Promise<void> => {
-  /* c8 ignore start — v0.7-M43 pre-flight stub. Runtime body
-     lifts at M43 IMPL; the c8-ignore boundary lives at the
-     wire dispatch leg only per R-NEW-76. All upstream argv
-     parse + shape validation + duplicate-token check + create-
-     mode resolution + M38 pre-check fired before reaching this
-     point and are shipped contract. */
-  // Anchors the `async` signature so M43 IMPL doesn't have to
-  // re-shape callers when it adds the real `await
-  // precheckLocalFile(...)` / `await executeCreateItem(...)` /
-  // `await executeFileColumnSet(...)` legs. The `await`
-  // resolves immediately; the throw below is the only
-  // observable behaviour at pre-flight.
-  await Promise.resolve();
-  // Reference inputs once so TS doesn't flag them as unused on
-  // the pre-flight stub; IMPL replaces this whole body. The throw
-  // below is the only observable behaviour at pre-flight.
-  void inputs.parsed;
-  void inputs.client;
-  void inputs.multipart;
-  void inputs.ctx;
-  void inputs.programOpts;
-  void inputs.apiVersion;
-  void inputs.createMode;
-  void inputs.resolveBoardId;
-  void inputs.setEntries;
-  void inputs.rawEntries;
-  void inputs.preflightSource;
-  void inputs.preflightCacheAgeSeconds;
-  void inputs.metaSource;
-  void inputs.metaCacheAgeSeconds;
-  void inputs.preflightWarnings;
-  void inputs.dateResolution;
-  void inputs.peopleResolution;
-  void inputs.tagResolution;
-  void inputs.relationResolution;
-  void inputs.isDryRun;
-  void inputs.noCache;
-  void inputs.toEmit;
-  throw new ApiError(
-    'internal_error',
-    'v0.7-M43 create-time file `--set` dispatch is not yet implemented; ' +
-      'pre-flight contract diff only at this commit (runtime body lands ' +
-      'at M43 IMPL). The argv shape + pre-check are shipped — reaching ' +
-      'this throw means the carve-out fold path was correctly entered.',
-    {
-      details: {
-        reason: 'm43_preflight_stub',
-        milestone: 'v0.7-M43',
-        column_id: inputs.m38.columnId,
-        hint:
-          'this command path is reserved for v0.7-M43 IMPL (create-time ' +
-          'file `--set` carve-out fold); the pre-flight contract diff ' +
-          '(current commit) ships only the argv + pre-check surface. ' +
-          'Create the item without the file (`monday item create --board ' +
-          '<bid> --name "..."`), then attach the file with `monday item ' +
-          'set <iid> <file-col>=<path>` (v0.6-M38) until IMPL ships.',
-      },
-    },
+  // 1) Upfront local file pre-check. Atomicity-before-wire per
+  //    cli-design §5.8: pre-checks fire BEFORE any wire round-trip
+  //    so a bad path surfaces `usage_error` (exit 1) with
+  //    `details.reason: 'file_not_readable'` / `'file_empty'`
+  //    without burning either wire leg. R-v0.6-NEW-1 4th-consumer
+  //    site (M31 upload + M38 single-item + M42 file-bulk + here);
+  //    5-consumer graduation threshold not yet hit.
+  const precheck = await precheckLocalFile(inputs.m38.rawValue);
+
+  // 2) Partition setEntries: the file entry's `token` matches
+  //    `inputs.m38.token` (the pre-check identified it); every
+  //    other token goes to leg-1's column_values.
+  const nonFileSetEntries = inputs.setEntries.filter(
+    (e) => e.token !== inputs.m38.token,
   );
-  /* c8 ignore stop */
+
+  // 3) Dry-run branch — D2 closure. Two `planned_changes` entries
+  //    without burning either wire leg. planCreate handles
+  //    non-file column resolution + diff cells; entry-2 is built
+  //    locally from the pre-check.
+  if (inputs.isDryRun) {
+    let planResult;
+    try {
+      planResult = await planCreate({
+        client: inputs.client,
+        mode: inputs.createMode,
+        name: inputs.parsed.name,
+        setEntries: nonFileSetEntries,
+        ...(inputs.rawEntries.length === 0
+          ? {}
+          : { rawEntries: inputs.rawEntries }),
+        dateResolution: inputs.dateResolution,
+        peopleResolution: inputs.peopleResolution,
+        tagResolution: inputs.tagResolution,
+        relationResolution: inputs.relationResolution,
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+      });
+    } catch (err) {
+      // Fold M38 pre-check warnings into the dry-run failure
+      // envelope's `details.resolver_warnings`. `mergeResolverWarningsIntoError`
+      // is a no-op on empty `preflightWarnings`, so no length guard
+      // is needed; the JSON path's analogous catch at
+      // `create.ts:944-951` keeps the guard inline for parity with
+      // its older pattern, but the M43 helper collapses it (smaller
+      // branch surface). Non-`MondayCliError` programmer bugs
+      // re-throw unchanged.
+      if (err instanceof MondayCliError) {
+        throw mergeResolverWarningsIntoError(err, inputs.preflightWarnings);
+      }
+      throw err;
+    }
+
+    // Source aggregates four legs (planner + M38 pre-check +
+    // pre-planner preflight) — mirrors the JSON-path dry-run
+    // aggregation pattern at lines 959-966 above. planCreate may
+    // return `source: 'none'` when its no-set short-circuit fires
+    // (only relevant here if the call had ONLY the file `--set`),
+    // so the standalone `mergeSourceWithPreflight` helper is used
+    // rather than the SourceAggregator class (which doesn't model
+    // 'none').
+    const dryRunSource = mergeSourceWithPreflight(
+      mergeSourceWithPreflight(planResult.source, inputs.metaSource),
+      inputs.preflightSource,
+    );
+    const dryRunCacheAge = mergeCacheAge(
+      mergeCacheAge(inputs.metaCacheAgeSeconds, planResult.cacheAgeSeconds),
+      inputs.preflightCacheAgeSeconds,
+    );
+
+    // Entry-2: `add_file_to_column` planned-change. Mirrors M31's
+    // dry-run shape minus `item_id` (the item doesn't exist yet).
+    // `file_path` is the argv-derived raw value per cli-design §6.4;
+    // resolved absolute path lives in pre-check rejections, not in
+    // the success-shaped dry-run envelope.
+    const fileEntry = {
+      operation: 'add_file_to_column' as const,
+      column_id: inputs.m38.columnId,
+      file_path: inputs.m38.rawValue,
+      filename: precheck.filename,
+      file_size_bytes: precheck.fileSizeBytes,
+    };
+
+    const plannedChanges = [
+      ...planResult.plannedChanges,
+      fileEntry,
+    ] as unknown as readonly Readonly<Record<string, unknown>>[];
+
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges,
+      source: dryRunSource,
+      cacheAgeSeconds: dryRunCacheAge,
+      warnings: dedupeCreateWarnings([
+        ...inputs.preflightWarnings,
+        ...planResult.warnings,
+      ]),
+      apiVersion: inputs.apiVersion,
+    });
+    return;
+  }
+
+  // 4) Live branch — leg-1 (create_item / create_subitem) then
+  //    leg-2 (add_file_to_column). resolveAndTranslate on non-file
+  //    entries yields leg-1's column_values; the M38 pre-check
+  //    already warmed the column-resolution cache so this leg
+  //    typically hits cache (source folds to `mixed` once leg-1
+  //    + leg-2 record `live`).
+  let resolutionResult;
+  try {
+    resolutionResult = await resolveAndTranslate({
+      client: inputs.client,
+      boardId: inputs.resolveBoardId,
+      setEntries: nonFileSetEntries,
+      rawEntries: inputs.rawEntries,
+      dateResolution: inputs.dateResolution,
+      peopleResolution: inputs.peopleResolution,
+      tagResolution: inputs.tagResolution,
+      relationResolution: inputs.relationResolution,
+      env: inputs.ctx.env,
+      noCache: inputs.noCache,
+    });
+  } catch (err) {
+    // Same shape as the planCreate catch above — collapse the
+    // `&& length > 0` guard (no-op on empty) for a smaller branch
+    // surface than the JSON path's pattern at
+    // `create.ts:1010-1022`.
+    if (err instanceof MondayCliError) {
+      throw mergeResolverWarningsIntoError(err, inputs.preflightWarnings);
+    }
+    throw err;
+  }
+
+  // Combined warnings: M38 pre-check + resolveAndTranslate. Deduped
+  // by code+message+token (a stale_cache_refreshed seen at pre-check
+  // AND at resolveAndTranslate for the same token collapses to one
+  // entry). Mirrors the JSON path's dedupeCreateWarnings usage.
+  const collectedWarnings: readonly ResolverWarning[] = dedupeCreateWarnings(
+    [...inputs.preflightWarnings, ...resolutionResult.warnings],
+  ) as readonly ResolverWarning[];
+
+  // Source aggregator across every wire leg that fires (or that
+  // already fired upstream). Records preflight + M38 pre-check +
+  // resolveAndTranslate legs; records `'live'` once at the end of
+  // each successful wire mutation (mergeSource is idempotent for a
+  // constant `'live'` second leg so recording leg-1 + leg-2 separately
+  // is byte-equivalent to recording once).
+  const sourceAgg = new SourceAggregator();
+  // Defensive: the helper is entered only when the action body's
+  // `preCheckM38FileDispatch` returned `kind: 'file_create'`, which
+  // guarantees `metaSource` is defined (the M38 pre-check populates
+  // `source` for every entry it resolves). The `undefined` arm is
+  // unreachable from any callable test surface.
+  /* c8 ignore next 3 */
+  if (inputs.metaSource !== undefined) {
+    sourceAgg.record(inputs.metaSource, inputs.metaCacheAgeSeconds);
+  }
+  if (resolutionResult.source !== undefined) {
+    sourceAgg.record(
+      resolutionResult.source,
+      resolutionResult.cacheAgeSeconds,
+    );
+  }
+  if (inputs.preflightSource !== undefined) {
+    sourceAgg.record(
+      inputs.preflightSource,
+      inputs.preflightCacheAgeSeconds,
+    );
+  }
+
+  // resolved_ids — file token + non-file tokens. Mirrors §6.4
+  // mutation-envelope shape: `{ <token>: <resolved_column_id> }`
+  // for every `--set` / `--set-raw` the agent supplied.
+  const resolvedIds: Readonly<Record<string, string>> = {
+    [inputs.m38.token]: inputs.m38.columnId,
+    ...resolutionResult.resolvedIds,
+  };
+
+  // Bundle non-file translated values into leg-1's column_values
+  // parameter. `null` when zero non-file entries (mirrors the JSON
+  // path's "no `--set` values to bundle" treatment — Monday accepts
+  // `column_values: null` distinctly from an empty map).
+  const translated = resolutionResult.translated;
+  const columnValues =
+    translated.length === 0 ? null : bundleColumnValues(translated);
+
+  // Leg-1: create_item or create_subitem. F4 remap on failure
+  // mirrors the JSON path's catch arm (cache-served resolution +
+  // Monday rejecting as `validation_failed` → check live archived
+  // state). No orphan handle on leg-1 failure because no item was
+  // created.
+  let leg1Result;
+  try {
+    if (inputs.createMode.kind === 'subitem') {
+      leg1Result = await executeCreateSubitem(inputs.client, {
+        parentItemId: inputs.createMode.parentItemId,
+        itemName: inputs.parsed.name,
+        columnValues,
+        createLabelsIfMissing: inputs.parsed.createLabelsIfMissing,
+      });
+    } else {
+      leg1Result = await executeCreateItem(inputs.client, {
+        boardId: inputs.createMode.boardId,
+        itemName: inputs.parsed.name,
+        groupId: inputs.createMode.groupId,
+        position: inputs.createMode.position,
+        columnValues,
+        createLabelsIfMissing: inputs.parsed.createLabelsIfMissing,
+      });
+    }
+  } catch (err) {
+    if (err instanceof MondayCliError) {
+      throw await foldAndRemap({
+        err,
+        warnings: collectedWarnings,
+        client: inputs.client,
+        boardId: inputs.resolveBoardId,
+        columnIds: translated.map((t) => t.columnId),
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+        resolutionSource: resolutionResult.source ?? 'live',
+      });
+    }
+    // Defensive: every wire fetcher in `src/api/**` raises typed
+    // errors (ApiError / UsageError) which both extend MondayCliError;
+    // a non-typed throw here indicates a programmer bug in the
+    // wire layer, not a Monday-side failure that needs the F4 remap.
+    /* c8 ignore next */
+    throw err;
+  }
+  // Leg-1 fired live; record into the aggregator.
+  sourceAgg.record('live', null);
+
+  // Leg-2: add_file_to_column via M31's multipart fetcher. On
+  // success, build the create envelope below; on `MondayCliError`,
+  // surface the D1 orphan-warn envelope with the freshly-created
+  // item ID as the recovery handle.
+  const fileEntry: FileColumnSetEntry = {
+    columnId: inputs.m38.columnId,
+    columnType: 'file',
+    rawValue: inputs.m38.rawValue,
+    filePath: precheck.filePath,
+    filename: precheck.filename,
+    fileSizeBytes: precheck.fileSizeBytes,
+  };
+
+  try {
+    await executeFileColumnSet({
+      client: inputs.client,
+      multipart: inputs.multipart,
+      itemId: leg1Result.projected.id,
+      entry: fileEntry,
+      signal: inputs.ctx.signal,
+      retries: inputs.retries,
+    });
+  } catch (err) {
+    if (err instanceof MondayCliError) {
+      // foldAndRemap surfaces `column_archived` for cache-served
+      // file-column resolution against an archived column (cli-
+      // design §6.5 stable-code rule; mirrors M42's file-bulk
+      // fail-fast pattern). The remapped error's code/message
+      // surface in `details.cause` so agents can branch on
+      // leg-2's underlying outcome from the orphan-warn envelope.
+      const remapped = await foldAndRemap({
+        err,
+        warnings: collectedWarnings,
+        client: inputs.client,
+        boardId: inputs.resolveBoardId,
+        columnIds: [inputs.m38.columnId],
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+        resolutionSource: inputs.metaSource ?? 'live',
+      });
+
+      // D1 orphan-warn envelope. Always-internal-error outer
+      // shape; the remapped error embeds as `details.cause` JSON
+      // projection so the agent sees `{code, message, details?}`
+      // for the underlying failure. Error.cause threads the
+      // remapped error for stack debugging in `--debug` mode.
+      const causeProjection: Record<string, unknown> = {
+        code: remapped.code,
+        message: remapped.message,
+      };
+      // Defensive: M31's wire-error rewraps (and foldAndRemap) always
+      // populate `details` on the returned error in practice; the
+      // undefined-arm exists only to satisfy the optional shape on
+      // the `MondayCliError` type.
+      /* c8 ignore next 3 */
+      if (remapped.details !== undefined) {
+        causeProjection.details = remapped.details;
+      }
+
+      const createdItemId = leg1Result.projected.id;
+      throw new ApiError(
+        'internal_error',
+        `Item ${createdItemId} was created on board ${inputs.resolveBoardId} ` +
+          `but the file upload to column ${inputs.m38.columnId} failed ` +
+          `(${remapped.code}: ${remapped.message}). The item persists on ` +
+          `Monday; retry the file upload alone with \`monday item set ` +
+          `${createdItemId} <file-col>=<path>\` against the orphan, or roll ` +
+          `back with \`monday item delete ${createdItemId} --yes\`.`,
+        {
+          cause: remapped,
+          details: {
+            reason: 'create_then_file_upload_partial_failure',
+            created_item_id: createdItemId,
+            column_id: inputs.m38.columnId,
+            cause: causeProjection,
+            hint:
+              `the item was created (id ${createdItemId}) but the file ` +
+              `upload failed. Retry leg-2 alone with \`monday item set ` +
+              `${createdItemId} <file-col>=<path>\`; or rollback the ` +
+              `orphan with \`monday item delete ${createdItemId} --yes\` ` +
+              `and re-run the original \`monday item create\` once the ` +
+              `underlying cause is fixed.`,
+          },
+        },
+      );
+    }
+    // Non-CliError programmer bug — re-throw to the runner's catch-
+    // all (surfaces as `internal_error` whole-call). Non-typed
+    // throws indicate broken contract, not a Monday-side failure
+    // that needs the orphan-warn decoration; routing them through
+    // D1's `create_then_file_upload_partial_failure` discriminator
+    // would falsely promise an orphan-recovery path for a programmer
+    // bug.
+    /* c8 ignore next */
+    throw err;
+  }
+  // Leg-2 fired live; record into the aggregator. `'live'` + `'live'`
+  // is idempotent under mergeSource so this is the second authoritative
+  // wire-leg record (leg-1 already recorded).
+  sourceAgg.record('live', null);
+
+  // Both legs succeeded — single board-cache invalidate before emit
+  // (mirrors M38 single-item + M42 fail-fast file-bulk invalidate
+  // timing; leg-2 mutated the file column's asset state wire-side).
+  // The invalidate fires BEFORE emitMutation so a cache-unlink
+  // failure surfaces through the runner's catch-all rather than
+  // double-emitting after the success envelope already hit stdout.
+  await invalidateBoard(inputs.resolveBoardId, inputs.ctx.env);
+
+  // Map the resolver warnings into the envelope `warnings` slot.
+  const warnings: readonly Warning[] = collectedWarnings;
+
+  // Success envelope — `data: ItemCreateOutput` from leg-1's
+  // projection. `toEmit(leg1Result.response)` threads leg-1's
+  // `complexity` + `apiVersion` slots; `sourceAgg.result()`
+  // overrides `source` + `cacheAgeSeconds` so the aggregator's
+  // result (cache + live blended across every leg) is
+  // authoritative. Leg-2's complexity is intentionally NOT folded
+  // — the contract pins leg-1's projection on `data`, and the
+  // envelope's `meta.complexity` is the create mutation's cost
+  // (multipart leg-2 has no GraphQL complexity surface).
+  // The output asset from leg-2 is attached to the item server-
+  // side; agents read it back via `monday item get <iid> --columns
+  // <file-col>` if they need the projection (the file-column
+  // dispatch's `Asset` slot is documented per item upload's
+  // envelope; the v0.7-M43 success envelope keeps the canonical
+  // ItemCreateOutput shape so JSON-path and file-path envelopes
+  // remain byte-equivalent on `data`).
+  emitMutation({
+    ctx: inputs.ctx,
+    data: leg1Result.projected,
+    schema: itemCreateOutputSchema,
+    programOpts: inputs.programOpts,
+    warnings,
+    ...inputs.toEmit(leg1Result.response),
+    ...sourceAgg.result(),
+    resolvedIds,
+  });
 };
