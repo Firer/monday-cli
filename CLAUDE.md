@@ -21,28 +21,40 @@ humans are second-class. Built incrementally via Claude Code on top of
   at https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
   Previous: `monday-cli@0.5.0` (2026-05-17T20:55:05Z).
 - **package.json version:** `0.6.0`.
-- **Live numbers:** 4115 tests + 1 skipped across 172 files (was
-  4113 + 1 at v0.6.0 / v0.7-M42 baseline; +2 from v0.7-M43
-  pre-flight `kind: 'file_create'` clean-path unit test + the
-  multi-file-on-create regression-guard); coverage 98.85 / 95.82
-  / 99.16 / 99.14 (stmts / branches / fns / lines) at the
-  95 / 95.45 / 95 / 95 floor (branches margin **0.37pp**
-  unchanged from v0.7-M42 IMPL baseline — M43 pre-flight stub
-  helper body is c8-ignored, so no further branches absorption;
-  was 1.01pp at v0.6.0 baseline — v0.7-M42 IMPL absorbed the
-  0.64pp drop across foldAndRemap-decorated ApiError ctor +
-  SourceAggregator seed-vs-record arms; full breakdown in
-  `docs/v0.7-plan.md` §3 M42 "Coverage residual"); **29
-  ERROR_CODES**; **117 commands**; `npm audit` 0 vulnerabilities
-  (audit-fix `fast-uri 3.1.0 → 3.1.2` folded into the
-  version-bump commit per security.md "high = merge blocker").
-- **Next session:** v0.7-M43 **IMPL** — runtime body for two-leg
-  create+file dispatch. **M43 pre-flight contract diff cluster
-  SHIPPED at `28f117c..ea71b55`** (7 commits: R0 contract diff
-  + R1-R5 Codex pre-flight fix-ups + §22 watch-items annotation
-  close-out; cycle CONVERGED at R5 with 0 P1 across all 5
-  rounds — every finding was prose-drift on the contract-term
-  surface). D1-D3 closed:
+- **Live numbers:** 4124 tests + 1 skipped across 172 files (was
+  4115 + 1 at v0.7-M43 pre-flight baseline; +9 from the v0.7-M43
+  IMPL R0 test surface flip — 12 IMPL tests replacing 3 pre-flight
+  stub assertions, covering the two-leg happy path top-level +
+  subitem, D6 mixed-set asymmetry, dry-run two-`planned_changes`,
+  D1 orphan-warn envelope, leg-1 failure w/ + w/o F4 remap,
+  translation reject, atomicity-before-wire ENOENT, regression-
+  guards); coverage 98.79 / 95.65 / 99.16 / 99.08 (stmts /
+  branches / fns / lines) at the 95 / 95.45 / 95 / 95 floor
+  (branches margin **0.20pp** — v0.7-M43 IMPL absorbed
+  the 0.17pp drop across the new helper's leg-1 / leg-2 catch
+  arms + cause-projection conditional + sourceAgg
+  `metaSource !== undefined` arm; defensive non-CliError
+  re-throws + the cause-details / metaSource unreachable arms
+  c8-ignored per testing.md preferred block-wrap form; the two
+  preflight-warnings catch arms collapse the `&& length > 0`
+  guard for a smaller branch surface than the JSON path's
+  pattern at `create.ts:1010-1022`; was 0.37pp at v0.7-M43
+  pre-flight baseline — pre-flight stub body was c8-ignored
+  so no branches absorption fired then); **29 ERROR_CODES**;
+  **117 commands**; `npm audit` 1 moderate
+  (`brace-expansion 5.0.2 → 5.0.5`; not a merge blocker per
+  security.md "high = merge blocker"; defer to v0.7 release-
+  prep audit-fix or earlier if a Codex round flags it).
+- **Next session:** v0.7-M43 **close-docs + v0.7-M39 pre-flight**
+  (per kickoff ship order M42 → M43 → re-probe SDK 15.x → M39 →
+  M40 → M41). **M43 IMPL R0 SHIPPED at `5cf4365`**; Codex IMPL
+  review R1 in progress at the current session (P2-1 status-
+  prose-drift + P3-1 narrow regression-guard findings; no P1s).
+  Pre-flight contract diff cluster SHIPPED at `28f117c..ea71b55`
+  (7 commits: R0 contract diff + R1-R5 Codex pre-flight fix-ups
+  + §22 watch-items annotation close-out; cycle CONVERGED at R5
+  with 0 P1 across all 5 rounds — every finding was prose-drift
+  on the contract-term surface). D1-D3 closed:
   - **D1 — Atomicity envelope: (b) orphan-warn.** Leg-2 failure
     surfaces `internal_error` with `details.reason:
     'create_then_file_upload_partial_failure'` +
@@ -69,23 +81,29 @@ humans are second-class. Built incrementally via Claude Code on top of
     with the new `create_then_file_upload_partial_failure`
     `details.reason` discriminator.
 
-  Pre-flight stubs: `enforceSingleFileColumnSet` +
-  `preCheckM38FileDispatch` extended with `kind: 'file_create'`
-  variant; `runItemCreateFileDispatch` helper stub in
-  `src/commands/item/create.ts` (mirrors M42's
-  `runItemUpdateBulkFileDispatch` shape) throws
-  `internal_error` with `details.reason: 'm43_preflight_stub'`
-  per R-NEW-76 (parseArgv-BEFORE-c8 discipline). Existing
-  v0.6-M38 integration + unit tests asserting
-  `'file_set_on_create_unsupported'` flipped to assert the
-  stub envelope + regression-guard the v0.6 literal's absence;
-  mixed-rule SUPPRESSION on `'item_create'` callShape (D6
-  asymmetry — `create_item` bundles non-file `column_values`
-  atomically into leg-1) unit-tested. M43 inherits the
-  R-v0.7-NEW-4 pre-IMPL contract-term checklist (graduated
-  v0.7-M42 IMPL R7); the full M43 checklist is committed
-  inline at `docs/v0.7-plan.md` §3 M43 entry. Apply from
-  R1 onwards as the post-fix-up grep checklist to short-
+  IMPL R0 runtime body at `5cf4365`: lifts the c8-ignored stub
+  at `runItemCreateFileDispatch` for the two-leg dispatch under
+  the §5.8 orphan-warn atomicity envelope. Single upfront
+  `precheckLocalFile` → partition setEntries by token
+  (non-file → leg-1 `column_values`, file → leg-2
+  `add_file_to_column`) → dry-run runs planCreate +
+  appends entry-2; live runs `resolveAndTranslate` + leg-1
+  `executeCreateItem` / `executeCreateSubitem` + leg-2
+  `executeFileColumnSet`; leg-2 failure surfaces orphan-warn
+  envelope w/ `details.{reason: 'create_then_file_upload_partial_failure',
+  created_item_id, column_id, cause, hint}`; leg-1 failure
+  routes through F4 remap (no orphan); single `invalidateBoard`
+  on full success only. Test surface flipped from 3 pre-flight
+  stub assertions to 12 IMPL tests. R-v0.6-NEW-1 4th-consumer
+  site for `precheckLocalFile` (no new lift; 5-consumer
+  graduation not yet hit). R-v0.7-NEW-5 INLINE decision
+  documented in the helper docstring + close-docs §22 entry
+  pending (M43's leg-2 catch is structurally distinct from the
+  fail-fast bulk pattern — always-internal-error outer code +
+  details.cause JSON projection vs preserve-remapped-code with
+  typed re-throw). M43 inherits the R-v0.7-NEW-4 pre-IMPL
+  contract-term checklist (graduated v0.7-M42 IMPL R7); applied
+  as the post-fix-up grep checklist from R1 onwards to short-
   circuit the W9 prose-escalation pattern M42 absorbed across
   8 rounds.
 

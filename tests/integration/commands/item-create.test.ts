@@ -2786,6 +2786,13 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     expect(env.error?.details?.reason).not.toBe(
       'create_then_file_upload_partial_failure',
     );
+    // Codex IMPL R1 P3-1 (W9): the reserved-literal regression-guard
+    // must fire on every failure path — the resolveAndTranslate catch
+    // arm is its own emit surface, so assert literal absence inline
+    // rather than relying on the dedicated regression-guard test
+    // which drives different surfaces.
+    expect(out.stdout).not.toContain('m43_preflight_stub');
+    expect(out.stderr).not.toContain('m43_preflight_stub');
     expect(multipart.requests).toHaveLength(0);
   });
 
@@ -3052,16 +3059,39 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     expect(env.error?.details?.reason).toBeUndefined();
   });
 
-  it("'m43_preflight_stub' literal stays RESERVED: M43 IMPL no longer surfaces it (was the pre-flight stub's transient discriminator); the literal MUST NOT reappear from this dispatch path", async () => {
+  it("'m43_preflight_stub' literal stays RESERVED: M43 IMPL no longer surfaces it (was the pre-flight stub's transient discriminator); the literal MUST NOT reappear from any of the M43 surfaces (success + dry-run + orphan-warn + leg-1 failure)", async () => {
     // Regression-guard mirroring v0.7-M42's `'m42_preflight_stub'`
     // post-IMPL regression-guard pattern. The IMPL replacement of
     // the v0.7-M43 pre-flight stub leaves the literal RESERVED — a
     // future re-introduction of `details.reason: 'm43_preflight_stub'`
     // (programmer regression, half-applied revert) would fail this
-    // test. Drives every M43 surface in one assertion: success
-    // envelope (stdout) + dry-run envelope (stdout) + orphan-warn
-    // envelope (stderr) + leg-1 failure envelope (stderr).
-    const multipart = createInlineMultipartFixtureTransport(
+    // test. Per Codex IMPL R1 P3-1 (W9): drives each M43 surface
+    // separately rather than asserting absence on one path alone,
+    // because the literal could land in any catch arm or emit
+    // surface independently — the test description claimed broader
+    // coverage than the original single-path assertion delivered.
+    const assertLiteralAbsent = (
+      label: string,
+      out: { stdout: string; stderr: string },
+    ): void => {
+      expect(out.stdout, `${label}: stdout`).not.toContain(
+        'm43_preflight_stub',
+      );
+      expect(out.stderr, `${label}: stderr`).not.toContain(
+        'm43_preflight_stub',
+      );
+      // R-v0.7-NEW-4 regression-guard: the v0.6-M38 reserved
+      // literal also stays absent from every runtime envelope.
+      expect(out.stdout, `${label}: stdout (v0.6 literal)`).not.toContain(
+        'file_set_on_create_unsupported',
+      );
+      expect(out.stderr, `${label}: stderr (v0.6 literal)`).not.toContain(
+        'file_set_on_create_unsupported',
+      );
+    };
+
+    // Surface 1 — live two-leg success envelope.
+    const successMultipart = createInlineMultipartFixtureTransport(
       [
         {
           operation_name: 'AddFileToColumn',
@@ -3094,13 +3124,125 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
           },
         ],
       },
-      { multipartTransport: multipart },
+      { multipartTransport: successMultipart },
     );
-    expect(successOut.stdout).not.toContain('m43_preflight_stub');
-    expect(successOut.stderr).not.toContain('m43_preflight_stub');
-    // R-v0.7-NEW-4 regression-guard: the v0.6-M38 literal also
-    // stays RESERVED across this dispatch path.
-    expect(successOut.stdout).not.toContain('file_set_on_create_unsupported');
-    expect(successOut.stderr).not.toContain('file_set_on_create_unsupported');
+    expect(successOut.exitCode).toBe(0);
+    assertLiteralAbsent('live success', successOut);
+
+    // Surface 2 — dry-run two-`planned_changes` envelope.
+    const dryRunMultipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const dryRunOut = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath}`,
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+      { multipartTransport: dryRunMultipart },
+    );
+    expect(dryRunOut.exitCode).toBe(0);
+    assertLiteralAbsent('dry-run', dryRunOut);
+
+    // Surface 3 — orphan-warn envelope on leg-2 failure.
+    const orphanMultipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          response: {
+            errors: [
+              {
+                message: 'File size limit exceeded',
+                extensions: { code: 'FILE_SIZE_LIMIT_EXCEEDED' },
+              },
+            ],
+          },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const orphanOut = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: orphanMultipart },
+    );
+    expect(orphanOut.exitCode).toBe(2);
+    assertLiteralAbsent('orphan-warn', orphanOut);
+
+    // Surface 4 — leg-1 failure envelope (no orphan).
+    const leg1FailMultipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
+    const leg1FailOut = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: {
+              errors: [
+                {
+                  message: 'Item name must not be blank',
+                  extensions: { code: 'InvalidArgumentException' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      { multipartTransport: leg1FailMultipart },
+    );
+    expect(leg1FailOut.exitCode).toBe(2);
+    assertLiteralAbsent('leg-1 failure', leg1FailOut);
   });
 });
