@@ -48,8 +48,10 @@ humans are second-class. Built incrementally via Claude Code on top of
 - **Next session:** v0.7-M43 **close-docs + v0.7-M39 pre-flight**
   (per kickoff ship order M42 → M43 → re-probe SDK 15.x → M39 →
   M40 → M41). **M43 IMPL R0 SHIPPED at `5cf4365`**; Codex IMPL
-  review R1 in progress at the current session (P2-1 status-
-  prose-drift + P3-1 narrow regression-guard findings; no P1s).
+  review in progress at the current session (round-by-round
+  summary lands at close-docs; behavioural findings 0 P1 across
+  rounds, only W9 prose-drift fix-ups iterating toward
+  convergence — mirrors the M42 R2-R8 asymptotic W9 sweep).
   Pre-flight contract diff cluster SHIPPED at `28f117c..ea71b55`
   (7 commits: R0 contract diff + R1-R5 Codex pre-flight fix-ups
   + §22 watch-items annotation close-out; cycle CONVERGED at R5
@@ -81,9 +83,10 @@ humans are second-class. Built incrementally via Claude Code on top of
     with the new `create_then_file_upload_partial_failure`
     `details.reason` discriminator.
 
-  IMPL R0 runtime body at `5cf4365`: lifts the c8-ignored stub
-  at `runItemCreateFileDispatch` for the two-leg dispatch under
-  the §5.8 orphan-warn atomicity envelope. Single upfront
+  IMPL R0 runtime body at `5cf4365`: lifted the formerly
+  c8-ignored stub at `runItemCreateFileDispatch` for the two-leg
+  dispatch under the §5.8 orphan-warn atomicity envelope. Single
+  upfront
   `precheckLocalFile` → partition setEntries by token
   (non-file → leg-1 `column_values`, file → leg-2
   `add_file_to_column`) → dry-run runs planCreate +
