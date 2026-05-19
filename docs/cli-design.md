@@ -8916,8 +8916,10 @@ scoped idempotent changes, and post comments narrating its work.**
     upload) under an orphan-warn envelope when leg-2 fails after
     leg-1 succeeds. Non-file `--set` / `--set-raw` entries
     bundle into leg-1; the file entry routes to leg-2. M43
-    pre-flight stubs (this commit) ship the argv + pre-check +
-    routing surface; M43 IMPL lifts the runtime body.
+    pre-flight contract diff cluster SHIPPED at `28f117c..ea71b55`
+    (argv + pre-check + routing surface); IMPL R0 SHIPPED at
+    `5cf4365` (runtime body for `runItemCreateFileDispatch`
+    under the §5.8 orphan-warn atomicity envelope).
   - `<path>='-'` stdin for file `--set` — surface deferred
     from M38 per D7; v0.7.x candidate once a `--filename`
     companion shape is pinned.

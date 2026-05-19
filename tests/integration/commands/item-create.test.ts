@@ -2786,13 +2786,18 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     expect(env.error?.details?.reason).not.toBe(
       'create_then_file_upload_partial_failure',
     );
-    // Codex IMPL R1 P3-1 (W9): the reserved-literal regression-guard
-    // must fire on every failure path — the resolveAndTranslate catch
-    // arm is its own emit surface, so assert literal absence inline
-    // rather than relying on the dedicated regression-guard test
-    // which drives different surfaces.
+    // Codex IMPL R1 P3-1 + R2 P3-1 (W9): the reserved-literal
+    // regression-guard must fire on every failure path — the
+    // resolveAndTranslate catch arm is its own emit surface (not
+    // exercised by the dedicated four-surface regression-guard
+    // test). Assert literal absence for BOTH reserved literals
+    // (v0.7-M43 transient + v0.6-M38 historical) inline so a
+    // regression here is caught regardless of how the broader
+    // regression-guard test evolves.
     expect(out.stdout).not.toContain('m43_preflight_stub');
     expect(out.stderr).not.toContain('m43_preflight_stub');
+    expect(out.stdout).not.toContain('file_set_on_create_unsupported');
+    expect(out.stderr).not.toContain('file_set_on_create_unsupported');
     expect(multipart.requests).toHaveLength(0);
   });
 
