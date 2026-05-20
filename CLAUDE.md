@@ -41,26 +41,42 @@ humans are second-class. Built incrementally via Claude Code on top of
   **0 vulnerabilities** post-fix (`brace-expansion 5.0.2 → 5.0.5+`
   resolved at the version-bump commit `75c8831` per the v0.6
   release-prep audit-fix-folded-into-version-bump precedent).
-- **Next session:** **v0.7.x candidate-selection** per R-NEW-75
-  (when ≥2 backlog candidates remain, run a dedicated
-  pre-pre-flight session before any pre-flight contract diff).
-  The current `cli-design.md` §13
-  carry-forward backlog living on the present `2026-01` pin
-  carries 5+ candidates: (a) `<file-col>=-` stdin support
-  (v0.6-M38 D7 deferral; needs clean `--filename` companion shape
-  pinned first); (b) multi-file `--set` per call (v0.6-M38 D2
-  deferral; M42 pinned the per-item file-dispatch envelope so
-  multi-file would revisit with M42's shape as the per-item
-  baseline); (c) profile-scoped argument defaults (filed at v0.6
-  kickoff; extends `~/.monday-cli/config.toml` with `[profiles.
-  <name>.defaults]`; carries the §13 carve-out Decision
-  prerequisite); (d) cross-board `item move` value-overrides
-  (Monday's `ColumnMappingInput` still carries no value slot at
-  API `2026-01` — slipped four times, may close permanently or
-  await Monday surface change); (e) cross-board search resumable
-  cursor (per-board cursor-lifetime under aggregation design
-  issue unchanged). The **v0.7-deferred M39 / M40 / M41
-  cluster** (API `2026-04` pin + `set_item_description_content` +
+- **Next session:** **v0.8-M46 pre-flight contract diff —
+  multi-file `--set` per call** (first half of the file `--set`
+  polish bundle picked at v0.8 kickoff candidate-selection
+  `<this-commit>` per R-NEW-75; second half is M47 stdin file
+  `--set`). v0.8 RE-SCOPES from the original `2026-07` SKELETON
+  (M44 user-entity migration + M45 user activity) to stay on
+  `2026-01` and ship the v0.6-M38 D2 + D7 carve-out folds —
+  mirrors the v0.7-pivot precedent verbatim (v0.7 originally
+  `2026-04` + M39/M40/M41; shipped `2026-01` + M42/M43
+  carve-out folds after SDK 15.x didn't publish in time). SDK
+  probe at the candidate-selection commit: `@mondaydotcomorg/api`
+  still at 14.0.0 baking `2026-01` natively; no 15.x release
+  (which would bake `2026-04`) or 16.x release (which would
+  bake `2026-07`, the v0.8 SKELETON's gating dependency).
+
+  Bundle scope (in milestone order):
+
+  - **M46 — multi-file `--set` per call** (v0.6-M38 D2 deferral
+    `multi_file_set_unsupported`). Extends v0.7-M42's per-item
+    file-dispatch envelope to multiple file entries per item.
+    Zero new wire surface, zero new transport seam, zero new
+    ERROR_CODES expected (registry stays at 29). Builds on M42's
+    pinned per-item baseline; file-source.ts (R-v0.6-NEW-1)
+    reaches its 6th consumer (already graduated at 5, so no new
+    lift work triggered).
+  - **M47 — stdin file `--set` `<file-col>=-`** (v0.6-M38 D7
+    deferral). Needs `--filename` companion shape pinned at
+    pre-flight + one wire-shape probe (does Monday's
+    `add_file_to_column` accept the streaming-from-stdin shape
+    without an explicit filename, or does it require one?).
+    Potential new "stdin-to-Blob" helper inside file-source.ts.
+
+  M44 + M45 (user-entity migration + user activity) retain their
+  numbers in the v0.8 SKELETON's §3 sequencing but DEFER again
+  pending SDK 16.x publication. The v0.7-deferred M39 / M40 / M41
+  cluster (API `2026-04` pin + `set_item_description_content` +
   `create_doc_blocks`) RE-OPENS only when `@mondaydotcomorg/api`
   SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` natively
   AND a paid-tier sandbox is available for the M40 wire probe.
@@ -68,9 +84,21 @@ humans are second-class. Built incrementally via Claude Code on top of
   work are recoverable in `git reflog` for ~90 days; M40 findings
   preserved in user-memory at
   `~/.claude/projects/-home-nick-code-monday-cli/memory/project_m40_findings_deferred.md`.
-  v0.8 SKELETON (`docs/v0.8-plan.md`) ratifies at the v0.8 kickoff
-  candidate-selection AFTER v0.7.0 ships AND the v0.7.x
-  candidate-selection runs.
+
+  Other carry-forward backlog stays deferred:
+  (a) profile-scoped argument defaults (filed at v0.6 kickoff;
+  extends `~/.monday-cli/config.toml` with `[profiles.<name>.
+  defaults]`; carries the §13 carve-out Decision prerequisite
+  distinguishing aliases-as-stored-command-strings from
+  defaults-as-stored-flag-values); (b) cross-board `item move`
+  value-overrides (Monday's `ColumnMappingInput` still carries
+  no value slot at API `2026-01` — slipped four times, may
+  close permanently or await Monday surface change);
+  (c) cross-board search resumable cursor (per-board
+  cursor-lifetime under aggregation design issue unchanged);
+  (d) multi-level subitem creation (Monday's `sub_items_board`
+  still missing `subtasks` column at `2026-01`/`2026-04`/
+  `2026-07` per 2026-05-18 changelog research).
 
 - **M43 SHIPPED at `5cf4365..c217011`** (R0 IMPL + R1-R3 Codex
   IMPL fix-up commits + R4 CONVERGED with zero findings). The
