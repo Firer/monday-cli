@@ -11,19 +11,19 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.7.0` ready for publish — release-prep
-  complete, npm publish + annotated tag pending user authorization.
-  Release-prep cluster closed at `9b7e9ad..<this-commit>` (5 commits:
-  ToC audit + deferral slip `9b7e9ad` / README quickstart + scope
-  refresh `3ca51ea` / version bump 0.6.0 → 0.7.0 + audit-fix
+- **Published:** `monday-cli@0.7.0` on npm (`latest` dist-tag,
+  2026-05-20T15:48:07Z). **v0.7.0 published — release complete.**
+  Release-prep closed at `9b7e9ad..3e46f59` (5 commits: ToC audit +
+  deferral slip `9b7e9ad` / README quickstart + scope refresh
+  `3ca51ea` / version bump 0.6.0 → 0.7.0 + audit-fix
   `brace-expansion 5.0.2 → 5.0.5+` `75c8831` / CHANGELOG [0.7.0]
-  `9ebaa81` / close-docs sweep `<this-commit>`; envelope-snapshot
-  refresh probe ran clean at release-prep open — zero diff vs M43
-  IMPL close — and folded into this close-docs prose per the v0.5 /
-  v0.6 precedent). Previous: `monday-cli@0.6.0` on npm (`latest`
-  dist-tag, 2026-05-18T16:30:21Z), release-prep closed at
-  `98185d4..51ba1a4`, annotated `v0.6.0` tag at
-  https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
+  `9ebaa81` / close-docs sweep `3e46f59`; envelope-snapshot refresh
+  probe ran clean at release-prep open — zero diff vs M43 IMPL
+  close — and folded into the close-docs prose per the v0.5 / v0.6
+  precedent). Annotated `v0.7.0` tag pushed pointing at `3e46f59`;
+  GitHub release live at
+  https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
+  `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
 - **Live numbers:** 4124 tests + 1 skipped across 172 files (unchanged
   across release-prep — no new feature surface; one test description
@@ -41,13 +41,10 @@ humans are second-class. Built incrementally via Claude Code on top of
   **0 vulnerabilities** post-fix (`brace-expansion 5.0.2 → 5.0.5+`
   resolved at the version-bump commit `75c8831` per the v0.6
   release-prep audit-fix-folded-into-version-bump precedent).
-- **Next session:** **EXTERNALLY BLOCKED on `v0.7.0` npm publish +
-  annotated tag — user actions, not agent actions.** Once
-  `monday-cli@0.7.0` lands on npm and the `v0.7.0` annotated tag
-  pushes to `origin/main`, the next session should be a **v0.7.x
-  candidate-selection** per R-NEW-75 (when ≥2 backlog candidates
-  remain, run a dedicated pre-pre-flight session before any
-  pre-flight contract diff). The current `cli-design.md` §13
+- **Next session:** **v0.7.x candidate-selection** per R-NEW-75
+  (when ≥2 backlog candidates remain, run a dedicated
+  pre-pre-flight session before any pre-flight contract diff).
+  The current `cli-design.md` §13
   carry-forward backlog living on the present `2026-01` pin
   carries 5+ candidates: (a) `<file-col>=-` stdin support
   (v0.6-M38 D7 deferral; needs clean `--filename` companion shape
