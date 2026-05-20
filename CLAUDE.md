@@ -59,7 +59,12 @@ humans are second-class. Built incrementally via Claude Code on top of
 - **Next session:** two candidates, plus one CI prerequisite:
   **(0) R-v0.8-NEW-10 — close the M46 coverage gap** so CI goes green
   (recover ≥15 branches in `item/update.ts` + `item/create.ts`;
-  user-deferred from the M49 session). **(a) M47 — stdin file `--set`
+  user-deferred from the M49 session). **Ride R-v0.8-NEW-11** on this
+  session — lifting the four helpers `multipart-transport.ts`
+  duplicates from `transport.ts` (`describeFetchError` / `combineSignals`
+  / `isAbortError` / `headersToRecord`) recovers the SAME defensive
+  branch that's uncovered in both copies (`transport.ts:249` +
+  `multipart-transport.ts:409`). **(a) M47 — stdin file `--set`
   `<file-col>=-`** — now UNBLOCKED (M49 fixed the shared upload
   transport). **(b) M48 — writable board_relation settings** —
   independent (it's `create_column`, JSON not multipart; probe

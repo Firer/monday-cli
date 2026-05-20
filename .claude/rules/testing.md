@@ -123,6 +123,21 @@ explanation comments go on separate lines from the directive markers.
   `client.request` (the SDK's escape hatch) or `fetch`/`undici` —
   not `commands/items/get.ts`'s helpers. The point is to verify the
   real code path under realistic inputs.
+- **The mock must reject what the real wire rejects.** A mock that
+  accepts a request shape the live API would 4xx keeps a whole
+  feature-family green while it's broken in production. The v0.8-M49
+  P1 proved it: the file-upload transport shipped the Apollo
+  multipart spec for five milestones (M31/M38/M42/M43/M46) because the
+  wire-shape assertion validated the *wrong* form — live Monday
+  rejected every real upload. So: assert the actual wire structure
+  (FormData parts, body shape, headers) against what the API truly
+  accepts, and where the mock structurally CAN'T match the wire (a
+  higher-level transport stub that never sees the body), back it with
+  a **`RUN_LIVE_TESTS`-gated live smoke test** that drives the real
+  transport against the API (see `tests/e2e/live-multipart-upload.test.ts`
+  + `tests/e2e/live-schema-drift.test.ts`). Pin the wire shape with an
+  empirical probe first (`scripts/probe/`). (v0.8-plan §22
+  R-v0.8-NEW-9.)
 - **Restore mocks in `afterEach`.** Use `vi.restoreAllMocks()` or
   `vi.resetAllMocks()` consistently — pick one per file.
 - **Fixtures live in `tests/fixtures/`** as `.json` files keyed by the
