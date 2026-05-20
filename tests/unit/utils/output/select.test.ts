@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { UsageError } from '../../../../src/utils/errors.js';
-import { selectOutput } from '../../../../src/utils/output/select.js';
+import {
+  resolveColorEnabled,
+  selectOutput,
+} from '../../../../src/utils/output/select.js';
 
 describe('selectOutput — defaults from TTY', () => {
   it('defaults to table when stdout is a TTY', () => {
@@ -100,5 +103,95 @@ describe('selectOutput — error type', () => {
       expect(err).toBeInstanceOf(UsageError);
       expect((err as UsageError).code).toBe('usage_error');
     }
+  });
+});
+
+describe('resolveColorEnabled', () => {
+  it('enables colour on a TTY with no opposing signal', () => {
+    expect(resolveColorEnabled({ noColor: false, isTTY: true })).toBe(true);
+  });
+
+  it('disables colour off a TTY (pipe-safe default)', () => {
+    expect(resolveColorEnabled({ noColor: false, isTTY: false })).toBe(false);
+  });
+
+  it('--no-color wins over a TTY', () => {
+    expect(resolveColorEnabled({ noColor: true, isTTY: true })).toBe(false);
+  });
+
+  it('--no-color wins even with FORCE_COLOR set', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: true,
+        isTTY: true,
+        env: { FORCE_COLOR: '1' },
+      }),
+    ).toBe(false);
+  });
+
+  it('FORCE_COLOR forces colour even off a TTY', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: false,
+        env: { FORCE_COLOR: '1' },
+      }),
+    ).toBe(true);
+  });
+
+  it('FORCE_COLOR=0 does not force colour (falls through to TTY)', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: false,
+        env: { FORCE_COLOR: '0' },
+      }),
+    ).toBe(false);
+  });
+
+  it('FORCE_COLOR=false does not force colour', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: false,
+        env: { FORCE_COLOR: 'false' },
+      }),
+    ).toBe(false);
+  });
+
+  it('empty FORCE_COLOR does not force colour', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: true,
+        env: { FORCE_COLOR: '', NO_COLOR: '1' },
+      }),
+    ).toBe(false);
+  });
+
+  it('NO_COLOR disables colour on a TTY', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: true,
+        env: { NO_COLOR: '1' },
+      }),
+    ).toBe(false);
+  });
+
+  it('empty NO_COLOR is ignored (falls through to TTY)', () => {
+    expect(
+      resolveColorEnabled({ noColor: false, isTTY: true, env: { NO_COLOR: '' } }),
+    ).toBe(true);
+  });
+
+  it('FORCE_COLOR takes precedence over NO_COLOR', () => {
+    expect(
+      resolveColorEnabled({
+        noColor: false,
+        isTTY: false,
+        env: { FORCE_COLOR: '1', NO_COLOR: '1' },
+      }),
+    ).toBe(true);
   });
 });

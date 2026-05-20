@@ -71,3 +71,41 @@ export const selectOutput = (input: SelectOutputInput): OutputFormat => {
 
   return isTTY ? 'table' : 'json';
 };
+
+export interface ResolveColorInput {
+  /** `--no-color` flag (commander-inverted `globalFlags.noColor`). */
+  readonly noColor: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly isTTY: boolean;
+}
+
+/**
+ * Decides whether presentation output (cli-table3 borders/headers,
+ * any future styled text) may emit ANSI colour. Unlike `selectOutput`,
+ * this is a hard gate the renderers must honour: cli-table3 colours its
+ * borders unconditionally otherwise, so a `--output table` forced
+ * through a pipe leaks `^[[90m`/`^[[39m` into captured output
+ * (`cli-design.md` §3.2 / `cli.md` "Respect NO_COLOR"). Default is the
+ * stdout TTY-ness so a normal pipe gets clean text without a flag.
+ *
+ * Resolution priority (first match wins):
+ *  1. `--no-color` → off (explicit user intent, strongest).
+ *  2. `FORCE_COLOR` (present, not `0`/`false`) → on, even off-TTY.
+ *  3. `NO_COLOR` (present, non-empty) → off.
+ *  4. fall back to `isTTY`.
+ */
+export const resolveColorEnabled = (input: ResolveColorInput): boolean => {
+  const { noColor, env, isTTY } = input;
+  if (noColor) {
+    return false;
+  }
+  const force = env?.FORCE_COLOR;
+  if (force !== undefined && force !== '' && force !== '0' && force !== 'false') {
+    return true;
+  }
+  const no = env?.NO_COLOR;
+  if (no !== undefined && no !== '') {
+    return false;
+  }
+  return isTTY;
+};

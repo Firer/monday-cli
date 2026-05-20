@@ -37,6 +37,15 @@ export interface TableOptions {
    * already, and a truncated header is more useful than an error here.
    */
   readonly columns?: readonly string[];
+  /**
+   * Whether ANSI colour may be emitted. cli-table3 colours its
+   * borders + header grey/red by default regardless of TTY-ness, so a
+   * `--output table` forced through a pipe leaks escape codes. When
+   * `false` (the default — callers opt INTO colour), border + head
+   * style arrays are emptied so the table is plain text. The
+   * command layer computes this via `resolveColorEnabled`.
+   */
+  readonly color?: boolean;
 }
 
 export interface SingleResourceTableInput {
@@ -129,9 +138,21 @@ const collectKeysInOrder = (
   return ordered;
 };
 
+/**
+ * cli-table3 colours its `head` (red) and `border` (grey) by default,
+ * emitting ANSI even when stdout isn't a TTY. When colour is off we
+ * empty both style arrays so the rendered table is plain text. Colour
+ * defaults to OFF here — callers opt in via `options.color`, which the
+ * emit layer computes from `resolveColorEnabled`.
+ */
+const colourStyle = (
+  color: boolean | undefined,
+): { style: { head: string[]; border: string[] } } | Record<string, never> =>
+  color === true ? {} : { style: { head: [], border: [] } };
+
 const renderSingle = (input: SingleResourceTableInput): string => {
   const { data, options = {} } = input;
-  const { full = false, width = FALLBACK_WIDTH, columns } = options;
+  const { full = false, width = FALLBACK_WIDTH, columns, color } = options;
 
   const allKeys = Object.keys(data);
   const keys = filterAndOrderKeys(allKeys, columns);
@@ -140,6 +161,7 @@ const renderSingle = (input: SingleResourceTableInput): string => {
 
   const table = new Table({
     head: ['field', 'value'],
+    ...colourStyle(color),
   });
   for (const key of keys) {
     const cell = formatCell(data[key]);
@@ -153,7 +175,7 @@ const renderSingle = (input: SingleResourceTableInput): string => {
 
 const renderCollection = (input: CollectionTableInput): string => {
   const { data, options = {} } = input;
-  const { full = false, width = FALLBACK_WIDTH, columns } = options;
+  const { full = false, width = FALLBACK_WIDTH, columns, color } = options;
 
   const allKeys = collectKeysInOrder(data);
   const keys = filterAndOrderKeys(allKeys, columns);
@@ -161,12 +183,13 @@ const renderCollection = (input: CollectionTableInput): string => {
   if (keys.length === 0) {
     // Empty collection still emits a table-shaped sentinel; an empty
     // string would let the renderer-selection bug ride silently.
-    return new Table({ head: [] }).toString();
+    return new Table({ head: [], ...colourStyle(color) }).toString();
   }
 
   const colWidth = full ? Number.POSITIVE_INFINITY : computeColumnWidth(keys.length, width);
   const table = new Table({
     head: full ? [...keys] : keys.map((k) => truncate(k, colWidth)),
+    ...colourStyle(color),
   });
   for (const row of data) {
     table.push(

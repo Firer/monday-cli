@@ -15,7 +15,11 @@ import { renderJson } from '../utils/output/json.js';
 import { renderNdjson } from '../utils/output/ndjson.js';
 import { renderTable } from '../utils/output/table.js';
 import { renderText } from '../utils/output/text.js';
-import { selectOutput, type OutputFormat } from '../utils/output/select.js';
+import {
+  resolveColorEnabled,
+  selectOutput,
+  type OutputFormat,
+} from '../utils/output/select.js';
 import { redact } from '../utils/redact.js';
 import {
   parseGlobalFlags,
@@ -153,19 +157,27 @@ const renderForFormat = <T>(
     case 'json':
       renderJson(redacted, ctx.stdout);
       return;
-    case 'table':
+    case 'table': {
+      // Gate cli-table3's default border/header colour on TTY-ness +
+      // NO_COLOR/--no-color so a piped `--output table` doesn't leak
+      // ANSI escapes into captured output (cli.md "Respect NO_COLOR").
+      const color = resolveColorEnabled({
+        noColor: globalFlags.noColor,
+        env: ctx.env,
+        isTTY: ctx.isTTY,
+      });
+      const tableOptions = {
+        full: globalFlags.full,
+        color,
+        ...(globalFlags.width === undefined ? {} : { width: globalFlags.width }),
+        ...(globalFlags.columns === undefined ? {} : { columns: globalFlags.columns }),
+      };
       if (kind === 'collection') {
         renderTable(
           {
             kind: 'collection',
             data: redactedData as readonly Readonly<Record<string, unknown>>[],
-            options: {
-              full: globalFlags.full,
-              ...(globalFlags.width === undefined ? {} : { width: globalFlags.width }),
-              ...(globalFlags.columns === undefined
-                ? {}
-                : { columns: globalFlags.columns }),
-            },
+            options: tableOptions,
           },
           ctx.stdout,
         );
@@ -174,18 +186,13 @@ const renderForFormat = <T>(
           {
             kind: 'single',
             data: redactedData as Readonly<Record<string, unknown>>,
-            options: {
-              full: globalFlags.full,
-              ...(globalFlags.width === undefined ? {} : { width: globalFlags.width }),
-              ...(globalFlags.columns === undefined
-                ? {}
-                : { columns: globalFlags.columns }),
-            },
+            options: tableOptions,
           },
           ctx.stdout,
         );
       }
       return;
+    }
     case 'text':
       if (kind === 'collection') {
         // Text renderer is single-resource only per v0.1; collections

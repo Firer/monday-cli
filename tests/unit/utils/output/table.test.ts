@@ -255,3 +255,52 @@ describe('renderTable — value formatting', () => {
     expect(out).toContain('42');
   });
 });
+
+describe('renderTable — colour gating', () => {
+  // cli-table3 colours its borders grey by default; a piped
+  // `--output table` must not leak ANSI escapes (cli.md "Respect
+  // NO_COLOR"). The emit layer resolves `color` from TTY-ness; here we
+  // assert the renderer honours it.
+  const ESC = String.fromCharCode(27);
+
+  it('emits no ANSI when colour is unset (default off)', () => {
+    const { stream, read } = collect();
+    renderTable(
+      { kind: 'single', data: { id: '1', name: 'x' }, options: { full: true } },
+      stream,
+    );
+    expect(read().includes(ESC)).toBe(false);
+  });
+
+  it('emits no ANSI when colour is false', () => {
+    const { stream, read } = collect();
+    renderTable(
+      {
+        kind: 'collection',
+        data: [{ id: '1' }, { id: '2' }],
+        options: { full: true, color: false },
+      },
+      stream,
+    );
+    expect(read().includes(ESC)).toBe(false);
+  });
+
+  it('emits ANSI border colour when colour is true', () => {
+    const { stream, read } = collect();
+    renderTable(
+      {
+        kind: 'single',
+        data: { id: '1', name: 'x' },
+        options: { full: true, color: true },
+      },
+      stream,
+    );
+    expect(read().includes(ESC)).toBe(true);
+  });
+
+  it('keeps the empty-collection sentinel plain when colour is off', () => {
+    const { stream, read } = collect();
+    renderTable({ kind: 'collection', data: [], options: { color: false } }, stream);
+    expect(read().includes(ESC)).toBe(false);
+  });
+});
