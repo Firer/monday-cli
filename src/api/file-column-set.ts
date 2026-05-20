@@ -122,9 +122,20 @@
  *   - `'mixed_file_and_value_sets'` — file `--set` + any value
  *     `--set` / `--set-raw` / `--name` in same call. Applies on
  *     single-item AND bulk call shapes (universal mutex rule).
- *   - `'multi_file_set_unsupported'` — 2+ file `--set` entries
- *     in same call. Applies on single-item AND bulk call shapes
- *     (universal mutex rule).
+ *   - `'multi_file_set_unsupported'` — **NO LONGER SURFACES**
+ *     from `'item_update_single'` / `'item_update_bulk'` /
+ *     `'item_create'` callShapes at v0.8-M46 onwards (D2 carve-out
+ *     fold; multi-file dispatch now routes through new `file_multi`
+ *     / `file_bulk_multi` / `file_create_multi` enforcement kinds
+ *     for the action body's per-item multi-leg fan-out). The
+ *     discriminator literal stays RESERVED across the codebase
+ *     (do not reuse for a different rejection reason; mirrors
+ *     M42 / M43 reserved-literal discipline). The throw remains
+ *     for the `'item_set'` callShape as a defensive type-system
+ *     ceiling — the single-positional `monday item set <iid>
+ *     <col>=<value>` shape is argv-incapable of expressing 2+
+ *     file `--set` entries, so this rejection is argv-unreachable
+ *     in practice; kept as defense-in-depth.
  *   - `'file_set_on_bulk_unsupported'` — **NO LONGER SURFACES**
  *     at v0.7-M42 onwards. Historical reference only; the
  *     discriminator literal stays reserved across the codebase
@@ -240,6 +251,49 @@ export const fileColumnSetOutputSchema = z
   .strict();
 
 export type FileColumnSetOutput = z.infer<typeof fileColumnSetOutputSchema>;
+
+/**
+ * Output envelope shape for the v0.8-M46 multi-file `--set` dispatch
+ * leg on single-item `monday item update <iid> --set f1=p1 --set
+ * f2=p2 ...`. Discriminate from M38's single-file envelope via the
+ * new `operation: 'add_files_to_columns'` literal (plural) — agents
+ * branch on `data.operation` to handle single vs multi shapes
+ * uniformly.
+ *
+ * Per-file slot mirrors M31's `Asset` shape verbatim wrapped under
+ * a `column_id` + `filename` + `file_size_bytes` per-entry context.
+ * The `applied_file_columns` slot echoes the file columns that
+ * landed on success (length N; always present on multi-file success
+ * envelopes).
+ *
+ * **Status: schema landed at v0.8-M46 pre-flight contract diff;
+ * runtime emit lifted at v0.8-M46 IMPL.** Pre-flight runtime path
+ * throws `'m46_preflight_stub'` from the c8-ignored stub helper;
+ * the schema is the contract IMPL builds against.
+ */
+export const fileColumnSetMultiOutputSchema = z
+  .object({
+    operation: z.literal('add_files_to_columns'),
+    item_id: z.string().min(1),
+    assets: z
+      .array(
+        z
+          .object({
+            column_id: z.string().min(1),
+            filename: z.string().min(1),
+            file_size_bytes: z.number().int().nonnegative(),
+            asset: assetSchema,
+          })
+          .strict(),
+      )
+      .min(2),
+    applied_file_columns: z.array(z.string().min(1)).min(2),
+  })
+  .strict();
+
+export type FileColumnSetMultiOutput = z.infer<
+  typeof fileColumnSetMultiOutputSchema
+>;
 
 /**
  * Inputs for the M38 file-column dispatch fetcher. Wraps M31's
@@ -424,7 +478,59 @@ export type FileColumnSetEnforcementResult =
   // shape per cli-design §5.8 — orphan-warn surfaces leg-1's item
   // ID via `internal_error.details.created_item_id` when leg-2 fails
   // (D1 closure).
-  | { readonly kind: 'file_create'; readonly columnId: string; readonly rawValue: string };
+  | { readonly kind: 'file_create'; readonly columnId: string; readonly rawValue: string }
+  // v0.8-M46 carve-out fold (D2 closure — multi-file `--set` per
+  // call). 2+ file `--set` entries on `'item_update_single'` route
+  // to this variant; the action body branches into
+  // `runItemUpdateSingleFileMultiDispatch` (in `commands/item/
+  // update.ts`) which runs an upfront `precheckLocalFile` per path,
+  // then sequences N `executeFileColumnSet` calls per the single
+  // target item ID. The `entries` slot carries the resolved file
+  // columns + agent-supplied raw paths in argv order (length ≥ 2;
+  // single-file routes to `kind: 'file'` per the existing path).
+  // Mutex rules at v0.8-M46: mixed-rule UNCHANGED (still rejects
+  // file + value `--set` / `--set-raw` / `--name` per the universal
+  // rule on `'item_update_single'` callShape).
+  | {
+      readonly kind: 'file_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+      }[];
+    }
+  // v0.8-M46 carve-out fold (D2 closure). 2+ file `--set` entries
+  // on `'item_update_bulk'` route to this variant; the action body
+  // branches into `runItemUpdateBulkFileMultiDispatch` which runs
+  // an upfront pre-check pass over ALL file paths once + fans out
+  // N legs per matched item under `--concurrency` (cross-item
+  // parallel) × within-item sequential (D1 closure). Per-item
+  // partial failure mid-multi-leg surfaces via M42's partial-
+  // success envelope extended with `applied_file_columns` +
+  // `failed_file_column` slots (D2 closure).
+  | {
+      readonly kind: 'file_bulk_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+      }[];
+    }
+  // v0.8-M46 carve-out fold (D2 closure). 2+ file `--set` entries
+  // on `'item_create'` route to this variant; the action body
+  // branches into `runItemCreateFileMultiDispatch` which runs
+  // upfront `precheckLocalFile` per path, leg-1 `create_item` with
+  // bundled non-file `column_values`, then N sequential
+  // `add_file_to_column` legs (legs 2..N+1) against the new item
+  // ID. Atomicity envelope extends M43's orphan-warn:
+  // `create_then_file_upload_partial_failure` extended with
+  // `applied_file_columns` always-present slot (length 0..N-1)
+  // reflecting file columns that landed before the failing leg.
+  | {
+      readonly kind: 'file_create_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+      }[];
+    };
 
 export interface EnforceSingleFileColumnSetInputs {
   /**
@@ -499,19 +605,27 @@ export interface EnforceSingleFileColumnSetInputs {
  * throws `ApiError('usage_error', ...)` on a mutex violation.
  *
  * Mutex priority (ratified at M38 pre-flight; updated at v0.7-M42
- * + v0.7-M43 pre-flights to fold the D5 bulk + D6 create carve-outs):
+ * + v0.7-M43 pre-flights to fold the D5 bulk + D6 create carve-outs;
+ * updated at v0.8-M46 pre-flight to fold the D2 multi-file carve-out):
  *
- *   1. **callShape gate — NONE remaining post-v0.7-M43** — both
- *      `'item_update_bulk'` (D5 fold at v0.7-M42) and `'item_create'`
- *      (D6 fold at v0.7-M43) short-circuit-throws have been removed.
- *      Every callShape falls through to the universal multi-file
- *      gate + a callShape-aware mixed gate, then returns a per-
- *      callShape `kind` on the clean path.
- *   2. **multi-file leg** — 2+ file `--set` entries (any callShape)
- *      surface `'multi_file_set_unsupported'`. Universal rule:
- *      Monday's `add_file_to_column` is single-column per call on
- *      the wire regardless of fan-out shape.
- *   3. **mixed leg** — 1 file `--set` + any value `--set` /
+ *   1. **callShape gate — ONLY `'item_set'` defensive throw remains**
+ *      post-v0.8-M46. The v0.6-M38 `'item_update_bulk'` (D5 fold at
+ *      v0.7-M42) and `'item_create'` (D6 fold at v0.7-M43) short-
+ *      circuit-throws have been removed; the v0.6-M38 universal
+ *      multi-file throw FOLDED at v0.8-M46 (D2) for the 3 reachable
+ *      callShapes. The `'item_set'` callShape's multi-file throw
+ *      stays as defensive type-system ceiling — the single-
+ *      positional `monday item set <iid> <col>=<value>` verb is
+ *      argv-incapable of expressing 2+ file `--set` entries, so
+ *      this branch is argv-unreachable in practice; kept as
+ *      defense-in-depth.
+ *   2. **multi-file leg (`'item_set'` only post-fold)** — 2+ file
+ *      `--set` entries on `'item_set'` callShape surface
+ *      `'multi_file_set_unsupported'` (argv-unreachable defensive).
+ *      The other 3 reachable callShapes (`'item_update_single'` /
+ *      `'item_update_bulk'` / `'item_create'`) fall through to the
+ *      mixed gate + clean leg for the multi-file dispatch routing.
+ *   3. **mixed leg** — 1+ file `--set` + any value `--set` /
  *      `--set-raw` / `--name` surfaces `'mixed_file_and_value_sets'`
  *      on `'item_set'` / `'item_update_single'` / `'item_update_bulk'`.
  *      Universal rule on those callShapes: mixing forces non-atomic
@@ -520,22 +634,26 @@ export interface EnforceSingleFileColumnSetInputs {
  *      asymmetry — `create_item` natively bundles non-file
  *      `column_values` atomically into leg-1, and `--name` is
  *      required on create.
- *   4. **clean leg** — 1 file `--set`, no mutex violation:
- *      - `'item_update_single'` / `'item_set'` → return
- *        `{ kind: 'file', columnId, rawValue }` for downstream
- *        {@link precheckLocalFile} + {@link executeFileColumnSet}
- *        (M38 path; unchanged).
- *      - `'item_update_bulk'` → return `{ kind: 'file_bulk',
- *        columnId, rawValue }` for the action body's per-item
- *        multipart fan-out (v0.7-M42 D5 carve-out fold).
- *      - `'item_create'` → return `{ kind: 'file_create', columnId,
- *        rawValue }` for the action body's two-leg `create_item`
- *        then `add_file_to_column` helper (v0.7-M43 D6 carve-out
- *        fold).
+ *   4. **clean leg** — ≥1 file `--set`, no mutex violation. Branches
+ *      on N (single vs multi) then callShape:
+ *      - N=1 (single-file path):
+ *        - `'item_update_single'` / `'item_set'` → `{ kind: 'file',
+ *          columnId, rawValue }` (M38 path; unchanged).
+ *        - `'item_update_bulk'` → `{ kind: 'file_bulk', ... }`
+ *          (v0.7-M42 D5 carve-out fold).
+ *        - `'item_create'` → `{ kind: 'file_create', ... }`
+ *          (v0.7-M43 D6 carve-out fold).
+ *      - N>1 (multi-file path — v0.8-M46 D2 carve-out fold):
+ *        - `'item_update_single'` → `{ kind: 'file_multi', entries }`
+ *          for the single-item multi-leg fan-out helper.
+ *        - `'item_update_bulk'` → `{ kind: 'file_bulk_multi',
+ *          entries }` for the bulk per-item multi-leg fan-out.
+ *        - `'item_create'` → `{ kind: 'file_create_multi', entries }`
+ *          for the create-time two-leg-group multi-file helper.
  *
  * The function is sync + pure. No I/O. Path validation lives at a
  * SEPARATE step (`precheckLocalFile` from `src/utils/file-source.ts`)
- * that the caller runs AFTER this function returns a `kind: 'file'`
+ * that the caller runs AFTER this function returns a `kind: 'file*'`
  * result.
  */
 export const enforceSingleFileColumnSet = (
@@ -560,33 +678,45 @@ export const enforceSingleFileColumnSet = (
   // the v0.7-M42 fold of `'file_set_on_bulk_unsupported'` for
   // `'item_update_bulk'`.)
 
-  // Multi-file leg (D2 multi). 2+ file `--set` entries on any
-  // callShape — applies universally (single-item AND bulk) because
-  // Monday's `add_file_to_column` is single-column per call on the
-  // wire regardless of how many items the dispatch fans out across.
-  // Multi-file dispatch carries forward as a v0.7.x candidate.
-  if (fileSetEntries.length > 1) {
+  // Multi-file leg (D2 multi). v0.8-M46 D2 carve-out fold: lifted
+  // on the 3 reachable callShapes (`'item_update_single'`,
+  // `'item_update_bulk'`, `'item_create'`); the action body routes
+  // the multi-file dispatch into the per-callShape multi-leg
+  // helper via the new `file_multi` / `file_bulk_multi` /
+  // `file_create_multi` enforcement kinds (see clean-leg block
+  // below).
+  //
+  // The `'item_set'` callShape's defensive throw stays in force —
+  // the single-positional `monday item set <iid> <col>=<value>`
+  // verb is argv-incapable of expressing 2+ file `--set` entries,
+  // so this branch is argv-unreachable in practice; kept as
+  // defense-in-depth + type-system ceiling. The
+  // `'multi_file_set_unsupported'` discriminator literal stays
+  // RESERVED across the codebase post-fold (mirrors v0.7-M42 D5
+  // fold of `'file_set_on_bulk_unsupported'` + v0.7-M43 D6 fold of
+  // `'file_set_on_create_unsupported'` reserved-literal discipline).
+  if (fileSetEntries.length > 1 && inputs.callShape === 'item_set') {
     throw new ApiError(
       'usage_error',
-      `Multi-file \`--set <file-col>=<path>\` is not supported ` +
-        `(${String(fileSetEntries.length)} file \`--set\` entries ` +
-        `detected; deferred to v0.7.x per cli-design §5.3 + v0.6-plan ` +
-        `§3 M38 D2 closure — carry-forward from v0.6 unchanged at ` +
-        `v0.7-M42). Monday's \`add_file_to_column\` mutation is ` +
-        `single-column per call on the wire; multi-file dispatch + ` +
-        `concurrent multipart over the shared transport carry design ` +
-        `dimensions worth their own milestone. Pass exactly one ` +
-        `\`--set <file-col>=<path>\` per call; for multiple uploads, ` +
-        `run separate calls.`,
+      `Multi-file \`--set <file-col>=<path>\` is not supported on the ` +
+        `\`monday item set\` single-positional verb (argv-unreachable ` +
+        `defensive guard — \`item set <iid> <col>=<value>\` accepts ` +
+        `exactly one positional). For multi-file dispatch, use ` +
+        `\`monday item update <iid> --set <file-col>=<path> --set ` +
+        `<file-col2>=<path2> ...\` (v0.8-M46 single-item multi-file ` +
+        `path) or \`monday item create --board <bid> --set ` +
+        `<file-col>=<path> --set <file-col2>=<path2> ...\` ` +
+        `(v0.8-M46 create-time multi-file path).`,
       {
         details: {
           reason: 'multi_file_set_unsupported',
           file_count: fileSetEntries.length,
           file_column_ids: fileSetEntries.map((e) => e.columnId),
-          deferred_to: 'v0.7.x',
+          call_shape: inputs.callShape,
           hint:
-            'pass exactly one `--set <file-col>=<path>` per call; ' +
-            'run separate calls for multiple file uploads.',
+            'use `monday item update <iid> --set ...` or `monday item ' +
+            'create --set ...` for multi-file dispatch (v0.8-M46 ' +
+            'carve-out fold).',
         },
       },
     );
@@ -650,16 +780,45 @@ export const enforceSingleFileColumnSet = (
     );
   }
 
-  // Clean dispatch leg. Single file `--set`, no mutex violation.
-  // Discriminators:
-  //   - `'item_update_single'` / `'item_set'` → `kind: 'file'`
-  //     (M38 single-item path; unchanged).
-  //   - `'item_update_bulk'` → `kind: 'file_bulk'` (v0.7-M42 D5
-  //     carve-out fold; action body's per-item multipart fan-out).
-  //   - `'item_create'` → `kind: 'file_create'` (v0.7-M43 D6
-  //     carve-out fold; action body's two-leg `create_item` then
-  //     `add_file_to_column` dispatch with orphan-warn atomicity
-  //     envelope per D1 closure).
+  // Clean dispatch leg. ≥1 file `--set`, no mutex violation.
+  // Branches on N (single vs multi) then on callShape:
+  //   N=1 (single-file path):
+  //     - `'item_update_single'` / `'item_set'` → `kind: 'file'`
+  //       (M38 single-item path; unchanged).
+  //     - `'item_update_bulk'` → `kind: 'file_bulk'` (v0.7-M42 D5
+  //       carve-out fold; action body's per-item multipart fan-out).
+  //     - `'item_create'` → `kind: 'file_create'` (v0.7-M43 D6
+  //       carve-out fold; action body's two-leg `create_item` then
+  //       `add_file_to_column` dispatch with orphan-warn atomicity
+  //       envelope per D1 closure).
+  //   N>1 (multi-file path — v0.8-M46 D2 carve-out fold):
+  //     - `'item_update_single'` → `kind: 'file_multi'` (single-item
+  //       N-leg fan-out helper `runItemUpdateSingleFileMultiDispatch`).
+  //     - `'item_update_bulk'` → `kind: 'file_bulk_multi'` (per-item
+  //       N-leg fan-out helper `runItemUpdateBulkFileMultiDispatch`;
+  //       cross-item parallel × within-item sequential).
+  //     - `'item_create'` → `kind: 'file_create_multi'` (two-leg-
+  //       group helper `runItemCreateFileMultiDispatch`; leg-1
+  //       `create_item` then N sequential `add_file_to_column`
+  //       legs). The `'item_set'` callShape is argv-unreachable
+  //       (single-positional; cannot express 2+ file `--set`) and
+  //       throws the defensive `'multi_file_set_unsupported'` above.
+  if (fileSetEntries.length > 1) {
+    const entries = fileSetEntries.map((e) => ({
+      columnId: e.columnId,
+      rawValue: e.rawValue,
+    }));
+    if (inputs.callShape === 'item_update_bulk') {
+      return { kind: 'file_bulk_multi', entries };
+    }
+    if (inputs.callShape === 'item_create') {
+      return { kind: 'file_create_multi', entries };
+    }
+    // `'item_update_single'` (and `'item_set'` defensively — the
+    // multi-file gate above already threw on `'item_set'`, so this
+    // branch only fires for `'item_update_single'` in practice).
+    return { kind: 'file_multi', entries };
+  }
   const fe = fileSetEntries[0];
   /* c8 ignore next 3 */
   if (fe === undefined) {
@@ -743,6 +902,47 @@ export type PreCheckM38FileDispatchResult =
       readonly columnId: string;
       readonly rawValue: string;
       readonly token: string;
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    }
+  // v0.8-M46 carve-out fold (D2 closure — multi-file `--set`). The
+  // three variants below mirror the single-file `'file'` /
+  // `'file_bulk'` / `'file_create'` shapes but carry a list of
+  // resolved file-column entries (length ≥ 2, in argv order). The
+  // action body branches on `kind` and routes into the per-callShape
+  // multi-leg helper. Each entry carries the resolved column ID +
+  // raw path + argv token (echoed downstream into `resolved_ids`
+  // for the envelope's wire-shape mirror).
+  | {
+      readonly kind: 'file_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+        readonly token: string;
+      }[];
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    }
+  | {
+      readonly kind: 'file_bulk_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+        readonly token: string;
+      }[];
+      readonly warnings: readonly ResolverWarning[];
+      readonly source: 'live' | 'cache' | 'mixed' | undefined;
+      readonly cacheAgeSeconds: number | null;
+    }
+  | {
+      readonly kind: 'file_create_multi';
+      readonly entries: readonly {
+        readonly columnId: string;
+        readonly rawValue: string;
+        readonly token: string;
+      }[];
       readonly warnings: readonly ResolverWarning[];
       readonly source: 'live' | 'cache' | 'mixed' | undefined;
       readonly cacheAgeSeconds: number | null;
@@ -890,9 +1090,49 @@ export const preCheckM38FileDispatch = async (
       cacheAgeSeconds: aggregateCacheAge,
     };
   }
-  // enforcement.kind is `'file'` (single-item) OR `'file_bulk'`
-  // (v0.7-M42 D5 carve-out fold). Find the matching resolved entry
-  // for the file-column token (echo into resolved_ids downstream).
+  // v0.8-M46 multi-file branches (D2 closure). The enforcement
+  // result carries a list of resolved file-column entries (length
+  // ≥ 2, argv order). Map each entry back to its argv token by
+  // matching (columnId, rawValue) against the pre-check's
+  // `resolved` list — the token is the load-bearing handle for
+  // the dispatch envelope's `resolved_ids` slot.
+  if (
+    enforcement.kind === 'file_multi' ||
+    enforcement.kind === 'file_bulk_multi' ||
+    enforcement.kind === 'file_create_multi'
+  ) {
+    const projectedEntries = enforcement.entries.map((entry) => {
+      const fileResolved = resolved.find(
+        (r) =>
+          r.columnType === 'file' &&
+          r.columnId === entry.columnId &&
+          r.rawValue === entry.rawValue,
+      );
+      /* c8 ignore next 6 — defensive: enforcement returned entries
+         the pre-check passed in; every find must succeed. */
+      if (fileResolved === undefined) {
+        throw new ApiError(
+          'internal_error',
+          'preCheckM38FileDispatch: multi-file entry not found in resolved set after enforcement',
+        );
+      }
+      return {
+        columnId: entry.columnId,
+        rawValue: entry.rawValue,
+        token: fileResolved.token,
+      };
+    });
+    return {
+      kind: enforcement.kind,
+      entries: projectedEntries,
+      warnings,
+      source: aggregateSource,
+      cacheAgeSeconds: aggregateCacheAge,
+    };
+  }
+  // Single-file branches: `'file'` (M38) / `'file_bulk'` (M42) /
+  // `'file_create'` (M43). Find the matching resolved entry for
+  // the file-column token (echo into resolved_ids downstream).
   const fileResolved = resolved.find(
     (r) =>
       r.columnType === 'file' &&

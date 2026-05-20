@@ -2265,10 +2265,18 @@ orphan-warn atomicity envelope (D1 closure).
 Mutex rules at the resolution boundary (D2/D5/D6 closures,
 universal across single + bulk):
 
-  - Exactly ONE file `--set` per call on every callShape
-    (universal multi-file mutex). 2+ file `--set` entries reject
-    with `usage_error` carrying `'multi_file_set_unsupported'` at
-    `details.reason`.
+  - **Multi-file `--set` per call — CARVED OUT at v0.8-M46** (D2
+    fold from v0.6-M38). At v0.6-M38 + v0.7 this rejected with
+    `usage_error.details.reason: 'multi_file_set_unsupported'`
+    on every callShape; v0.8-M46 lifts the gate for the 3
+    reachable callShapes (`'item_update_single'` /
+    `'item_update_bulk'` / `'item_create'`) — multi-leg per-item
+    fan-out (sequential within an item × parallel across items
+    for bulk). The literal stays RESERVED across the codebase
+    post-fold (regression-guarded). The throw remains for the
+    `'item_set'` callShape as a defensive type-system ceiling
+    (single-positional verb is argv-incapable of expressing 2+
+    file `--set` entries).
   - Mixing file `--set` with value `--set` / `--set-raw` /
     `--name` rejects on `'item_set'` / `'item_update_single'` /
     `'item_update_bulk'` with `usage_error.details.reason:

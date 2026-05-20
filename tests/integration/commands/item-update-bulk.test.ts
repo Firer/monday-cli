@@ -4383,4 +4383,119 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(out.stderr).not.toContain('m42_preflight_stub');
     });
   });
+
+  describe('v0.8-M46 bulk multi-file `--set` carve-out fold (D2 closure from v0.6-M38) — pre-flight stub', () => {
+    // v0.8-M46 pre-flight contract diff. argv + pre-check + items_page
+    // walk + confirmation gate + routing ship as live contract; the
+    // per-item multi-leg fan-out body is the c8-ignored stub throwing
+    // `'m46_preflight_stub'`. IMPL lifts the stub in a separate
+    // session. Mirrors v0.7-M42 pre-flight test shape verbatim.
+    const fileBoardMultiCols = {
+      ...sampleBoardMetadata,
+      columns: [
+        {
+          id: 'attachments',
+          title: 'Attachments',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'attachments_2',
+          title: 'Attachments 2',
+          type: 'file',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+        {
+          id: 'status_1',
+          title: 'Status',
+          type: 'status',
+          description: null,
+          archived: null,
+          settings_str: '{}',
+          width: null,
+        },
+      ],
+    };
+
+    let workdirM46: string;
+    let reportPath1: string;
+    let reportPath2: string;
+    beforeEach(async () => {
+      workdirM46 = await mkdtemp(join(tmpdir(), 'monday-cli-item-update-m46-'));
+      reportPath1 = join(workdirM46, 'report-1.pdf');
+      reportPath2 = join(workdirM46, 'report-2.pdf');
+      await writeFile(reportPath1, 'PDF-bytes-fixture-1', 'utf8');
+      await writeFile(reportPath2, 'PDF-bytes-fixture-2', 'utf8');
+    });
+    afterEach(async () => {
+      await rm(workdirM46, { recursive: true, force: true });
+    });
+
+    const fileBoardMetadataMulti = {
+      operation_name: 'BoardMetadata',
+      response: { data: { boards: [fileBoardMultiCols] } },
+    };
+    const itemsPageWithTwo = {
+      operation_name: 'ItemsPage',
+      response: {
+        data: {
+          boards: [
+            {
+              items_page: {
+                cursor: null,
+                items: [{ id: '12345' }, { id: '23456' }],
+              },
+            },
+          ],
+        },
+      },
+    };
+
+    it("routes 2+ file --set entries on item_update_bulk to the v0.8-M46 stub (surfaces 'm46_preflight_stub' until IMPL; was 'multi_file_set_unsupported' rejection at v0.6-M38 / v0.7)", async () => {
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: {
+            reason?: string;
+            call_shape?: string;
+            file_count?: number;
+            matched_count?: number;
+          };
+        };
+      };
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+      expect(env.error?.details?.call_shape).toBe('item_update_bulk');
+      expect(env.error?.details?.file_count).toBe(2);
+      expect(env.error?.details?.matched_count).toBe(2);
+      // Regression-guard: the v0.6-M38 reserved literal stays absent
+      // from runtime output post-fold.
+      expect(out.stderr).not.toContain('multi_file_set_unsupported');
+      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+    });
+  });
 });

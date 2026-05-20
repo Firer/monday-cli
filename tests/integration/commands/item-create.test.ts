@@ -3251,3 +3251,100 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     assertLiteralAbsent('leg-1 failure', leg1FailOut);
   });
 });
+
+describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 closure from v0.6-M38) — pre-flight stub', () => {
+  // v0.8-M46 pre-flight contract diff. argv + pre-check +
+  // create-mode resolution + routing surface ships as live
+  // contract; the two-leg-group multi-file dispatch body
+  // (precheckLocalFile × N + leg-1 create_item + legs 2..N+1
+  // add_file_to_column) is the c8-ignored stub throwing
+  // `'m46_preflight_stub'`. Lifted at v0.8-M46 IMPL. Mirrors
+  // v0.7-M43 pre-flight test shape verbatim. The
+  // `'multi_file_set_unsupported'` discriminator literal stays
+  // RESERVED across the codebase post-fold.
+  const fileBoardMultiCols = {
+    ...sampleBoardMetadata,
+    columns: [
+      {
+        id: 'attachments',
+        title: 'Attachments',
+        type: 'file',
+        description: null,
+        archived: null,
+        settings_str: '{}',
+        width: null,
+      },
+      {
+        id: 'attachments_2',
+        title: 'Attachments 2',
+        type: 'file',
+        description: null,
+        archived: null,
+        settings_str: '{}',
+        width: null,
+      },
+    ],
+  };
+
+  let workdirM46: string;
+  let reportPath1: string;
+  let reportPath2: string;
+  beforeEach(async () => {
+    workdirM46 = await mkdtemp(join(tmpdir(), 'monday-cli-item-create-m46-'));
+    reportPath1 = join(workdirM46, 'report-1.pdf');
+    reportPath2 = join(workdirM46, 'report-2.pdf');
+    await writeFile(reportPath1, 'PDF-bytes-fixture-1', 'utf8');
+    await writeFile(reportPath2, 'PDF-bytes-fixture-2', 'utf8');
+  });
+  afterEach(async () => {
+    await rm(workdirM46, { recursive: true, force: true });
+  });
+
+  it("routes 2+ file --set entries on item_create to the v0.8-M46 stub (surfaces 'm46_preflight_stub' until IMPL; was 'multi_file_set_unsupported' rejection at v0.6-M38 / v0.7)", async () => {
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'multi-file create item',
+        '--set',
+        `attachments=${reportPath1}`,
+        '--set',
+        `attachments_2=${reportPath2}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoardMultiCols] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: {
+          reason?: string;
+          call_shape?: string;
+          create_mode_kind?: string;
+          file_count?: number;
+        };
+      };
+    };
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+    expect(env.error?.details?.call_shape).toBe('item_create');
+    expect(env.error?.details?.create_mode_kind).toBe('item');
+    expect(env.error?.details?.file_count).toBe(2);
+    // Regression-guard: the v0.6-M38 reserved literal stays absent
+    // from runtime output post-fold (multi-file rejection literal
+    // RESERVED).
+    expect(out.stderr).not.toContain('multi_file_set_unsupported');
+    expect(out.stdout).not.toContain('multi_file_set_unsupported');
+  });
+});

@@ -1722,13 +1722,15 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # v0.6-M38: file-column dispatch — when a --set <col>=<path>
                                           # resolves to type `file`, the command branches off the JSON
                                           # translator path into add_file_to_column (multipart).
-                                          # Mutex rules at M38: exactly one file --set per call; mixing
-                                          # with any value --set / --set-raw / --name → usage_error
-                                          # carrying 'mixed_file_and_value_sets' at details.reason;
-                                          # 2+ file --set → usage_error carrying
-                                          # 'multi_file_set_unsupported' at details.reason — multi-file
-                                          # dispatch defers to v0.7.x (unratified — carry-forward
-                                          # candidate). --set-raw <file-col>=<json> stays REJECTED.
+                                          # Mutex rules at M38 + carve-out folds: mixing file --set with
+                                          # any value --set / --set-raw / --name → usage_error carrying
+                                          # 'mixed_file_and_value_sets' at details.reason (suppressed on
+                                          # 'item_create' callShape per v0.7-M43 D6 asymmetry); 2+ file
+                                          # --set entries CARVED OUT at v0.8-M46 (D2 fold) — multi-leg
+                                          # per-item fan-out under sequential within-item × parallel
+                                          # across-items (for bulk). The 'multi_file_set_unsupported'
+                                          # discriminator literal stays RESERVED. --set-raw
+                                          # <file-col>=<json> stays REJECTED per D3 (permanent).
 monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38; CARVED OUT at v0.7-M42 — pre-flight contract diff lands the argv + pre-check surface; IMPL body at v0.7-M42 IMPL)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # v0.7-M42 (D5 carve-out fold from v0.6-M38): file-column
@@ -3589,11 +3591,31 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
    `usage_error.details.reason` discriminator pattern from M14 /
    M27 / M31:
 
-   - **Single file `--set` per call.** 2+ `--set <file-col>=<path>`
-     entries in the same call reject as `usage_error` with
-     `'multi_file_set_unsupported'` — multi-file dispatch is an
-     unratified v0.7.x carry-forward candidate. The discriminator
-     literal lives at `details.reason`.
+   - **Multi-file `--set` per call — CARVED OUT at v0.8-M46**
+     (D2 fold from v0.6-M38). At v0.6-M38 + v0.7 this rejected
+     with `'multi_file_set_unsupported'` for 2+
+     `--set <file-col>=<path>` entries in the same call; v0.8-M46
+     accepts the path and dispatches per-item multi-leg fan-out
+     (sequential within an item × parallel across items for bulk
+     per M42's `dispatchParallel`; single-item N-leg sequence for
+     `item update <iid>`; two-leg-group fan-out for `item create`
+     extending M43's two-leg pattern). Partial-failure envelope
+     extends M42's per-item shape with `applied_file_columns:
+     [<col_ids>]` + `failed_file_column: <col_id>` slots;
+     create-time multi-file extends M43's
+     `'create_then_file_upload_partial_failure'` discriminator
+     with always-present `applied_file_columns` slot (length
+     0..N-1 reflecting file columns that landed before the
+     failing leg). The `'multi_file_set_unsupported'` literal
+     stays RESERVED across the codebase post-fold (regression-
+     guarded by tests asserting the literal does NOT appear in
+     runtime output for the 3 reachable callShapes —
+     `'item_update_single'` / `'item_update_bulk'` /
+     `'item_create'`). The throw remains for the `'item_set'`
+     callShape as a defensive type-system ceiling (the single-
+     positional `monday item set <iid> <col>=<value>` verb is
+     argv-incapable of expressing 2+ file `--set` entries; kept
+     as defense-in-depth).
    - **No mixing with value flags on update / set callShapes.**
      File `--set` mixed with any value `--set` / `--set-raw` /
      `--name <n>` in the same call rejects as `usage_error` with
@@ -4292,11 +4314,15 @@ contract:
    multipart dispatch. The mixed-rule SUPPRESSION on
    `'item_create'` callShape (per `file-column-set.ts:
    enforceSingleFileColumnSet`) lets non-file values through
-   the mutex check; the universal multi-file rule
-   (`'multi_file_set_unsupported'`) STILL rejects 2+ file
-   `--set` entries (Monday's wire is single-column per
-   `add_file_to_column` call regardless of dispatch shape).
-   `--set-raw <file-col>=<json>` stays at
+   the mutex check; 2+ file `--set` entries CARVE OUT at
+   **v0.8-M46** (D2 fold) into the multi-leg dispatch
+   (`runItemCreateFileMultiDispatch`) extending the two-leg
+   pattern with legs 2..N+1 each firing a separate
+   `add_file_to_column` round-trip. The
+   `'multi_file_set_unsupported'` literal stays RESERVED
+   post-fold (regression-guarded by tests asserting the literal
+   does NOT appear in runtime output for the 3 reachable
+   callShapes). `--set-raw <file-col>=<json>` stays at
    `translateRawColumnValue`'s D3 permanent rejection (no JSON
    wire shape for files).
 
@@ -8898,7 +8924,15 @@ scoped idempotent changes, and post comments narrating its work.**
   dispatch under the §5.8 orphan-warn atomicity envelope;
   D1 closure defaulted to orphan-warn under uncertainty about
   rollback-leg reliability — pre-flight probe couldn't run
-  empirically due to token permissions);
+  empirically due to token permissions); multi-file
+  `--set <file-col>=<path> --set <file-col2>=<path2> ...`
+  per call deferred D2 → **carved out at v0.8-M46** (per-item
+  multi-leg fan-out — sequential within an item × parallel
+  across items for bulk per M42's `dispatchParallel`; partial-
+  failure envelope extends M42's per-item shape with
+  `applied_file_columns` + `failed_file_column` slots, extends
+  M43's `create_then_file_upload_partial_failure` with always-
+  present `applied_file_columns` slot length 0..N-1);
   `--set-raw <file-col>=<json>` STAYS REJECTED per D3
   (permanent). M38 pre-flight stubs landed at
   `0cb8b69..1a92955` (4 fix-up rounds + 1 ratification);
@@ -8911,6 +8945,23 @@ scoped idempotent changes, and post comments narrating its work.**
     deferred from M38 per D5 → **shipped at v0.7-M42** (per-
     item multipart fan-out under `--concurrency` /
     `--continue-on-error`; closes the v0.6-deferred surface).
+  - Multi-file `--set <file-col>=<path> --set <file-col2>=<path2>
+    ...` per call — deferred from M38 per D2 → **carved out at
+    v0.8-M46** (per-item multi-leg fan-out: sequential within an
+    item × parallel across items for bulk per M42's
+    `dispatchParallel`; single-item single-call N-leg sequence
+    for `item update <iid>`; two-leg-group fan-out for
+    `item create`). Partial-failure envelope extends M42's per-
+    item shape with `applied_file_columns: [<col_ids>]` +
+    `failed_file_column: <col_id>` slots; create-time multi-file
+    extends M43's `'create_then_file_upload_partial_failure'`
+    discriminator with always-present `applied_file_columns`
+    slot (length 0..N-1). The `'multi_file_set_unsupported'`
+    discriminator literal at `src/api/file-column-set.ts` no
+    longer surfaces from the runtime path for the 3 reachable
+    callShapes (`'item_update_single'` / `'item_update_bulk'` /
+    `'item_create'`) post-fold; literal stays RESERVED across
+    the codebase (mirrors M42/M43 reserved-literal discipline).
   - `item create --set <file-col>=<path>` — deferred from M38
     per D6 → **carved out at v0.7-M43** (two-leg `create_item`
     + `add_file_to_column` dispatch under the §5.8 orphan-warn

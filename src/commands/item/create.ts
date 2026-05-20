@@ -870,6 +870,12 @@ export const itemCreateCommand: CommandModule<
         let m38FileCreate:
           | Extract<PreCheckM38FileDispatchResult, { kind: 'file_create' }>
           | undefined;
+        let m38FileCreateMulti:
+          | Extract<
+              PreCheckM38FileDispatchResult,
+              { kind: 'file_create_multi' }
+            >
+          | undefined;
         if (setEntries.length > 0) {
           const m38 = await preCheckM38FileDispatch({
             client,
@@ -886,6 +892,13 @@ export const itemCreateCommand: CommandModule<
           m38Warnings = m38.warnings;
           if (m38.kind === 'file_create') {
             m38FileCreate = m38;
+          }
+          if (m38.kind === 'file_create_multi') {
+            // v0.8-M46 D2 carve-out fold. Hold the file_create_multi
+            // slot for the two-leg-group multi-file dispatch helper
+            // below (c8-ignored stub at pre-flight; lifted at v0.8-M46
+            // IMPL).
+            m38FileCreateMulti = m38;
           }
         }
 
@@ -912,6 +925,43 @@ export const itemCreateCommand: CommandModule<
             setEntries,
             rawEntries,
             m38: m38FileCreate,
+            preflightSource: createModeResult.preflightSource,
+            preflightCacheAgeSeconds:
+              createModeResult.preflightCacheAgeSeconds,
+            metaSource: m38Source,
+            metaCacheAgeSeconds: m38CacheAge,
+            preflightWarnings: m38Warnings,
+            dateResolution,
+            peopleResolution,
+            tagResolution,
+            relationResolution,
+            isDryRun: globalFlags.dryRun,
+            noCache: globalFlags.noCache,
+            retries: globalFlags.retry,
+            toEmit,
+          });
+          return;
+        }
+
+        // v0.8-M46 D2 carve-out fold — create-time multi-file
+        // dispatch path. argv parse + create-mode resolution + M38
+        // pre-check (which returned `kind: 'file_create_multi'`
+        // here) have already run as live contract; the two-leg-
+        // group multi-file body is the pre-flight stub throwing
+        // `'m46_preflight_stub'`. Lifted at v0.8-M46 IMPL.
+        if (m38FileCreateMulti !== undefined) {
+          await runItemCreateFileMultiDispatch({
+            parsed,
+            client,
+            multipart,
+            ctx,
+            programOpts: program.opts(),
+            apiVersion,
+            createMode,
+            resolveBoardId,
+            setEntries,
+            rawEntries,
+            m38: m38FileCreateMulti,
             preflightSource: createModeResult.preflightSource,
             preflightCacheAgeSeconds:
               createModeResult.preflightCacheAgeSeconds,
@@ -1928,4 +1978,117 @@ const runItemCreateFileDispatch = async (
     ...sourceAgg.result(),
     resolvedIds,
   });
+};
+
+// ============================================================
+// v0.8-M46 create-time multi-file `--set` carve-out fold (D2
+// closure from v0.6-M38). Pre-flight stub — runtime body lifted
+// at v0.8-M46 IMPL.
+//
+// **Status: pre-flight stub landed at v0.8-M46 pre-flight contract
+// diff.** argv parse + create-mode resolution + M38 pre-check
+// (returning `kind: 'file_create_multi'`) + routing surface ship
+// as live contract upstream of this helper; the two-leg-group
+// multi-file dispatch body is the only c8-ignored leg. parseArgv
+// + create-mode resolution run BEFORE the `c8 ignore start`
+// block-wrap per R-NEW-76 (graduated v0.5-M34 pre-flight; wire-
+// dispatch-anchored at v0.7-M43 IMPL).
+//
+// **Production-shape preview (lands at IMPL):**
+//
+//   1. Single upfront `precheckLocalFile` per file path — N file
+//      legs × 1 pre-check each (D3 closure). Whole-call abort on
+//      any pre-check failure regardless of `--continue-on-error`
+//      per cli-design §5.8.
+//   2. Partition setEntries — N file entries → leg-2..N+1's
+//      `add_file_to_column` legs; remaining non-file entries
+//      bundle into leg-1's `create_item` / `create_subitem`
+//      `column_values`.
+//   3. Leg-1 — `create_item` or `create_subitem` (per
+//      `createMode.kind`) with bundled non-file `column_values`.
+//      Same wire op as M43's single-file leg-1; reuses
+//      `executeCreateItem` / `executeCreateSubitem` helpers.
+//   4. Legs 2..N+1 — sequential `executeFileColumnSet` calls
+//      against the new item ID, one per file column in argv
+//      order (D1 closure — sequential within-item preserves
+//      `applied_file_columns` echo accuracy on partial failure).
+//   5. Atomicity-envelope shape (D2 closure) — extends M43's
+//      orphan-warn discriminator
+//      `'create_then_file_upload_partial_failure'` with always-
+//      present `details.applied_file_columns: []` slot (length
+//      0..N-1 reflecting file columns that landed after leg-1
+//      succeeded but before the failing file leg). Length 0
+//      corresponds to M43's single-file failure case (leg-2 fails
+//      immediately); length k>0 corresponds to multi-file partial
+//      failure after k file legs succeeded.
+//   6. Envelope emit — new schema (lands at IMPL) with
+//      `operation: 'item_create_with_files'` + `item_id` (leg-1's
+//      new item) + `assets: [{column_id, asset}, ...]` (length N)
+//      + `applied_file_columns: [...]` (length N on success).
+//
+// **D-list closures inherited from v0.8-plan §3 M46 entry; full
+// rationale + watch-items live there.**
+// ============================================================
+
+interface RunItemCreateFileMultiDispatchInputs {
+  readonly parsed: ParsedInput;
+  readonly client: MondayClient;
+  readonly multipart: MultipartTransport;
+  readonly ctx: RunContext;
+  readonly programOpts: unknown;
+  readonly apiVersion: string;
+  readonly createMode: CreateMode;
+  readonly resolveBoardId: string;
+  readonly setEntries: readonly SetExpression[];
+  readonly rawEntries: readonly ParsedSetRawExpression[];
+  readonly m38: Extract<
+    PreCheckM38FileDispatchResult,
+    { kind: 'file_create_multi' }
+  >;
+  readonly preflightSource: 'live' | 'cache' | 'mixed' | undefined;
+  readonly preflightCacheAgeSeconds: number | null;
+  readonly metaSource: 'live' | 'cache' | 'mixed' | undefined;
+  readonly metaCacheAgeSeconds: number | null;
+  readonly preflightWarnings: readonly ResolverWarning[];
+  readonly dateResolution: ResolutionContexts['dateResolution'];
+  readonly peopleResolution: ResolutionContexts['peopleResolution'];
+  readonly tagResolution: ResolutionContexts['tagResolution'];
+  readonly relationResolution: ResolutionContexts['relationResolution'];
+  readonly isDryRun: boolean;
+  readonly noCache: boolean;
+  readonly retries: number;
+  readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
+}
+
+const runItemCreateFileMultiDispatch = async (
+  inputs: RunItemCreateFileMultiDispatchInputs,
+): Promise<void> => {
+  /* c8 ignore start */
+  // Stub anchor — IMPL replaces the body with the real async two-leg-
+  // group dispatch (precheckLocalFile × N + executeCreateItem
+  // (or executeCreateSubitem) bundling non-file column_values + N
+  // sequential executeFileColumnSet legs + envelope emit). The
+  // `await` here keeps the function shape async-correct for lint
+  // until IMPL lands.
+  await Promise.resolve();
+  throw new ApiError(
+    'internal_error',
+    `Multi-file \`--set\` per call on \`monday item create\` is a ` +
+      `v0.8-M46 pre-flight stub. The argv + pre-check + create-mode ` +
+      `resolution + routing surface ships as contract at this commit; ` +
+      `the two-leg-group multi-file dispatch body lifts at v0.8-M46 ` +
+      `IMPL in a separate session.`,
+    {
+      details: {
+        reason: 'm46_preflight_stub',
+        call_shape: 'item_create',
+        create_mode_kind: inputs.createMode.kind,
+        board_id: inputs.resolveBoardId,
+        file_count: inputs.m38.entries.length,
+        file_column_ids: inputs.m38.entries.map((e) => e.columnId),
+        is_dry_run: inputs.isDryRun,
+      },
+    },
+  );
+  /* c8 ignore stop */
 };

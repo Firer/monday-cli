@@ -1713,7 +1713,18 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
     });
 
-    it("rejects 2 file --set entries with usage_error.details.reason: 'multi_file_set_unsupported' (D2 multi leg)", async () => {
+    it("routes 2+ file --set entries through the v0.8-M46 multi-file dispatch stub (D2 carve-out fold from v0.6-M38; pre-flight surfaces 'm46_preflight_stub' until IMPL)", async () => {
+      // v0.8-M46 pre-flight contract diff. At v0.6-M38 + v0.7 this
+      // path rejected with `usage_error.details.reason:
+      // 'multi_file_set_unsupported'`; v0.8-M46 D2 carve-out fold
+      // lifts the gate on `'item_update_single'` callShape and
+      // routes to `runItemUpdateSingleFileMultiDispatch` for the
+      // per-item multi-leg fan-out. Pre-flight stub throws
+      // `internal_error` with `details.reason:
+      // 'm46_preflight_stub'`; IMPL lifts the stub body. The
+      // `'multi_file_set_unsupported'` discriminator literal stays
+      // RESERVED across the codebase post-fold (mirror M42/M43
+      // reserved-literal discipline).
       const out = await drive(
         [
           'item',
@@ -1736,16 +1747,27 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
           ],
         },
       );
-      expect(out.exitCode).toBe(1);
+      expect(out.exitCode).toBe(2);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
         error?: {
           code: string;
-          details?: { reason?: string; file_count?: number };
+          details?: {
+            reason?: string;
+            call_shape?: string;
+            file_count?: number;
+          };
         };
       };
-      expect(env.error?.code).toBe('usage_error');
-      expect(env.error?.details?.reason).toBe('multi_file_set_unsupported');
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+      expect(env.error?.details?.call_shape).toBe('item_update_single');
       expect(env.error?.details?.file_count).toBe(2);
+      // R-v0.7-NEW-4 contract-term regression-guard: the v0.6-M38
+      // literal stays absent from message + details post-fold (the
+      // 3 reachable callShapes route to the m46_preflight_stub
+      // discriminator instead).
+      expect(out.stderr).not.toContain('multi_file_set_unsupported');
+      expect(out.stdout).not.toContain('multi_file_set_unsupported');
     });
 
     it('archived file column on item update: throws column_archived (NOT M38 dispatch — Codex round-2 P2-1 pin; pre-check mirrors resolveAndTranslate archived-column guard)', async () => {

@@ -263,9 +263,12 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // R-v0.7-NEW-4 contract-term checklist (graduated v0.7-M42 IMPL):
     // pre-IMPL framing literals stay reserved post-fold so future
     // contract drift can't silently re-introduce them. Assert across
-    // the clean path (`file_create` return), the mixed-suppressed
-    // path (still `file_create`), and the universal multi-file path
-    // (`multi_file_set_unsupported` throw — distinct literal).
+    // the clean single-file path (`file_create` return), the mixed-
+    // suppressed path (still `file_create`), AND the multi-file
+    // path (`file_create_multi` return — v0.8-M46 D2 carve-out fold
+    // flipped the universal multi-file rejection to a clean
+    // dispatch kind on the 3 reachable callShapes including
+    // `'item_create'`).
     const clean = enforceSingleFileColumnSet({
       callShape: 'item_create',
       setEntries: [
@@ -277,45 +280,114 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     expect(JSON.stringify(clean)).not.toContain(
       'file_set_on_create_unsupported',
     );
-    // Codex pre-flight R1 P3-1 fix: assert that multi-file on
-    // `'item_create'` callShape DOES throw the universal
-    // multi-file mutex (`'multi_file_set_unsupported'` — the
-    // create-callShape gate folded but the universal rule still
-    // fires); regression-guard the M38 literal stays absent from
-    // both message + details. Pre-fix the test silently passed
-    // even if no throw fired (false-positive risk).
-    let multiThrew = false;
-    try {
-      enforceSingleFileColumnSet({
-        callShape: 'item_create',
-        setEntries: [
-          { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
-          { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
-        ],
-        setRawEntries: [],
-        hasName: true,
-      });
-    } catch (err) {
-      multiThrew = true;
-      const ae = err as ApiError;
-      // Pin the multi-file mutex reason on the create callShape.
-      expect(ae.details?.reason).toBe('multi_file_set_unsupported');
-      // R-v0.7-NEW-4 contract-term regression guards: the v0.6
-      // literal stays absent from both message + details.
-      expect(ae.message).not.toContain('file_set_on_create_unsupported');
-      expect(JSON.stringify(ae.details)).not.toContain(
-        'file_set_on_create_unsupported',
-      );
-    }
-    // Pre-flight R1 P3-1 fix: assert the throw actually fired
-    // (pre-fix the test silently passed if no exception fired).
-    expect(multiThrew).toBe(true);
+    // v0.8-M46 D2 carve-out fold: multi-file on `'item_create'`
+    // callShape no longer throws `'multi_file_set_unsupported'`;
+    // returns `kind: 'file_create_multi'` for the action body's
+    // two-leg-group multi-file dispatch helper. Regression-guard
+    // both the M38 reserved literal AND the v0.6 reserved
+    // `'file_set_on_create_unsupported'` literal stay absent.
+    const multi = enforceSingleFileColumnSet({
+      callShape: 'item_create',
+      setEntries: [
+        { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
+        { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
+      ],
+      setRawEntries: [],
+      hasName: true,
+    });
+    expect(multi.kind).toBe('file_create_multi');
+    expect(JSON.stringify(multi)).not.toContain(
+      'file_set_on_create_unsupported',
+    );
+    expect(JSON.stringify(multi)).not.toContain(
+      'multi_file_set_unsupported',
+    );
   });
 
-  it("throws usage_error.details.reason: 'multi_file_set_unsupported' for 2+ file --set entries (D2 multi leg)", () => {
+  it("v0.8-M46 D2 carve-out fold: returns kind: 'file_multi' on item_update_single callShape for 2+ file --set entries (was 'multi_file_set_unsupported' throw at v0.6-M38)", () => {
+    // v0.8-M46 pre-flight contract diff: the v0.6-M38 D2 universal
+    // multi-file rejection is carved out for the 3 reachable
+    // callShapes (`'item_update_single'` / `'item_update_bulk'` /
+    // `'item_create'`). Clean multi-file dispatch returns the new
+    // `kind: 'file_multi'` variant carrying the resolved entries
+    // (length ≥ 2, argv order). The action body branches into
+    // `runItemUpdateSingleFileMultiDispatch` for the per-leg fan-
+    // out helper. The `'multi_file_set_unsupported'` literal stays
+    // RESERVED across the codebase (no test should assert its
+    // surfacing on the clean path for these 3 callShapes).
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_update_single',
+      setEntries: [
+        {
+          columnId: 'attachments',
+          columnType: 'file',
+          rawValue: './a.pdf',
+        },
+        {
+          columnId: 'other_files',
+          columnType: 'file',
+          rawValue: './b.png',
+        },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result.kind).toBe('file_multi');
+    expect(JSON.stringify(result)).not.toContain('multi_file_set_unsupported');
+    if (result.kind === 'file_multi') {
+      expect(result.entries).toEqual([
+        { columnId: 'attachments', rawValue: './a.pdf' },
+        { columnId: 'other_files', rawValue: './b.png' },
+      ]);
+    }
+  });
+
+  it("v0.8-M46 D2 carve-out fold: returns kind: 'file_bulk_multi' on item_update_bulk callShape for 2+ file --set entries", () => {
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_update_bulk',
+      setEntries: [
+        { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
+        { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result.kind).toBe('file_bulk_multi');
+    if (result.kind === 'file_bulk_multi') {
+      expect(result.entries.length).toBe(2);
+      expect(result.entries[0]).toEqual({
+        columnId: 'a',
+        rawValue: './a.pdf',
+      });
+    }
+  });
+
+  it("v0.8-M46 D2 carve-out fold: returns kind: 'file_create_multi' on item_create callShape for 2+ file --set entries (mixed-rule still suppressed on create)", () => {
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_create',
+      setEntries: [
+        { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
+        { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
+      ],
+      setRawEntries: [],
+      hasName: true,
+    });
+    expect(result.kind).toBe('file_create_multi');
+    if (result.kind === 'file_create_multi') {
+      expect(result.entries.length).toBe(2);
+    }
+  });
+
+  it("v0.8-M46 defensive: item_set callShape STILL throws 'multi_file_set_unsupported' on 2+ file --set entries (argv-unreachable; kept as type-system ceiling)", () => {
+    // `monday item set <iid> <col>=<value>` is single-positional;
+    // argv cannot express 2+ file `--set` entries. The throw is
+    // unreachable from production argv but kept as defense-in-
+    // depth + type-system ceiling. v0.8-M46 carve-out fold lifts
+    // the gate on the 3 OTHER callShapes (item_update_single +
+    // item_update_bulk + item_create); item_set stays defensive.
     try {
       enforceSingleFileColumnSet({
-        callShape: 'item_update_single',
+        callShape: 'item_set',
         setEntries: [
           {
             columnId: 'attachments',
@@ -337,7 +409,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
       expect(ae.code).toBe('usage_error');
       expect(ae.details?.reason).toBe('multi_file_set_unsupported');
       expect(ae.details?.file_count).toBe(2);
-      expect(ae.details?.file_column_ids).toEqual(['attachments', 'other_files']);
+      expect(ae.details?.call_shape).toBe('item_set');
     }
   });
 
@@ -415,31 +487,31 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
 
   it('multi-file gate fires on item_update_bulk callShape (universal rule survives v0.7-M42 D5 carve-out fold; was bulk-gate-first at v0.6-M38)', () => {
     // v0.7-M42 pre-flight: with the D5 bulk-file rejection carved
-    // out, the universal multi-file gate is the FIRST mutex check
-    // applied on the bulk callShape (no more bulk-specific
-    // short-circuit). The 'file_set_on_bulk_unsupported'
-    // discriminator literal stays RESERVED but no test should
-    // assert its surfacing.
-    try {
-      enforceSingleFileColumnSet({
-        callShape: 'item_update_bulk',
-        setEntries: [
-          { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
-          { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
-        ],
-        setRawEntries: [],
-        hasName: false,
-      });
-      throw new Error('expected ApiError');
-    } catch (err) {
-      const ae = err as ApiError;
-      expect(ae.details?.reason).toBe('multi_file_set_unsupported');
-      expect(ae.details?.file_count).toBe(2);
-      expect(ae.details?.deferred_to).toBe('v0.7.x');
-    }
+    // v0.8-M46 D2 carve-out fold: the universal multi-file
+    // rejection lifts on `'item_update_bulk'` — clean multi-file
+    // dispatch returns `kind: 'file_bulk_multi'` for the per-item
+    // multi-leg fan-out helper. The `'multi_file_set_unsupported'`
+    // literal stays RESERVED; no test should assert its surfacing
+    // on the 3 reachable callShapes post-fold.
+    const result = enforceSingleFileColumnSet({
+      callShape: 'item_update_bulk',
+      setEntries: [
+        { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
+        { columnId: 'b', columnType: 'file', rawValue: './b.pdf' },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result.kind).toBe('file_bulk_multi');
+    expect(JSON.stringify(result)).not.toContain('multi_file_set_unsupported');
   });
 
-  it('multi-file gate fires BEFORE mixed gate (priority: multi → mixed)', () => {
+  it('v0.8-M46: mixed gate STILL fires on item_update_single multi-file + value --set (multi-file carve-out does NOT lift mixed-rule)', () => {
+    // v0.8-M46 D5 closure: NO CHANGE to mixed-rule semantics.
+    // Multi-file + value --set on `'item_update_single'` STILL
+    // rejects with `'mixed_file_and_value_sets'` (multi-file
+    // carve-out lifts ONLY the multi-file gate; mixed-rule stays
+    // in force on non-create callShapes).
     try {
       enforceSingleFileColumnSet({
         callShape: 'item_update_single',
@@ -454,7 +526,13 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
       throw new Error('expected ApiError');
     } catch (err) {
       const ae = err as ApiError;
-      expect(ae.details?.reason).toBe('multi_file_set_unsupported');
+      expect(ae.details?.reason).toBe('mixed_file_and_value_sets');
+      // v0.8-M46 regression-guard: multi-file rejection literal
+      // stays absent (the multi-file gate folded; only the mixed
+      // gate fires here).
+      expect(JSON.stringify(ae.details)).not.toContain(
+        'multi_file_set_unsupported',
+      );
     }
   });
 
