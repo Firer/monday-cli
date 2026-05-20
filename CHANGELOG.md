@@ -7,6 +7,394 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.7.0] - 2026-05-20 — Bulk + create-time file `--set` carve-out folds (M42 + M43)
+
+The "friendly file `--set` reaches every callShape" milestone —
+v0.6-M38's single-item friendly file-column writer gains the two
+carve-outs deferred at M38: bulk `monday item update --where ...
+--set <file-col>=<path>` per-item multipart fan-out (M42, closes
+D5) and create-time `monday item create --set <file-col>=<path>`
+two-leg dispatch under the §5.8 orphan-warn atomicity envelope
+(M43, closes D6). The friendly file-`--set` form now reaches
+every CLI callShape (`item set` / `item update <iid>` / `item
+update --where` / `item create`). **No breaking changes vs
+`0.6.0` — every v0.7 surface is additive.** Built incrementally
+across M42 + M43.
+
+**Pivot note 2026-05-20.** The originally-planned API `2026-04`
+pin (M39) + `monday item set-description` (M40) + `monday doc
+block-create-bulk <did>` (M41) cluster was **DEFERRED** to a
+future release pending `@mondaydotcomorg/api` SDK 15.x publishing
+with `CURRENT_VERSION = '2026-04'` natively. M39's string-literal
+override path was explored then abandoned after M40's empirical
+probe revealed paid-tier feature gating + opaque
+`INTERNAL_SERVER_ERROR { service: 'docs-api' }` on free-tier
+accounts at every payload size — not worth the override-
+maintenance overhead for a single user-blocked verb. Re-attempt
+expected at v0.8 if Monday's SDK cadence holds (≈2 months between
+major SDK bumps per the 13.0.0 / 14.0.0 / 15.0.0 trajectory) AND
+a paid-tier sandbox is available for the M40 wire probe.
+
+### Breaking changes vs `0.6.0`
+
+**None.** Every command, error code, envelope key, and warning
+shape shipped in v0.6.0 is preserved byte-for-byte. v0.7 only adds.
+
+### Surface
+
+**117 commands shipped (unchanged from v0.6).** M42 + M43 extend
+two existing verbs (`monday item update` bulk dispatch leg +
+`monday item create` action body) with new file-column dispatch
+branches rather than introducing new noun namespaces or verbs.
+The friendly translator (`translateColumnValueAsync`) stays
+JSON-output-shaped for the 13 existing writable types; file-
+column dispatch routes through v0.6-M38's
+`executeFileColumnSet` sibling module (the new bulk + create-
+time paths consume the M38 helper rather than duplicating it).
+
+**Bulk file `--set` (M42) — `monday item update --where ...
+--set <file-col>=<path>`.** Per-item multipart fan-out across
+the `--where`-resolved item-id set, dispatched through the
+existing v0.4-M30 `dispatchParallel` over a shared
+`MultipartTransport` (per D1 closure — no new transport seam;
+the parallel-multipart cross-product of M30's bulk-concurrency
++ M31's multipart wire was already pinned). New helper
+`runItemUpdateBulkFileDispatch` (in `src/commands/item/
+update.ts`) mirrors M25's partial-success shape with `asset`
+slot replacing `item` slot (per D2 closure):
+`data.results[i].asset: { id, name, ... }` on success;
+`data.results[i].error: { code, message }` under
+`--continue-on-error`. Aggregate `data.summary` extends M25's
+`partialSuccessBulkUpdateDataSchema` with three new slots
+(`column_id` / `filename` / `file_size_bytes`) echoing the
+dispatched file alongside `matched_count` / `applied_count` /
+`failed_count` / `board_id`. New `data.operation:
+'item_update_bulk_file_set'` literal discriminator (distinct
+from M25's `'item_update'`) so agents branch uniformly on
+`data.operation`. `--concurrency 1..32` (default 1) opts into
+bounded parallel dispatch per the v0.4-M30 range; `--continue-
+on-error` partitions per-item wire failures into the partial-
+success envelope while leaving whole-call-abort semantics for
+the upfront local file pre-check (per D3 closure —
+`precheckLocalFile` fires ONCE upfront per cli-design §5.8 "pre-
+checks MUST fire BEFORE any wire round-trip" before the dispatch
+loop, since the bulk shape has ONE file path shared across N
+matched items).
+
+**Create-time file `--set` (M43) — `monday item create --set
+<file-col>=<path>`.** Two-leg dispatch routes through the new
+`runItemCreateFileDispatch` helper (in `src/commands/item/
+create.ts`): leg-1 `create_item` bundles the non-file
+`column_values` atomically into the wire call; leg-2
+`add_file_to_column` attaches the file to the newly-created
+item. Pair is non-atomic by construction (Monday has no single-
+wire create-item-with-file mutation at API `2026-01`). The atomicity
+envelope shape closed at D1 to **(b) orphan-warn** rather than
+(a) automatic rollback — the pre-flight rollback-viability probe
+could not run empirically (the token lacked `create_item`
+permission in token-created sandbox workspaces + existing-board
+attempts were correctly blocked by harness modify-shared-state
+guards), so defaulting to orphan-warn preserves the agent's
+recovery handle without introducing a destructive `delete_item`
+cleanup leg whose own failure mode is unaccounted for. Leg-2
+failure surfaces `internal_error` with `details.reason:
+'create_then_file_upload_partial_failure'` + `details.
+created_item_id` echoing leg-1's orphan + `details.column_id`
+(the resolved file-column ID) + `details.cause` (the M31 wire-
+failure JSON projection) + `details.hint` directing agents to
+retry leg-2 alone (`monday item set <iid> <file-col>=<path>`)
+OR rollback (`monday item delete <iid> --yes`). `--dry-run`
+emits two `planned_changes` entries per D2 closure
+(`operation: 'create_item'` / `'create_subitem'` with bundled
+non-file `column_values`, then `operation:
+'add_file_to_column'` with the file pre-check echo); the leg-2
+entry carries no `item_id` slot because the item doesn't exist
+at dry-run time. **D6 mixed-set mutex SUPPRESSED on
+`'item_create'`** per the asymmetry closure — `create_item`
+natively bundles non-file `column_values` atomically into leg-
+1, so a multi-`--set` mix of file + non-file entries is
+legitimate at create time (unlike single-item / bulk
+callShapes where Monday's `change_multiple_column_values`
+doesn't accept files). The universal multi-file mutex still
+applies — 2+ file entries reject with `usage_error.details.
+reason: 'multi_file_set_unsupported'`.
+
+**Mutex rules at v0.7 (universal across all four callShapes
+post-M42 + M43).**
+
+- **Exactly ONE file `--set <file-col>=<path>` per call** across
+  every callShape (`'item_set'` / `'item_update_single'` /
+  `'item_update_bulk'` / `'item_create'`). 2+ file entries
+  reject with `usage_error.details.reason:
+  'multi_file_set_unsupported'`.
+- **Mixing a file `--set` with any value `--set` / `--set-raw`
+  / `--name`** rejects with `usage_error.details.reason:
+  'mixed_file_and_value_sets'` on `'item_set'` /
+  `'item_update_single'` / `'item_update_bulk'`. **SUPPRESSED**
+  on `'item_create'` per D6 asymmetry — `create_item` bundles
+  non-file `column_values` atomically into leg-1, so the mix
+  is legitimate at create time.
+
+Enforcement fires at the column-resolution boundary (parse-time
+can't know — the column type only resolves after board metadata
+loads); rejection happens BEFORE any multipart bytes get
+constructed.
+
+**`--set-raw <file-col>=<json>` STAYS REJECTED at v0.7
+(unchanged from v0.6-M38 D3 — PERMANENT, not deferred).**
+Monday's wire has no JSON shape for `change_column_value` on
+file columns; the rejection at `src/api/raw-write.ts:
+translateRawColumnValue` carries `details.hint` pointing at
+the friendly `--set` form (now universal across callShapes per
+M42 + M43) AND the v0.4-M31 verb-shaped `monday item upload`.
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** Per D3
+closure on M42 + D3 closure on M43, every v0.7 rejection routes
+through existing codes (`usage_error` / `unsupported_column_
+type` / `not_found` / `validation_failed` / `internal_error`)
+with `details.reason` literal-string discriminators. **One new
+discriminator literal lands at v0.7:** M43's
+`'create_then_file_upload_partial_failure'` (M43 leg-2 partial-
+failure orphan-warn envelope) joins the existing M38-era
+discriminators (`mixed_file_and_value_sets` /
+`multi_file_set_unsupported` / `file_set_on_bulk_unsupported` /
+`file_set_on_create_unsupported`) under the R-v0.6-NEW-2
+discriminated-union per-status-detail pattern.
+
+**R-v0.6-NEW-2 graduates at the 5-consumer threshold post-M43.**
+The discriminator pattern (4 supporting instances at v0.6 close)
+crossed the threshold with M43's new discriminator literal as
+the 5th. Graduation lifts the pattern from "watch-item" to
+"ratified design idiom" — future milestones touching the
+`details.reason` per-status-detail surface inherit the pattern
+without further filing.
+
+**New aggregate envelope slots for M42 bulk file dispatch.**
+`data.summary.{column_id, filename, file_size_bytes}` extend
+M25's `partialSuccessBulkUpdateDataSchema` with file-dispatch
+echo slots so agents reading the success envelope see which
+file was dispatched + where. `column_id` echoes the resolved
+file-column ID; `filename` echoes the basename; `file_size_
+bytes` echoes the `fs.stat()` size in bytes (no file bytes are
+loaded into memory at envelope-time — the size is captured
+pre-dispatch in the `precheckLocalFile` step).
+
+**New M43 orphan-warn envelope on `data.operation:
+'item_create'` leg-2 failure.** Beyond the existing M38-era
+`add_file_to_column` failure envelope, M43 leg-2 failure
+surfaces a 5-slot details bag: `reason` (literal
+`'create_then_file_upload_partial_failure'`) + `created_item_
+id` (the orphaned leg-1 item ID) + `column_id` (the resolved
+file-column ID) + `cause` (the M31 wire-failure JSON
+projection) + `hint` (the recovery-path English string).
+
+**No new envelope keys, no new warning shapes** outside the M42
+`data.summary` extension above. M42 + M43 reuse the M31
+multipart wire's success envelope shape + the post-success
+eager-invalidation contract (`invalidateBoard(boardId)` fires
+single-leg on multipart success across all 4 callShapes).
+
+### Upgrade notes
+
+- **`unsupported_column_type` `deferred_to: "v0.6"` for the
+  files-shaped category on bulk + create paths is DROPPED.**
+  v0.7-M42 picks up the bulk path (per-item multipart fan-out
+  under `--concurrency` / `--continue-on-error`); v0.7-M43
+  picks up the create-time path (two-leg dispatch under §5.8
+  orphan-warn). The rejection row at `src/api/column-values.ts`
+  (the files-shaped row of the friendly translator) no longer
+  fires on `item create` or `item update --where` — those paths
+  now dispatch to the appropriate helper BEFORE the translator
+  row fires. The v0.6-M38 literals `'file_set_on_bulk_
+  unsupported'` and `'file_set_on_create_unsupported'` STAY
+  RESERVED in docstrings + regression-guarded by integration
+  tests; the runtime path no longer surfaces them. Agents that
+  branched on either literal will instead receive the success
+  envelopes documented above OR a leg-2 failure under M43's
+  orphan-warn shape.
+- **`--set-raw <file-col>=<json>` STAYS REJECTED (unchanged
+  from v0.6-M38 D3, PERMANENT).** Monday's wire has no JSON
+  shape for files-shaped `change_column_value`. The rejection
+  hint at `src/api/raw-write.ts` names BOTH the friendly `--set`
+  form (now universal across callShapes) AND the v0.4-M31
+  `monday item upload` verb.
+- **Multi-level subitem creation slips from `"v0.7"` →
+  `"v0.8"`.** Originally slipped from v0.3 → v0.4 → v0.5 → v0.6
+  → v0.7 across four prior release-preps. v0.7 didn't pick it
+  up (v0.7 pivoted away from API `2026-04` at 2026-05-20 so
+  the data-model probe gate moves to v0.8's planned `2026-07`
+  pin; Monday's `sub_items_board` still carries no `subtasks`
+  column at API `2026-01`). The `error.code: "usage_error"` +
+  `details.hierarchy_type: "multi_level"` keys are unchanged;
+  only the `deferred_to` literal flipped.
+- **Cross-board `item move` value-overrides slips from `"v0.7"`
+  → `"v0.8"`.** Slipped across v0.3-M11 → v0.4 → v0.5 → v0.6
+  → v0.7 → v0.8 release-preps. Monday's `ColumnMappingInput`
+  still carries no value slot; the cross-leg partial-failure
+  envelope question stays open.
+- **Cross-board resumable cursor slips from `"v0.7"` →
+  `"v0.8"`.** Slot remains for the per-board cursor-lifetime
+  under-aggregation design issue. The `cross_board_truncated`
+  warning's `details.hint` continues to recommend narrowing via
+  `--workspace` / `--favorites` / `--max-boards`.
+- **Multi-file `--set` per call (v0.6-M38 D2) and file-`--set`
+  stdin support (v0.6-M38 D7) remain v0.7.x / future
+  candidates.** M42 pinned the per-item file-dispatch envelope;
+  multi-file would now revisit with M42's shape as the per-
+  item baseline.
+- **`monday auth login` placeholder-guard unchanged.** The verb
+  is still registered and still surfaces `usage_error.details.
+  reason: oauth_unregistered` pointing at `MONDAY_API_TOKEN`
+  (unchanged from v0.6.0). The OAuth deferral revisits in
+  v0.7.x / v0.8 contingent on user demand.
+- **Stable error-code registry stays at 29.** Existing codes'
+  shapes are unchanged across v0.6 → v0.7.
+
+### Internals worth highlighting
+
+- **R-v0.6-NEW-1 graduates at the 5-consumer threshold post-
+  M43.** The `file-source.ts` two-export module (`precheck
+  LocalFile` + `buildBlobFromPath`) added at v0.6-M38 IMPL
+  kickoff (`3c2a9b0`, ahead-of-feat 3-consumer lift) scaled to
+  5 consumers post-v0.7: M31 `item upload` + M31 `update
+  upload` + M38 single-item `executeFileColumnSet` + M42 bulk
+  `runItemUpdateBulkFileDispatch` + M43 create-time
+  `runItemCreateFileDispatch`. Helper internal shape unchanged
+  across all 5 consumers — graduation earned.
+- **R-v0.6-NEW-2 graduates at the 5-consumer threshold post-
+  M43.** The `details.reason` discriminated-union per-status-
+  detail pattern (4 supporting instances at v0.6 close —
+  `mixed_file_and_value_sets` / `multi_file_set_unsupported` /
+  `file_set_on_create_unsupported` / `file_set_on_bulk_
+  unsupported`) crossed the threshold with M43's new
+  `create_then_file_upload_partial_failure` literal as the 5th.
+- **R-NEW-82 graduated at the 5th-consecutive consumer.** The
+  release-prep cross-doc grep for stale `deferred_to:
+  "v<currently-releasing-version>"` slots fired and caught
+  one stale site (multi-level subitem `--parent` rejection —
+  slipped to `"v0.8"`) plus one ToC drift (v0.7-M42 + v0.7-M43
+  friendly file `--set` annotations missing from `docs/output-
+  shapes.md`'s `item (mutations)` row). Mirrors v0.3-M28 (1st)
+  / v0.4 (2nd) / v0.5 (3rd) / v0.6 (4th) / v0.7 (5th) release-
+  prep ratifications.
+- **R-NEW-84 graduated discipline applied.** The v0.7 release-
+  prep cluster ships zero production `src/**/*.ts` semantic
+  changes (only the literal `'v0.7'` → `'v0.8'` flip in the
+  multi-level subitem rejection slot); gates carry verification
+  per the R-NEW-84 carve-out (skip Codex review on mechanical /
+  process-only clusters).
+- **R-v0.7-NEW-4 (Pre-IMPL contract-term checklist) graduated
+  at v0.7-M42 IMPL R7 + refined at R8.** The discipline lives
+  in `.claude/rules/workflow.md` as a permanent rule. v0.7-M43
+  IMPL inherited the checklist + extended it with a "round-
+  agnostic framing" sub-rule at R3, and converged in 4 fix-up
+  rounds vs M42's 8 — graduation earned its keep.
+- **R-NEW-76 graduated** from "stub-anchored ordering invariant"
+  to "wire-dispatch-anchored ordering invariant" at v0.7-M43
+  IMPL — post-IMPL the c8 boundary is gone but the `parseArgv`-
+  BEFORE-dispatch ordering itself stays load-bearing (argv-
+  level failures surface as `usage_error`, not
+  `internal_error`).
+- **M42 IMPL converged in 8 fix-up rounds.** R1 closed the
+  behavioral surface (`foldAndRemap` + `SourceAggregator` +
+  fail-fast partial-success invalidate); R2-R8 were W9-prose-
+  only (no behavioral findings, asymptotic prose convergence
+  pattern that motivated the R-v0.7-NEW-4 graduation).
+- **M43 IMPL converged in 4 fix-up rounds.** R1 closed the
+  behavioral surface; R2-R3 trailing W9 prose drift; R4
+  CONVERGED with zero findings. M43 inherited R-v0.7-NEW-4
+  from M42's graduation, short-circuiting the W9 cycle from
+  M42's 8 rounds down to 4.
+- **Audit-fix folded into version-bump per security.md "high
+  = merge blocker" interpretation.** v0.6 release-prep
+  established the inline audit-fix precedent at version-bump;
+  v0.7 release-prep applied it: `npm audit` flagged
+  `brace-expansion@5.0.2` (moderate severity —
+  GHSA-jxxr-4gwj-5jf2 large-numeric-range DoS-protection
+  defeat); `npm audit fix` cleanly resolved via the lockfile
+  to `5.0.5+` (non-breaking transitive through eslint's
+  minimatch chain). `npm audit` reports `0 vulnerabilities`
+  post-fix.
+- **Two-AI review** ran for v0.7-M42 pre-flight + IMPL, v0.7-
+  M43 pre-flight + IMPL. M42 IMPL converged in 8 fix-up rounds
+  (1 behavioral + 7 W9 prose); M43 IMPL converged in 4 (1
+  behavioral + 2 W9 + 1 zero-finding CONVERGED). The v0.7
+  release-prep cluster skipped Codex per R-NEW-84. Cumulative
+  Codex breakdowns live in the per-milestone post-mortems in
+  [`docs/v0.7-plan.md`](./docs/v0.7-plan.md) §3.
+
+### Tests + quality gates
+
+- **4124 unit/integration + E2E tests** at v0.7.0 (+1 skipped;
+  was 4100 + 1 at v0.6.0; +24 net for M42 + M43 — ~15 new tests
+  for M42 covering bulk fan-out + `--concurrency` interaction +
+  partial-success projection + `data.summary` echo, ~9 net for
+  M43 covering two-leg happy path top-level + subitem + D6
+  mixed-set asymmetry + dry-run two-`planned_changes` + D1
+  orphan-warn envelope + leg-1 failure with/without remap +
+  translation reject + atomicity-before-wire ENOENT +
+  regression-guards across all 4 emit surfaces). All green on
+  Node 22 + 24.
+- **Coverage at 98.79 / 95.65 / 99.16 / 99.08** (statements /
+  branches / functions / lines) against the floor 95 / 95.45 /
+  95 / 95. Branches margin **0.20pp** at v0.7.0 (was 1.01pp at
+  v0.6.0; the 0.81pp drop reflects new conditional-spread arms
+  across M42 + M43's leg-1 / leg-2 catch arms — defensive non-
+  CliError re-throws + cause-details / metaSource unreachable
+  arms c8-ignored per testing.md preferred form). Floor unchanged
+  across v0.6.0 → v0.7.0.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.7
+  release-prep (zero diff vs M43 IMPL close); per-milestone
+  close-docs sweeps refreshed snapshots in lockstep at M42 IMPL
+  close + M43 IMPL close.
+- **Five test layers held**: unit, integration (in-process
+  `FixtureTransport` + `MultipartFixtureTransport`), E2E
+  (subprocess against fixture server), envelope-shape snapshot
+  suite, published-tarball E2E.
+- **Audit-fix folded into release-prep.** `npm audit` flagged a
+  transitive `brace-expansion@5.0.2` (moderate severity); `npm
+  audit fix` cleanly resolved to `5.0.5+`. `npm audit` reports
+  `0 vulnerabilities` post-fix.
+
+### Documentation
+
+- **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** new — the v0.7
+  active plan with M42 + M43 milestones, decisions log (per-
+  milestone D1-D6), R-class register (R-v0.7-NEW-1 through
+  R-v0.7-NEW-5), per-milestone post-mortems (§3), 2026-05-20
+  pivot note pinning M39 / M40 / M41 as DEFERRED.
+- **[`docs/cli-design.md`](./docs/cli-design.md)** §4.3
+  `monday item update` + `monday item create` rows annotated
+  with the M42 bulk + M43 create-time file-column dispatch
+  shapes; §5.3 "File-column dispatch leg" subsection extended
+  with the bulk fan-out (M42) + two-leg orphan-warn (M43)
+  branches; §5.8 atomicity discipline extended with the M43
+  two-leg orphan-warn envelope shape.
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** —
+  `item update --where ... --set <file-col>=<path>` section at
+  line 2399 (M42 bulk file dispatch); `item create --set <file-
+  col>=<path>` integrated into the existing `item create`
+  section at line 2524 (M43 two-leg dispatch + orphan-warn
+  envelope); ToC row for `item (mutations)` updated to
+  enumerate the friendly file `--set v0.6-M38 single + v0.7-M42
+  bulk` annotation on `update` + `(friendly file --set v0.7-M43)`
+  annotation on `create` (caught at v0.7 release-prep ToC audit
+  as a v0.7-M42 + v0.7-M43 close-docs gap — 5th consecutive
+  R-NEW-82 graduated-discipline ratification).
+- **README.md** quickstart expanded with v0.7 examples (step 13
+  extended to demonstrate M42 bulk file dispatch under
+  `--concurrency` / `--continue-on-error` + M43 create-time
+  file `--set` with mixed-set asymmetry). Scope section reshaped
+  around v0.7.0 / v0.6.0 / v0.5.0 / v0.4.0 / v0.3.0 / v0.2.0 /
+  v0.1.0 per-version layout. New "What v0.7 added (M42 + M43)"
+  per-milestone bullet block. v0.8 (next) block enumerates
+  carry-forward backlog + the v0.7-deferred M39 / M40 / M41
+  cluster pending SDK 15.x native `2026-04`.
+
+[0.7.0]: https://github.com/Firer/monday-cli/releases/tag/v0.7.0
+
 ## [0.6.0] - 2026-05-18 — Files-shaped friendly `--set` writes (M38)
 
 The "agents can write to files-shaped columns inline" milestone —
