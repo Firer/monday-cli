@@ -8999,8 +8999,9 @@ scoped idempotent changes, and post comments narrating its work.**
     `5cf4365` (runtime body for `runItemCreateFileDispatch`
     under the §5.8 orphan-warn atomicity envelope).
   - `<path>='-'` stdin for file `--set` — surface deferred
-    from M38 per D7; v0.7.x candidate once a `--filename`
-    companion shape is pinned.
+    from M38 per D7; **v0.8-M47 candidate** — opens after M46
+    IMPL closes once the `--filename` companion shape is pinned
+    at M47 pre-flight.
   - Cross-board `item move` value-overrides — carried over
     from v0.4 + v0.5 release-prep. Monday's `ColumnMapping
     Input` carries no value slot at API `2026-01`; richer

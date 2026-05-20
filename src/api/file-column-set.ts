@@ -191,8 +191,9 @@
  * clean `--filename` companion shape pinned for `--set
  * <file-col>=-` syntax (stdin reads byte-anonymously; the
  * filename is the load-bearing handle for Monday's wire
- * `Asset.name` slot). Carry-forward candidate for v0.7.x once a
- * `--filename` companion shape is pinned.
+ * `Asset.name` slot). v0.8-M47 candidate — opens once
+ * `--filename` companion shape is pinned at M47 pre-flight
+ * (M47 ships after M46 IMPL closes per v0.8-plan PIVOT block).
  *
  * **No new ERROR_CODE (D8 closure; registry stays at 29).** All
  * M38-specific rejections route through existing `usage_error`
