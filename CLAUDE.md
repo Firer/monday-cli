@@ -54,6 +54,18 @@ humans are second-class. Built incrementally via Claude Code on top of
   deferred R-v0.8-NEW-2 (`enforceSingleFileColumnSet` rename) +
   R-v0.8-NEW-4 (M42/M43 schema parse-test backfill) into the M47
   cluster per §22 if the file-column-set.ts touch lands there.
+  **Post-M46 refactor-audit (`docs/v0.8-plan.md` §22 +
+  `docs/v0.7-plan.md` §22):** R-v0.7-NEW-5 (fail-fast
+  error-decoration split-and-rebuild scaffold) TRIGGER FIRED — now
+  4 consumers (clear / JSON-bulk / M42 file-bulk / M46
+  file-bulk-multi); lift crystallised (`reThrowDecorated` helper),
+  raised LOW→MEDIUM, wants a standalone `src/api/` error-helper
+  session (spans 4 mutation paths — out of M47 scope). New:
+  R-v0.8-NEW-6 (orphan-warn `causeProjection` builder, 3 consumers,
+  MEDIUM-LOW), R-v0.8-NEW-7 (bare-SHA doc citations fragile under
+  rebase — adopt subject-line refs at next close-docs, MEDIUM),
+  R-v0.8-NEW-8 (Codex audit-point: new emit shape → `outputSchema`
+  advertisement check, LOW-MEDIUM).
 
   **v0.8-M46 SHIPPED at `3e6bdc1..1289133`** (R0 IMPL + R1-R2 Codex
   IMPL fix-up rounds; CONVERGED at R3 with zero findings). The
