@@ -25,36 +25,50 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** 4124 tests + 1 skipped across 172 files (unchanged
-  across release-prep — no new feature surface; one test description
-  string reworded at the deferral-slip commit `9b7e9ad`); coverage
-  98.79 / 95.65 / 99.16 / 99.08 (stmts / branches / fns / lines) at
-  the 95 / 95.45 / 95 / 95 floor (branches margin **0.20pp** — held
-  flat across release-prep since the cluster ships zero production
-  semantic changes beyond the literal `'v0.7'` → `'v0.8'` flip at
-  `src/commands/item/create.ts:653`; v0.7-M43 IMPL absorbed the
-  0.17pp drop earlier across the new helper's leg-1 / leg-2 catch
-  arms with defensive non-CliError re-throws + cause-details /
-  metaSource unreachable arms c8-ignored per testing.md preferred
-  form; full breakdown in `docs/v0.7-plan.md` §3 M43 "Coverage
-  residual"); **29 ERROR_CODES**; **117 commands**; `npm audit`
-  **0 vulnerabilities** post-fix (`brace-expansion 5.0.2 → 5.0.5+`
-  resolved at the version-bump commit `75c8831` per the v0.6
-  release-prep audit-fix-folded-into-version-bump precedent).
-- **Next session:** **v0.8-M46 IMPL kickoff (post-pre-flight
-  cluster close)** — M46 pre-flight contract diff cluster
-  SHIPPED across multiple Codex pre-flight rounds (round-by-
-  round summary lands at M46 close-docs per the round-agnostic
-  framing graduated at v0.7-M43 R3). If the current Codex
-  pre-flight round converges (zero P1/P2; P3 W9 drift absorbed
-  inline or logged to §22 per workflow.md), next session opens
-  M46 IMPL — lift the c8-ignored stubs in
-  `runItemUpdateSingleFileMultiDispatch` /
-  `runItemUpdateBulkFileMultiDispatch` /
-  `runItemCreateFileMultiDispatch` for the per-callShape multi-
-  leg fan-out body. Otherwise the next pre-flight round folds
-  the surfaced findings. M47 (stdin file `--set`) opens after
-  M46 IMPL closes. v0.8 RE-SCOPES from the original `2026-07`
+- **Live numbers:** **4155 tests + 1 skipped** post-v0.8-M46 IMPL
+  (release-anchored baseline was 4124 at v0.7.0 close; the M46
+  pre-flight cluster added the stub-routing tests → ~4145; M46 IMPL
+  is **+10 net** — 17 live/dry-run/partial-failure/precheck-abort
+  tests added across the 3 callShapes, 7 stub-routing tests removed).
+  Coverage holds above the **95 / 95.45 / 95 / 95** floor: the
+  multi-file dispatch bodies replace the c8-ignored
+  `m46_preflight_stub` wrappers with fully-tested runtime (live +
+  dry-run + partial-failure 0..N-1 + precheck-abort arms across all
+  3 callShapes); the only remaining c8-ignores are the bulk fold's
+  defensive dispatcher-contract guards (mirror M42's pattern). The
+  **precise post-IMPL coverage percentages are PENDING a clean
+  coverage run** — blocked this session by the R-v0.7-NEW-8
+  worker-pool `EAGAIN` flake under concurrent-agent load (a second
+  agent's `is_leaf` bug-fix session ran the suite simultaneously;
+  see `docs/v0.7-plan.md` §22 instance #6). **29 ERROR_CODES**;
+  **117 commands** (M46 adds no new command — it lifts dispatch
+  inside existing `item update` / `item create`); `npm audit`
+  **0 vulnerabilities**.
+- **Next session:** **v0.8-M47 pre-flight contract diff — stdin
+  file `--set` `<file-col>=-`** (second half of the file-`--set`
+  polish bundle; v0.6-M38 D7 closure). Needs the `--filename`
+  companion shape pinned at pre-flight + one wire-shape probe (does
+  Monday's `add_file_to_column` accept the streaming-from-stdin
+  shape without an explicit filename, or require one?); a potential
+  new "stdin-to-Blob" helper inside `file-source.ts`. Bundle the
+  deferred R-v0.8-NEW-2 (`enforceSingleFileColumnSet` rename) +
+  R-v0.8-NEW-4 (M42/M43 schema parse-test backfill) into the M47
+  cluster per §22 if the file-column-set.ts touch lands there.
+
+  **v0.8-M46 SHIPPED at `b28b3b6..9af6253`** (R0 IMPL + R1-R2 Codex
+  IMPL fix-up rounds; CONVERGED at R3 with zero findings). The
+  v0.6-M38 → v0.8-M46 D2 fold lands multi-file `--set` per call for
+  the 3 reachable callShapes (single-item update / bulk update /
+  create), each firing N sequential `add_file_to_column` legs per
+  item. R-v0.8-NEW-1 RESOLVED as LIFT — the inner sequential N-leg
+  loop + partial-failure accumulator lifted to
+  `dispatchFileLegsSequentially` (`src/api/file-column-set.ts`, 3
+  consumers); per-callShape envelope decoration + `foldAndRemap`
+  placement stayed inlined. Pre-flight cluster was `7daffaf..dd1b1fa`
+  (R0 + 3 Codex pre-flight rounds). Full narrative + post-mortem at
+  `docs/v0.8-plan.md` §3 M46 entry + §22 R-v0.8-NEW-1.
+
+  v0.8 RE-SCOPES from the original `2026-07`
   SKELETON
   (M44 user-entity migration + M45 user activity) to stay on
   `2026-01` and ship the v0.6-M38 D2 + D7 carve-out folds —
@@ -69,13 +83,14 @@ humans are second-class. Built incrementally via Claude Code on top of
   Bundle scope (in milestone order):
 
   - **M46 — multi-file `--set` per call** (v0.6-M38 D2 deferral
-    `multi_file_set_unsupported`). Extends v0.7-M42's per-item
-    file-dispatch envelope to multiple file entries per item.
-    Zero new wire surface, zero new transport seam, zero new
-    ERROR_CODES expected (registry stays at 29). Builds on M42's
-    pinned per-item baseline; file-source.ts (R-v0.6-NEW-1)
-    reaches its 6th consumer (already graduated at 5, so no new
-    lift work triggered).
+    `multi_file_set_unsupported`). **SHIPPED at `b28b3b6..9af6253`.**
+    Extended v0.7-M42's per-item file-dispatch envelope to multiple
+    file entries per item. Zero new wire surface, zero new transport
+    seam, zero new ERROR_CODES (registry stays at 29). Built on M42's
+    pinned per-item baseline; `file-source.ts` (R-v0.6-NEW-1) reached
+    its 6th consumer (already graduated at 5, so no new lift work) +
+    gained the new `dispatchFileLegsSequentially` lift (R-v0.8-NEW-1,
+    3 consumers).
   - **M47 — stdin file `--set` `<file-col>=-`** (v0.6-M38 D7
     deferral). Needs `--filename` companion shape pinned at
     pre-flight + one wire-shape probe (does Monday's
