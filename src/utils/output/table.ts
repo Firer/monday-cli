@@ -1,4 +1,5 @@
 import Table from 'cli-table3';
+import colorSupport from '@colors/colors/safe.js';
 
 /**
  * Table renderer for TTY output (`cli-design.md` §3.2).
@@ -38,12 +39,13 @@ export interface TableOptions {
    */
   readonly columns?: readonly string[];
   /**
-   * Whether ANSI colour may be emitted. cli-table3 colours its
-   * borders + header grey/red by default regardless of TTY-ness, so a
-   * `--output table` forced through a pipe leaks escape codes. When
-   * `false` (the default — callers opt INTO colour), border + head
-   * style arrays are emptied so the table is plain text. The
-   * command layer computes this via `resolveColorEnabled`.
+   * Whether ANSI colour may be emitted — the already-resolved colour
+   * decision (`resolveColorEnabled`: TTY + NO_COLOR + FORCE_COLOR),
+   * NOT a re-detection hint. When `true`, head (red) + border (grey)
+   * are styled via cli-table3's defaults; when `false` (the default —
+   * callers opt INTO colour) both style arrays are emptied so the
+   * table is plain text. `renderTable` makes this decision authoritative
+   * over @colors/colors' own ambient detection — see `applyColorState`.
    */
   readonly color?: boolean;
 }
@@ -139,16 +141,41 @@ const collectKeysInOrder = (
 };
 
 /**
- * cli-table3 colours its `head` (red) and `border` (grey) by default,
- * emitting ANSI even when stdout isn't a TTY. When colour is off we
- * empty both style arrays so the rendered table is plain text. Colour
- * defaults to OFF here — callers opt in via `options.color`, which the
- * emit layer computes from `resolveColorEnabled`.
+ * cli-table3 colours its `head` (red) and `border` (grey) by default.
+ * When colour is off we empty both style arrays so the rendered table
+ * is plain text. Colour defaults to OFF here — callers opt in via
+ * `options.color`, which the emit layer computes from
+ * `resolveColorEnabled`.
  */
 const colourStyle = (
   color: boolean | undefined,
 ): { style: { head: string[]; border: string[] } } | Record<string, never> =>
   color === true ? {} : { style: { head: [], border: [] } };
+
+/**
+ * Make the resolved `color` decision authoritative over @colors/colors'
+ * own ambient detection.
+ *
+ * cli-table3 styles head/border through `@colors/colors`, whose
+ * `enabled` flag is cached ONCE at import from TTY/FORCE_COLOR
+ * detection (`lib/colors.js`). A non-TTY context (a CI worker, a piped
+ * test runner) caches `enabled = false`, so cli-table3 emits NO ANSI
+ * even when the caller explicitly opted into colour — which made the
+ * `color: true` render flaky in CI (it passed only when the worker that
+ * imported the lib happened to see colour support). The colour decision
+ * is already settled upstream by `resolveColorEnabled`
+ * (TTY + NO_COLOR + FORCE_COLOR); honour it here rather than letting the
+ * table lib re-decide off a stale cached probe. (`color: false` empties
+ * the style arrays so it stays plain regardless — we pin the flag both
+ * ways so the global never drifts mid-suite.)
+ */
+const applyColorState = (color: boolean | undefined): void => {
+  if (color === true) {
+    colorSupport.enable();
+  } else {
+    colorSupport.disable();
+  }
+};
 
 const renderSingle = (input: SingleResourceTableInput): string => {
   const { data, options = {} } = input;
@@ -206,6 +233,7 @@ export const renderTable = (
   input: TableInput,
   stream: NodeJS.WritableStream,
 ): void => {
+  applyColorState(input.options?.color);
   const text = input.kind === 'single' ? renderSingle(input) : renderCollection(input);
   stream.write(`${text}\n`);
 };
