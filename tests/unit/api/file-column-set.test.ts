@@ -1,13 +1,23 @@
 /**
- * Unit tests for `src/api/file-column-set.ts` — v0.6-M38 file-
- * column dispatch leg.
+ * Unit tests for `src/api/file-column-set.ts` — file-column
+ * dispatch leg across v0.6-M38 (single-file) + v0.7-M42 (bulk
+ * carve-out fold) + v0.7-M43 (create-time carve-out fold) +
+ * v0.8-M46 (multi-file carve-out fold).
  *
  * Coverage:
- *   - Envelope schema shape (`fileColumnSetOutputSchema`).
+ *   - Single-file envelope schema (`fileColumnSetOutputSchema`,
+ *     v0.6-M38).
+ *   - Multi-file envelope schemas (`fileColumnSetMultiOutputSchema`,
+ *     v0.8-M46; `bulkFileSetMultiDataSchema`,
+ *     `itemCreateWithFilesOutputSchema` co-located in update.ts /
+ *     create.ts and parse-tested via dynamic imports below).
  *   - {@link FileColumnSetEntry} type narrowing.
  *   - {@link enforceSingleFileColumnSet} runtime behaviour:
- *     mutex priority (bulk / create / multi / mixed / clean / no-file),
- *     D2/D5/D6 reason discriminators, callShape gating.
+ *     mutex priority (folded D2 multi-file / D5 bulk / D6 create /
+ *     mixed / clean / no-file), `details.reason` discriminators
+ *     including the v0.8-M46 `'duplicate_resolved_file_columns'`
+ *     guard, callShape gating including the `'item_set'` defensive
+ *     unreachable throw.
  *
  * `executeFileColumnSet` runtime body is exercised end-to-end via
  * the M38 integration tests at `tests/integration/commands/item-
