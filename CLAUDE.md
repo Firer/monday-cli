@@ -13,6 +13,13 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 - **Published:** `monday-cli@0.7.0` on npm (`latest` dist-tag,
   2026-05-20T15:48:07Z). **v0.7.0 published — release complete.**
+  **⚠️ KNOWN P1 (live in v0.7.0): file uploads are broken** —
+  `multipart-transport.ts` ships the Apollo multipart spec, which
+  live Monday rejects; affects `item upload` / `update upload` /
+  file `--set` (M31/M38/M42/M43/M46). Found 2026-05-20 via live
+  probe; fix scoped as **v0.8-M49** (build-first), filed P1 /
+  fix-in-v0.8. Tests never caught it (mocked transport validated
+  the wrong wire format — R-v0.8-NEW-9).
   Release-prep closed at `9b7e9ad..3e46f59` (5 commits: ToC audit +
   deferral slip `9b7e9ad` / README quickstart + scope refresh
   `3ca51ea` / version bump 0.6.0 → 0.7.0 + audit-fix
@@ -44,31 +51,41 @@ humans are second-class. Built incrementally via Claude Code on top of
   **117 commands** (M46 adds no new command — it lifts dispatch
   inside existing `item update` / `item create`); `npm audit`
   **0 vulnerabilities**.
-- **Next session:** **v0.8-M48 pre-flight contract diff (writable
-  `board_relation` / `dependency` column settings) OR M47 — order is
-  your call (the gating M48 probe is DONE).** M48 was elevated to
-  committed v0.8 scope on user demand (2026-05-20); the gating
-  `create_column` probe RAN 2026-05-20 (`get_column_type_schema`,
-  read-only — the token can't create boards, `USER_UNAUTHORIZED`,
-  same wall as M40): **outcome (b)** — `create_column.defaults`
-  accepts `{settings: {boardIds: [<int>], boardId, allowMultipleItems,
-  allowCreateReflectionColumn}}` at create time (the M19 "no
-  documented shape" assumption is REFUTED via `get_column_type_schema`;
-  `dependency` parallels it). **Single-leg dispatch** — no two-leg
-  degradation. Residual: a live create+readback (blocked by token
-  perms) would 100%-confirm activation; close it at M48 pre-flight
-  with a create-capable token. M48 is cleanly buildable, so it can go
-  ahead of M47 if wanted. Full probe result + open decisions at
-  `docs/v0.8-plan.md` §3 M48 entry; raw report (gitignored, local) at
-  `scripts/probe/m48-board-relation-settings.report.txt`.
+- **Next session:** **v0.8-M49 — 🚨 P1 file-upload multipart
+  wire-format fix (BUILD FIRST).** A live probe (2026-05-20) found
+  the CLI ships the Apollo multipart spec (`operations`/`map`/`"0"`)
+  which **live Monday rejects** ("query not found" @ `/v2`,
+  "Unsupported query" @ `/v2/file`) — so **every file-upload command
+  is broken in published v0.7.0** (M31/M38/M42/M43/M46; M46's just-
+  shipped feature is live-broken too). Monday's NATIVE format works
+  (probe-confirmed): top-level `query` + `map:{"image":"variables.file"}`
+  (string value) + file part named `image`, at `/v2/file` (also `/v2`).
+  Fix `src/api/multipart-transport.ts` to the native shape + add a
+  `RUN_LIVE_TESTS`-gated live upload smoke test (the mocked transport
+  validated the WRONG form for 5 milestones — R-v0.8-NEW-9). Filed
+  P1, fix-in-v0.8 (user decision 2026-05-20). **Hard prerequisite for
+  M47.** Full detail + fix shape + open decisions at
+  `docs/v0.8-plan.md` §3 M49 entry; raw probe at
+  `scripts/probe/m47-stdin-filename.report.txt` (gitignored).
 
-  **v0.8 committed scope (post-M46-IMPL + 2026-05-20 prioritisation):**
+  **v0.8 committed scope (post-M46-IMPL + 2026-05-20 prioritisation),
+  rough build order:**
+  - **M49** — 🚨 P1 file-upload wire-format fix (above). TOP priority.
   - **M47** — stdin file `--set` `<file-col>=-` (D7 closure).
-    `--filename` companion shape + `add_file_to_column`
-    streaming-from-stdin probe; potential stdin-to-Blob helper in
-    `file-source.ts`. R-v0.8-NEW-2 (`enforceSingleFileColumnSet`
-    rename) folds in here (shared `file-column-set.ts` touch).
-  - **M48** — board_relation/dependency writable settings (above).
+    **Blocked-by M49.** Probe DONE: `--filename` is OPTIONAL (any
+    non-empty name works — `"stdin"` / default `"blob"`; empty → 500),
+    so default a non-empty placeholder. R-v0.8-NEW-2
+    (`enforceSingleFileColumnSet` rename) folds in here (shared
+    `file-column-set.ts` touch).
+  - **M48** — board_relation/dependency writable settings (probe
+    COMPLETE — outcome (b) live-confirmed; single-leg; M19
+    "no documented shape" REFUTED; create-time `defaults:
+    {settings:{boardIds:[int],...}}` wires the relation, read back as
+    unwrapped `settings_str`; Monday validates board existence →
+    `not_found`; `dependency` diverges (host-self-ref). Independent
+    of M49 — `create_column` is JSON, not multipart). Full result at
+    §3 M48 entry; raw report at
+    `scripts/probe/m48-board-relation-settings.report.txt`.
   - **v0.8 refactor cluster** (committed, prioritised on user
     demand) — R-v0.7-NEW-5 `reThrowDecorated` fail-fast-scaffold lift
     (4 consumers: clear / JSON-bulk / M42 file-bulk / M46
