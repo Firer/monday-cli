@@ -1,6 +1,6 @@
 {
   "name": "monday-cli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Agent-first CLI for Monday.com — read boards, file backlog items, transition statuses, and post comments from the terminal. Built for AI coding agents (Claude Code, Codex) with humans as a welcome second audience.",
   "type": "module",
   "engines": {
