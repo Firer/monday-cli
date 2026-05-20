@@ -44,21 +44,23 @@ humans are second-class. Built incrementally via Claude Code on top of
   **117 commands** (M46 adds no new command — it lifts dispatch
   inside existing `item update` / `item create`); `npm audit`
   **0 vulnerabilities**.
-- **Next session:** **`create_column` wire probe for v0.8-M48
-  (writable `board_relation` / `dependency` column settings)** —
-  M48 was ELEVATED to committed v0.8 scope on user demand
-  (2026-05-20), **probe-first**: does `create_column.defaults`
-  accept a `{boardIds, allowMultipleItems}` JSON at create time so
-  the new Connect-Boards column points at a target board (M19
-  shipped an empty create-time settings schema)? The probe gates
-  M48's pre-flight AND decides the **M47-vs-M48 order** (per the
-  user's probe-first selection). Probe with the token in
-  `.env.probe.local`; land the report at
-  `scripts/probe/m48-board-relation-settings.report.txt`. Then open
-  the chosen milestone's pre-flight contract diff. Full M48 skeleton
-  + the 3-outcome probe-design (a accepts verbatim / b needs a
-  different create-time shape / c settings post-create-only →
-  two-leg dispatch) at `docs/v0.8-plan.md` §3 M48 entry.
+- **Next session:** **v0.8-M48 pre-flight contract diff (writable
+  `board_relation` / `dependency` column settings) OR M47 — order is
+  your call (the gating M48 probe is DONE).** M48 was elevated to
+  committed v0.8 scope on user demand (2026-05-20); the gating
+  `create_column` probe RAN 2026-05-20 (`get_column_type_schema`,
+  read-only — the token can't create boards, `USER_UNAUTHORIZED`,
+  same wall as M40): **outcome (b)** — `create_column.defaults`
+  accepts `{settings: {boardIds: [<int>], boardId, allowMultipleItems,
+  allowCreateReflectionColumn}}` at create time (the M19 "no
+  documented shape" assumption is REFUTED via `get_column_type_schema`;
+  `dependency` parallels it). **Single-leg dispatch** — no two-leg
+  degradation. Residual: a live create+readback (blocked by token
+  perms) would 100%-confirm activation; close it at M48 pre-flight
+  with a create-capable token. M48 is cleanly buildable, so it can go
+  ahead of M47 if wanted. Full probe result + open decisions at
+  `docs/v0.8-plan.md` §3 M48 entry; raw report (gitignored, local) at
+  `scripts/probe/m48-board-relation-settings.report.txt`.
 
   **v0.8 committed scope (post-M46-IMPL + 2026-05-20 prioritisation):**
   - **M47** — stdin file `--set` `<file-col>=-` (D7 closure).
