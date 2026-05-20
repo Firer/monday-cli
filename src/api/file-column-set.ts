@@ -82,14 +82,25 @@
  * after metadata loads). When any resolved column has `type ===
  * 'file'`:
  *
- *   - Exactly ONE file `--set` entry allowed per call (single-
- *     file scope; multi-file dispatch defers to v0.7.x — Monday's
- *     `add_file_to_column` is single-column per call on the wire
- *     regardless of how many items the dispatch fans out across,
- *     so this rule is universal).
+ *   - Multi-file `--set` per call — **CARVED OUT at v0.8-M46**
+ *     (D2 fold). At v0.6-M38 + v0.7 this rejected universally
+ *     with `'multi_file_set_unsupported'`; v0.8-M46 lifts the
+ *     gate for the 3 reachable callShapes (`'item_update_single'`
+ *     / `'item_update_bulk'` / `'item_create'`) and routes
+ *     through new `'file_multi'` / `'file_bulk_multi'` /
+ *     `'file_create_multi'` enforcement kinds for the action
+ *     body's per-item multi-leg fan-out (sequential within an
+ *     item × parallel across items for bulk). Monday's
+ *     `add_file_to_column` is still single-column per call on
+ *     the wire — M46 fans N legs per item rather than bundling
+ *     them. The throw remains for the `'item_set'` callShape as
+ *     a defensive type-system ceiling (argv-unreachable on the
+ *     single-positional verb).
  *   - NO other value `--set` / `--set-raw` / `--name` flags
  *     allowed (mixing would force non-atomic multi-leg dispatch
- *     across the multipart + JSON wire surfaces).
+ *     across the multipart + JSON wire surfaces — universal on
+ *     `'item_set'` / `'item_update_single'` / `'item_update_bulk'`,
+ *     SUPPRESSED on `'item_create'` per v0.7-M43 D6 asymmetry).
  *   - Bulk `item update --where ... --set <file-col>=<path>` —
  *     **CARVED OUT at v0.7-M42** (D5 fold). At v0.6-M38 this was
  *     REJECTED with `'file_set_on_bulk_unsupported'`; v0.7-M42's
@@ -426,22 +437,36 @@ export const executeFileColumnSet = async (
  *     helper.
  *   - Throws `ApiError('usage_error', ...)` with a
  *     `details.reason` discriminator when a mutex violation is
- *     detected: `'multi_file_set_unsupported'` (D2 multi-file leg
- *     — universal; applies on single + bulk + create) OR
- *     `'mixed_file_and_value_sets'` (D2 mixed leg — universal on
- *     non-create callShapes; SUPPRESSED on `'item_create'` per
- *     the D6 mixed-rule asymmetry since `create_item` natively
- *     bundles `column_values` atomically + `item_name` is
- *     required on create).
+ *     detected: `'multi_file_set_unsupported'` (defensive throw
+ *     on `'item_set'` callShape only — argv-unreachable; v0.8-M46
+ *     D2 fold lifted the multi-file gate on the 3 reachable
+ *     callShapes) OR `'duplicate_resolved_file_columns'` (v0.8-
+ *     M46 multi-file leg — 2+ file `--set` entries resolving to
+ *     the same column ID; mirrors JSON path's cross-token
+ *     duplicate-resolved-ID contract) OR `'mixed_file_and_value_sets'`
+ *     (D2 mixed leg — universal on non-create callShapes;
+ *     SUPPRESSED on `'item_create'` per the D6 mixed-rule
+ *     asymmetry since `create_item` natively bundles
+ *     `column_values` atomically + `item_name` is required on
+ *     create).
  *
- * Both `'file_set_on_bulk_unsupported'` (v0.6-M38 D5) and
- * `'file_set_on_create_unsupported'` (v0.6-M38 D6) literals NO
- * LONGER SURFACE from this function as of v0.7-M42 / v0.7-M43
- * respectively — the carve-out folds return
- * `kind: 'file_bulk'` / `kind: 'file_create'` on clean dispatch
- * paths instead. The literals stay RESERVED in docstrings as
- * historical reference; do not re-introduce as runtime rejections
- * without fresh contract decisions.
+ * Three reserved-literal discriminators NO LONGER SURFACE from
+ * this function on the reachable callShape paths:
+ *
+ *   - `'file_set_on_bulk_unsupported'` (v0.6-M38 D5) → folded at
+ *     v0.7-M42; returns `kind: 'file_bulk'` on clean dispatch.
+ *   - `'file_set_on_create_unsupported'` (v0.6-M38 D6) → folded
+ *     at v0.7-M43; returns `kind: 'file_create'` on clean
+ *     dispatch.
+ *   - `'multi_file_set_unsupported'` (v0.6-M38 D2 universal) →
+ *     folded at v0.8-M46 for the 3 reachable callShapes; returns
+ *     `kind: 'file_multi'` / `'file_bulk_multi'` /
+ *     `'file_create_multi'` on clean multi-file dispatch. Throw
+ *     remains on `'item_set'` defensively (argv-unreachable).
+ *
+ * All three literals stay RESERVED in docstrings as historical
+ * reference; do not re-introduce as runtime rejections without
+ * fresh contract decisions.
  *
  * Pure synchronous check — no I/O, no side effects. The caller
  * resolves columns first (via `resolveColumnWithRefresh` or the
@@ -804,6 +829,50 @@ export const enforceSingleFileColumnSet = (
   //       (single-positional; cannot express 2+ file `--set`) and
   //       throws the defensive `'multi_file_set_unsupported'` above.
   if (fileSetEntries.length > 1) {
+    // v0.8-M46 Codex R1 P2-1 fix: reject duplicate resolved file-
+    // column IDs across multi-file entries (mirrors JSON path's
+    // existing cross-token duplicate-resolved-ID contract at
+    // `src/api/resolution-pass.ts` + `docs/output-shapes.md`).
+    // Without this guard, `--set attachments=/p/a --set
+    // id:attachments=/p/b` (two distinct argv tokens that resolve
+    // to the same file column ID) would either silently dispatch
+    // two `add_file_to_column` legs against the same column (the
+    // second leg's file replaces the first wire-side — surprising
+    // behavior) or downstream `projectedEntries` token-by-find
+    // logic in `preCheckM38FileDispatch` would lose token identity
+    // (map both entries to the first token's slot). Rejecting at
+    // the enforcement layer is the simplest contract that aligns
+    // with the JSON path's existing behavior + sidesteps the
+    // token-identity edge case.
+    const seenColumnIds = new Set<string>();
+    for (const entry of fileSetEntries) {
+      if (seenColumnIds.has(entry.columnId)) {
+        throw new ApiError(
+          'usage_error',
+          `Multiple \`--set\` entries resolve to the same file column ` +
+            `\`${entry.columnId}\` (v0.8-M46 multi-file dispatch requires ` +
+            `each file column to appear at most once per call). Monday's ` +
+            `\`add_file_to_column\` is single-column per call on the wire; ` +
+            `two legs against the same column would either silently ` +
+            `replace the first file or surface non-deterministic ` +
+            `wire-side ordering. Drop one of the duplicate entries or ` +
+            `target distinct file columns.`,
+          {
+            details: {
+              reason: 'duplicate_resolved_file_columns',
+              column_id: entry.columnId,
+              file_count: fileSetEntries.length,
+              file_column_ids: fileSetEntries.map((e) => e.columnId),
+              hint:
+                'each file column may appear at most once across `--set` ' +
+                'entries; drop the duplicate or target distinct file ' +
+                'columns.',
+            },
+          },
+        );
+      }
+      seenColumnIds.add(entry.columnId);
+    }
     const entries = fileSetEntries.map((e) => ({
       columnId: e.columnId,
       rawValue: e.rawValue,

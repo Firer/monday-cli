@@ -1770,6 +1770,50 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(out.stdout).not.toContain('multi_file_set_unsupported');
     });
 
+    it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN multi-file routing path (single-item update; the stub fires in dry-run too because pre-flight body throws regardless of --dry-run)", async () => {
+      // v0.8-M46 Codex round-1 P3-2 fix: the existing live-path
+      // regression-guard above asserts the literal is absent on
+      // the live multi-file routing path. The dry-run path also
+      // reaches the stub (the c8-ignored body throws unconditionally
+      // regardless of `inputs.isDryRun`); regression-guard the
+      // literal stays absent on dry-run too so future contract
+      // drift can't silently re-introduce it on either path.
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          `attachments_2=${reportPath}`,
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { reason?: string; is_dry_run?: boolean };
+        };
+      };
+      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+      expect(env.error?.details?.is_dry_run).toBe(true);
+      expect(out.stderr).not.toContain('multi_file_set_unsupported');
+      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+    });
+
     it('archived file column on item update: throws column_archived (NOT M38 dispatch — Codex round-2 P2-1 pin; pre-check mirrors resolveAndTranslate archived-column guard)', async () => {
       // Pre-IMPL round-1 + IMPL round-1 pre-check fix: passing
       // `--set <archived-file-col>=<path>` reached the M38 dispatch

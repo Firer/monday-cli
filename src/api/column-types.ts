@@ -237,13 +237,20 @@ export const isReadOnlyForeverType = (type: string): type is ReadOnlyForeverType
  *     under the §5.8 orphan-warn atomicity envelope (D1 closure).
  *
  * Mutex rules at the resolution boundary (D2 closures + folded
- * D5/D6): multi-file `--set` rejects universally
- * (`multi_file_set_unsupported`); mixed file + value `--set` /
- * `--set-raw` / `--name` rejects on `'item_set'` /
- * `'item_update_single'` / `'item_update_bulk'` callShapes
- * (`mixed_file_and_value_sets`), SUPPRESSED on `'item_create'`
- * per v0.7-M43 asymmetry (`create_item` natively bundles
- * non-file `column_values` atomically into leg-1).
+ * D5/D6/D2-multi): multi-file `--set` carved out at v0.8-M46 for
+ * the 3 reachable callShapes — routes through new `'file_multi'`
+ * / `'file_bulk_multi'` / `'file_create_multi'` enforcement kinds
+ * for per-item multi-leg fan-out (sequential within an item ×
+ * parallel across items for bulk per M42's `dispatchParallel`).
+ * The `'multi_file_set_unsupported'` literal stays RESERVED post-
+ * fold; the throw remains for the `'item_set'` callShape as a
+ * defensive type-system ceiling (argv-unreachable on the single-
+ * positional verb). Mixed file + value `--set` / `--set-raw` /
+ * `--name` rejects on `'item_set'` / `'item_update_single'` /
+ * `'item_update_bulk'` callShapes (`mixed_file_and_value_sets`),
+ * SUPPRESSED on `'item_create'` per v0.7-M43 asymmetry
+ * (`create_item` natively bundles non-file `column_values`
+ * atomically into leg-1).
  *
  * The `--set-raw <file-col>=<json>` form STAYS REJECTED per D3
  * closure — Monday's wire has no JSON-shape for

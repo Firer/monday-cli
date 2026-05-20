@@ -843,8 +843,16 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //      warm metadata cache and runs
   //      `enforceSingleFileColumnSet({callShape: 'item_update_bulk'})`:
   //
-  //        - Multi-file `--set` → throws `'multi_file_set_unsupported'`
-  //          (universal rule; single-column-per-wire-call).
+  //        - Multi-file `--set` with distinct file columns →
+  //          returns `kind: 'file_bulk_multi'` (v0.8-M46 D2
+  //          carve-out fold; action body branches into the
+  //          per-item multi-leg fan-out helper
+  //          `runItemUpdateBulkFileMultiDispatch` — pre-flight
+  //          stub at this commit, lifts at M46 IMPL).
+  //        - Multi-file `--set` with duplicate resolved file
+  //          columns → throws `'duplicate_resolved_file_columns'`
+  //          (mirrors JSON path's cross-token duplicate-resolved-
+  //          ID contract; M46 R1 P2-1 fix).
   //        - File `--set` + value `--set` / `--set-raw` / `--name`
   //          → throws `'mixed_file_and_value_sets'` (universal rule;
   //          mixing forces non-atomic multi-leg dispatch).
@@ -1749,6 +1757,106 @@ export const bulkFileSetDataSchema = z.object({
 });
 
 export type BulkFileSetData = z.infer<typeof bulkFileSetDataSchema>;
+
+/**
+ * v0.8-M46 bulk multi-file `--set` per-item result schema (D6
+ * closure — separate envelope shape from M42's single-file
+ * `bulkFileSetResultSchema`). Per-item record carries the
+ * per-leg asset projections + an `applied_file_columns` echo
+ * slot (length 1..N reflecting which file columns landed
+ * successfully on this item). On per-item partial failure mid-
+ * multi-leg under `--continue-on-error`, `applied_file_columns`
+ * length is 0..N-1 (reflecting columns that landed before the
+ * failing leg) + `failed_file_column` carries the failing
+ * column ID + `error` carries the leg's underlying error.
+ *
+ * **Status: schema landed at v0.8-M46 pre-flight contract diff
+ * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
+ * Pre-flight runtime path throws `'m46_preflight_stub'` from
+ * `runItemUpdateBulkFileMultiDispatch` (below); the schema is
+ * the contract IMPL builds against. Mirrors M42's per-item
+ * partial-success shape extended with the multi-leg slots.
+ */
+export const bulkFileSetMultiResultSchema = z.object({
+  item_id: z.string().min(1),
+  ok: z.boolean(),
+  /**
+   * Per-leg asset projections — one per file column that landed
+   * on this item. Length N on success; length 0..N-1 on per-item
+   * partial failure (`ok: false` with `error` populated). Each
+   * entry carries the column ID + asset shape (mirrors M31's
+   * Asset projection inside a per-leg context).
+   */
+  assets: z
+    .array(
+      z
+        .object({
+          column_id: z.string().min(1),
+          filename: z.string().min(1),
+          file_size_bytes: z.number().int().nonnegative(),
+          asset: z
+            .object({
+              id: z.string().min(1),
+              name: z.string().min(1),
+            })
+            .loose(),
+        })
+        .strict(),
+    )
+    .optional(),
+  /**
+   * Echo of file column IDs that landed successfully on this
+   * item, in dispatch order. Length 1..N on success; length
+   * 0..N-1 on per-item partial failure (reflecting columns that
+   * landed before the failing leg).
+   */
+  applied_file_columns: z.array(z.string().min(1)).optional(),
+  /** Column ID of the failing leg on per-item partial failure. */
+  failed_file_column: z.string().min(1).optional(),
+  error: z
+    .object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+    })
+    .optional(),
+});
+
+export type BulkFileSetMultiResult = z.infer<
+  typeof bulkFileSetMultiResultSchema
+>;
+
+/**
+ * v0.8-M46 bulk multi-file `--set` envelope `data` shape.
+ * Discriminate from M42's single-file `bulkFileSetDataSchema`
+ * via `operation: 'item_update_bulk_file_set_multi'` (plural).
+ * Agents reading `data.operation` branch uniformly across
+ * single + multi shapes. Aggregate `summary` extends M42's
+ * shape with `file_count: number` (the N file columns per item
+ * the call attempted).
+ *
+ * Invariant: `matched_count === applied_count + failed_count`
+ * (per-item rollup; mirrors M42 + M25 invariant). Per-item
+ * partial failure mid-multi-leg counts toward `failed_count`
+ * with the per-item record's `applied_file_columns` reflecting
+ * the partial-leg success.
+ *
+ * **Status: schema landed at v0.8-M46 pre-flight contract diff
+ * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
+ */
+export const bulkFileSetMultiDataSchema = z.object({
+  operation: z.literal('item_update_bulk_file_set_multi'),
+  summary: z.object({
+    matched_count: z.number().int().nonnegative(),
+    applied_count: z.number().int().nonnegative(),
+    failed_count: z.number().int().nonnegative(),
+    board_id: z.string().min(1),
+    file_count: z.number().int().min(2),
+    file_column_ids: z.array(z.string().min(1)).min(2),
+  }),
+  results: z.array(bulkFileSetMultiResultSchema),
+});
+
+export type BulkFileSetMultiData = z.infer<typeof bulkFileSetMultiDataSchema>;
 
 interface RunItemUpdateBulkFileDispatchInputs {
   readonly parsed: ParsedInput;

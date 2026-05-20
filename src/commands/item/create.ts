@@ -213,6 +213,65 @@ const itemCreateOutputSchema = z.object({
 });
 export type ItemCreateOutput = z.infer<typeof itemCreateOutputSchema>;
 
+/**
+ * v0.8-M46 create-time multi-file `--set` envelope `data` shape
+ * (D6 closure). Two-leg-group dispatch: leg-1 `create_item` (or
+ * `create_subitem`) bundling non-file `column_values`, then N
+ * sequential `add_file_to_column` legs (legs 2..N+1) against
+ * the new item ID. The envelope projects:
+ *
+ *   - `operation: 'item_create_with_files'` literal discriminator
+ *     (plural distinguishes from M43's single-file
+ *     `'item_create'` literal at `itemCreateOutputSchema`).
+ *   - Leg-1's `ItemCreateOutput` shape (item ID + name + board_id
+ *     + group_id + parent_id for subitems) inlined as `item`.
+ *   - Per-leg asset projections — one per file column that landed,
+ *     length N on success; length 0..N-1 on partial failure
+ *     (reflecting columns landed before the failing leg).
+ *   - `applied_file_columns: [<col_ids>]` echo (length 1..N on
+ *     success; length 0..N-1 on partial failure).
+ *
+ * Atomicity-envelope shape on partial failure (D2 closure):
+ * extends M43's `'create_then_file_upload_partial_failure'`
+ * discriminator at `details.reason` with always-present
+ * `details.applied_file_columns: []` slot (length 0..N-1
+ * reflecting file columns landed after leg-1 succeeded but
+ * before the failing leg). Length 0 corresponds to M43's
+ * single-file failure case; length k>0 corresponds to M46
+ * multi-file partial failure after k file legs succeeded.
+ *
+ * **Status: schema landed at v0.8-M46 pre-flight contract diff
+ * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
+ * Pre-flight runtime path throws `'m46_preflight_stub'` from
+ * `runItemCreateFileMultiDispatch` (below); the schema is the
+ * contract IMPL builds against.
+ */
+export const itemCreateWithFilesOutputSchema = z.object({
+  operation: z.literal('item_create_with_files'),
+  item: itemCreateOutputSchema,
+  assets: z
+    .array(
+      z
+        .object({
+          column_id: z.string().min(1),
+          filename: z.string().min(1),
+          file_size_bytes: z.number().int().nonnegative(),
+          asset: z
+            .object({
+              id: z.string().min(1),
+              name: z.string().min(1),
+            })
+            .loose(),
+        })
+        .strict(),
+    )
+    .min(2),
+  applied_file_columns: z.array(z.string().min(1)).min(2),
+});
+export type ItemCreateWithFilesOutput = z.infer<
+  typeof itemCreateWithFilesOutputSchema
+>;
+
 const createItemResponseSchema = z
   .object({
     id: ItemIdSchema,
@@ -854,9 +913,17 @@ export const itemCreateCommand: CommandModule<
         //     entry; branches into the v0.7-M43 two-leg dispatch
         //     helper {@link runItemCreateFileDispatch} (carve-out
         //     fold from v0.6-M38's permanent rejection).
+        //   - `kind: 'file_create_multi'` — clean multi-file
+        //     `--set` entries with distinct file columns; branches
+        //     into the v0.8-M46 two-leg-group dispatch helper
+        //     `runItemCreateFileMultiDispatch` (D2 carve-out fold
+        //     from v0.6-M38's universal multi-file rejection).
+        //     Pre-flight stub at this commit; lifts at M46 IMPL.
         //   - Throws `usage_error` with
-        //     `details.reason: 'multi_file_set_unsupported'` on 2+
-        //     file `--set` entries (universal mutex rule). The
+        //     `details.reason: 'duplicate_resolved_file_columns'` when
+        //     2+ file `--set` entries resolve to the same column ID
+        //     (mirrors JSON path's cross-token duplicate-resolved-ID
+        //     contract; M46 R1 P2-1 fix). The
         //     `'mixed_file_and_value_sets'` rule is SUPPRESSED on
         //     `'item_create'` callShape per the v0.7-M43 D6 mixed-
         //     rule asymmetry — `create_item` natively bundles

@@ -102,6 +102,86 @@ describe('fileColumnSetOutputSchema (v0.6-M38 file-column dispatch envelope)', (
   });
 });
 
+describe('fileColumnSetMultiOutputSchema (v0.8-M46 single-item multi-file envelope)', () => {
+  // v0.8-M46 Codex R1 P2-2 fix: the schema pins the multi-file
+  // envelope's contract surface at pre-flight. Runtime emit lifts
+  // at IMPL; the schema is the contract IMPL builds against.
+  it("accepts a full multi-file envelope shape — operation literal 'add_files_to_columns' (plural) + assets array + applied_file_columns echo", async () => {
+    const { fileColumnSetMultiOutputSchema } = await import(
+      '../../../src/api/file-column-set.js'
+    );
+    const valid = {
+      operation: 'add_files_to_columns' as const,
+      item_id: '12345',
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: sampleAsset,
+        },
+        {
+          column_id: 'attachments_2',
+          filename: 'b.png',
+          file_size_bytes: 2048,
+          asset: { ...sampleAsset, id: 'asset-2' },
+        },
+      ],
+      applied_file_columns: ['attachments', 'attachments_2'],
+    };
+    const result = fileColumnSetMultiOutputSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a single-element assets array — length ≥ 2 invariant pins the multi-file shape (N=1 routes to single-file fileColumnSetOutputSchema instead)', async () => {
+    const { fileColumnSetMultiOutputSchema } = await import(
+      '../../../src/api/file-column-set.js'
+    );
+    const invalid = {
+      operation: 'add_files_to_columns' as const,
+      item_id: '12345',
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: sampleAsset,
+        },
+      ],
+      applied_file_columns: ['attachments'],
+    };
+    const result = fileColumnSetMultiOutputSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects the single-file `add_file_to_column` operation literal (multi-file envelope discriminator is the PLURAL `add_files_to_columns`)', async () => {
+    const { fileColumnSetMultiOutputSchema } = await import(
+      '../../../src/api/file-column-set.js'
+    );
+    const invalid = {
+      operation: 'add_file_to_column' as const,
+      item_id: '12345',
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: sampleAsset,
+        },
+        {
+          column_id: 'attachments_2',
+          filename: 'b.png',
+          file_size_bytes: 2048,
+          asset: sampleAsset,
+        },
+      ],
+      applied_file_columns: ['attachments', 'attachments_2'],
+    };
+    const result = fileColumnSetMultiOutputSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('FileColumnSetEntry type — interface shape', () => {
   it('compiles with the contract-pinned shape (columnType literal: "file"; rawValue: argv-derived path; filename: basename derived; fileSizeBytes: fs.stat() size)', () => {
     // Compile-time check via type narrowing on the literal slot.
@@ -375,6 +455,53 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     expect(result.kind).toBe('file_create_multi');
     if (result.kind === 'file_create_multi') {
       expect(result.entries.length).toBe(2);
+    }
+  });
+
+  it("v0.8-M46 Codex R1 P2-1 fix: rejects duplicate resolved file-column IDs across multi-file entries with 'duplicate_resolved_file_columns' (mirrors JSON path's cross-token duplicate-resolved-ID contract)", () => {
+    // v0.8-M46 Codex round-1 P2-1 fix: without this guard, two
+    // distinct argv tokens resolving to the same file column would
+    // silently dispatch two `add_file_to_column` legs against the
+    // same column (the second wire-side replaces the first) AND
+    // bypass the JSON path's existing cross-token duplicate-
+    // resolved-ID rejection. Mirrors the v0.7-M42 + v0.7-M43
+    // partial-failure-envelope discipline by failing fast at the
+    // enforcement layer.
+    try {
+      enforceSingleFileColumnSet({
+        callShape: 'item_update_single',
+        setEntries: [
+          {
+            columnId: 'attachments',
+            columnType: 'file',
+            rawValue: './a.pdf',
+          },
+          {
+            columnId: 'attachments',
+            columnType: 'file',
+            rawValue: './b.png',
+          },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('duplicate_resolved_file_columns');
+      expect(ae.details?.column_id).toBe('attachments');
+      expect(ae.details?.file_count).toBe(2);
+      expect(ae.details?.file_column_ids).toEqual([
+        'attachments',
+        'attachments',
+      ]);
+      // Regression-guard: the v0.6 reserved literal stays absent
+      // (this is the duplicate-column gate, NOT the multi-file
+      // unsupported gate).
+      expect(JSON.stringify(ae.details)).not.toContain(
+        'multi_file_set_unsupported',
+      );
     }
   });
 

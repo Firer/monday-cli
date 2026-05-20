@@ -3347,4 +3347,46 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
     expect(out.stderr).not.toContain('multi_file_set_unsupported');
     expect(out.stdout).not.toContain('multi_file_set_unsupported');
   });
+
+  it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN create-time multi-file routing path", async () => {
+    // Dry-run reaches the same stub (the c8-ignored body throws
+    // unconditionally regardless of `inputs.isDryRun`); regression-
+    // guard the literal stays absent on dry-run + live paths so
+    // future contract drift can't silently re-introduce it.
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'multi-file create item (dry-run)',
+        '--set',
+        `attachments=${reportPath1}`,
+        '--set',
+        `attachments_2=${reportPath2}`,
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoardMultiCols] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        code: string;
+        details?: { reason?: string; is_dry_run?: boolean };
+      };
+    };
+    expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+    expect(env.error?.details?.is_dry_run).toBe(true);
+    expect(out.stderr).not.toContain('multi_file_set_unsupported');
+    expect(out.stdout).not.toContain('multi_file_set_unsupported');
+  });
 });

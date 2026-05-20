@@ -1736,10 +1736,15 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # v0.7-M42 (D5 carve-out fold from v0.6-M38): file-column
                                           # `--set <file-col>=<path>` is now ACCEPTED on the bulk
                                           # path — per-item multipart fan-out over the --where /
-                                          # --filter-json-resolved item-id set. Single file --set
-                                          # per call (multi-file mutex still rejects per universal
-                                          # rule); mixing with value --set / --set-raw / --name
-                                          # rejects per the universal mixed-leg mutex. --concurrency
+                                          # --filter-json-resolved item-id set. Multi-file --set
+                                          # CARVED OUT at v0.8-M46 (D2 fold) — per-item multi-leg
+                                          # fan-out (sequential within an item × parallel across
+                                          # items per --concurrency); duplicate resolved file-
+                                          # column IDs reject with 'duplicate_resolved_file_columns'
+                                          # (mirrors JSON path's existing duplicate-column
+                                          # contract). Mixing with value --set / --set-raw /
+                                          # --name still rejects per the universal mixed-leg
+                                          # mutex. --concurrency
                                           # 1..32 reuses v0.4-M30's dispatchParallel selector over a
                                           # shared MultipartTransport. Pre-check is single upfront
                                           # local file validation (file_not_readable / file_empty
@@ -1792,10 +1797,17 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # internal_error with details.created_item_id echoing
                                           # leg-1's orphan + a hint to retry leg-2 only OR
                                           # `monday item delete` to clean up (§5.8 orphan-warn
-                                          # atomicity envelope, D1 closure). Multi-file --set
-                                          # stays rejected (universal mutex). The pre-v0.7-M43
-                                          # rejection literal `'file_set_on_create_unsupported'`
-                                          # is RESERVED post-fold (regression-guarded).
+                                          # atomicity envelope, D1 closure). Multi-file --set on
+                                          # create CARVED OUT at v0.8-M46 (D2 fold) — two-leg-
+                                          # group dispatch (leg-1 create_item with bundled non-
+                                          # file column_values, then N sequential add_file_to_column
+                                          # legs against the new item ID); 'create_then_file_upload_
+                                          # partial_failure' discriminator extended with always-
+                                          # present applied_file_columns slot (length 0..N-1) on
+                                          # partial failure. The pre-v0.7-M43 rejection literal
+                                          # `'file_set_on_create_unsupported'` + the pre-v0.8-M46
+                                          # rejection literal `'multi_file_set_unsupported'` are
+                                          # both RESERVED post-fold (regression-guarded).
                                           # --set / --set-raw values bundle into the single
                                           # create_item / create_subitem mutation — single
                                           # round-trip on the JSON-only path; on the file-set

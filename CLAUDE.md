@@ -41,11 +41,17 @@ humans are second-class. Built incrementally via Claude Code on top of
   **0 vulnerabilities** post-fix (`brace-expansion 5.0.2 → 5.0.5+`
   resolved at the version-bump commit `75c8831` per the v0.6
   release-prep audit-fix-folded-into-version-bump precedent).
-- **Next session:** **v0.8-M46 pre-flight contract diff —
-  multi-file `--set` per call** (first half of the file `--set`
-  polish bundle picked at v0.8 kickoff candidate-selection
-  `<this-commit>` per R-NEW-75; second half is M47 stdin file
-  `--set`). v0.8 RE-SCOPES from the original `2026-07` SKELETON
+- **Next session:** **v0.8-M46 Codex pre-flight round verdict
+  + (likely) M46 IMPL kickoff** — M46 pre-flight contract diff
+  SHIPPED at `7daffaf` (this commit). If Codex round-1 verdict
+  is CONVERGED (zero P1/P2/P3), next session opens M46 IMPL
+  (lift the c8-ignored stubs in `runItemUpdateSingleFileMultiDispatch`
+  / `runItemUpdateBulkFileMultiDispatch` / `runItemCreateFileMultiDispatch`
+  for the per-callShape multi-leg fan-out body). If Codex round-1
+  surfaces P1/P2 findings, next session is M46 pre-flight round 2
+  with the round-1 findings folded. M47 (stdin file `--set`) opens
+  after M46 IMPL closes. v0.8 RE-SCOPES from the original `2026-07`
+  SKELETON
   (M44 user-entity migration + M45 user activity) to stay on
   `2026-01` and ship the v0.6-M38 D2 + D7 carve-out folds —
   mirrors the v0.7-pivot precedent verbatim (v0.7 originally

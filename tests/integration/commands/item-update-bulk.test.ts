@@ -4497,5 +4497,40 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(out.stderr).not.toContain('multi_file_set_unsupported');
       expect(out.stdout).not.toContain('multi_file_set_unsupported');
     });
+
+    it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN bulk multi-file routing path", async () => {
+      // Dry-run reaches the same stub (the c8-ignored body throws
+      // unconditionally regardless of `inputs.isDryRun`); the live-
+      // path regression-guard above asserts literal absence on live,
+      // this one asserts the same on dry-run.
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--dry-run',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: { reason?: string; is_dry_run?: boolean };
+        };
+      };
+      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
+      expect(env.error?.details?.is_dry_run).toBe(true);
+      expect(out.stderr).not.toContain('multi_file_set_unsupported');
+      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+    });
   });
 });
