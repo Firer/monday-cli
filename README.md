@@ -49,7 +49,7 @@ Requires **Node.js ≥ 22**.
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
 #
 #    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.6.0 — the verb surfaces a clear `usage_error.details.reason:
+#    v0.7.0 — the verb surfaces a clear `usage_error.details.reason:
 #    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
@@ -117,17 +117,31 @@ monday user team-list --json
 monday user team-create --name "Platform" --users 7,9 --json
 monday user team-add-members <tid> --users 11,13 --json
 
-# 13. Files-shaped friendly `--set` writes (v0.6-M38 — closes the v0.4
-#     → v0.5 → v0.6 carry-over of the inline form). Single-call file
-#     upload via `--set <file-col>=<path>`; sibling-branch dispatch at
-#     the column-resolution boundary routes to the v0.4-M31 multipart
-#     `add_file_to_column` wire. `--dry-run` emits a `planned_changes`
-#     envelope without the multipart round-trip. The v0.4-M31 verb-
-#     shaped `monday item upload` path remains; this is the friendly
-#     inline alternative.
+# 13. Files-shaped friendly `--set` writes — the v0.6 → v0.7 carve-out
+#     set, all four CLI shapes reaching Monday's `add_file_to_column`
+#     multipart wire:
+#     - v0.6-M38 ships single-item friendly `--set <file-col>=<path>`
+#       on `monday item set` + `monday item update <iid>` (sibling-
+#       branch dispatch at the column-resolution boundary).
+#     - v0.7-M42 ships the bulk variant on `monday item update --where
+#       ... --set <file-col>=<path>` (per-item multipart fan-out under
+#       `--concurrency` / `--continue-on-error`).
+#     - v0.7-M43 ships the create-time variant on `monday item create
+#       --set <file-col>=<path>` as a two-leg `create_item` +
+#       `add_file_to_column` dispatch under the §5.8 orphan-warn
+#       atomicity envelope.
+#     The v0.4-M31 verb-shaped `monday item upload` path remains as
+#     the alternative. `--dry-run` emits `planned_changes` on every
+#     shape without the multipart round-trip.
 monday item set 67890 'Attachments'=./screenshot.png --json
 monday item update 67890 --set 'Attachments'=./diagram.png --json
 monday item update 67890 --set 'Attachments'=./report.pdf --dry-run --json
+monday item update --board 12345 --where status=Backlog \
+  --set 'Attachments'=./report.pdf --yes --continue-on-error \
+  --concurrency 4 --json                # v0.7-M42 bulk file dispatch
+monday item create --board 12345 --name "Field report" \
+  --set 'Attachments'=./report.pdf --set status='Working on it' \
+  --json                                # v0.7-M43 create-time file --set
 
 # 14. Find-or-create with idempotent matching (v0.2)
 #     Re-running with the same args is safe — 0/1/2+ matches route to
@@ -214,7 +228,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.6.0",
+    "cli_version": "0.7.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -314,7 +328,34 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.6.0 (current — `monday-cli@0.6.0` on npm):**
+**v0.7.0 (current — `monday-cli@0.7.0` on npm):**
+the v0.6 surface PLUS the two file-`--set` carve-outs deferred at
+v0.6-M38 — bulk `monday item update --where ... --set <file-col>=
+<path>` (M42, per-item multipart fan-out under `--concurrency` /
+`--continue-on-error`) and create-time `monday item create --set
+<file-col>=<path>` (M43, two-leg `create_item` + `add_file_to_
+column` dispatch under the §5.8 orphan-warn atomicity envelope).
+**No breaking changes vs v0.6.0** — the v0.7 surface is additive
+(M42 + M43 only). Built incrementally as two milestones (M42 +
+M43); both close v0.6-M38 D5 / D6 deferrals so the friendly file-
+`--set` form now reaches every callShape (single-item / bulk /
+create-time). The originally-planned Monday API `2026-04` pin
+bump (M39) + `monday item set-description` (M40) + `monday doc
+block-create-bulk` (M41) DEFERRED at 2026-05-20 pending
+`@mondaydotcomorg/api` SDK 15.x publishing with
+`CURRENT_VERSION = '2026-04'` natively — see the per-milestone
+breakdown below. See [CHANGELOG.md](./CHANGELOG.md) for the full
+per-milestone release notes.
+
+**OAuth deferral (unchanged from v0.6.0).** `monday auth login` is
+registered but the canonical Monday OAuth app is not registered in
+v0.7.0; the verb surfaces a clear `usage_error.details.reason:
+oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
+config + per-profile credentials cache work fully against API
+tokens; OAuth registration revisits in v0.7.x / v0.8 contingent on
+user demand.
+
+**v0.6.0 (the previous release):**
 the v0.5 surface PLUS files-shaped friendly `--set <file-col>=<path>`
 writes on `monday item set` + `monday item update` (single-item
 paths), closing the v0.4 → v0.5 → v0.6 carry-over of the inline
@@ -323,18 +364,10 @@ routes file `--set` to the v0.4-M31 `add_file_to_column` multipart
 wire; the friendly translator stays JSON-output-shaped for the 13
 existing writable types. **No breaking changes vs v0.5.0** — the
 v0.6 surface is additive (M38 only). Built as a single milestone
-(M38). See [CHANGELOG.md](./CHANGELOG.md) for the full
-per-milestone release notes.
+(M38). The bulk + create-time carve-outs deferred at v0.6-M38
+(D5 / D6) carry forward to v0.7 (above).
 
-**OAuth deferral (unchanged from v0.5.0).** `monday auth login` is
-registered but the canonical Monday OAuth app is not registered in
-v0.6.0; the verb surfaces a clear `usage_error.details.reason:
-oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
-config + per-profile credentials cache work fully against API
-tokens; OAuth registration revisits in v0.6.x / v0.7 contingent on
-user demand.
-
-**v0.5.0 (the previous release):**
+**v0.5.0 (the prior release):**
 the v0.4 surface PLUS the full team-writer surface
 (`monday user team-list/get/create/delete/add-members/remove-members`),
 the full Monday workdocs CRUD mutation surface — doc-level
@@ -344,7 +377,7 @@ and doc-content import (`monday doc import-html/append-markdown`) —
 closing the v0.4-M32 workdocs-mutation deferral. **16 new CLI
 verbs across 9 wire mutations.** Built incrementally across M34–M37.
 
-**v0.4.0 (the prior release):**
+**v0.4.0 (the earlier release):**
 the v0.3 surface PLUS long-poll item activity streaming
 (`monday item watch <iid>` — NDJSON), parallel bulk dispatch
 (`monday item update --where ... --concurrency <N>`), asset uploads
@@ -354,7 +387,7 @@ workdocs CRUD mutation surface deferred to v0.5; shipped at v0.5),
 and shell completion (`monday completion bash|zsh|fish`). Built
 incrementally across M29–M33.
 
-**v0.3.0 (the earlier release):**
+**v0.3.0 (an even-earlier release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -644,6 +677,69 @@ row `tags`, `board_relation`, `dependency`.
   D13 empirical-probe pinning (rejected at 500KB, OK at 250KB on
   both surfaces).
 
+**What v0.7 added (M42 + M43; full per-milestone narrative in
+[CHANGELOG.md](./CHANGELOG.md)):**
+
+- **M42** — `monday item update --where ... --set <file-col>=
+  <path>` ships the bulk file-`--set` carve-out fold deferred at
+  v0.6-M38 D5. Per-item multipart fan-out across the `--where`-
+  resolved item-id set, dispatched through the existing v0.4-M30
+  `dispatchParallel` over a shared `MultipartTransport`. `--
+  concurrency 1..32` (default 1) opts into bounded parallel
+  dispatch; `--continue-on-error` partitions per-item wire
+  failures into the M25 partial-success envelope while leaving
+  whole-call-abort semantics for the upfront local file pre-check
+  (cli-design §5.8). New aggregate `data.summary` slots:
+  `column_id` / `filename` / `file_size_bytes` echo the dispatched
+  file alongside `matched_count` / `applied_count` / `failed_count`.
+  Reuses M31's multipart wire verbatim + v0.6-M38's
+  `executeFileColumnSet` runtime body — no new wire op. The pre-
+  v0.7-M42 literal `"file_set_on_bulk_unsupported"` (the M38 D5
+  rejection) stays RESERVED in docstrings + regression-guarded;
+  the runtime path no longer surfaces it.
+
+- **M43** — `monday item create --set <file-col>=<path>` ships
+  the create-time file-`--set` carve-out fold deferred at v0.6-
+  M38 D6. Two-leg dispatch: leg-1 `create_item` bundles the non-
+  file `column_values` atomically into the wire call; leg-2
+  `add_file_to_column` attaches the file to the newly-created
+  item. Pair is non-atomic by construction — leg-2 failure
+  surfaces `internal_error` with `details.reason: "create_then_
+  file_upload_partial_failure"` + `details.created_item_id`
+  echoing the leg-1 orphan + `details.column_id` + `details.
+  cause` (M31 wire-failure projection) + `details.hint`
+  directing agents to retry leg-2 alone (`monday item set <iid>
+  <file-col>=<path>`) OR rollback (`monday item delete <iid>
+  --yes`) per the §5.8 orphan-warn atomicity envelope (D1
+  closure). `--dry-run` emits two `planned_changes` entries
+  (`create_item` with bundled non-file `column_values`, then
+  `add_file_to_column`); leg-2 carries no `item_id` slot because
+  the item doesn't exist at dry-run time. Reuses M31's multipart
+  wire + v0.6-M38's `executeFileColumnSet` runtime body — no new
+  wire op. The pre-v0.7-M43 literal
+  `"file_set_on_create_unsupported"` (the M38 D6 rejection) stays
+  RESERVED + regression-guarded; the runtime path no longer
+  surfaces it. The mixed-set mutex rule SUPPRESSED on
+  `'item_create'` per D6 asymmetry — `create_item` natively
+  bundles non-file `column_values` atomically into leg-1 so the
+  multi-`--set` shape is legitimate at create time (universal
+  multi-file mutex still applies — 2+ file entries reject as
+  before).
+
+- **Deferred from v0.7 (pending SDK 15.x with `CURRENT_VERSION
+  = '2026-04'` natively):** M39 (Monday API pin bump `2026-01`
+  → `2026-04`), M40 (`monday item set-description <iid>` via
+  `set_item_description_content`), M41 (`monday doc block-
+  create-bulk <did>` via `create_doc_blocks`). The original
+  v0.7 framing collapsed to the M42 + M43 carve-out folds at
+  2026-05-20 because (a) SDK 15.x hadn't published, (b) M40's
+  empirical probe revealed paid-tier gating + opaque
+  `INTERNAL_SERVER_ERROR { service: 'docs-api' }` on free-tier
+  accounts, and (c) the string-literal API-version override
+  carried maintenance overhead disproportionate to a single
+  user-blocked verb. Findings preserved for the re-attempt
+  session.
+
 **What v0.6 added (M38; full per-milestone narrative in
 [CHANGELOG.md](./CHANGELOG.md)):**
 
@@ -684,31 +780,33 @@ row `tags`, `board_relation`, `dependency`.
   `unsupported_column_type` / `not_found` / `validation_failed`
   codes with `details.reason` discrimination).
 
-**v0.7 (next):** **Carry-forward backlog** (unpicked
+**v0.8 (next):** **Carry-forward backlog** (unpicked
 candidates remain in cli-design.md §13 slipped-candidates list
 pending future candidate-selection sessions): multi-level
 subitems remain conditional on Monday's data model surfacing
-them (slipped from v0.4 → v0.5 → v0.6 → v0.7 across three
-consecutive release-preps — Monday's `sub_items_board` still
-carries no `subtasks` column at API `2026-01`); cross-board
-`item move` value-overrides (Monday's `ColumnMappingInput`
-still carries no value slot — slipped three times for the same
-reason); resumable cross-board cursor pagination (per-board
-cursor-lifetime under aggregation needs design work);
-profile-scoped argument defaults (filed at the v0.6 kickoff
-candidate-selection session — extends `~/.monday-cli/config.toml`
-with a `[profiles.<name>.defaults]` table carrying scoping args;
-requires a prerequisite §13 carve-out Decision at pre-flight
-distinguishing aliases-as-stored-command-strings (still
-non-goal) from defaults-as-stored-flag-values (carve-out)).
-**Carry-forward carve-outs from v0.6-M38**: bulk file `--set`
-path (D5) shipped at v0.7-M42 (per-item multipart fan-out under
-`--concurrency` / `--continue-on-error`); create-time file
-`--set` path (D6) shipped at v0.7-M43 (two-leg `create_item` +
-`add_file_to_column` dispatch under the §5.8 orphan-warn
-atomicity envelope). Multi-file `--set` per call (D2) and
-file-`--set` stdin support (D7) remain deferred — v0.7.x /
-future candidates.
+them (slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 across
+four consecutive release-preps — Monday's `sub_items_board`
+still carries no `subtasks` column at API `2026-01`, and v0.7
+pivoted away from API `2026-04` at 2026-05-20 so the data-
+model probe gate moves to v0.8's planned `2026-07` pin);
+cross-board `item move` value-overrides (Monday's
+`ColumnMappingInput` still carries no value slot — slipped four
+times for the same reason); resumable cross-board cursor
+pagination (per-board cursor-lifetime under aggregation needs
+design work); profile-scoped argument defaults (filed at the
+v0.6 kickoff candidate-selection session — extends `~/.monday-
+cli/config.toml` with a `[profiles.<name>.defaults]` table
+carrying scoping args; requires a prerequisite §13 carve-out
+Decision at pre-flight distinguishing aliases-as-stored-
+command-strings (still non-goal) from defaults-as-stored-flag-
+values (carve-out)). Multi-file `--set` per call (v0.6-M38 D2
+deferral) and file-`--set` stdin support (v0.6-M38 D7 deferral)
+remain v0.7.x / future candidates. **v0.7-deferred milestones**:
+M39 (API pin `2026-04`) + M40 (`item set-description`) + M41
+(`doc block-create-bulk`) re-open when `@mondaydotcomorg/api`
+SDK 15.x ships natively — earliest target is v0.8 if Monday's
+SDK cadence holds (≈2 months between major SDK bumps per the
+13.0.0 / 14.0.0 / 15.0.0 trajectory).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) for the
