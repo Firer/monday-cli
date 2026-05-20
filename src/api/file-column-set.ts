@@ -36,12 +36,25 @@
  *   2. The atomicity contract differs — the 13 existing types
  *      bundle atomically via `change_multiple_column_values` when
  *      ≥2 columns target the same item. File-column writes are
- *      single-column-per-call only on Monday's wire; mixing a
- *      file-column `--set` with any value `--set` / `--set-raw` /
- *      `--name` in the same call would force a multi-leg dispatch
- *      that breaks the existing atomicity guarantee. M38 enforces
- *      single-file-only via the mutex rules below (D2 closure) —
- *      the existing atomicity contract stays intact.
+ *      single-column-per-wire-call only on Monday's wire (each
+ *      `add_file_to_column` round-trip targets one file column);
+ *      mixing a file-column `--set` with any value `--set` /
+ *      `--set-raw` / `--name` in the same call would force a
+ *      multi-leg dispatch across the multipart + JSON wire
+ *      surfaces that breaks the existing atomicity guarantee
+ *      (M38 enforces the mixed-rule mutex below — D2 closure;
+ *      universal on non-create callShapes, SUPPRESSED on
+ *      `'item_create'` per v0.7-M43 D6 asymmetry). Multi-file
+ *      `--set` CARVED OUT at v0.8-M46 (D2 fold): the CLI now
+ *      routes multi-leg fan-out for the 3 reachable callShapes
+ *      (`'item_update_single'` / `'item_update_bulk'` /
+ *      `'item_create'`), preserving the single-column-per-wire-
+ *      call invariant by firing N sequential
+ *      `add_file_to_column` calls per item. The existing
+ *      atomicity contract on the JSON `column_values` bundle
+ *      stays intact; the multi-file dispatch's atomicity
+ *      envelope (partial-failure shape per D2 closure) is
+ *      separately decorated.
  *   3. The translator's input contract is "value-string-to-JSON-
  *      payload" — file columns take a file path, not a value
  *      string. Path validation + `fs.stat` + `fs.access(R_OK)` +
@@ -85,17 +98,22 @@
  *   - Multi-file `--set` per call — **CARVED OUT at v0.8-M46**
  *     (D2 fold). At v0.6-M38 + v0.7 this rejected universally
  *     with `'multi_file_set_unsupported'`; v0.8-M46 lifts the
- *     gate for the 3 reachable callShapes (`'item_update_single'`
- *     / `'item_update_bulk'` / `'item_create'`) and routes
- *     through new `'file_multi'` / `'file_bulk_multi'` /
- *     `'file_create_multi'` enforcement kinds for the action
- *     body's per-item multi-leg fan-out (sequential within an
- *     item × parallel across items for bulk). Monday's
- *     `add_file_to_column` is still single-column per call on
- *     the wire — M46 fans N legs per item rather than bundling
- *     them. The throw remains for the `'item_set'` callShape as
- *     a defensive type-system ceiling (argv-unreachable on the
- *     single-positional verb).
+ *     CLI mutex for the 3 reachable callShapes
+ *     (`'item_update_single'` / `'item_update_bulk'` /
+ *     `'item_create'`) and routes through new `'file_multi'` /
+ *     `'file_bulk_multi'` / `'file_create_multi'` enforcement
+ *     kinds for the action body's per-item multi-leg fan-out
+ *     (sequential within an item × parallel across items for
+ *     bulk). Monday wire stays single-column-per-wire-call
+ *     (each `add_file_to_column` round-trip targets one file
+ *     column); M46 fans N CLI legs per item rather than
+ *     bundling them on the wire. The throw remains for the
+ *     `'item_set'` callShape as a defensive type-system
+ *     ceiling — `monday item set <iid> <col>=<value>` accepts
+ *     exactly one positional and is argv-incapable of
+ *     expressing 2+ file `--set` entries; the throw is
+ *     unreachable from production argv but kept as defense-in-
+ *     depth.
  *   - NO other value `--set` / `--set-raw` / `--name` flags
  *     allowed (mixing would force non-atomic multi-leg dispatch
  *     across the multipart + JSON wire surfaces — universal on
@@ -568,27 +586,42 @@ export interface EnforceSingleFileColumnSetInputs {
    *     translateRawColumnValue` per D3 — no new mutex needed here).
    *   - `'item_update_single'` — single-item `monday item update
    *     <iid>`. Multiple `--set` + `--set-raw` + `--name` flags are
-   *     accepted; M38 mutex enforces "single file `--set` + no
-   *     other value flags".
+   *     accepted. M38 originally enforced "single file `--set` +
+   *     no other value flags"; v0.8-M46 D2 carve-out fold lifts
+   *     the multi-file gate — clean multi-file dispatch returns
+   *     `kind: 'file_multi'` for the action body's per-item
+   *     multi-leg fan-out helper. Duplicate resolved file-column
+   *     IDs reject with `'duplicate_resolved_file_columns'`.
+   *     Mixed-rule (file + value `--set` / `--set-raw` /
+   *     `--name`) STILL rejects on this callShape per the
+   *     universal mixed mutex.
    *   - `'item_update_bulk'` — `monday item update --where ...`.
    *     At v0.6-M38 this rejected with `'file_set_on_bulk_unsupported'`;
    *     v0.7-M42 carves out the D5 closure — clean single-file
    *     bulk-file dispatch returns `kind: 'file_bulk'` for the
-   *     action body's per-item multipart fan-out. Multi-file +
-   *     mixed gates STILL reject (those mutex rules are
-   *     universal — file column dispatch is single-column per
-   *     wire call regardless of how many items the fan-out
-   *     spans).
+   *     action body's per-item multipart fan-out. v0.8-M46 D2
+   *     carve-out fold lifts the multi-file gate — clean multi-
+   *     file dispatch returns `kind: 'file_bulk_multi'` for the
+   *     per-item multi-leg fan-out (sequential within an item ×
+   *     parallel across items). Monday wire stays single-column-
+   *     per-wire-call (each `add_file_to_column` round-trip
+   *     targets one file column); M46 fans N legs per item over
+   *     the same single-column-per-wire-call surface. Mixed-rule
+   *     STILL rejects per the universal mixed mutex.
    *   - `'item_create'` — `monday item create`. At v0.6-M38 this
    *     rejected with `'file_set_on_create_unsupported'`;
    *     v0.7-M43 carves out the D6 closure — clean single-file
    *     create-time dispatch returns `kind: 'file_create'` for the
    *     action body's two-leg `create_item` then
-   *     `add_file_to_column` helper. Multi-file gate STILL rejects
-   *     (universal). Mixed-rule SUPPRESSED on create per D6
-   *     asymmetry (`create_item` natively bundles non-file
-   *     `column_values` atomically + `--name` is required on
-   *     create). `--set-raw <file-col>=<json>` stays rejected at
+   *     `add_file_to_column` helper. v0.8-M46 D2 carve-out fold
+   *     lifts the multi-file gate — clean multi-file dispatch
+   *     returns `kind: 'file_create_multi'` for the action body's
+   *     two-leg-group helper (leg-1 `create_item` with bundled
+   *     non-file `column_values` + N sequential file legs).
+   *     Mixed-rule SUPPRESSED on create per D6 asymmetry
+   *     (`create_item` natively bundles non-file `column_values`
+   *     atomically + `--name` is required on create).
+   *     `--set-raw <file-col>=<json>` stays rejected at
    *     `raw-write.ts:translateRawColumnValue` per D3 (separate
    *     enforcement layer).
    */

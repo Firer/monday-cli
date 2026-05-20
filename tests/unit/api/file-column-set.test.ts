@@ -723,3 +723,257 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     expect(result).toEqual({ kind: 'json' });
   });
 });
+
+describe('bulkFileSetMultiDataSchema (v0.8-M46 bulk multi-file envelope)', () => {
+  // v0.8-M46 Codex R2 P3-3 fix: schema parse tests for bulk
+  // multi-file envelope (mirrors R1 P2-2 fix pattern from
+  // fileColumnSetMultiOutputSchema tests above).
+  const buildBulkAsset = (
+    columnId: string,
+    assetId: string,
+  ): {
+    column_id: string;
+    filename: string;
+    file_size_bytes: number;
+    asset: { id: string; name: string };
+  } => ({
+    column_id: columnId,
+    filename: 'report.pdf',
+    file_size_bytes: 1024,
+    asset: { id: assetId, name: 'report.pdf' },
+  });
+
+  it("accepts a full bulk multi-file envelope shape — operation literal 'item_update_bulk_file_set_multi' + per-item results + aggregate summary", async () => {
+    const { bulkFileSetMultiDataSchema } = await import(
+      '../../../src/commands/item/update.js'
+    );
+    const valid = {
+      operation: 'item_update_bulk_file_set_multi' as const,
+      summary: {
+        matched_count: 2,
+        applied_count: 2,
+        failed_count: 0,
+        board_id: '111',
+        file_count: 2,
+        file_column_ids: ['attachments', 'attachments_2'],
+      },
+      results: [
+        {
+          item_id: '12345',
+          ok: true,
+          assets: [
+            buildBulkAsset('attachments', 'asset-1'),
+            buildBulkAsset('attachments_2', 'asset-2'),
+          ],
+          applied_file_columns: ['attachments', 'attachments_2'],
+        },
+        {
+          item_id: '23456',
+          ok: true,
+          assets: [
+            buildBulkAsset('attachments', 'asset-3'),
+            buildBulkAsset('attachments_2', 'asset-4'),
+          ],
+          applied_file_columns: ['attachments', 'attachments_2'],
+        },
+      ],
+    };
+    const result = bulkFileSetMultiDataSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects the single-file 'item_update_bulk_file_set' operation literal (multi shape discriminator is the _multi suffix)", async () => {
+    const { bulkFileSetMultiDataSchema } = await import(
+      '../../../src/commands/item/update.js'
+    );
+    const invalid = {
+      operation: 'item_update_bulk_file_set' as const,
+      summary: {
+        matched_count: 1,
+        applied_count: 1,
+        failed_count: 0,
+        board_id: '111',
+        file_count: 2,
+        file_column_ids: ['attachments', 'attachments_2'],
+      },
+      results: [],
+    };
+    const result = bulkFileSetMultiDataSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects file_count < 2 — multi-file invariant pins N ≥ 2 (N=1 routes through M42 single-file bulkFileSetDataSchema instead)', async () => {
+    const { bulkFileSetMultiDataSchema } = await import(
+      '../../../src/commands/item/update.js'
+    );
+    const invalid = {
+      operation: 'item_update_bulk_file_set_multi' as const,
+      summary: {
+        matched_count: 1,
+        applied_count: 1,
+        failed_count: 0,
+        board_id: '111',
+        file_count: 1,
+        file_column_ids: ['attachments'],
+      },
+      results: [],
+    };
+    const result = bulkFileSetMultiDataSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a per-item partial-failure shape (ok: false with applied_file_columns length 0..N-1 + failed_file_column + error)', async () => {
+    const { bulkFileSetMultiDataSchema } = await import(
+      '../../../src/commands/item/update.js'
+    );
+    const valid = {
+      operation: 'item_update_bulk_file_set_multi' as const,
+      summary: {
+        matched_count: 1,
+        applied_count: 0,
+        failed_count: 1,
+        board_id: '111',
+        file_count: 2,
+        file_column_ids: ['attachments', 'attachments_2'],
+      },
+      results: [
+        {
+          item_id: '12345',
+          ok: false,
+          assets: [buildBulkAsset('attachments', 'asset-1')],
+          applied_file_columns: ['attachments'],
+          failed_file_column: 'attachments_2',
+          error: {
+            code: 'file_too_large',
+            message: 'leg-2 failed: file exceeds the per-asset size cap',
+          },
+        },
+      ],
+    };
+    const result = bulkFileSetMultiDataSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('itemCreateWithFilesOutputSchema (v0.8-M46 create-time multi-file envelope)', () => {
+  // v0.8-M46 Codex R2 P3-3 fix: schema parse tests for create-time
+  // multi-file envelope. Codex R2 P2-1 prose mismatch fix: the
+  // envelope's `item` slot inlines M43's `ItemCreateOutput` shape
+  // (full item projection, NOT a scalar `item_id`).
+  it("accepts a full create-time multi-file envelope — operation literal 'item_create_with_files' + item shape + assets array", async () => {
+    const { itemCreateWithFilesOutputSchema } = await import(
+      '../../../src/commands/item/create.js'
+    );
+    const valid = {
+      operation: 'item_create_with_files' as const,
+      item: {
+        id: '12345',
+        name: 'multi-file create item',
+        board_id: '111',
+        group_id: 'topics',
+      },
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: { id: 'asset-1', name: 'a.pdf' },
+        },
+        {
+          column_id: 'attachments_2',
+          filename: 'b.png',
+          file_size_bytes: 2048,
+          asset: { id: 'asset-2', name: 'b.png' },
+        },
+      ],
+      applied_file_columns: ['attachments', 'attachments_2'],
+    };
+    const result = itemCreateWithFilesOutputSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
+  it('v0.8-M46 Codex R2 P2-1 regression-guard: rejects a scalar `item_id` slot in place of the inlined `item` shape — the envelope pins the M43 ItemCreateOutput projection, NOT just the ID', async () => {
+    const { itemCreateWithFilesOutputSchema } = await import(
+      '../../../src/commands/item/create.js'
+    );
+    const invalid = {
+      operation: 'item_create_with_files' as const,
+      item_id: '12345',
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: { id: 'asset-1', name: 'a.pdf' },
+        },
+        {
+          column_id: 'attachments_2',
+          filename: 'b.png',
+          file_size_bytes: 2048,
+          asset: { id: 'asset-2', name: 'b.png' },
+        },
+      ],
+      applied_file_columns: ['attachments', 'attachments_2'],
+    };
+    const result = itemCreateWithFilesOutputSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects the single-file 'item_create' operation literal — multi shape discriminator is the dedicated 'item_create_with_files' literal", async () => {
+    const { itemCreateWithFilesOutputSchema } = await import(
+      '../../../src/commands/item/create.js'
+    );
+    const invalid = {
+      operation: 'item_create' as const,
+      item: {
+        id: '12345',
+        name: 'x',
+        board_id: '111',
+        group_id: null,
+      },
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: { id: 'asset-1', name: 'a.pdf' },
+        },
+        {
+          column_id: 'attachments_2',
+          filename: 'b.png',
+          file_size_bytes: 2048,
+          asset: { id: 'asset-2', name: 'b.png' },
+        },
+      ],
+      applied_file_columns: ['attachments', 'attachments_2'],
+    };
+    const result = itemCreateWithFilesOutputSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a single-element assets array — multi-file shape invariant pins N ≥ 2', async () => {
+    const { itemCreateWithFilesOutputSchema } = await import(
+      '../../../src/commands/item/create.js'
+    );
+    const invalid = {
+      operation: 'item_create_with_files' as const,
+      item: {
+        id: '12345',
+        name: 'x',
+        board_id: '111',
+        group_id: null,
+      },
+      assets: [
+        {
+          column_id: 'attachments',
+          filename: 'a.pdf',
+          file_size_bytes: 1024,
+          asset: { id: 'asset-1', name: 'a.pdf' },
+        },
+      ],
+      applied_file_columns: ['attachments'],
+    };
+    const result = itemCreateWithFilesOutputSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+});

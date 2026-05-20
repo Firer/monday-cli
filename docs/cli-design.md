@@ -3579,13 +3579,19 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      mutation via `executeFileColumnSet` (`src/api/file-column-
      set.ts`), which wraps v0.4-M31's `addFileToColumn` fetcher
      (`src/api/assets.ts`) verbatim. The file dispatch is
-     **single-column-per-call** on Monday's wire — multipart
+     **single-column-per-wire-call** on Monday's wire — multipart
      uploads can't bundle into `change_multiple_column_values`,
-     so M38 enforces single-file-only via the mutex rules below
-     ("File-column dispatch leg" subsection). Path validation
-     mirrors `monday item upload`'s pattern (`fs.stat()` +
-     `fs.access(R_OK)` + non-empty pre-check) before any wire
-     call fires.
+     so each `add_file_to_column` round-trip targets exactly one
+     file column. At v0.6-M38 this surfaced as a single-file-only
+     CLI mutex; v0.8-M46 D2 carve-out fold lifts the CLI mutex
+     for the 3 reachable callShapes (`'item_update_single'` /
+     `'item_update_bulk'` / `'item_create'`) and routes multi-leg
+     CLI fan-out (N legs per item, one per file column) over the
+     same single-column-per-wire-call surface. The mutex rules
+     below ("File-column dispatch leg" subsection) describe the
+     callShape-aware enforcement. Path validation mirrors `monday
+     item upload`'s pattern (`fs.stat()` + `fs.access(R_OK)` +
+     non-empty pre-check) before any wire call fires.
    `--set-raw` (v0.2) always uses `change_column_value` for the
    single-column case and `change_multiple_column_values` for the
    bundled case — the simple variant is an optimisation that
@@ -3826,7 +3832,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk + M43 friendly `--set` create) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. **v0.7-M43** carved out the create-time path — `monday item create --set <file-col>=<path>` now dispatches a two-leg `create_item` + `add_file_to_column` sequence under the §5.8 orphan-warn atomicity envelope (D1 closure); non-file `--set` / `--set-raw` entries bundle into leg-1 atomically, the file entry routes to leg-2. Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helper, and the create path adds `runItemCreateFileDispatch` (`src/commands/item/create.ts`) as the two-leg helper. Mutex rules: single file `--set` only on every callShape (universal multi-file mutex); mixing with value `--set` / `--set-raw` / `--name` rejects on `'item_set'` / `'item_update_single'` / `'item_update_bulk'` (universal mixed mutex), SUPPRESSED on `'item_create'` (M43 D6 asymmetry — `create_item` natively bundles non-file `column_values` atomically). `--set-raw <file-col>=<json>` stays REJECTED on every callShape (no JSON wire shape for `add_file_to_column`; D3 permanent rejection at `translateRawColumnValue`). |
+| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk + M43 friendly `--set` create) + **v0.8** (M46 friendly multi-file `--set`) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. **v0.7-M43** carved out the create-time path — `monday item create --set <file-col>=<path>` now dispatches a two-leg `create_item` + `add_file_to_column` sequence under the §5.8 orphan-warn atomicity envelope (D1 closure); non-file `--set` / `--set-raw` entries bundle into leg-1 atomically, the file entry routes to leg-2. **v0.8-M46** carved out the multi-file path — `monday item update <iid> --set f1=p1 --set f2=p2 ...` / `monday item update --where ... --set f1=p1 --set f2=p2 ...` / `monday item create --set f1=p1 --set f2=p2 ...` now dispatch per-item multi-leg fan-out (N `add_file_to_column` legs per item, sequential within an item × parallel across items for bulk per `dispatchParallel`). Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` + `runItemUpdateBulkFileMultiDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helpers, the create path adds `runItemCreateFileDispatch` + `runItemCreateFileMultiDispatch` (`src/commands/item/create.ts`) as the two-leg / two-leg-group helpers, and single-item update adds `runItemUpdateSingleFileDispatch` + `runItemUpdateSingleFileMultiDispatch` for the N=1 / N≥2 cases. Mutex rules: Monday wire stays **single-column-per-wire-call** (one file column per `add_file_to_column` round-trip), but the CLI now routes multi-leg fan-out for the 3 reachable callShapes (`'item_update_single'` / `'item_update_bulk'` / `'item_create'`); only `'item_set'` keeps the defensive unreachable `'multi_file_set_unsupported'` throw (single-positional verb is argv-incapable of expressing 2+ file `--set`). Duplicate resolved file-column IDs reject with `'duplicate_resolved_file_columns'` (mirrors JSON path's cross-token duplicate-resolved-ID contract). Mixing with value `--set` / `--set-raw` / `--name` rejects on `'item_set'` / `'item_update_single'` / `'item_update_bulk'` (universal mixed mutex), SUPPRESSED on `'item_create'` (M43 D6 asymmetry — `create_item` natively bundles non-file `column_values` atomically). `--set-raw <file-col>=<json>` stays REJECTED on every callShape (no JSON wire shape for `add_file_to_column`; D3 permanent rejection at `translateRawColumnValue`). |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -8926,8 +8932,12 @@ scoped idempotent changes, and post comments narrating its work.**
   to-multipart dispatch). Zero new Monday wire surface, zero
   new transport seam (multipart shipped at v0.4-M31), zero new
   ERROR_CODE (29 stays). Mutex rules at M38 (per §5.3 step 5
-  "File-column dispatch leg"): single file `--set` only, no
-  mixing with value `--set` / `--set-raw` / `--name`; bulk
+  "File-column dispatch leg"; updated through v0.7/v0.8 carve-
+  outs): single file `--set` per call at M38 (multi-file
+  CARVED OUT at v0.8-M46 — per-item multi-leg fan-out for the 3
+  reachable callShapes), no mixing with value `--set` /
+  `--set-raw` / `--name` on non-create callShapes (mixed rule
+  SUPPRESSED on `'item_create'` per v0.7-M43 D6); bulk
   `item update --where ... --set <file-col>=<path>` deferred
   D5 → **shipped at v0.7-M42** (per-item multipart fan-out
   under `--concurrency` / `--continue-on-error`); `item create

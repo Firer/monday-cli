@@ -2088,10 +2088,14 @@ const runItemCreateFileDispatch = async (
 //      corresponds to M43's single-file failure case (leg-2 fails
 //      immediately); length k>0 corresponds to multi-file partial
 //      failure after k file legs succeeded.
-//   6. Envelope emit — new schema (lands at IMPL) with
-//      `operation: 'item_create_with_files'` + `item_id` (leg-1's
-//      new item) + `assets: [{column_id, asset}, ...]` (length N)
-//      + `applied_file_columns: [...]` (length N on success).
+//   6. Envelope emit — `itemCreateWithFilesOutputSchema`
+//      (defined above near `itemCreateOutputSchema`):
+//      `operation: 'item_create_with_files'` literal + `item:
+//      {id, name, board_id, group_id, parent_id?}` (inlines M43's
+//      `ItemCreateOutput` shape — leg-1's full item projection,
+//      NOT a scalar `item_id`) + `assets: [{column_id, filename,
+//      file_size_bytes, asset}, ...]` (length N) +
+//      `applied_file_columns: [...]` (length N on success).
 //
 // **D-list closures inherited from v0.8-plan §3 M46 entry; full
 // rationale + watch-items live there.**
