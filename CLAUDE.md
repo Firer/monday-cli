@@ -13,13 +13,16 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 - **Published:** `monday-cli@0.7.0` on npm (`latest` dist-tag,
   2026-05-20T15:48:07Z). **v0.7.0 published — release complete.**
-  **⚠️ KNOWN P1 (live in v0.7.0): file uploads are broken** —
-  `multipart-transport.ts` ships the Apollo multipart spec, which
-  live Monday rejects; affects `item upload` / `update upload` /
-  file `--set` (M31/M38/M42/M43/M46). Found 2026-05-20 via live
-  probe; fix scoped as **v0.8-M49** (build-first), filed P1 /
-  fix-in-v0.8. Tests never caught it (mocked transport validated
-  the wrong wire format — R-v0.8-NEW-9).
+  **✅ P1 FIXED in-tree (v0.8-M49, `2ec67ad`, 2026-05-21; unreleased
+  — still live-broken in published v0.7.0 until v0.8 publishes):**
+  file uploads shipped the Apollo multipart spec, which live Monday
+  rejects (`item upload` / `update upload` / file `--set` —
+  M31/M38/M42/M43/M46). `multipart-transport.ts` now emits Monday's
+  native shape (`query` + sibling `variables` + string-`map` + named
+  part, POSTed to `/v2/file`); Codex R1 CONVERGED 0 findings;
+  live-verified via a RUN_LIVE_TESTS-gated upload smoke test. Tests
+  never caught it because the wire-shape assertion validated the wrong
+  form (R-v0.8-NEW-9, now RESOLVED).
   Release-prep closed at `9b7e9ad..3e46f59` (5 commits: ToC audit +
   deferral slip `9b7e9ad` / README quickstart + scope refresh
   `3ca51ea` / version bump 0.6.0 → 0.7.0 + audit-fix
@@ -32,47 +35,44 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** **4155 tests + 1 skipped** post-v0.8-M46 IMPL
-  (release-anchored baseline was 4124 at v0.7.0 close; the M46
-  pre-flight cluster added the stub-routing tests → ~4145; M46 IMPL
-  is **+10 net** — 17 live/dry-run/partial-failure/precheck-abort
-  tests added across the 3 callShapes, 7 stub-routing tests removed).
-  Coverage holds above the **95 / 95.45 / 95 / 95** floor: the
-  multi-file dispatch bodies replace the c8-ignored
-  `m46_preflight_stub` wrappers with fully-tested runtime (live +
-  dry-run + partial-failure 0..N-1 + precheck-abort arms across all
-  3 callShapes); the only remaining c8-ignores are the bulk fold's
-  defensive dispatcher-contract guards (mirror M42's pattern). The
-  **precise post-IMPL coverage percentages are PENDING a clean
-  coverage run** — blocked this session by the R-v0.7-NEW-8
-  worker-pool `EAGAIN` flake under concurrent-agent load (a second
-  agent's `is_leaf` bug-fix session ran the suite simultaneously;
-  see `docs/v0.7-plan.md` §22 instance #6). **29 ERROR_CODES**;
-  **117 commands** (M46 adds no new command — it lifts dispatch
-  inside existing `item update` / `item create`); `npm audit`
-  **0 vulnerabilities**.
-- **Next session:** **v0.8-M49 — 🚨 P1 file-upload multipart
-  wire-format fix (BUILD FIRST).** A live probe (2026-05-20) found
-  the CLI ships the Apollo multipart spec (`operations`/`map`/`"0"`)
-  which **live Monday rejects** ("query not found" @ `/v2`,
-  "Unsupported query" @ `/v2/file`) — so **every file-upload command
-  is broken in published v0.7.0** (M31/M38/M42/M43/M46; M46's just-
-  shipped feature is live-broken too). Monday's NATIVE format works
-  (probe-confirmed): top-level `query` + `map:{"image":"variables.file"}`
-  (string value) + file part named `image`, at `/v2/file` (also `/v2`).
-  Fix `src/api/multipart-transport.ts` to the native shape + add a
-  `RUN_LIVE_TESTS`-gated live upload smoke test (the mocked transport
-  validated the WRONG form for 5 milestones — R-v0.8-NEW-9). Filed
-  P1, fix-in-v0.8 (user decision 2026-05-20). **Hard prerequisite for
-  M47.** Full detail + fix shape + open decisions at
-  `docs/v0.8-plan.md` §3 M49 entry; raw probe at
-  `scripts/probe/m47-stdin-filename.report.txt` (gitignored).
+- **Live numbers:** **4170 tests pass + 3 skipped** (post-M49: the 2
+  pre-existing skips + the new RUN_LIVE_TESTS-gated multipart-upload
+  smoke test). **⚠️ CI is RED on the `test:coverage` step:** the
+  now-measured global **branch coverage is 95.14% vs the 95.45%
+  floor** (15 branches short). This is PRE-EXISTING and not M49 — the
+  parent commit (`f2dd552`) measures the identical 95.14% (verified
+  via a clean worktree run, which finally cleared the R-v0.7-NEW-8
+  EAGAIN block that had kept the M46 number "PENDING"). The deficit
+  is M46's multi-file `--set` additions: `item/update.ts` (43
+  uncovered branches, 79.42%) + `item/create.ts` (29, 82.31%) — the
+  exact surface flagged "coverage PENDING" at M46 close. **DEFERRED**
+  by user decision (2026-05-21) to a dedicated M46-coverage pass; see
+  `docs/v0.8-plan.md` §22 **R-v0.8-NEW-10**. **29 ERROR_CODES**;
+  **117 commands** (M49 adds no new command — it fixes the shared
+  multipart transport seam); `npm audit` **0 vulnerabilities**.
+- **CI status:** the v0.7.0 table-colour test flake (root cause:
+  cli-table3's `@colors/colors` caches its enabled-state from ambient
+  TTY detection, so `color: true` emitted no ANSI in a non-TTY CI
+  worker) is **FIXED** at `a14802d` — `renderTable` now makes the
+  resolved colour decision authoritative. Once R-v0.8-NEW-10's
+  coverage gap is closed, CI goes fully green.
+- **Next session:** two candidates, plus one CI prerequisite:
+  **(0) R-v0.8-NEW-10 — close the M46 coverage gap** so CI goes green
+  (recover ≥15 branches in `item/update.ts` + `item/create.ts`;
+  user-deferred from the M49 session). **(a) M47 — stdin file `--set`
+  `<file-col>=-`** — now UNBLOCKED (M49 fixed the shared upload
+  transport). **(b) M48 — writable board_relation settings** —
+  independent (it's `create_column`, JSON not multipart; probe
+  already done). Run the candidate-selection discipline
+  (`workflow.md`) if 2+ remain. **v0.8-M49 is DONE** (`2ec67ad`):
+  `src/api/multipart-transport.ts` now emits Monday's native multipart
+  shape; full close at `docs/v0.8-plan.md` §3 M49.
 
-  **v0.8 committed scope (post-M46-IMPL + 2026-05-20 prioritisation),
-  rough build order:**
-  - **M49** — 🚨 P1 file-upload wire-format fix (above). TOP priority.
+  **v0.8 committed scope (post-M49), rough build order:**
+  - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
+    `2ec67ad`** (Codex R1 CONVERGED, live-verified).
   - **M47** — stdin file `--set` `<file-col>=-` (D7 closure).
-    **Blocked-by M49.** Probe DONE: `--filename` is OPTIONAL (any
+    **UNBLOCKED by M49.** Probe DONE: `--filename` is OPTIONAL (any
     non-empty name works — `"stdin"` / default `"blob"`; empty → 500),
     so default a non-empty placeholder. R-v0.8-NEW-2
     (`enforceSingleFileColumnSet` rename) folds in here (shared
