@@ -16,19 +16,33 @@
  *      operationName })`.
  *
  * Asset upload violates invariants (2) and (3): Monday's
- * `add_file_to_column` + `add_file_to_update` mutations follow the
- * standard GraphQL multipart-request specification (jaydenseric, used
- * widely across the GraphQL ecosystem). The wire envelope is
- * `multipart/form-data` with three named parts:
+ * `add_file_to_column` + `add_file_to_update` mutations take a
+ * `multipart/form-data` body. **Monday uses its own NATIVE multipart
+ * shape — NOT the Apollo / jaydenseric GraphQL-multipart spec.** This
+ * is load-bearing: v0.4-M31 through v0.7.0 shipped the jaydenseric
+ * spec (`operations` JSON + `map: {"0":["variables.file"]}` + part
+ * `"0"`), which live Monday REJECTS ("query not found in multipart
+ * form" @ `/v2`; "Unsupported query" @ `/v2/file`), so every
+ * file-upload command was broken in published v0.7.0 until v0.8-M49
+ * rewrote this seam (probe `scripts/probe/m49-native-variables.ts`,
+ * 2026-05-20). The native wire envelope is four parts:
  *
- *   - `operations` (JSON) — `{query, variables, operationName}` where
- *     the file-typed variable's value is `null` (placeholder).
- *   - `map` (JSON) — `{"<file-index>": ["variables.<file-var-name>"]}`
- *     pointing the multipart file part at the operations variable
- *     slot the file should fill.
- *   - `<file-index>` (binary) — the file's bytes, with `filename` +
- *     `Content-Type` parameters surfacing the upload's metadata
- *     (Monday reads `name` from this `filename` parameter).
+ *   - `query` (text) — the mutation document (a single named operation;
+ *     no `operationName` field is needed or sent).
+ *   - `variables` (JSON) — the operation's non-file variables
+ *     (`itemId` / `columnId`); the file variable's `null` placeholder
+ *     may be present or absent (Monday accepts both — the caller sets
+ *     it for parity with the JSON transport).
+ *   - `map` (JSON) — `{"<part-name>": "variables.<file-var-name>"}`
+ *     whose value is a STRING (not a one-element array), pointing the
+ *     binary part at the operation's file-variable slot.
+ *   - `<part-name>` (binary) — the file's bytes, with a NON-EMPTY
+ *     `filename` parameter (Monday reads `Asset.name` from it; an
+ *     empty filename 500s) + `Content-Type` from the `Blob`. The part
+ *     name matches the `map` key (we use the file-variable name).
+ *
+ * Posted to `/v2/file` (Monday's documented file endpoint, derived
+ * from the configured GraphQL base — see `deriveFileEndpoint`).
  *
  * The multipart envelope is incompatible with the JSON transport's
  * `body: JSON.stringify(...)` path; building it inside `transport.ts`
@@ -59,9 +73,10 @@
  * are transport-owned exactly the same way; `Content-Type` is set
  * automatically by `fetch` when given a `FormData` body (the
  * multipart boundary parameter requires the body builder to set
- * `Content-Type` so we don't preempt it here). Caller-supplied
- * headers with case-insensitive matches against the reserved set
- * are stripped before the spread.
+ * `Content-Type` so we don't preempt it here).
+ * `MultipartTransportRequest` carries no `headers` slot, so the
+ * lockdown is closed-by-construction — there is no caller bag from
+ * which a header could shadow the transport-owned set.
  *
  * **Retry + signal contract.** The transport itself does NOT own
  * retry — callers (the asset-upload fetchers in
@@ -73,9 +88,13 @@
  * the standard `AbortSignal.any(timeout, caller)` chain mirroring
  * `transport.ts`'s `combineSignals` (lands at IMPL).
  *
- * **Status: runtime body shipped at v0.4-M31 IMPL.** Wire-body
- * builder + fetch dispatch + header lockdown + signal combination +
- * fetch-error mapping all land below. Header lockdown mirrors
+ * **Status: runtime body shipped at v0.4-M31 IMPL; wire format
+ * corrected at v0.8-M49.** The M31 build emitted the Apollo/jaydenseric
+ * multipart spec, which live Monday rejects — M49 rewrote the FormData
+ * assembly to Monday's native shape (see the module header) after a
+ * live probe. Wire-body builder + fetch dispatch + header lockdown +
+ * signal combination + fetch-error mapping all land below. Header
+ * lockdown mirrors
  * `transport.ts:createFetchTransport` (caller-supplied headers can
  * never override `Authorization` / `API-Version`); `Content-Type`
  * is intentionally NOT in the transport-owned override set —
@@ -89,8 +108,9 @@
  *     `ID!`).
  *   - `add_file_to_update(file: File!, update_id: ID!) → Asset`.
  *   - `File` scalar (NOT the spec-standard `Upload!` — Monday's
- *     schema names it `File`; the multipart wire shape is otherwise
- *     compliant with the jaydenseric spec).
+ *     schema names it `File`). The multipart wire shape is Monday's
+ *     OWN native form, NOT the jaydenseric spec — see the M49 note in
+ *     the module header.
  *   - `Asset` returns 10 fields (`id` / `name` / `url` /
  *     `public_url` / `file_extension` / `file_size` /
  *     `created_at` / `uploaded_by` / `original_geometry` /
@@ -100,29 +120,36 @@
 import { ApiError, errorCode } from '../utils/errors.js';
 
 /**
- * One multipart request: the GraphQL operations payload (query +
- * variables + operationName) plus the binary file content and the
- * upload metadata (filename + content-type). The caller (the fetcher
- * in `src/api/assets.ts`) constructs both the GraphQL document AND
- * the file bytes; this transport only owns the wire-shape assembly
- * (FormData parts + header lockdown + fetch dispatch).
+ * One multipart request: the GraphQL document (query + variables +
+ * operationName) plus the binary file content and the upload metadata
+ * (filename + content-type). The caller (the fetcher in
+ * `src/api/assets.ts`) constructs both the GraphQL document AND the
+ * file bytes; this transport only owns the wire-shape assembly
+ * (Monday-native FormData parts + header lockdown + fetch dispatch).
  *
- * `fileVariableName` is the GraphQL variable name in `operations.
- * variables` that the file fills — the multipart `map` JSON pins
- * the binary part at `variables.<fileVariableName>`. Currently
- * always `'file'` (both Monday upload mutations use `$file: File!`)
- * but exposed as a parameter so the spec-compliant `map` JSON
- * generation stays local to this module.
+ * `fileVariableName` is the GraphQL variable name the file fills — the
+ * multipart `map` JSON pins the binary part at
+ * `variables.<fileVariableName>`. Currently always `'file'` (both
+ * Monday upload mutations use `$file: File!`) but exposed as a
+ * parameter so the `map` JSON generation stays local to this module.
  */
 export interface MultipartTransportRequest {
   readonly query: string;
   readonly variables: Readonly<Record<string, unknown>>;
+  /**
+   * The operation name. Retained for cassette matching in the test
+   * fixture + parity with the JSON transport, but NOT sent on the
+   * native wire: the documents carry a single named operation, so
+   * Monday resolves it without an `operationName` form field
+   * (M49 probe-confirmed).
+   */
   readonly operationName: string;
   /**
-   * GraphQL variable name in `variables` to populate with the
-   * file's binary content. The `variables.<fileVariableName>` slot
-   * in the operations payload MUST be `null` (placeholder); the
-   * multipart `map` JSON points the binary part at this path.
+   * GraphQL variable name in `variables` to populate with the file's
+   * binary content. The multipart `map` JSON points the binary part at
+   * `variables.<fileVariableName>`. The caller leaves that slot `null`
+   * in `variables` (placeholder for parity); Monday accepts the slot
+   * present-as-null or absent — the `map` is what routes the bytes.
    *
    * Monday's two upload mutations both use `$file: File!` at the
    * pinned API `2026-01`, so callers pass `'file'`; future Monday
@@ -179,6 +206,12 @@ export interface MultipartTransport {
 }
 
 export interface MultipartFetchTransportConfig {
+  /**
+   * The GraphQL base endpoint (e.g. `https://api.monday.com/v2`) —
+   * the same `config.apiUrl` the JSON transport uses. Uploads POST to
+   * the derived `/v2/file` file endpoint (see `deriveFileEndpoint`),
+   * so callers pass the base, not the `/file` path.
+   */
   readonly endpoint: string;
   readonly apiToken: string;
   readonly apiVersion: string;
@@ -189,27 +222,27 @@ export interface MultipartFetchTransportConfig {
 
 /**
  * Builds a `MultipartTransport` over Node's `fetch` using the Web
- * `FormData` API to assemble the multipart body (operations + map
- * + file parts per the standard GraphQL multipart-request
- * specification). Header lockdown mirrors `createFetchTransport`'s
- * discipline: caller-supplied headers never override `Authorization`
- * / `API-Version`; `Content-Type` is set by `fetch` from the
- * `FormData` body's boundary parameter, so it is NOT in the
- * transport-owned override set (different from the JSON transport's
- * hard-coded `application/json`).
+ * `FormData` API to assemble Monday's NATIVE file-upload body
+ * (`query` + `variables` + string-valued `map` + named file part —
+ * see the module header; NOT the Apollo/jaydenseric spec the broken
+ * pre-M49 build shipped). Header lockdown mirrors
+ * `createFetchTransport`'s discipline: caller-supplied headers never
+ * override `Authorization` / `API-Version`; `Content-Type` is set by
+ * `fetch` from the `FormData` body's boundary parameter, so it is NOT
+ * in the transport-owned override set (different from the JSON
+ * transport's hard-coded `application/json`).
  *
  * Pipeline per request:
  *
- *   1. Strip caller-supplied headers whose lowercase names match the
- *      reserved set (`authorization`, `api-version`); spread the safe
- *      remainder into the request bag, then append the transport-
- *      owned `Authorization` + `API-Version` so they always win.
- *   2. Build the `FormData` body — `operations` JSON part with the
- *      query + variables + operationName (the file variable's value
- *      is `null` at the caller's request, per spec) + `map` JSON
- *      part pointing the file part at
- *      `variables.<fileVariableName>` + the file `Blob` keyed by
- *      index `'0'` with the caller-supplied `filename`.
+ *   1. Build the transport-owned header bag (`Authorization` +
+ *      `API-Version`). `MultipartTransportRequest` carries no `headers`
+ *      slot, so the lockdown is closed-by-construction — no caller bag
+ *      can override the transport-owned set.
+ *   2. Build the `FormData` body in Monday's native shape — `query`
+ *      text part + `variables` JSON part + `map` JSON part (string
+ *      value `variables.<fileVariableName>`, keyed by the file part's
+ *      name) + the file `Blob` named to match that map key, with the
+ *      caller-supplied `filename`.
  *   3. Combine the caller's `signal` with `AbortSignal.timeout
  *      (timeoutMs)` so SIGINT + per-request timeout both propagate
  *      to the in-flight upload.
@@ -232,12 +265,12 @@ export const createMultipartFetchTransport = (
   config: MultipartFetchTransportConfig,
 ): MultipartTransport => {
   const fetchImpl = config.fetchImpl ?? fetch;
+  const fileEndpoint = deriveFileEndpoint(config.endpoint);
 
   return {
     request: async ({
       query,
       variables,
-      operationName,
       fileVariableName,
       file,
       filename,
@@ -258,21 +291,33 @@ export const createMultipartFetchTransport = (
         'API-Version': config.apiVersion,
       };
 
-      // Build the multipart body per the spec. The operations JSON
-      // carries `null` in the file variable's slot (the caller
-      // already populated `variables[fileVariableName] = null`
-      // before reaching the transport). The `map` JSON pins the
-      // binary part at `variables.<fileVariableName>` so Monday's
-      // multipart parser can route the bytes to the right slot.
-      const operations: Record<string, unknown> = { query, variables };
-      operations.operationName = operationName;
+      // Build the multipart body in Monday's NATIVE file-upload shape
+      // (probe-confirmed 2026-05-20, `scripts/probe/m49-native-variables.ts`).
+      // This is NOT the Apollo / jaydenseric GraphQL-multipart spec
+      // (`operations` JSON + `map: {"0":["variables.file"]}` + part
+      // `"0"`) — live Monday REJECTS that ("query not found in
+      // multipart form" @ /v2; "Unsupported query" @ /v2/file), which
+      // is why every upload was broken through v0.7.0 (M49). The native
+      // shape is:
+      //   - a top-level `query` form field (the mutation document),
+      //   - a sibling `variables` JSON form field (itemId / columnId +
+      //     the file variable's `null` placeholder — Monday accepts it
+      //     present or absent; the caller sets it for parity),
+      //   - a `map` whose value is a STRING `variables.<fileVariableName>`
+      //     (NOT a one-element array), keyed by the file part's name,
+      //   - the file part named to match that map key.
+      // `operationName` is intentionally omitted — the documents carry a
+      // single named operation, so Monday resolves it without the hint
+      // (probe-confirmed). No spread-leak risk: every value is a literal
+      // build, not a caller-controlled bag.
       const formData = new FormData();
-      formData.append('operations', JSON.stringify(operations));
+      formData.append('query', query);
+      formData.append('variables', JSON.stringify(variables));
       formData.append(
         'map',
-        JSON.stringify({ '0': [`variables.${fileVariableName}`] }),
+        JSON.stringify({ [fileVariableName]: `variables.${fileVariableName}` }),
       );
-      formData.append('0', file, filename);
+      formData.append(fileVariableName, file, filename);
 
       const combinedSignal = combineSignals(
         signal,
@@ -281,7 +326,7 @@ export const createMultipartFetchTransport = (
 
       let response: Response;
       try {
-        response = await fetchImpl(config.endpoint, {
+        response = await fetchImpl(fileEndpoint, {
           method: 'POST',
           headers: requestHeaders,
           body: formData,
@@ -318,6 +363,23 @@ export const createMultipartFetchTransport = (
       };
     },
   };
+};
+
+/**
+ * Monday's documented file-upload endpoint is `/v2/file` — the GraphQL
+ * base (`config.endpoint`, e.g. `https://api.monday.com/v2`) with
+ * `/file` appended. Derive it from the configured endpoint so a custom
+ * `MONDAY_API_URL` / corporate proxy base still routes uploads to the
+ * right path. Trailing slashes are normalised first so
+ * `.../v2/` → `.../v2/file` (not `.../v2//file`). `config.endpoint` is
+ * a zod-validated URL upstream, so `new URL` never throws here. (Native
+ * multipart was also accepted at the bare `/v2` in the M49 probe, but
+ * `/v2/file` is the documented surface — prefer it.)
+ */
+const deriveFileEndpoint = (endpoint: string): string => {
+  const url = new URL(endpoint);
+  url.pathname = `${url.pathname.replace(/\/+$/u, '')}/file`;
+  return url.toString();
 };
 
 const isAbortError = (err: unknown): boolean => {

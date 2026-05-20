@@ -82,19 +82,20 @@ const baseRequest = (
 });
 
 describe('createMultipartFetchTransport — wire shape', () => {
-  it('POSTs to the configured endpoint with a FormData body', async () => {
+  it('POSTs to the derived /file endpoint with a FormData body', async () => {
     const { fetch: fakeFetch, calls } = captureFetch(() =>
       okResponse({ data: { add_file_to_column: { id: '99' } } }),
     );
     const transport = createMultipartFetchTransport(sampleConfig(fakeFetch));
     await transport.request(baseRequest());
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe('https://api.example/v2');
+    // Monday's documented file endpoint = the GraphQL base + `/file`.
+    expect(calls[0]!.url).toBe('https://api.example/v2/file');
     expect(calls[0]!.init.method).toBe('POST');
     expect(calls[0]!.init.body).toBeInstanceOf(FormData);
   });
 
-  it('FormData carries operations + map + file parts per the GraphQL multipart spec', async () => {
+  it('FormData carries Monday-native query + variables + string-map + named file part', async () => {
     const { fetch: fakeFetch, calls } = captureFetch(() =>
       okResponse({ data: { add_file_to_column: { id: '99' } } }),
     );
@@ -106,34 +107,40 @@ describe('createMultipartFetchTransport — wire shape', () => {
     );
     const fd = calls[0]!.init.body as FormData;
 
-    // operations part — the GraphQL document + variables + operationName.
-    const operations = fd.get('operations');
-    expect(typeof operations).toBe('string');
-    const parsedOperations = JSON.parse(operations as string) as {
-      query: string;
-      variables: Record<string, unknown>;
-      operationName: string;
-    };
-    expect(parsedOperations.operationName).toBe('AddFileToColumn');
-    expect(parsedOperations.variables).toEqual({
+    // `query` is a top-level text part (NOT nested inside `operations`).
+    const query = fd.get('query');
+    expect(typeof query).toBe('string');
+    expect(query as string).toMatch(/AddFileToColumn/);
+
+    // `variables` is a sibling JSON part carrying the non-file vars.
+    const variables = fd.get('variables');
+    expect(typeof variables).toBe('string');
+    expect(JSON.parse(variables as string)).toEqual({
       itemId: '12345',
       columnId: 'files',
       file: null,
     });
-    expect(parsedOperations.query).toMatch(/AddFileToColumn/);
 
-    // map part — pins file part `'0'` at `variables.file`.
+    // `map` value is a STRING `variables.file` (not a `['variables.file']`
+    // array), keyed by the file part's name.
     const map = fd.get('map');
     expect(typeof map).toBe('string');
-    expect(JSON.parse(map as string)).toEqual({ '0': ['variables.file'] });
+    expect(JSON.parse(map as string)).toEqual({ file: 'variables.file' });
 
-    // file part — the binary content with the supplied filename.
-    const filePart = fd.get('0');
+    // file part named to match the map key (`file`), carrying the filename.
+    const filePart = fd.get('file');
     expect(filePart).toBeInstanceOf(Blob);
     expect((filePart as File).name).toBe('screenshot.png');
+
+    // Regression guard (R-v0.8-NEW-9): the Apollo/jaydenseric spec parts
+    // (`operations` JSON, `map`-array, file part `'0'`) — which live
+    // Monday rejects — must NOT appear. A revert to that shape fails here.
+    expect(fd.get('operations')).toBeNull();
+    expect(fd.get('0')).toBeNull();
+    expect(fd.get('operationName')).toBeNull();
   });
 
-  it('honors a custom fileVariableName in the map JSON', async () => {
+  it('honors a custom fileVariableName in the map JSON + file part name', async () => {
     const { fetch: fakeFetch, calls } = captureFetch(() =>
       okResponse({ data: { x: { id: '1' } } }),
     );
@@ -146,8 +153,10 @@ describe('createMultipartFetchTransport — wire shape', () => {
     );
     const fd = calls[0]!.init.body as FormData;
     expect(JSON.parse(fd.get('map') as string)).toEqual({
-      '0': ['variables.attachment'],
+      attachment: 'variables.attachment',
     });
+    // The binary part is named to match the map key.
+    expect(fd.get('attachment')).toBeInstanceOf(Blob);
   });
 
   it('preserves the file bytes on the wire', async () => {
@@ -158,7 +167,7 @@ describe('createMultipartFetchTransport — wire shape', () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header magic
     await transport.request(baseRequest({ file: sampleBlob(bytes) }));
     const fd = calls[0]!.init.body as FormData;
-    const filePart = fd.get('0') as Blob;
+    const filePart = fd.get('file') as Blob;
     const received = new Uint8Array(await filePart.arrayBuffer());
     expect(Array.from(received)).toEqual(Array.from(bytes));
   });
