@@ -55,7 +55,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   R-v0.8-NEW-4 (M42/M43 schema parse-test backfill) into the M47
   cluster per §22 if the file-column-set.ts touch lands there.
 
-  **v0.8-M46 SHIPPED at `b28b3b6..9af6253`** (R0 IMPL + R1-R2 Codex
+  **v0.8-M46 SHIPPED at `3e6bdc1..1289133`** (R0 IMPL + R1-R2 Codex
   IMPL fix-up rounds; CONVERGED at R3 with zero findings). The
   v0.6-M38 → v0.8-M46 D2 fold lands multi-file `--set` per call for
   the 3 reachable callShapes (single-item update / bulk update /
@@ -64,7 +64,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   loop + partial-failure accumulator lifted to
   `dispatchFileLegsSequentially` (`src/api/file-column-set.ts`, 3
   consumers); per-callShape envelope decoration + `foldAndRemap`
-  placement stayed inlined. Pre-flight cluster was `7daffaf..dd1b1fa`
+  placement stayed inlined. Pre-flight cluster was `89a86ea..d9b035b`
   (R0 + 3 Codex pre-flight rounds). Full narrative + post-mortem at
   `docs/v0.8-plan.md` §3 M46 entry + §22 R-v0.8-NEW-1.
 
@@ -83,7 +83,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   Bundle scope (in milestone order):
 
   - **M46 — multi-file `--set` per call** (v0.6-M38 D2 deferral
-    `multi_file_set_unsupported`). **SHIPPED at `b28b3b6..9af6253`.**
+    `multi_file_set_unsupported`). **SHIPPED at `3e6bdc1..1289133`.**
     Extended v0.7-M42's per-item file-dispatch envelope to multiple
     file entries per item. Zero new wire surface, zero new transport
     seam, zero new ERROR_CODES (registry stays at 29). Built on M42's
