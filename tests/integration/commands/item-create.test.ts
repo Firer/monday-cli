@@ -1117,7 +1117,7 @@ describe('monday item create — subitem (live)', () => {
     expect(env.resolved_ids).toEqual({});
   });
 
-  it('multi_level board → usage_error with details.hierarchy_type + deferred_to: v0.7 (M28 Decision 11 closure; slipped from v0.4 → v0.5 → v0.6 → v0.7 across three consecutive release-preps — Monday\'s data model still doesn\'t surface subtasks at API 2026-01)', async () => {
+  it('multi_level board → usage_error with details.hierarchy_type + deferred_to: v0.8 (M28 Decision 11 closure; slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 across four consecutive release-preps — Monday\'s data model still doesn\'t surface subtasks at API 2026-01; v0.7 pivoted away from API 2026-04 so the data-model probe gate moves to v0.8\'s 2026-07 pin)', async () => {
     const out = await drive(
       ['item', 'create', '--parent', '12345', '--name', 'Subtask', '--json'],
       {
@@ -1146,7 +1146,7 @@ describe('monday item create — subitem (live)', () => {
     expect(details).toMatchObject({
       parent_item_id: '12345',
       hierarchy_type: 'multi_level',
-      deferred_to: 'v0.7',
+      deferred_to: 'v0.8',
     });
   });
 

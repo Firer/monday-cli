@@ -58,7 +58,7 @@ no `data`); see the **Errors** section at the bottom.
 | [user](#user) | list, get, me, team-list (v0.5-M34), team-get (v0.5-M34), team-create (v0.5-M34), team-delete (v0.5-M34), team-add-members (v0.5-M34), team-remove-members (v0.5-M34) |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13), upload (v0.4-M31) |
 | [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29) |
-| [item (mutations)](#item-mutations) | set (friendly file `--set` v0.6-M38), clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30 + friendly file `--set` v0.6-M38), create, archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20), upload (v0.4-M31) |
+| [item (mutations)](#item-mutations) | set (friendly file `--set` v0.6-M38), clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30 + friendly file `--set` v0.6-M38 single + v0.7-M42 bulk), create (friendly file `--set` v0.7-M43), archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20), upload (v0.4-M31) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
 | [config](#config) | show, path |
@@ -2583,11 +2583,13 @@ present) derive the auto-generated subitems board from the parent's
 
 Multi-level boards (`hierarchy_type: "multi_level"`) are rejected
 pre-mutation with `usage_error` carrying `details.hierarchy_type` +
-`details.deferred_to: "v0.7"` (M28 Decision 11 closure — Monday's
+`details.deferred_to: "v0.8"` (M28 Decision 11 closure — Monday's
 `sub_items_board` carries no `subtasks` column at API `2026-01`;
-slipped from v0.4 → v0.5 → v0.6 → v0.7 across three consecutive
-release-preps because none of v0.4 / v0.5 / v0.6 picked the feature
-up and the data-model gap is unchanged).
+slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 across four
+consecutive release-preps because none of v0.4 / v0.5 / v0.6 / v0.7
+picked the feature up — v0.7 pivoted away from API `2026-04` at
+2026-05-20 so the data-model probe gate moves forward to v0.8's
+`2026-07` pin).
 `--parent` is mutually exclusive with
 `--board`, `--group`, and `--position` / `--relative-to`. `--set` /
 `--set-raw` columns resolve against the **subitems board**, not the
