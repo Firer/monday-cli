@@ -11,69 +11,69 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.6.0` on npm (`latest` dist-tag,
-  2026-05-18T16:30:21Z). **v0.6.0 published — release complete.**
-  Release-prep closed at `98185d4..51ba1a4` (5 commits: ToC audit
-  + slip / README refresh / version bump + audit-fix / CHANGELOG /
-  close-docs sweep; envelope-snapshot probe ran clean + folded
-  into close-docs prose per the v0.5 precedent). Annotated
-  `v0.6.0` tag pushed pointing at `51ba1a4`; GitHub release live
-  at https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
-  Previous: `monday-cli@0.5.0` (2026-05-17T20:55:05Z).
-- **package.json version:** `0.6.0`.
-- **Live numbers:** 4124 tests + 1 skipped across 172 files (was
-  4115 + 1 at v0.7-M43 pre-flight baseline; +9 from the v0.7-M43
-  IMPL test surface flip — 12 IMPL tests replacing 3 pre-flight
-  stub assertions, covering the two-leg happy path top-level +
-  subitem, D6 mixed-set asymmetry, dry-run two-`planned_changes`,
-  D1 orphan-warn envelope, leg-1 failure w/ + w/o F4 remap,
-  translation reject, atomicity-before-wire ENOENT, regression-
-  guards across all 4 emit surfaces); coverage 98.79 / 95.65 /
-  99.16 / 99.08 (stmts / branches / fns / lines) at the
-  95 / 95.45 / 95 / 95 floor (branches margin **0.20pp** — v0.7-
-  M43 IMPL absorbed the 0.17pp drop across the new helper's leg-1
-  / leg-2 catch arms; defensive non-CliError re-throws + the
-  cause-details / metaSource unreachable arms c8-ignored per
-  testing.md preferred form; the two preflight-warnings catch
-  arms collapse the `&& length > 0` guard for a smaller branch
-  surface than the JSON path's pattern at `create.ts:1010-1022`;
-  was 0.37pp at v0.7-M43 pre-flight baseline — pre-flight stub
-  body was c8-ignored so no branches absorption fired then; full
-  breakdown in `docs/v0.7-plan.md` §3 M43 "Coverage residual");
-  **29 ERROR_CODES**; **117 commands**; `npm audit` 1 moderate
-  (`brace-expansion 5.0.2 → 5.0.5`; not a merge blocker per
-  security.md "high = merge blocker"; defer to v0.7 release-
-  prep audit-fix or earlier if a Codex round flags it).
-- **Next session:** **NOT v0.7-M39 / M40 / M41.** Per session-end
-  directive 2026-05-20: pivot v0.7's remaining scope away from
-  any API-`2026-04`-dependent milestone until `@mondaydotcomorg/
-  api` SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` (or
-  later) natively. The v0.7-M39 string-literal override path is
-  abandoned — the override commits (`bb7c2cc..2e501b5`) were
-  shipped in a prior session then `git reset --hard ea153ee`'d
-  back at session-end 2026-05-20 because the first downstream
-  surface (M40 `set_item_description_content`) turned out to be a
-  premium-feature wire returning opaque `INTERNAL_SERVER_ERROR
-  { service: 'docs-api' }` on free-tier accounts — not worth the
-  override-maintenance overhead for a single user-blocked verb.
-  Findings preserved in user-memory at
-  `~/.claude/projects/-home-nick-code-monday-cli/memory/project_m40_findings_deferred.md`
-  + the M40 probe + report in `git reflog` (M39 commits + M40
-  uncommitted work are recoverable for ~90 days if priorities
-  shift). M41 (`create_doc_blocks` for bulk doc-block create) is
-  similarly `2026-04`-introduced; defers under the same gate.
-  **Recommended candidates for the next session** (none need
-  `2026-04`): finishing v0.7 by treating M42 + M43 as the
-  release content + opening v0.7 release-prep (envelope-snapshot
-  refresh probe + ToC audit + version bump 0.6.0 → 0.7.0 +
-  CHANGELOG + README quickstart + close-docs sweep); OR pivoting
-  to a v0.6.x backlog candidate that lives on the current
-  `2026-01` pin (stdin file `--set`, profile-scoped argument
-  defaults, multi-level subitem creation, cross-board `item
-  move` value-overrides, cross-board search resumable cursor —
-  all carry-forwards from earlier release-preps per
-  `docs/cli-design.md` §13). Reopen a candidate-selection
-  session at the next kickoff to pick.
+- **Published:** `monday-cli@0.7.0` ready for publish — release-prep
+  complete, npm publish + annotated tag pending user authorization.
+  Release-prep cluster closed at `9b7e9ad..<this-commit>` (5 commits:
+  ToC audit + deferral slip `9b7e9ad` / README quickstart + scope
+  refresh `3ca51ea` / version bump 0.6.0 → 0.7.0 + audit-fix
+  `brace-expansion 5.0.2 → 5.0.5+` `75c8831` / CHANGELOG [0.7.0]
+  `9ebaa81` / close-docs sweep `<this-commit>`; envelope-snapshot
+  refresh probe ran clean at release-prep open — zero diff vs M43
+  IMPL close — and folded into this close-docs prose per the v0.5 /
+  v0.6 precedent). Previous: `monday-cli@0.6.0` on npm (`latest`
+  dist-tag, 2026-05-18T16:30:21Z), release-prep closed at
+  `98185d4..51ba1a4`, annotated `v0.6.0` tag at
+  https://github.com/Firer/monday-cli/releases/tag/v0.6.0.
+- **package.json version:** `0.7.0`.
+- **Live numbers:** 4124 tests + 1 skipped across 172 files (unchanged
+  across release-prep — no new feature surface; one test description
+  string reworded at the deferral-slip commit `9b7e9ad`); coverage
+  98.79 / 95.65 / 99.16 / 99.08 (stmts / branches / fns / lines) at
+  the 95 / 95.45 / 95 / 95 floor (branches margin **0.20pp** — held
+  flat across release-prep since the cluster ships zero production
+  semantic changes beyond the literal `'v0.7'` → `'v0.8'` flip at
+  `src/commands/item/create.ts:653`; v0.7-M43 IMPL absorbed the
+  0.17pp drop earlier across the new helper's leg-1 / leg-2 catch
+  arms with defensive non-CliError re-throws + cause-details /
+  metaSource unreachable arms c8-ignored per testing.md preferred
+  form; full breakdown in `docs/v0.7-plan.md` §3 M43 "Coverage
+  residual"); **29 ERROR_CODES**; **117 commands**; `npm audit`
+  **0 vulnerabilities** post-fix (`brace-expansion 5.0.2 → 5.0.5+`
+  resolved at the version-bump commit `75c8831` per the v0.6
+  release-prep audit-fix-folded-into-version-bump precedent).
+- **Next session:** **EXTERNALLY BLOCKED on `v0.7.0` npm publish +
+  annotated tag — user actions, not agent actions.** Once
+  `monday-cli@0.7.0` lands on npm and the `v0.7.0` annotated tag
+  pushes to `origin/main`, the next session should be a **v0.7.x
+  candidate-selection** per R-NEW-75 (when ≥2 backlog candidates
+  remain, run a dedicated pre-pre-flight session before any
+  pre-flight contract diff). The current `cli-design.md` §13
+  carry-forward backlog living on the present `2026-01` pin
+  carries 5+ candidates: (a) `<file-col>=-` stdin support
+  (v0.6-M38 D7 deferral; needs clean `--filename` companion shape
+  pinned first); (b) multi-file `--set` per call (v0.6-M38 D2
+  deferral; M42 pinned the per-item file-dispatch envelope so
+  multi-file would revisit with M42's shape as the per-item
+  baseline); (c) profile-scoped argument defaults (filed at v0.6
+  kickoff; extends `~/.monday-cli/config.toml` with `[profiles.
+  <name>.defaults]`; carries the §13 carve-out Decision
+  prerequisite); (d) cross-board `item move` value-overrides
+  (Monday's `ColumnMappingInput` still carries no value slot at
+  API `2026-01` — slipped four times, may close permanently or
+  await Monday surface change); (e) cross-board search resumable
+  cursor (per-board cursor-lifetime under aggregation design
+  issue unchanged). The **v0.7-deferred M39 / M40 / M41
+  cluster** (API `2026-04` pin + `set_item_description_content` +
+  `create_doc_blocks`) RE-OPENS only when `@mondaydotcomorg/api`
+  SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` natively
+  AND a paid-tier sandbox is available for the M40 wire probe.
+  The M39 override commits (`bb7c2cc..2e501b5`) + M40 uncommitted
+  work are recoverable in `git reflog` for ~90 days; M40 findings
+  preserved in user-memory at
+  `~/.claude/projects/-home-nick-code-monday-cli/memory/project_m40_findings_deferred.md`.
+  v0.8 SKELETON (`docs/v0.8-plan.md`) ratifies at the v0.8 kickoff
+  candidate-selection AFTER v0.7.0 ships AND the v0.7.x
+  candidate-selection runs.
 
 - **M43 SHIPPED at `5cf4365..c217011`** (R0 IMPL + R1-R3 Codex
   IMPL fix-up commits + R4 CONVERGED with zero findings). The
@@ -168,13 +168,26 @@ detail, and R-class refactor backlog, **read the plan docs** —
    deferral list (§13), every binding decision.
 2. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — **SKELETON**
    (filed forward 2026-05-18). v0.8 = Monday API 2026-07 pin +
-   user-entity migration (M44) + `user activity` (M45). Ratified
-   at v0.8 kickoff candidate-selection AFTER v0.7.0 ships.
-3. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — **SKELETON**
-   (filed forward 2026-05-18). v0.7 = Monday API 2026-04 pin +
-   item set-description (M40) + doc block-create-bulk (M41) +
-   v0.6.x bulk + create file `--set` carve-outs (M42 / M43).
-   Ratified at v0.7 kickoff candidate-selection (next session).
+   user-entity migration (M44) + `user activity` (M45) PLUS the
+   v0.7-deferred M39 / M40 / M41 re-open candidates (API
+   `2026-04` pin + item set-description + doc block-create-bulk)
+   pending SDK 15.x publication. Ratified at v0.8 kickoff
+   candidate-selection AFTER v0.7.0 ships AND v0.7.x
+   candidate-selection runs.
+3. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
+   M43 (the v0.6.x bulk + create file `--set` carve-out folds);
+   M39 (API `2026-04` pin bump) + M40 (`item set-description`) +
+   M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** to a
+   future release pending `@mondaydotcomorg/api` SDK 15.x with
+   `CURRENT_VERSION = '2026-04'` natively + a paid-tier sandbox
+   for the M40 wire probe. §22 R-class log
+   (R-v0.7-NEW-1 through R-v0.7-NEW-5 — R-v0.6-NEW-1 graduated
+   at the 5-consumer threshold; R-v0.6-NEW-2 graduated at the
+   5-discriminator threshold; R-NEW-82 ratified at the 5th
+   consecutive release-prep consumer; R-v0.7-NEW-4 graduated
+   into `.claude/rules/workflow.md` at M42 IMPL R7 + refined
+   at R8; R-NEW-76 graduated from stub-anchored to wire-
+   dispatch-anchored invariant at M43 IMPL).
 4. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
    (files-shaped friendly `--set`) with §22 R-class log
    (R-v0.6-NEW-*).
