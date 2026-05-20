@@ -3252,16 +3252,28 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
   });
 });
 
-describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 closure from v0.6-M38) — pre-flight stub', () => {
-  // v0.8-M46 pre-flight contract diff. argv + pre-check +
-  // create-mode resolution + routing surface ships as live
-  // contract; the two-leg-group multi-file dispatch body
-  // (precheckLocalFile × N + leg-1 create_item + legs 2..N+1
-  // add_file_to_column) is the c8-ignored stub throwing
-  // `'m46_preflight_stub'`. Lifted at v0.8-M46 IMPL. Mirrors
-  // v0.7-M43 pre-flight test shape verbatim. The
-  // `'multi_file_set_unsupported'` discriminator literal stays
-  // RESERVED across the codebase post-fold.
+describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 closure from v0.6-M38)', () => {
+  // v0.8-M46 IMPL. argv + pre-check + create-mode resolution +
+  // routing surface ships as live contract; the two-leg-group
+  // multi-file dispatch body (`runItemCreateFileMultiDispatch`):
+  // precheckLocalFile × N + leg-1 create_item (bundling non-file
+  // column_values) + legs 2..N+1 sequential add_file_to_column,
+  // emitting `operation: 'item_create_with_files'`. The
+  // `'m46_preflight_stub'` + `'multi_file_set_unsupported'`
+  // discriminator literals stay RESERVED post-IMPL (regression-
+  // guarded below).
+  const buildMultiAsset = (id: string, name: string): Record<string, unknown> => ({
+    id,
+    name,
+    url: `https://files.monday.com/x/${id}`,
+    public_url: `https://share.monday.com/${id}`,
+    file_extension: 'pdf',
+    file_size: 19,
+    created_at: '2026-06-01T10:30:00Z',
+    uploaded_by: { id: '1', name: 'Alice' },
+    original_geometry: null,
+    url_thumbnail: null,
+  });
   const fileBoardMultiCols = {
     ...sampleBoardMetadata,
     columns: [
@@ -3300,7 +3312,27 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
     await rm(workdirM46, { recursive: true, force: true });
   });
 
-  it("routes 2+ file --set entries on item_create to the v0.8-M46 stub (surfaces 'm46_preflight_stub' until IMPL; was 'multi_file_set_unsupported' rejection at v0.6-M38 / v0.7)", async () => {
+  it("live create-time multi-file: leg-1 create_item then N sequential add_file_to_column legs + emits 'item_create_with_files' (inlined item shape, NOT scalar item_id)", async () => {
+    // v0.8-M46 IMPL two-leg-group. Leg-1 creates the item (column_values
+    // null since both `--set` are file entries → routed to file legs);
+    // legs 2..N+1 attach the files sequentially per D1. The envelope
+    // inlines leg-1's full ItemCreateOutput under `item` (NOT a scalar
+    // item_id — the Codex R2 P2-1 regression-guard contract).
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report-1.pdf',
+          response: { data: { add_file_to_column: buildMultiAsset('a1', 'report-1.pdf') } },
+        },
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report-2.pdf',
+          response: { data: { add_file_to_column: buildMultiAsset('a2', 'report-2.pdf') } },
+        },
+      ],
+      { assertExhaustive: true },
+    );
     const out = await drive(
       [
         'item',
@@ -3308,7 +3340,7 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
         '--board',
         '111',
         '--name',
-        'multi-file create item',
+        'Refactor login',
         '--set',
         `attachments=${reportPath1}`,
         '--set',
@@ -3321,38 +3353,72 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
             operation_name: 'BoardMetadata',
             response: { data: { boards: [fileBoardMultiCols] } },
           },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            match_variables: {
+              boardId: '111',
+              itemName: 'Refactor login',
+              columnValues: null,
+            },
+            response: { data: { create_item: newItem } },
+          },
         ],
       },
+      { multipartTransport: multipart },
     );
-    expect(out.exitCode).toBe(2);
-    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-      error?: {
-        code: string;
-        details?: {
-          reason?: string;
-          call_shape?: string;
-          create_mode_kind?: string;
-          file_count?: number;
-        };
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        operation: string;
+        item: { id: string; name: string; board_id: string; group_id: string | null };
+        assets: { column_id: string; filename: string; asset: { id: string } }[];
+        applied_file_columns: string[];
       };
+      resolved_ids?: Readonly<Record<string, string>>;
     };
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-    expect(env.error?.details?.call_shape).toBe('item_create');
-    expect(env.error?.details?.create_mode_kind).toBe('item');
-    expect(env.error?.details?.file_count).toBe(2);
-    // Regression-guard: the v0.6-M38 reserved literal stays absent
-    // from runtime output post-fold (multi-file rejection literal
-    // RESERVED).
+    assertEnvelopeContract(env);
+    expect(env.data.operation).toBe('item_create_with_files');
+    // Inlined ItemCreateOutput shape, NOT a scalar item_id.
+    expect(env.data.item).toEqual({
+      id: '99001',
+      name: 'Refactor login',
+      board_id: '111',
+      group_id: 'topics',
+    });
+    expect(env.data.applied_file_columns).toEqual([
+      'attachments',
+      'attachments_2',
+    ]);
+    expect(env.data.assets).toHaveLength(2);
+    expect(env.data.assets[0]).toMatchObject({
+      column_id: 'attachments',
+      filename: 'report-1.pdf',
+      asset: { id: 'a1' },
+    });
+    expect(env.data.assets[1]).toMatchObject({
+      column_id: 'attachments_2',
+      filename: 'report-2.pdf',
+      asset: { id: 'a2' },
+    });
+    expect(env.resolved_ids).toMatchObject({
+      attachments: 'attachments',
+      attachments_2: 'attachments_2',
+    });
+    // Two file legs fired in dispatch order against the created item.
+    expect(multipart.requests).toHaveLength(2);
+    expect(multipart.requests[0]?.filename).toBe('report-1.pdf');
+    expect(multipart.requests[1]?.filename).toBe('report-2.pdf');
+    multipart.assertConsumed();
+    expect(out.stderr).not.toContain('m46_preflight_stub');
+    expect(out.stdout).not.toContain('m46_preflight_stub');
     expect(out.stderr).not.toContain('multi_file_set_unsupported');
     expect(out.stdout).not.toContain('multi_file_set_unsupported');
   });
 
-  it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN create-time multi-file routing path", async () => {
-    // Dry-run reaches the same stub (the c8-ignored body throws
-    // unconditionally regardless of `inputs.isDryRun`); regression-
-    // guard the literal stays absent on dry-run + live paths so
-    // future contract drift can't silently re-introduce it.
+  it('dry-run create-time multi-file: emits N+1 planned_changes (1 create_item + N add_file_to_column without item_id), no wire legs', async () => {
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: true,
+    });
     const out = await drive(
       [
         'item',
@@ -3360,7 +3426,7 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
         '--board',
         '111',
         '--name',
-        'multi-file create item (dry-run)',
+        'Refactor login',
         '--set',
         `attachments=${reportPath1}`,
         '--set',
@@ -3376,17 +3442,219 @@ describe('monday item create — v0.8-M46 multi-file `--set` carve-out fold (D2 
           },
         ],
       },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      planned_changes?: readonly Record<string, unknown>[];
+    };
+    expect(env.ok).toBe(true);
+    const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+    expect(meta.dry_run).toBe(true);
+    // 1 create_item + 2 add_file_to_column = 3 planned_changes.
+    expect(env.planned_changes).toHaveLength(3);
+    expect(env.planned_changes![0]).toMatchObject({
+      operation: 'create_item',
+      board_id: '111',
+      name: 'Refactor login',
+    });
+    expect(env.planned_changes![1]).toEqual({
+      operation: 'add_file_to_column',
+      column_id: 'attachments',
+      file_path: reportPath1,
+      filename: 'report-1.pdf',
+      file_size_bytes: 19,
+    });
+    expect(env.planned_changes![2]).toEqual({
+      operation: 'add_file_to_column',
+      column_id: 'attachments_2',
+      file_path: reportPath2,
+      filename: 'report-2.pdf',
+      file_size_bytes: 19,
+    });
+    expect(multipart.requests).toHaveLength(0);
+    expect(out.stdout).not.toContain('m46_preflight_stub');
+    expect(out.stderr).not.toContain('m46_preflight_stub');
+  });
+
+  it("create-time multi-file partial failure: orphan-warn 'create_then_file_upload_partial_failure' with created_item_id + applied_file_columns (length 0..N-1) after a file leg fails", async () => {
+    // Leg-1 creates the item; leg-2 (attachments) lands; leg-3
+    // (attachments_2) fails. The orphan-warn envelope extends M43's
+    // discriminator with the always-present applied_file_columns slot
+    // (length k>0 here — one file column landed before the failure).
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report-1.pdf',
+          response: { data: { add_file_to_column: buildMultiAsset('a1', 'report-1.pdf') } },
+        },
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report-2.pdf',
+          response: { errors: [{ message: 'Internal server error' }] },
+          http_status: 500,
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath1}`,
+        '--set',
+        `attachments_2=${reportPath2}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoardMultiCols] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
     );
     expect(out.exitCode).toBe(2);
     const env = parseEnvelope(out.stderr) as EnvelopeShape & {
       error?: {
         code: string;
-        details?: { reason?: string; is_dry_run?: boolean };
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+          applied_file_columns?: string[];
+          failed_file_column?: string;
+          column_id?: string;
+          cause?: { code?: string };
+        };
       };
     };
-    expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-    expect(env.error?.details?.is_dry_run).toBe(true);
-    expect(out.stderr).not.toContain('multi_file_set_unsupported');
-    expect(out.stdout).not.toContain('multi_file_set_unsupported');
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe(
+      'create_then_file_upload_partial_failure',
+    );
+    expect(env.error?.details?.created_item_id).toBe('99001');
+    // One file column landed before the failure.
+    expect(env.error?.details?.applied_file_columns).toEqual(['attachments']);
+    expect(env.error?.details?.failed_file_column).toBe('attachments_2');
+    expect(env.error?.details?.column_id).toBe('attachments_2');
+    expect(env.error?.details?.cause?.code).toBeDefined();
+    expect(out.stderr).not.toContain('m46_preflight_stub');
+  });
+
+  it('create-time multi-file partial failure with length-0 applied_file_columns when the FIRST file leg fails (no file columns landed; item still orphaned)', async () => {
+    // Leg-1 creates the item; the FIRST file leg fails immediately —
+    // applied_file_columns is length 0 (mirrors M43's single-file
+    // leg-2-fails-immediately case extended to the multi-file surface).
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'report-1.pdf',
+          response: { errors: [{ message: 'Internal server error' }] },
+          http_status: 500,
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath1}`,
+        '--set',
+        `attachments_2=${reportPath2}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoardMultiCols] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: {
+        details?: {
+          reason?: string;
+          created_item_id?: string;
+          applied_file_columns?: string[];
+          failed_file_column?: string;
+        };
+      };
+    };
+    expect(env.error?.details?.reason).toBe(
+      'create_then_file_upload_partial_failure',
+    );
+    expect(env.error?.details?.created_item_id).toBe('99001');
+    expect(env.error?.details?.applied_file_columns).toEqual([]);
+    expect(env.error?.details?.failed_file_column).toBe('attachments');
+    // Only one file leg fired — the loop stopped at the first failure.
+    expect(multipart.requests).toHaveLength(1);
+  });
+
+  it('create-time multi-file pre-check aborts the whole call BEFORE leg-1 create when a file path is unreadable (usage_error; no create_item wire leg)', async () => {
+    // D3 — N upfront pre-checks BEFORE either wire leg. A missing path
+    // aborts the whole call with `usage_error`; the BoardMetadata fetch
+    // (for the M38 pre-check's column resolution) fires, but no
+    // ItemCreateTopLevel leg + no multipart leg.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: false,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'Refactor login',
+        '--set',
+        `attachments=${reportPath1}`,
+        '--set',
+        `attachments_2=${join(workdirM46, 'missing.pdf')}`,
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoardMultiCols] } },
+          },
+        ],
+      },
+      { multipartTransport: multipart },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+      error?: { code: string; details?: { reason?: string } };
+    };
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.reason).toBe('file_not_readable');
+    expect(multipart.requests).toHaveLength(0);
   });
 });

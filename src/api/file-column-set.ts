@@ -211,7 +211,7 @@
  */
 
 import { z } from 'zod';
-import { ApiError } from '../utils/errors.js';
+import { ApiError, MondayCliError } from '../utils/errors.js';
 import { buildBlobFromPath } from '../utils/file-source.js';
 import { addFileToColumn, assetSchema, type Asset } from './assets.js';
 import { resolveColumnWithRefresh, type ResolverWarning } from './columns.js';
@@ -427,6 +427,155 @@ export const executeFileColumnSet = async (
     cacheAgeSeconds: null,
     complexity: result.complexity,
   };
+};
+
+/**
+ * One resolved + pre-checked file-column dispatch leg for the v0.8-M46
+ * multi-file fan-out. Carries the resolved column ID + the
+ * {@link precheckLocalFile} outputs (absolute path + basename +
+ * fs-stat size) + the argv-derived raw path. Built by each
+ * callShape's action body from `precheckLocalFile` results, then
+ * fanned through {@link dispatchFileLegsSequentially}.
+ */
+export interface MultiFileLegEntry {
+  /** Resolved Monday column ID (post-`resolveColumnWithRefresh`). */
+  readonly columnId: string;
+  /** The argv-derived path token (relative or absolute as typed). */
+  readonly rawValue: string;
+  /** Resolved absolute path (post `path.resolve(cwd, rawValue)`). */
+  readonly filePath: string;
+  /** `basename(filePath)` — Monday's wire `Asset.name` source. */
+  readonly filename: string;
+  /** Local `fs.stat()` size at pre-check time. */
+  readonly fileSizeBytes: number;
+}
+
+/**
+ * Per-leg asset projection captured on a successful
+ * `add_file_to_column` round-trip. Shared across the three v0.8-M46
+ * multi-file envelope shapes (`fileColumnSetMultiOutputSchema` /
+ * `bulkFileSetMultiResultSchema` / `itemCreateWithFilesOutputSchema`)
+ * — each wraps M31's `Asset` under the same `column_id` + `filename`
+ * + `file_size_bytes` per-entry context.
+ */
+export interface MultiFileLegAsset {
+  readonly column_id: string;
+  readonly filename: string;
+  readonly file_size_bytes: number;
+  readonly asset: Asset;
+}
+
+/**
+ * Result of {@link dispatchFileLegsSequentially}. The accumulator is
+ * always populated up to the point of failure (or fully on success):
+ *
+ *   - `appliedColumns` — resolved column IDs that landed
+ *     successfully, in dispatch order (length N on success; 0..N-1
+ *     when `failure` is present).
+ *   - `assets` — per-leg asset projections, same ordering + length
+ *     as `appliedColumns`.
+ *   - `lastComplexity` — the complexity block from the most recent
+ *     successful leg (`null` if zero legs succeeded). Threaded into
+ *     `meta.complexity` by the single-item / create success paths.
+ *   - `failure` — present iff a leg threw a `MondayCliError`. Carries
+ *     the failing column ID + the underlying error. The caller
+ *     decorates the partial-failure envelope per callShape
+ *     (single-item `multi_file_update_partial_failure` whole-call
+ *     throw / bulk per-item record-or-fail-fast / create-time
+ *     `create_then_file_upload_partial_failure` orphan-warn) and
+ *     applies {@link foldAndRemap} where the callShape's stable-code
+ *     rule requires it (bulk + create remap cache-served
+ *     `validation_failed` → `column_archived`; single-item does not
+ *     remap, matching the M38 single-item precedent).
+ */
+export interface DispatchFileLegsResult {
+  readonly appliedColumns: readonly string[];
+  readonly assets: readonly MultiFileLegAsset[];
+  readonly lastComplexity: Complexity | null;
+  readonly failure?: {
+    readonly failedColumn: string;
+    readonly cause: MondayCliError;
+  };
+}
+
+/**
+ * Sequential multi-leg `add_file_to_column` fan-out shared by the
+ * three v0.8-M46 multi-file callShape helpers
+ * (`runItemUpdateSingleFileMultiDispatch` /
+ * `runItemUpdateBulkFileMultiDispatch` per-item worker /
+ * `runItemCreateFileMultiDispatch`). R-v0.8-NEW-1 lift — the inner
+ * loop + partial-failure accumulator is byte-identical across all 3
+ * sites; only the envelope decoration diverges (kept in the caller).
+ *
+ * **Sequential within an item (D1 closure).** Legs fire in
+ * `inputs.entries` order so `appliedColumns` echoes the file columns
+ * that landed before a failure in dispatch order. The bulk path
+ * achieves cross-item parallelism by invoking this helper inside each
+ * per-item `dispatchParallel` worker — parallel ACROSS items ×
+ * sequential WITHIN each item.
+ *
+ * **Failure handling.** A `MondayCliError` from any leg stops the
+ * loop and returns the accumulator with `failure` populated (the
+ * caller decorates + optionally remaps). A non-`MondayCliError`
+ * (programmer bug in the wire layer) re-throws to the runner's
+ * catch-all so it surfaces as a whole-call `internal_error` rather
+ * than masquerading as a recoverable partial failure — mirrors the
+ * non-CliError re-throw arms in M42's bulk + M43's create-time
+ * single-file dispatch helpers.
+ */
+export const dispatchFileLegsSequentially = async (inputs: {
+  readonly client: MondayClient;
+  readonly multipart: MultipartTransport;
+  readonly itemId: string;
+  readonly entries: readonly MultiFileLegEntry[];
+  readonly signal: AbortSignal;
+  readonly retries: number;
+}): Promise<DispatchFileLegsResult> => {
+  const assets: MultiFileLegAsset[] = [];
+  const appliedColumns: string[] = [];
+  let lastComplexity: Complexity | null = null;
+  for (const entry of inputs.entries) {
+    try {
+      const result = await executeFileColumnSet({
+        client: inputs.client,
+        multipart: inputs.multipart,
+        itemId: inputs.itemId,
+        entry: {
+          columnId: entry.columnId,
+          columnType: 'file',
+          rawValue: entry.rawValue,
+          filePath: entry.filePath,
+          filename: entry.filename,
+          fileSizeBytes: entry.fileSizeBytes,
+        },
+        signal: inputs.signal,
+        retries: inputs.retries,
+      });
+      assets.push({
+        column_id: entry.columnId,
+        filename: entry.filename,
+        file_size_bytes: entry.fileSizeBytes,
+        asset: result.asset,
+      });
+      appliedColumns.push(entry.columnId);
+      lastComplexity = result.complexity;
+    } catch (err: unknown) {
+      if (err instanceof MondayCliError) {
+        return {
+          appliedColumns,
+          assets,
+          lastComplexity,
+          failure: { failedColumn: entry.columnId, cause: err },
+        };
+      }
+      // Non-CliError programmer bug — re-throw to the runner's
+      // catch-all (whole-call `internal_error`). Routing it through
+      // a partial-failure envelope would falsely promise a recovery
+      // handle for a broken contract.
+      throw err;
+    }
+  }
+  return { appliedColumns, assets, lastComplexity };
 };
 
 /**

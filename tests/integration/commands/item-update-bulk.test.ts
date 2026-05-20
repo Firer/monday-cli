@@ -4384,12 +4384,27 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
     });
   });
 
-  describe('v0.8-M46 bulk multi-file `--set` carve-out fold (D2 closure from v0.6-M38) — pre-flight stub', () => {
-    // v0.8-M46 pre-flight contract diff. argv + pre-check + items_page
-    // walk + confirmation gate + routing ship as live contract; the
-    // per-item multi-leg fan-out body is the c8-ignored stub throwing
-    // `'m46_preflight_stub'`. IMPL lifts the stub in a separate
-    // session. Mirrors v0.7-M42 pre-flight test shape verbatim.
+  describe('v0.8-M46 bulk multi-file `--set` carve-out fold (D2 closure from v0.6-M38)', () => {
+    // v0.8-M46 IMPL. argv + pre-check + items_page walk + confirmation
+    // gate + routing ship as live contract; the per-item multi-leg
+    // fan-out body (`runItemUpdateBulkFileMultiDispatch`) dispatches N
+    // sequential `add_file_to_column` legs per matched item (cross-item
+    // parallel under `--concurrency` × within-item sequential per D1),
+    // emitting `operation: 'item_update_bulk_file_set_multi'`. The
+    // `'m46_preflight_stub'` + `'multi_file_set_unsupported'` literals
+    // stay RESERVED post-IMPL (regression-guarded below).
+    const buildMultiAsset = (id: string, name: string): Record<string, unknown> => ({
+      id,
+      name,
+      url: `https://files.monday.com/x/${id}`,
+      public_url: `https://share.monday.com/${id}`,
+      file_extension: 'pdf',
+      file_size: 19,
+      created_at: '2026-06-01T10:30:00Z',
+      uploaded_by: { id: '1', name: 'Alice' },
+      original_geometry: null,
+      url_thumbnail: null,
+    });
     const fileBoardMultiCols = {
       ...sampleBoardMetadata,
       columns: [
@@ -4457,7 +4472,36 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       },
     };
 
-    it("routes 2+ file --set entries on item_update_bulk to the v0.8-M46 stub (surfaces 'm46_preflight_stub' until IMPL; was 'multi_file_set_unsupported' rejection at v0.6-M38 / v0.7)", async () => {
+    it("live fail-fast bulk multi-file: dispatches N legs per matched item sequentially + emits 'item_update_bulk_file_set_multi' with file_count + file_column_ids summary", async () => {
+      // Fail-fast (no --continue-on-error): 2 matched items × 2 file
+      // columns = 4 sequential `add_file_to_column` legs. Dispatch
+      // order is per-item (item 12345 legs, then item 23456 legs),
+      // sequential within each item per D1.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a1', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a2', 'report-2.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a3', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a4', 'report-2.pdf') } },
+          },
+        ],
+        { assertExhaustive: true },
+      );
       const out = await drive(
         [
           'item',
@@ -4474,35 +4518,63 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
           '--json',
         ],
         { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: {
-          code: string;
-          details?: {
-            reason?: string;
-            call_shape?: string;
-            file_count?: number;
-            matched_count?: number;
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          summary: {
+            matched_count: number;
+            applied_count: number;
+            failed_count: number;
+            board_id: string;
+            file_count: number;
+            file_column_ids: string[];
           };
+          results: readonly {
+            item_id: string;
+            ok: boolean;
+            assets?: { column_id: string }[];
+            applied_file_columns?: string[];
+          }[];
         };
       };
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-      expect(env.error?.details?.call_shape).toBe('item_update_bulk');
-      expect(env.error?.details?.file_count).toBe(2);
-      expect(env.error?.details?.matched_count).toBe(2);
-      // Regression-guard: the v0.6-M38 reserved literal stays absent
-      // from runtime output post-fold.
+      expect(env.ok).toBe(true);
+      expect(env.data.operation).toBe('item_update_bulk_file_set_multi');
+      expect(env.data.summary).toEqual({
+        matched_count: 2,
+        applied_count: 2,
+        failed_count: 0,
+        board_id: '111',
+        file_count: 2,
+        file_column_ids: ['attachments', 'attachments_2'],
+      });
+      expect(env.data.results).toHaveLength(2);
+      expect(env.data.results[0]).toMatchObject({
+        item_id: '12345',
+        ok: true,
+        applied_file_columns: ['attachments', 'attachments_2'],
+      });
+      expect(env.data.results[0]?.assets).toHaveLength(2);
+      expect(env.data.results[1]).toMatchObject({
+        item_id: '23456',
+        ok: true,
+        applied_file_columns: ['attachments', 'attachments_2'],
+      });
+      // 2 items × 2 files = 4 sequential legs.
+      expect(multipart.requests).toHaveLength(4);
+      multipart.assertConsumed();
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+      expect(out.stdout).not.toContain('m46_preflight_stub');
       expect(out.stderr).not.toContain('multi_file_set_unsupported');
       expect(out.stdout).not.toContain('multi_file_set_unsupported');
     });
 
-    it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN bulk multi-file routing path", async () => {
-      // Dry-run reaches the same stub (the c8-ignored body throws
-      // unconditionally regardless of `inputs.isDryRun`); the live-
-      // path regression-guard above asserts literal absence on live,
-      // this one asserts the same on dry-run.
+    it('dry-run bulk multi-file: emits N×M planned_changes (one add_file_to_column per (item, file column) pair), no multipart wire', async () => {
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
       const out = await drive(
         [
           'item',
@@ -4519,18 +4591,278 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
           '--json',
         ],
         { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout);
+      expect(env.ok).toBe(true);
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      // 2 items × 2 columns = 4 planned_changes, item-major order.
+      expect(envWithPlanned.planned_changes).toHaveLength(4);
+      expect(envWithPlanned.planned_changes?.[0]).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
+        filename: 'report-1.pdf',
+      });
+      expect(envWithPlanned.planned_changes?.[3]).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '23456',
+        column_id: 'attachments_2',
+        filename: 'report-2.pdf',
+      });
+      // No multipart wire fired on dry-run.
+      expect(multipart.requests).toHaveLength(0);
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+      expect(out.stdout).not.toContain('m46_preflight_stub');
+    });
+
+    it("fail-fast bulk multi-file partial failure: aborts whole-call with applied_to + applied_file_columns_per_item + failed_at_item + failed_file_column", async () => {
+      // Item 12345 lands both legs; item 23456's leg-2 fails. Fail-fast
+      // aborts the whole call. `applied_to` lists the fully-succeeded
+      // item; `applied_file_columns_per_item` maps the failed item to
+      // its partial-leg success.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a1', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a2', 'report-2.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a3', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { errors: [{ message: 'Internal server error' }] },
+            http_status: 500,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
       );
       expect(out.exitCode).toBe(2);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
         error?: {
           code: string;
-          details?: { reason?: string; is_dry_run?: boolean };
+          details?: {
+            applied_to?: string[];
+            applied_count?: number;
+            applied_file_columns_per_item?: Record<string, string[]>;
+            failed_at_item?: string;
+            failed_file_column?: string;
+            matched_count?: number;
+            file_count?: number;
+          };
         };
       };
-      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-      expect(env.error?.details?.is_dry_run).toBe(true);
-      expect(out.stderr).not.toContain('multi_file_set_unsupported');
-      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+      expect(env.error?.details?.applied_to).toEqual(['12345']);
+      expect(env.error?.details?.applied_count).toBe(1);
+      expect(env.error?.details?.failed_at_item).toBe('23456');
+      expect(env.error?.details?.failed_file_column).toBe('attachments_2');
+      expect(env.error?.details?.applied_file_columns_per_item).toEqual({
+        '23456': ['attachments'],
+      });
+      expect(env.error?.details?.matched_count).toBe(2);
+      expect(env.error?.details?.file_count).toBe(2);
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+    });
+
+    it("--continue-on-error bulk multi-file: per-item partial failure lands as results[i].error + applied_file_columns + failed_file_column; envelope stays ok: true", async () => {
+      // Item 12345 fully succeeds; item 23456 partial-fails on leg-2.
+      // Sequential (no --concurrency) keeps multipart ordering
+      // deterministic.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a1', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a2', 'report-2.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { data: { add_file_to_column: buildMultiAsset('a3', 'report-1.pdf') } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-2.pdf',
+            response: { errors: [{ message: 'Internal server error' }] },
+            http_status: 500,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--continue-on-error',
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          summary: { applied_count: number; failed_count: number };
+          results: readonly {
+            item_id: string;
+            ok: boolean;
+            assets?: { column_id: string }[];
+            applied_file_columns?: string[];
+            failed_file_column?: string;
+            error?: { code: string; message: string };
+          }[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.summary.applied_count).toBe(1);
+      expect(env.data.summary.failed_count).toBe(1);
+      expect(env.data.results[0]).toMatchObject({
+        item_id: '12345',
+        ok: true,
+        applied_file_columns: ['attachments', 'attachments_2'],
+      });
+      const failed = env.data.results[1];
+      expect(failed?.item_id).toBe('23456');
+      expect(failed?.ok).toBe(false);
+      // Partial-leg success echo: leg-1 landed before leg-2 failed.
+      expect(failed?.applied_file_columns).toEqual(['attachments']);
+      expect(failed?.failed_file_column).toBe('attachments_2');
+      expect(failed?.assets).toHaveLength(1);
+      expect(failed?.error?.code).toBeDefined();
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+    });
+
+    it('--continue-on-error --concurrency 2 bulk multi-file: routes through dispatchParallel (cross-item parallel × within-item sequential)', async () => {
+      // --concurrency requires --continue-on-error (M30 D2). Use
+      // operation-only matching with repeat so interleaved parallel
+      // requests match deterministically regardless of arrival order.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            response: { data: { add_file_to_column: buildMultiAsset('ax', 'report.pdf') } },
+            repeat: 4,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--continue-on-error',
+          '--concurrency',
+          '2',
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          summary: { applied_count: number; failed_count: number };
+          results: readonly { item_id: string; ok: boolean }[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.operation).toBe('item_update_bulk_file_set_multi');
+      expect(env.data.summary.applied_count).toBe(2);
+      expect(env.data.summary.failed_count).toBe(0);
+      // 2 items × 2 files = 4 legs (interleaved under concurrency 2).
+      expect(multipart.requests).toHaveLength(4);
+    });
+
+    it("bulk multi-file pre-check aborts the whole call BEFORE any wire leg when a file path is unreadable (usage_error; zero multipart legs)", async () => {
+      // D3 — single upfront pre-check pass over ALL file paths before
+      // any wire round-trip. A missing path aborts whole-call with
+      // `usage_error` (`file_not_readable`); zero multipart legs fire
+      // regardless of matched-item count.
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${join(workdirM46, 'missing.pdf')}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_not_readable');
+      expect(multipart.requests).toHaveLength(0);
     });
   });
 });

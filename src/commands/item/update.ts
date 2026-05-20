@@ -60,9 +60,14 @@ import {
 import { executeItemMutation } from '../../api/item-mutation-execute.js';
 import {
   executeFileColumnSet,
+  dispatchFileLegsSequentially,
   fileColumnSetOutputSchema,
+  fileColumnSetMultiOutputSchema,
   preCheckM38FileDispatch,
   type FileColumnSetOutput,
+  type FileColumnSetMultiOutput,
+  type MultiFileLegEntry,
+  type MultiFileLegAsset,
   type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
 import { precheckLocalFile } from '../../utils/file-source.js';
@@ -2480,46 +2485,174 @@ interface RunItemUpdateSingleFileMultiDispatchInputs {
 
 /**
  * Single-item multi-file `--set` dispatch helper (v0.8-M46 D2
- * carve-out fold). Pre-flight stub — runtime body lifted at v0.8-M46
- * IMPL.
+ * carve-out fold). Runtime body shipped at v0.8-M46 IMPL.
  *
- * Production-shape preview (lands at IMPL): upfront
- * `precheckLocalFile` per file path (N legs × 1 pre-check),
- * sequential per-leg `executeFileColumnSet` under the single item
- * ID, single `invalidateBoard` post-dispatch, envelope emit per
- * `fileColumnSetMultiOutputSchema` (`operation: 'add_files_to_columns'`
- * + `assets: [...]` + `applied_file_columns: [...]`). Mid-dispatch
- * partial failure surfaces `internal_error` with `details.reason:
- * 'multi_file_update_partial_failure'` + `details.applied_file_columns`
- * + `details.failed_file_column` + `details.cause`.
+ * **Execution shape:**
+ *
+ *   1. Single upfront `precheckLocalFile` per file path (N pre-checks
+ *      in argv order; D3 closure). Any pre-check failure aborts the
+ *      whole call with `usage_error` (`file_not_readable` /
+ *      `file_empty`) BEFORE any wire round-trip fires — atomicity-
+ *      before-wire per cli-design §5.8.
+ *   2. Dry-run branch — N `add_file_to_column` planned_changes,
+ *      `source: 'none'` (pure-local, mirrors M38 single-item
+ *      dry-run); no multipart wire fires.
+ *   3. Live branch — sequential N legs via
+ *      {@link dispatchFileLegsSequentially} (R-v0.8-NEW-1 shared
+ *      helper) against the single `inputs.itemId`. On partial
+ *      failure, `invalidateBoard` (any landed legs mutated the
+ *      board's asset state wire-side) then `internal_error` with
+ *      `details.reason: 'multi_file_update_partial_failure'` +
+ *      `details.item_id` + `details.applied_file_columns` (length
+ *      0..N-1) + `details.failed_file_column` + `details.cause`
+ *      (M31 wire-failure surface, JSON projection) + `details.hint`.
+ *      Unlike the bulk + create paths, the single-item path does NOT
+ *      run `foldAndRemap` on the failing leg's cause — it mirrors the
+ *      M38 single-item precedent (`runItemUpdateSingleFileDispatch`
+ *      doesn't remap either); an archived file column is already
+ *      rejected at the pre-check's `includeArchived` archived-column
+ *      guard before dispatch.
+ *   4. Full success — single `invalidateBoard` then envelope emit
+ *      per `fileColumnSetMultiOutputSchema`
+ *      (`operation: 'add_files_to_columns'` + `assets: [...]` +
+ *      `applied_file_columns: [...]`, both length N).
  */
 const runItemUpdateSingleFileMultiDispatch = async (
   inputs: RunItemUpdateSingleFileMultiDispatchInputs,
 ): Promise<void> => {
-  /* c8 ignore start */
-  // Stub anchor — IMPL replaces the body with the real async dispatch
-  // (precheckLocalFile × N + sequential executeFileColumnSet × N +
-  // invalidateBoard + envelope emit). The `await` here keeps the
-  // function shape async-correct for lint until IMPL lands.
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    `Multi-file \`--set\` per call on \`monday item update <iid>\` ` +
-      `is a v0.8-M46 pre-flight stub. The argv + pre-check + routing ` +
-      `surface ships as contract at this commit; the per-leg multi-` +
-      `file dispatch body lifts at v0.8-M46 IMPL in a separate session.`,
-    {
-      details: {
-        reason: 'm46_preflight_stub',
-        call_shape: 'item_update_single',
-        item_id: inputs.itemId,
-        file_count: inputs.m38.entries.length,
-        file_column_ids: inputs.m38.entries.map((e) => e.columnId),
-        is_dry_run: inputs.isDryRun,
-      },
-    },
+  // 1) Upfront pre-check per file path, in argv order. A bad path
+  //    surfaces `usage_error` (exit 1) whole-call-abort before any
+  //    multipart wire leg fires (cli-design §5.8). R-v0.6-NEW-1
+  //    `precheckLocalFile` called N times (one per file column).
+  const legEntries: MultiFileLegEntry[] = [];
+  for (const entry of inputs.m38.entries) {
+    const precheck = await precheckLocalFile(entry.rawValue);
+    legEntries.push({
+      columnId: entry.columnId,
+      rawValue: entry.rawValue,
+      filePath: precheck.filePath,
+      filename: precheck.filename,
+      fileSizeBytes: precheck.fileSizeBytes,
+    });
+  }
+
+  const warnings = inputs.m38.warnings.map((w) => ({
+    code: w.code,
+    message: w.message,
+    details: w.details,
+  }));
+  const resolvedIds: Readonly<Record<string, string>> = Object.fromEntries(
+    inputs.m38.entries.map((e) => [e.token, e.columnId]),
   );
-  /* c8 ignore stop */
+
+  // 2) Dry-run branch — N planned_changes; pure-local, `source: 'none'`
+  //    (mirrors M38 single-item dry-run).
+  if (inputs.isDryRun) {
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges: legEntries.map((leg) => ({
+        operation: 'add_file_to_column' as const,
+        item_id: inputs.itemId,
+        column_id: leg.columnId,
+        file_path: leg.rawValue,
+        filename: leg.filename,
+        file_size_bytes: leg.fileSizeBytes,
+      })),
+      source: 'none',
+      cacheAgeSeconds: null,
+      warnings,
+      apiVersion: inputs.apiVersion,
+    });
+    return;
+  }
+
+  // 3) Live branch — sequential N-leg fan-out against the single item.
+  const dispatch = await dispatchFileLegsSequentially({
+    client: inputs.client,
+    multipart: inputs.multipart,
+    itemId: inputs.itemId,
+    entries: legEntries,
+    signal: inputs.ctx.signal,
+    retries: inputs.retries,
+  });
+
+  if (dispatch.failure !== undefined) {
+    // Partial failure. If any leg landed, the board's asset state
+    // mutated wire-side — invalidate before re-throwing so a
+    // follow-up read doesn't serve stale metadata (mirrors M42's
+    // fail-fast invalidate-on-partial-apply).
+    if (dispatch.appliedColumns.length > 0) {
+      await invalidateBoard(inputs.boardId, inputs.ctx.env);
+    }
+    const cause = dispatch.failure.cause;
+    const causeProjection: Record<string, unknown> = {
+      code: cause.code,
+      message: cause.message,
+    };
+    if (cause.details !== undefined) {
+      causeProjection.details = cause.details;
+    }
+    throw new ApiError(
+      'internal_error',
+      `Multi-file \`--set\` on item ${inputs.itemId} partially failed: ` +
+        `${String(dispatch.appliedColumns.length)} of ` +
+        `${String(legEntries.length)} file column(s) landed before column ` +
+        `${dispatch.failure.failedColumn} failed ` +
+        `(${cause.code}: ${cause.message}). The applied file columns ` +
+        `persist on Monday; retry only the unfailed columns with ` +
+        `\`monday item set ${inputs.itemId} <file-col>=<path>\`, or reissue ` +
+        `all ${String(legEntries.length)} \`--set\` entries.`,
+      {
+        cause,
+        details: {
+          reason: 'multi_file_update_partial_failure',
+          item_id: inputs.itemId,
+          applied_file_columns: dispatch.appliedColumns,
+          failed_file_column: dispatch.failure.failedColumn,
+          cause: causeProjection,
+          hint:
+            `${String(dispatch.appliedColumns.length)} file column(s) ` +
+            `already landed on item ${inputs.itemId}; retry the unfailed ` +
+            `columns alone with \`monday item set ${inputs.itemId} ` +
+            `<file-col>=<path>\`, or reissue every \`--set\` entry (the ` +
+            `landed columns will be overwritten with the same files).`,
+        },
+      },
+    );
+  }
+
+  // 4) Full success — single board-cache invalidate before emit
+  //    (mirrors M38 single-leg invalidate timing; one board covers
+  //    every leg's mutated asset slot).
+  await invalidateBoard(inputs.boardId, inputs.ctx.env);
+  const data: FileColumnSetMultiOutput = {
+    operation: 'add_files_to_columns',
+    item_id: inputs.itemId,
+    assets: dispatch.assets.map((a) => ({
+      column_id: a.column_id,
+      filename: a.filename,
+      file_size_bytes: a.file_size_bytes,
+      asset: a.asset,
+    })),
+    applied_file_columns: [...dispatch.appliedColumns],
+  };
+  emitMutation({
+    ctx: inputs.ctx,
+    data,
+    schema: fileColumnSetMultiOutputSchema,
+    programOpts: inputs.programOpts,
+    warnings,
+    ...inputs.toEmit({
+      data: dispatch.assets,
+      complexity: dispatch.lastComplexity,
+      stats: { attempts: 1, totalBackoffMs: 0 },
+    }),
+    source: 'live',
+    cacheAgeSeconds: null,
+    complexity: dispatch.lastComplexity,
+    resolvedIds,
+  });
 };
 
 interface RunItemUpdateBulkFileMultiDispatchInputs {
@@ -2545,49 +2678,427 @@ interface RunItemUpdateBulkFileMultiDispatchInputs {
 
 /**
  * Bulk multi-file `--set` per-item dispatch helper (v0.8-M46 D2
- * carve-out fold). Pre-flight stub — runtime body lifted at v0.8-M46
- * IMPL.
+ * carve-out fold). Runtime body shipped at v0.8-M46 IMPL.
  *
- * Production-shape preview (lands at IMPL): single upfront
- * `precheckLocalFile` pass over ALL N file paths (D3), per-item
- * multi-leg fan-out under M42's `dispatchParallel` (cross-item
- * `--concurrency` workers × within-item sequential N legs per D1),
- * post-dispatch `invalidateBoard`, envelope emit per
- * `bulkFileSetMultiDataSchema` (`operation:
- * 'item_update_bulk_file_set_multi'`). Per-item partial failure
- * mid-multi-leg surfaces via M25 partial-success extended with
- * `applied_file_columns` + `failed_file_column` slots; v0.1 fail-
- * fast decoration extended with `applied_file_columns_per_item`
- * map on default path.
+ * **Execution shape (extends M42's `runItemUpdateBulkFileDispatch`
+ * single-file bulk path to N file legs per item):**
+ *
+ *   1. Single upfront `precheckLocalFile` pass over ALL N file paths
+ *      (D3 — N pre-checks total, shared across the M matched items,
+ *      NOT N×M). Any failure aborts the whole call with `usage_error`
+ *      regardless of `--continue-on-error` per cli-design §5.8.
+ *   2. Dry-run branch — N×M `add_file_to_column` planned_changes
+ *      (one per (item, file column) pair); source aggregates the
+ *      upstream metadata + items_page legs per M42's pattern.
+ *   3. Live branch — cross-item parallel via M42's `dispatchParallel`
+ *      / `dispatchSequential` (under `--concurrency`) × within-item
+ *      sequential N legs via {@link dispatchFileLegsSequentially}
+ *      (D1). Two shapes per `parsed.continueOnError`:
+ *      - **Fail-fast (default)** — sequential over matched items;
+ *        first per-item failure aborts whole-call with
+ *        `details.applied_to` (items where ALL legs landed) +
+ *        `details.applied_file_columns_per_item` (the failed item's
+ *        partial-leg map) + `details.failed_at_item` +
+ *        `details.failed_file_column`.
+ *      - **`--continue-on-error`** — per-item failures land as
+ *        `data.results[i].error` extended with
+ *        `applied_file_columns` + `failed_file_column`; partially-
+ *        landed assets carry on `data.results[i].assets`.
+ *   4. Post-dispatch `invalidateBoard` + emit per
+ *      `bulkFileSetMultiDataSchema`
+ *      (`operation: 'item_update_bulk_file_set_multi'` +
+ *      `summary.{file_count, file_column_ids}`).
+ *
+ * Per-item failures route through `foldAndRemap` BEFORE the per-item
+ * record / fail-fast decoration so the stable-code rule (cli-design
+ * §6.5) surfaces `column_archived` for cache-served file-column
+ * resolution against an archived column — mirrors M42's bulk
+ * single-file remap.
  */
 const runItemUpdateBulkFileMultiDispatch = async (
   inputs: RunItemUpdateBulkFileMultiDispatchInputs,
 ): Promise<void> => {
-  /* c8 ignore start */
-  // Stub anchor — IMPL replaces the body with the real async dispatch
-  // (single upfront precheckLocalFile × N file paths + per-item
-  // multi-leg fan-out under M42's dispatchParallel × within-item
-  // sequential + invalidateBoard + envelope emit). The `await` here
-  // keeps the function shape async-correct for lint until IMPL lands.
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    `Multi-file \`--set\` per call on \`monday item update --where ...\` ` +
-      `is a v0.8-M46 pre-flight stub. The argv + pre-check + items_page ` +
-      `walk + confirmation gate + routing surface ships as contract at ` +
-      `this commit; the per-item multi-leg fan-out body lifts at ` +
-      `v0.8-M46 IMPL in a separate session.`,
-    {
-      details: {
-        reason: 'm46_preflight_stub',
-        call_shape: 'item_update_bulk',
-        board_id: inputs.boardId,
-        matched_count: inputs.matchedItemIds.length,
-        file_count: inputs.m38.entries.length,
-        file_column_ids: inputs.m38.entries.map((e) => e.columnId),
-        is_dry_run: inputs.isDryRun,
-      },
-    },
+  // 1) Single upfront pre-check pass over ALL N file paths (D3).
+  //    Shared across the M matched items — N pre-checks, NOT N×M.
+  //    Whole-call abort regardless of `--continue-on-error` per
+  //    cli-design §5.8 (`precheckLocalFile` throws `usage_error`
+  //    with `file_not_readable` / `file_empty`).
+  const legEntries: MultiFileLegEntry[] = [];
+  for (const entry of inputs.m38.entries) {
+    const precheck = await precheckLocalFile(entry.rawValue);
+    legEntries.push({
+      columnId: entry.columnId,
+      rawValue: entry.rawValue,
+      filePath: precheck.filePath,
+      filename: precheck.filename,
+      fileSizeBytes: precheck.fileSizeBytes,
+    });
+  }
+
+  const fileColumnIds = legEntries.map((leg) => leg.columnId);
+  const combinedWarnings = dedupeWarnings([
+    ...inputs.filterWarnings,
+    ...inputs.m38.warnings,
+  ]);
+  const resolvedIds: Readonly<Record<string, string>> = Object.fromEntries(
+    inputs.m38.entries.map((e) => [e.token, e.columnId]),
   );
-  /* c8 ignore stop */
+
+  // Source aggregator — mirrors M42's bulk single-file pattern.
+  // Seeds the metadata leg, folds the M38 pre-check leg + a synthetic
+  // 'live' leg for the items_page walker (always fired upstream).
+  const sourceAgg = new SourceAggregator({
+    source: inputs.metaSource,
+    cacheAgeSeconds: inputs.metaCacheAgeSeconds,
+  });
+  if (inputs.m38.source !== undefined) {
+    sourceAgg.record(inputs.m38.source, inputs.m38.cacheAgeSeconds);
+  }
+  sourceAgg.record('live', null);
+
+  // 2) Dry-run branch — N×M planned_changes (one `add_file_to_column`
+  //    per (item, file column) pair). No file bytes loaded, no
+  //    multipart wire. Source carries the aggregated upstream legs
+  //    (mirrors M42's bulk dry-run, which is NOT pure-local).
+  if (inputs.isDryRun) {
+    const plannedChanges = inputs.matchedItemIds.flatMap((itemId) =>
+      legEntries.map((leg) => ({
+        operation: 'add_file_to_column' as const,
+        item_id: itemId,
+        column_id: leg.columnId,
+        file_path: leg.rawValue,
+        filename: leg.filename,
+        file_size_bytes: leg.fileSizeBytes,
+      })),
+    );
+    const dryRunAgg = sourceAgg.result();
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges,
+      source: dryRunAgg.source,
+      cacheAgeSeconds: dryRunAgg.cacheAgeSeconds,
+      warnings: combinedWarnings,
+      apiVersion: inputs.apiVersion,
+    });
+    return;
+  }
+
+  // 3) Live dispatch. Record the dispatch leg as 'live'.
+  sourceAgg.record('live', null);
+  const liveAgg = sourceAgg.result();
+  const remapSource: 'live' | 'cache' | 'mixed' = inputs.m38.source ?? 'live';
+  const fileCount = legEntries.length;
+  const continueOnError = inputs.parsed.continueOnError === true;
+
+  if (!continueOnError) {
+    // Fail-fast bulk multi-file dispatch. Sequential over matched
+    // items (M30 D2: `--concurrency requires --continue-on-error`).
+    // Each item fans out N sequential file legs; first per-item
+    // failure aborts whole-call.
+    const fullyApplied: { itemId: string; assets: readonly MultiFileLegAsset[] }[] =
+      [];
+    for (const itemId of inputs.matchedItemIds) {
+      const dispatch = await dispatchFileLegsSequentially({
+        client: inputs.client,
+        multipart: inputs.multipart,
+        itemId,
+        entries: legEntries,
+        signal: inputs.ctx.signal,
+        retries: inputs.retries,
+      });
+      if (dispatch.failure !== undefined) {
+        // Any prior item fully applied OR this item landed ≥1 leg →
+        // the board's asset state mutated wire-side; invalidate
+        // before re-throwing (mirrors M42 fail-fast invalidate).
+        if (fullyApplied.length > 0 || dispatch.appliedColumns.length > 0) {
+          await invalidateBoard(inputs.boardId, inputs.ctx.env);
+        }
+        const remapped = await foldAndRemap({
+          err: dispatch.failure.cause,
+          warnings: inputs.m38.warnings,
+          client: inputs.client,
+          boardId: inputs.boardId,
+          columnIds: fileColumnIds,
+          env: inputs.ctx.env,
+          noCache: inputs.noCache,
+          resolutionSource: remapSource,
+        });
+        const existing = remapped.details ?? {};
+        const decoration = {
+          ...existing,
+          applied_count: fullyApplied.length,
+          applied_to: fullyApplied.map((a) => a.itemId),
+          applied_file_columns_per_item: {
+            [itemId]: dispatch.appliedColumns,
+          },
+          failed_at_item: itemId,
+          failed_file_column: dispatch.failure.failedColumn,
+          matched_count: inputs.matchedItemIds.length,
+          file_count: fileCount,
+          file_column_ids: fileColumnIds,
+        };
+        if (remapped.code === 'usage_error') {
+          throw new UsageError(remapped.message, {
+            ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
+            details: decoration,
+          });
+        }
+        throw new ApiError(remapped.code, remapped.message, {
+          ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
+          ...(remapped.httpStatus === undefined
+            ? {}
+            : { httpStatus: remapped.httpStatus }),
+          ...(remapped.mondayCode === undefined
+            ? {}
+            : { mondayCode: remapped.mondayCode }),
+          ...(remapped.requestId === undefined
+            ? {}
+            : { requestId: remapped.requestId }),
+          retryable: remapped.retryable,
+          ...(remapped.retryAfterSeconds === undefined
+            ? {}
+            : { retryAfterSeconds: remapped.retryAfterSeconds }),
+          details: decoration,
+        });
+      }
+      fullyApplied.push({ itemId, assets: dispatch.assets });
+    }
+
+    // Every item applied all N legs — single board-cache invalidate
+    // before emit.
+    await invalidateBoard(inputs.boardId, inputs.ctx.env);
+    const results: BulkFileSetMultiResult[] = fullyApplied.map(
+      ({ itemId, assets }) => ({
+        item_id: itemId,
+        ok: true,
+        assets: assets.map((a) => ({
+          column_id: a.column_id,
+          filename: a.filename,
+          file_size_bytes: a.file_size_bytes,
+          asset: a.asset,
+        })),
+        applied_file_columns: [...fileColumnIds],
+      }),
+    );
+    const data: BulkFileSetMultiData = {
+      operation: 'item_update_bulk_file_set_multi',
+      summary: {
+        matched_count: inputs.matchedItemIds.length,
+        applied_count: fullyApplied.length,
+        failed_count: 0,
+        board_id: inputs.boardId,
+        file_count: fileCount,
+        file_column_ids: [...fileColumnIds],
+      },
+      results,
+    };
+    emitMutation({
+      ctx: inputs.ctx,
+      data,
+      schema: bulkFileSetMultiDataSchema,
+      programOpts: inputs.programOpts,
+      warnings: combinedWarnings,
+      source: liveAgg.source,
+      cacheAgeSeconds: liveAgg.cacheAgeSeconds,
+      apiVersion: inputs.apiVersion,
+      resolvedIds,
+    });
+    return;
+  }
+
+  // `--continue-on-error` path. Per-item failures land as per-record
+  // slots; the envelope is `ok: true` regardless of how many items
+  // failed (universal partial-success rule). Each item's within-item
+  // fan-out is sequential; a partial mid-multi-leg failure records
+  // the landed assets + applied_file_columns + failed_file_column on
+  // the per-item record. `internal_error` (or non-CliError) re-throws
+  // whole-call via the shared dispatcher's escape hatch.
+  const successById = new Map<string, readonly MultiFileLegAsset[]>();
+  const partialById = new Map<
+    string,
+    {
+      readonly assets: readonly MultiFileLegAsset[];
+      readonly appliedColumns: readonly string[];
+      readonly failedColumn: string;
+    }
+  >();
+  const perTargetDispatch = async ({
+    targetId,
+  }: DispatchOneTargetInputs<string>): Promise<void> => {
+    const dispatch = await dispatchFileLegsSequentially({
+      client: inputs.client,
+      multipart: inputs.multipart,
+      itemId: targetId,
+      entries: legEntries,
+      signal: inputs.ctx.signal,
+      retries: inputs.retries,
+    });
+    if (dispatch.failure !== undefined) {
+      // Record the partial state (landed assets + applied columns +
+      // failing column) keyed by item_id, then re-throw the remapped
+      // error so the shared dispatcher captures it as `ok: false` +
+      // `error: {code, message}`. `foldAndRemap` NEVER converts a
+      // non-`internal_error` into `internal_error`, so the
+      // dispatcher's `internal_error` escape hatch stays intact.
+      partialById.set(targetId, {
+        assets: dispatch.assets,
+        appliedColumns: dispatch.appliedColumns,
+        failedColumn: dispatch.failure.failedColumn,
+      });
+      const remapped = await foldAndRemap({
+        err: dispatch.failure.cause,
+        warnings: inputs.m38.warnings,
+        client: inputs.client,
+        boardId: inputs.boardId,
+        columnIds: fileColumnIds,
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+        resolutionSource: remapSource,
+      });
+      throw remapped;
+    }
+    successById.set(targetId, dispatch.assets);
+  };
+
+  let dispatchResults: readonly PartialSuccessResult[];
+  if (
+    inputs.parsed.concurrency !== undefined &&
+    inputs.parsed.concurrency > 1
+  ) {
+    dispatchResults = await dispatchParallel(
+      inputs.matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+      inputs.parsed.concurrency,
+      inputs.ctx.signal,
+    );
+  } else {
+    dispatchResults = await dispatchSequential(
+      inputs.matchedItemIds,
+      'item_id',
+      perTargetDispatch,
+      inputs.ctx.signal,
+    );
+  }
+
+  // Single post-dispatch invalidate (fires even when every item
+  // failed — wire calls still fired against Monday).
+  await invalidateBoard(inputs.boardId, inputs.ctx.env);
+
+  const results: BulkFileSetMultiResult[] = dispatchResults.map((row) => {
+    const itemIdSlot = row.item_id;
+    /* c8 ignore next 8 — dispatcher contract: every result row carries
+       the id-field slot; this guard catches a contract violation that
+       would surface as a programmer bug, not a Monday-side failure. */
+    if (typeof itemIdSlot !== 'string' || itemIdSlot.length === 0) {
+      throw new ApiError(
+        'internal_error',
+        'bulk multi-file dispatch result row is missing the `item_id` field — dispatcher contract violation.',
+        { details: { record_keys: Object.keys(row) } },
+      );
+    }
+    if (row.ok) {
+      const assets = successById.get(itemIdSlot);
+      /* c8 ignore next 8 — side-map invariant: every successful
+         per-target dispatch records its assets; this guard catches a
+         wrapper-layer miss (programmer bug). */
+      if (assets === undefined) {
+        throw new ApiError(
+          'internal_error',
+          `bulk multi-file dispatch result row for item_id ${itemIdSlot} reported ok: true but no assets were captured — wrapper-layer side-map miss.`,
+          { details: { item_id: itemIdSlot } },
+        );
+      }
+      return {
+        item_id: itemIdSlot,
+        ok: true,
+        assets: assets.map((a) => ({
+          column_id: a.column_id,
+          filename: a.filename,
+          file_size_bytes: a.file_size_bytes,
+          asset: a.asset,
+        })),
+        applied_file_columns: [...fileColumnIds],
+      };
+    }
+    /* c8 ignore next 8 — dispatcher contract: every `ok: false` row
+       carries the `error` slot (populated by the shared dispatcher's
+       per-target error decoration). */
+    if (row.error === undefined) {
+      throw new ApiError(
+        'internal_error',
+        `bulk multi-file dispatch result row for item_id ${itemIdSlot} reported ok: false but no error payload was captured — dispatcher contract violation.`,
+        { details: { item_id: itemIdSlot } },
+      );
+    }
+    const partial = partialById.get(itemIdSlot);
+    /* c8 ignore next 8 — side-map invariant: every per-target failure
+       routes through `perTargetDispatch`'s `partialById.set` before
+       re-throwing; a miss is a wrapper-layer programmer bug. */
+    if (partial === undefined) {
+      throw new ApiError(
+        'internal_error',
+        `bulk multi-file dispatch result row for item_id ${itemIdSlot} reported ok: false but no partial-leg state was captured — wrapper-layer side-map miss.`,
+        { details: { item_id: itemIdSlot } },
+      );
+    }
+    return {
+      item_id: itemIdSlot,
+      ok: false,
+      assets: partial.assets.map((a) => ({
+        column_id: a.column_id,
+        filename: a.filename,
+        file_size_bytes: a.file_size_bytes,
+        asset: a.asset,
+      })),
+      applied_file_columns: [...partial.appliedColumns],
+      failed_file_column: partial.failedColumn,
+      error: { code: row.error.code, message: row.error.message },
+    };
+  });
+
+  const appliedCount = results.filter((r) => r.ok).length;
+  const failedCount = results.filter((r) => !r.ok).length;
+  /* c8 ignore next 11 — invariant: every matched item produces exactly
+     one result row under both dispatchers; mismatch indicates a
+     programmer bug in the dispatcher or the fold. */
+  if (appliedCount + failedCount !== inputs.matchedItemIds.length) {
+    throw new ApiError(
+      'internal_error',
+      `bulk multi-file dispatch summary invariant violated — matched_count (${String(inputs.matchedItemIds.length)}) !== applied_count (${String(appliedCount)}) + failed_count (${String(failedCount)}).`,
+      {
+        details: {
+          matched_count: inputs.matchedItemIds.length,
+          applied_count: appliedCount,
+          failed_count: failedCount,
+          board_id: inputs.boardId,
+        },
+      },
+    );
+  }
+
+  const data: BulkFileSetMultiData = {
+    operation: 'item_update_bulk_file_set_multi',
+    summary: {
+      matched_count: inputs.matchedItemIds.length,
+      applied_count: appliedCount,
+      failed_count: failedCount,
+      board_id: inputs.boardId,
+      file_count: fileCount,
+      file_column_ids: [...fileColumnIds],
+    },
+    results,
+  };
+  emitMutation({
+    ctx: inputs.ctx,
+    data,
+    schema: bulkFileSetMultiDataSchema,
+    programOpts: inputs.programOpts,
+    warnings: combinedWarnings,
+    source: liveAgg.source,
+    cacheAgeSeconds: liveAgg.cacheAgeSeconds,
+    apiVersion: inputs.apiVersion,
+    resolvedIds,
+  });
 };

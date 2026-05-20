@@ -100,7 +100,9 @@ import {
 import { resolveAndTranslate } from '../../api/resolution-pass.js';
 import {
   executeFileColumnSet,
+  dispatchFileLegsSequentially,
   type FileColumnSetEntry,
+  type MultiFileLegEntry,
   preCheckM38FileDispatch,
   type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
@@ -2134,32 +2136,287 @@ interface RunItemCreateFileMultiDispatchInputs {
 const runItemCreateFileMultiDispatch = async (
   inputs: RunItemCreateFileMultiDispatchInputs,
 ): Promise<void> => {
-  /* c8 ignore start */
-  // Stub anchor — IMPL replaces the body with the real async two-leg-
-  // group dispatch (precheckLocalFile × N + executeCreateItem
-  // (or executeCreateSubitem) bundling non-file column_values + N
-  // sequential executeFileColumnSet legs + envelope emit). The
-  // `await` here keeps the function shape async-correct for lint
-  // until IMPL lands.
-  await Promise.resolve();
-  throw new ApiError(
-    'internal_error',
-    `Multi-file \`--set\` per call on \`monday item create\` is a ` +
-      `v0.8-M46 pre-flight stub. The argv + pre-check + create-mode ` +
-      `resolution + routing surface ships as contract at this commit; ` +
-      `the two-leg-group multi-file dispatch body lifts at v0.8-M46 ` +
-      `IMPL in a separate session.`,
-    {
-      details: {
-        reason: 'm46_preflight_stub',
-        call_shape: 'item_create',
-        create_mode_kind: inputs.createMode.kind,
-        board_id: inputs.resolveBoardId,
-        file_count: inputs.m38.entries.length,
-        file_column_ids: inputs.m38.entries.map((e) => e.columnId),
-        is_dry_run: inputs.isDryRun,
-      },
-    },
+  // 1) Upfront pre-check per file path (N pre-checks, argv order;
+  //    D3). Atomicity-before-wire per cli-design §5.8 — a bad path
+  //    surfaces `usage_error` BEFORE either wire leg fires.
+  const legEntries: MultiFileLegEntry[] = [];
+  for (const entry of inputs.m38.entries) {
+    const precheck = await precheckLocalFile(entry.rawValue);
+    legEntries.push({
+      columnId: entry.columnId,
+      rawValue: entry.rawValue,
+      filePath: precheck.filePath,
+      filename: precheck.filename,
+      fileSizeBytes: precheck.fileSizeBytes,
+    });
+  }
+
+  // 2) Partition setEntries: every file token routes to a file leg;
+  //    the rest bundle into leg-1's `create_item.column_values`.
+  const fileTokens = new Set(inputs.m38.entries.map((e) => e.token));
+  const nonFileSetEntries = inputs.setEntries.filter(
+    (e) => !fileTokens.has(e.token),
   );
-  /* c8 ignore stop */
+
+  // 3) Dry-run branch — leg-1 planned-changes from planCreate +
+  //    N synthetic `add_file_to_column` entries (no item_id; the
+  //    item doesn't exist yet). Mirrors M43 single-file dry-run
+  //    extended to N file entries.
+  if (inputs.isDryRun) {
+    let planResult;
+    try {
+      planResult = await planCreate({
+        client: inputs.client,
+        mode: inputs.createMode,
+        name: inputs.parsed.name,
+        setEntries: nonFileSetEntries,
+        ...(inputs.rawEntries.length === 0
+          ? {}
+          : { rawEntries: inputs.rawEntries }),
+        dateResolution: inputs.dateResolution,
+        peopleResolution: inputs.peopleResolution,
+        tagResolution: inputs.tagResolution,
+        relationResolution: inputs.relationResolution,
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+      });
+    } catch (err) {
+      if (err instanceof MondayCliError) {
+        throw mergeResolverWarningsIntoError(err, inputs.preflightWarnings);
+      }
+      throw err;
+    }
+
+    const dryRunSource = mergeSourceWithPreflight(
+      mergeSourceWithPreflight(planResult.source, inputs.metaSource),
+      inputs.preflightSource,
+    );
+    const dryRunCacheAge = mergeCacheAge(
+      mergeCacheAge(inputs.metaCacheAgeSeconds, planResult.cacheAgeSeconds),
+      inputs.preflightCacheAgeSeconds,
+    );
+
+    const fileEntries = legEntries.map((leg) => ({
+      operation: 'add_file_to_column' as const,
+      column_id: leg.columnId,
+      file_path: leg.rawValue,
+      filename: leg.filename,
+      file_size_bytes: leg.fileSizeBytes,
+    }));
+    const plannedChanges = [
+      ...planResult.plannedChanges,
+      ...fileEntries,
+    ] as unknown as readonly Readonly<Record<string, unknown>>[];
+
+    emitDryRun({
+      ctx: inputs.ctx,
+      programOpts: inputs.programOpts,
+      plannedChanges,
+      source: dryRunSource,
+      cacheAgeSeconds: dryRunCacheAge,
+      warnings: dedupeCreateWarnings([
+        ...inputs.preflightWarnings,
+        ...planResult.warnings,
+      ]),
+      apiVersion: inputs.apiVersion,
+    });
+    return;
+  }
+
+  // 4) Live branch — leg-1 (create_item / create_subitem with bundled
+  //    non-file column_values) then legs 2..N+1 (sequential
+  //    `add_file_to_column`).
+  let resolutionResult;
+  try {
+    resolutionResult = await resolveAndTranslate({
+      client: inputs.client,
+      boardId: inputs.resolveBoardId,
+      setEntries: nonFileSetEntries,
+      rawEntries: inputs.rawEntries,
+      dateResolution: inputs.dateResolution,
+      peopleResolution: inputs.peopleResolution,
+      tagResolution: inputs.tagResolution,
+      relationResolution: inputs.relationResolution,
+      env: inputs.ctx.env,
+      noCache: inputs.noCache,
+    });
+  } catch (err) {
+    if (err instanceof MondayCliError) {
+      throw mergeResolverWarningsIntoError(err, inputs.preflightWarnings);
+    }
+    throw err;
+  }
+
+  const collectedWarnings: readonly ResolverWarning[] = dedupeCreateWarnings(
+    [...inputs.preflightWarnings, ...resolutionResult.warnings],
+  ) as readonly ResolverWarning[];
+
+  const sourceAgg = new SourceAggregator();
+  /* c8 ignore next 3 */
+  if (inputs.metaSource !== undefined) {
+    sourceAgg.record(inputs.metaSource, inputs.metaCacheAgeSeconds);
+  }
+  if (resolutionResult.source !== undefined) {
+    sourceAgg.record(resolutionResult.source, resolutionResult.cacheAgeSeconds);
+  }
+  if (inputs.preflightSource !== undefined) {
+    sourceAgg.record(inputs.preflightSource, inputs.preflightCacheAgeSeconds);
+  }
+
+  // resolved_ids — file tokens + non-file tokens.
+  const resolvedIds: Readonly<Record<string, string>> = {
+    ...Object.fromEntries(inputs.m38.entries.map((e) => [e.token, e.columnId])),
+    ...resolutionResult.resolvedIds,
+  };
+
+  const translated = resolutionResult.translated;
+  const columnValues =
+    translated.length === 0 ? null : bundleColumnValues(translated);
+
+  // Leg-1: create_item / create_subitem. F4 remap on failure mirrors
+  // M43 single-file leg-1; no orphan handle (no item created yet).
+  let leg1Result;
+  try {
+    if (inputs.createMode.kind === 'subitem') {
+      leg1Result = await executeCreateSubitem(inputs.client, {
+        parentItemId: inputs.createMode.parentItemId,
+        itemName: inputs.parsed.name,
+        columnValues,
+        createLabelsIfMissing: inputs.parsed.createLabelsIfMissing,
+      });
+    } else {
+      leg1Result = await executeCreateItem(inputs.client, {
+        boardId: inputs.createMode.boardId,
+        itemName: inputs.parsed.name,
+        groupId: inputs.createMode.groupId,
+        position: inputs.createMode.position,
+        columnValues,
+        createLabelsIfMissing: inputs.parsed.createLabelsIfMissing,
+      });
+    }
+  } catch (err) {
+    if (err instanceof MondayCliError) {
+      throw await foldAndRemap({
+        err,
+        warnings: collectedWarnings,
+        client: inputs.client,
+        boardId: inputs.resolveBoardId,
+        columnIds: translated.map((t) => t.columnId),
+        env: inputs.ctx.env,
+        noCache: inputs.noCache,
+        resolutionSource: resolutionResult.source ?? 'live',
+      });
+    }
+    /* c8 ignore next */
+    throw err;
+  }
+  sourceAgg.record('live', null);
+
+  // Legs 2..N+1: sequential `add_file_to_column` fan-out against the
+  // freshly-created item ID (R-v0.8-NEW-1 shared helper, D1 sequential
+  // within-item).
+  const createdItemId = leg1Result.projected.id;
+  const dispatch = await dispatchFileLegsSequentially({
+    client: inputs.client,
+    multipart: inputs.multipart,
+    itemId: createdItemId,
+    entries: legEntries,
+    signal: inputs.ctx.signal,
+    retries: inputs.retries,
+  });
+
+  if (dispatch.failure !== undefined) {
+    // Orphan-warn (D1 + D2). Extends M43's single-file discriminator
+    // `'create_then_file_upload_partial_failure'` with the always-
+    // present `applied_file_columns` slot (length 0..N-1 reflecting
+    // file columns that landed after leg-1 succeeded but before the
+    // failing file leg). foldAndRemap surfaces `column_archived` for
+    // cache-served resolution against an archived column.
+    if (dispatch.appliedColumns.length > 0) {
+      // ≥1 file leg landed wire-side — invalidate the board cache so a
+      // follow-up read doesn't serve stale asset metadata. (M43's
+      // single-file leg-2 failure never lands a file, so it skips the
+      // invalidate; the multi-file partial case can land legs.)
+      await invalidateBoard(inputs.resolveBoardId, inputs.ctx.env);
+    }
+    const remapped = await foldAndRemap({
+      err: dispatch.failure.cause,
+      warnings: collectedWarnings,
+      client: inputs.client,
+      boardId: inputs.resolveBoardId,
+      columnIds: [dispatch.failure.failedColumn],
+      env: inputs.ctx.env,
+      noCache: inputs.noCache,
+      resolutionSource: inputs.metaSource ?? 'live',
+    });
+
+    const causeProjection: Record<string, unknown> = {
+      code: remapped.code,
+      message: remapped.message,
+    };
+    /* c8 ignore next 3 */
+    if (remapped.details !== undefined) {
+      causeProjection.details = remapped.details;
+    }
+
+    const failedColumn = dispatch.failure.failedColumn;
+    throw new ApiError(
+      'internal_error',
+      `Item ${createdItemId} was created on board ${inputs.resolveBoardId} ` +
+        `but file upload to column ${failedColumn} failed after ` +
+        `${String(dispatch.appliedColumns.length)} of ` +
+        `${String(legEntries.length)} file column(s) landed ` +
+        `(${remapped.code}: ${remapped.message}). The item + applied file ` +
+        `columns persist on Monday; retry the unfailed columns with ` +
+        `\`monday item set ${createdItemId} <file-col>=<path>\`, or roll ` +
+        `back with \`monday item delete ${createdItemId} --yes\`.`,
+      {
+        cause: remapped,
+        details: {
+          reason: 'create_then_file_upload_partial_failure',
+          created_item_id: createdItemId,
+          applied_file_columns: dispatch.appliedColumns,
+          failed_file_column: failedColumn,
+          column_id: failedColumn,
+          cause: causeProjection,
+          hint:
+            `the item was created (id ${createdItemId}) and ` +
+            `${String(dispatch.appliedColumns.length)} file column(s) ` +
+            `landed before column ${failedColumn} failed. Retry the ` +
+            `unfailed file columns alone with \`monday item set ` +
+            `${createdItemId} <file-col>=<path>\`; or rollback the orphan ` +
+            `with \`monday item delete ${createdItemId} --yes\` and re-run ` +
+            `the original \`monday item create\` once the underlying ` +
+            `cause is fixed.`,
+        },
+      },
+    );
+  }
+  sourceAgg.record('live', null);
+
+  // All N file legs succeeded — single board-cache invalidate before
+  // emit (leg-2..N+1 mutated file-column asset state wire-side).
+  await invalidateBoard(inputs.resolveBoardId, inputs.ctx.env);
+
+  const data: ItemCreateWithFilesOutput = {
+    operation: 'item_create_with_files',
+    item: leg1Result.projected,
+    assets: dispatch.assets.map((a) => ({
+      column_id: a.column_id,
+      filename: a.filename,
+      file_size_bytes: a.file_size_bytes,
+      asset: a.asset,
+    })),
+    applied_file_columns: [...dispatch.appliedColumns],
+  };
+  emitMutation({
+    ctx: inputs.ctx,
+    data,
+    schema: itemCreateWithFilesOutputSchema,
+    programOpts: inputs.programOpts,
+    warnings: collectedWarnings,
+    ...inputs.toEmit(leg1Result.response),
+    ...sourceAgg.result(),
+    resolvedIds,
+  });
 };

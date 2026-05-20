@@ -1503,6 +1503,7 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
   describe('v0.6-M38 file-column dispatch (cli-design §5.3 step 5 "File-column dispatch leg")', () => {
     let workdir: string;
     let reportPath: string;
+    let report2Path: string;
     const fileBoard = {
       ...sampleBoardMetadata,
       columns: [
@@ -1552,6 +1553,8 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       workdir = await mkdtemp(join(tmpdir(), 'monday-cli-item-update-m38-'));
       reportPath = join(workdir, 'report.pdf');
       await writeFile(reportPath, 'PDF-bytes-fixture', 'utf8');
+      report2Path = join(workdir, 'report2.pdf');
+      await writeFile(report2Path, 'PDF-bytes-fixture-2', 'utf8');
     });
     afterEach(async () => {
       await rm(workdir, { recursive: true, force: true });
@@ -1713,18 +1716,34 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(env.error?.details?.reason).toBe('mixed_file_and_value_sets');
     });
 
-    it("routes 2+ file --set entries through the v0.8-M46 multi-file dispatch stub (D2 carve-out fold from v0.6-M38; pre-flight surfaces 'm46_preflight_stub' until IMPL)", async () => {
-      // v0.8-M46 pre-flight contract diff. At v0.6-M38 + v0.7 this
-      // path rejected with `usage_error.details.reason:
-      // 'multi_file_set_unsupported'`; v0.8-M46 D2 carve-out fold
-      // lifts the gate on `'item_update_single'` callShape and
-      // routes to `runItemUpdateSingleFileMultiDispatch` for the
-      // per-item multi-leg fan-out. Pre-flight stub throws
-      // `internal_error` with `details.reason:
-      // 'm46_preflight_stub'`; IMPL lifts the stub body. The
-      // `'multi_file_set_unsupported'` discriminator literal stays
-      // RESERVED across the codebase post-fold (mirror M42/M43
-      // reserved-literal discipline).
+    it('live single-item multi-file: dispatches N add_file_to_column legs sequentially + emits the add_files_to_columns envelope (v0.8-M46 D2 carve-out fold from v0.6-M38)', async () => {
+      // v0.8-M46 IMPL. At v0.6-M38 + v0.7 this path rejected with
+      // `usage_error.details.reason: 'multi_file_set_unsupported'`;
+      // v0.8-M46 D2 carve-out fold lifts the gate on
+      // `'item_update_single'` and routes to
+      // `runItemUpdateSingleFileMultiDispatch` for the per-item
+      // multi-leg fan-out (sequential within the item per D1). The
+      // `'multi_file_set_unsupported'` + `'m46_preflight_stub'`
+      // literals stay RESERVED across the codebase post-IMPL.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report2.pdf',
+            response: {
+              data: {
+                add_file_to_column: { ...sampleAsset, id: '555000333' },
+              },
+            },
+          },
+        ],
+        { assertExhaustive: true },
+      );
       const out = await drive(
         [
           'item',
@@ -1733,7 +1752,7 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
           '--set',
           `attachments=${reportPath}`,
           '--set',
-          `attachments_2=${reportPath}`,
+          `attachments_2=${report2Path}`,
           '--board',
           '111',
           '--json',
@@ -1746,6 +1765,93 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
             },
           ],
         },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          item_id: string;
+          assets: { column_id: string; filename: string; asset: { id: string } }[];
+          applied_file_columns: string[];
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.operation).toBe('add_files_to_columns');
+      expect(env.data.item_id).toBe('12345');
+      // Dispatch order is argv order (D1 sequential within-item).
+      expect(env.data.applied_file_columns).toEqual([
+        'attachments',
+        'attachments_2',
+      ]);
+      expect(env.data.assets).toHaveLength(2);
+      expect(env.data.assets[0]).toMatchObject({
+        column_id: 'attachments',
+        filename: 'report.pdf',
+        asset: { id: '555000222' },
+      });
+      expect(env.data.assets[1]).toMatchObject({
+        column_id: 'attachments_2',
+        filename: 'report2.pdf',
+        asset: { id: '555000333' },
+      });
+      // Two multipart legs fired in dispatch order.
+      expect(multipart.requests).toHaveLength(2);
+      expect(multipart.requests[0]?.filename).toBe('report.pdf');
+      expect(multipart.requests[1]?.filename).toBe('report2.pdf');
+      multipart.assertConsumed();
+      // Reserved-literal regression guards (R-v0.7-NEW-4 checklist).
+      expect(out.stderr).not.toContain('multi_file_set_unsupported');
+      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+      expect(out.stdout).not.toContain('m46_preflight_stub');
+    });
+
+    it("single-item multi-file partial failure: surfaces internal_error with 'multi_file_update_partial_failure' + applied_file_columns echo (length 0..N-1) after leg-2 fails mid-dispatch", async () => {
+      // D2 closure (single-item leg). Leg-1 (attachments) lands;
+      // leg-2 (attachments_2) fails wire-side. The applied_file_columns
+      // slot echoes the columns that landed before the failure in
+      // dispatch order; failed_file_column names the failing leg.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report2.pdf',
+            response: {
+              errors: [{ message: 'Internal server error' }],
+            },
+            http_status: 500,
+          },
+        ],
+        { assertExhaustive: true },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          `attachments_2=${report2Path}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
       );
       expect(out.exitCode).toBe(2);
       const env = parseEnvelope(out.stderr) as EnvelopeShape & {
@@ -1753,21 +1859,80 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
           code: string;
           details?: {
             reason?: string;
-            call_shape?: string;
-            file_count?: number;
+            item_id?: string;
+            applied_file_columns?: string[];
+            failed_file_column?: string;
+            cause?: { code?: string };
           };
         };
       };
       expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-      expect(env.error?.details?.call_shape).toBe('item_update_single');
-      expect(env.error?.details?.file_count).toBe(2);
-      // R-v0.7-NEW-4 contract-term regression-guard: the v0.6-M38
-      // literal stays absent from message + details post-fold (the
-      // 3 reachable callShapes route to the m46_preflight_stub
-      // discriminator instead).
-      expect(out.stderr).not.toContain('multi_file_set_unsupported');
-      expect(out.stdout).not.toContain('multi_file_set_unsupported');
+      expect(env.error?.details?.reason).toBe(
+        'multi_file_update_partial_failure',
+      );
+      expect(env.error?.details?.item_id).toBe('12345');
+      // Leg-1 landed before leg-2 failed — applied length N-1 = 1.
+      expect(env.error?.details?.applied_file_columns).toEqual(['attachments']);
+      expect(env.error?.details?.failed_file_column).toBe('attachments_2');
+      expect(env.error?.details?.cause?.code).toBeDefined();
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+    });
+
+    it("single-item multi-file partial failure with length-0 applied_file_columns when the FIRST file leg fails (no columns landed)", async () => {
+      // Boundary: leg-1 fails immediately, so applied_file_columns is
+      // length 0 (mirrors M43's single-file leg-2-fails-immediately
+      // case extended to the multi-file surface).
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { errors: [{ message: 'Internal server error' }] },
+            http_status: 500,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          `attachments_2=${report2Path}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          details?: {
+            reason?: string;
+            applied_file_columns?: string[];
+            failed_file_column?: string;
+          };
+        };
+      };
+      expect(env.error?.details?.reason).toBe(
+        'multi_file_update_partial_failure',
+      );
+      expect(env.error?.details?.applied_file_columns).toEqual([]);
+      expect(env.error?.details?.failed_file_column).toBe('attachments');
+      // Only one multipart leg fired — the loop stopped at leg-1.
+      expect(multipart.requests).toHaveLength(1);
     });
 
     it("v0.8-M46 Codex R2 P3-2 fix: rejects multi-file --set when two distinct argv tokens resolve to the SAME file column ID with 'duplicate_resolved_file_columns' (command-level test asserting the guard fires BEFORE the m46_preflight_stub)", async () => {
@@ -1828,14 +1993,10 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(out.stdout).not.toContain('multi_file_set_unsupported');
     });
 
-    it("v0.8-M46 Codex R1 P3-2 fix: 'multi_file_set_unsupported' literal stays absent on the DRY-RUN multi-file routing path (single-item update; the stub fires in dry-run too because pre-flight body throws regardless of --dry-run)", async () => {
-      // v0.8-M46 Codex round-1 P3-2 fix: the existing live-path
-      // regression-guard above asserts the literal is absent on
-      // the live multi-file routing path. The dry-run path also
-      // reaches the stub (the c8-ignored body throws unconditionally
-      // regardless of `inputs.isDryRun`); regression-guard the
-      // literal stays absent on dry-run too so future contract
-      // drift can't silently re-introduce it on either path.
+    it('dry-run single-item multi-file: emits N add_file_to_column planned_changes (source none; no multipart wire) — v0.8-M46 D2', async () => {
+      // v0.8-M46 IMPL dry-run branch. Mirrors M38 single-item dry-run
+      // (`source: 'none'`, pure-local) extended to N planned_changes,
+      // one per file column in argv order. No multipart wire fires.
       const out = await drive(
         [
           'item',
@@ -1844,7 +2005,7 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
           '--set',
           `attachments=${reportPath}`,
           '--set',
-          `attachments_2=${reportPath}`,
+          `attachments_2=${report2Path}`,
           '--board',
           '111',
           '--dry-run',
@@ -1859,17 +2020,79 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
           ],
         },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
-        error?: {
-          code: string;
-          details?: { reason?: string; is_dry_run?: boolean };
-        };
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout);
+      expect(env.ok).toBe(true);
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      expect(meta.source).toBe('none');
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
       };
-      expect(env.error?.details?.reason).toBe('m46_preflight_stub');
-      expect(env.error?.details?.is_dry_run).toBe(true);
+      expect(envWithPlanned.planned_changes).toEqual([
+        {
+          operation: 'add_file_to_column',
+          item_id: '12345',
+          column_id: 'attachments',
+          file_path: reportPath,
+          filename: 'report.pdf',
+          file_size_bytes: 17,
+        },
+        {
+          operation: 'add_file_to_column',
+          item_id: '12345',
+          column_id: 'attachments_2',
+          file_path: report2Path,
+          filename: 'report2.pdf',
+          file_size_bytes: 19,
+        },
+      ]);
+      // Reserved-literal regression guards on the dry-run path too.
       expect(out.stderr).not.toContain('multi_file_set_unsupported');
       expect(out.stdout).not.toContain('multi_file_set_unsupported');
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+      expect(out.stdout).not.toContain('m46_preflight_stub');
+    });
+
+    it("single-item multi-file pre-check aborts the whole call BEFORE any wire leg when a file path is unreadable (usage_error; no multipart request fires)", async () => {
+      // D3 closure — single upfront pre-check pass over ALL file
+      // paths BEFORE any wire round-trip. A missing path on leg-2
+      // surfaces `usage_error` (`file_not_readable`) whole-call-abort
+      // with zero multipart legs fired.
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          `attachments=${reportPath}`,
+          '--set',
+          `attachments_2=${join(workdir, 'does-not-exist.pdf')}`,
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: { code: string; details?: { reason?: string } };
+      };
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details?.reason).toBe('file_not_readable');
+      // Atomicity-before-wire: zero multipart legs fired.
+      expect(multipart.requests).toHaveLength(0);
     });
 
     it('archived file column on item update: throws column_archived (NOT M38 dispatch — Codex round-2 P2-1 pin; pre-check mirrors resolveAndTranslate archived-column guard)', async () => {
