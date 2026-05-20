@@ -243,10 +243,9 @@ export type ItemCreateOutput = z.infer<typeof itemCreateOutputSchema>;
  * multi-file partial failure after k file legs succeeded.
  *
  * **Status: schema landed at v0.8-M46 pre-flight contract diff
- * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
- * Pre-flight runtime path throws `'m46_preflight_stub'` from
- * `runItemCreateFileMultiDispatch` (below); the schema is the
- * contract IMPL builds against.
+ * (Codex R1 P2-2 fix); runtime emit shipped at v0.8-M46 IMPL.**
+ * `runItemCreateFileMultiDispatch` (below) emits against this
+ * schema on the create-time multi-file path.
  */
 export const itemCreateWithFilesOutputSchema = z.object({
   operation: z.literal('item_create_with_files'),
@@ -965,8 +964,7 @@ export const itemCreateCommand: CommandModule<
           if (m38.kind === 'file_create_multi') {
             // v0.8-M46 D2 carve-out fold. Hold the file_create_multi
             // slot for the two-leg-group multi-file dispatch helper
-            // below (c8-ignored stub at pre-flight; lifted at v0.8-M46
-            // IMPL).
+            // below (runtime body shipped at v0.8-M46 IMPL).
             m38FileCreateMulti = m38;
           }
         }
@@ -1016,8 +1014,9 @@ export const itemCreateCommand: CommandModule<
         // dispatch path. argv parse + create-mode resolution + M38
         // pre-check (which returned `kind: 'file_create_multi'`
         // here) have already run as live contract; the two-leg-
-        // group multi-file body is the pre-flight stub throwing
-        // `'m46_preflight_stub'`. Lifted at v0.8-M46 IMPL.
+        // group multi-file body runs leg-1 `create_item` then N
+        // sequential `add_file_to_column` legs (runtime body
+        // shipped at v0.8-M46 IMPL).
         if (m38FileCreateMulti !== undefined) {
           await runItemCreateFileMultiDispatch({
             parsed,
@@ -2051,19 +2050,21 @@ const runItemCreateFileDispatch = async (
 
 // ============================================================
 // v0.8-M46 create-time multi-file `--set` carve-out fold (D2
-// closure from v0.6-M38). Pre-flight stub — runtime body lifted
-// at v0.8-M46 IMPL.
+// closure from v0.6-M38). Two-leg-group dispatch — leg-1
+// `create_item` then N sequential `add_file_to_column` legs via
+// the shared `dispatchFileLegsSequentially` helper (R-v0.8-NEW-1
+// lift).
 //
-// **Status: pre-flight stub landed at v0.8-M46 pre-flight contract
-// diff.** argv parse + create-mode resolution + M38 pre-check
-// (returning `kind: 'file_create_multi'`) + routing surface ship
-// as live contract upstream of this helper; the two-leg-group
-// multi-file dispatch body is the only c8-ignored leg. parseArgv
-// + create-mode resolution run BEFORE the `c8 ignore start`
-// block-wrap per R-NEW-76 (graduated v0.5-M34 pre-flight; wire-
-// dispatch-anchored at v0.7-M43 IMPL).
+// **Status: runtime body shipped at v0.8-M46 IMPL.** The v0.8-M46
+// pre-flight contract diff shipped argv parse + create-mode
+// resolution + M38 pre-check (returning `kind: 'file_create_multi'`)
+// + routing as live contract plus a c8-ignored stub throwing
+// `'m46_preflight_stub'`; IMPL swapped the stub for the two-leg-
+// group runtime body below. parseArgv + create-mode resolution run
+// BEFORE the wire-dispatch leg per R-NEW-76 (graduated v0.5-M34
+// pre-flight; wire-dispatch-anchored at v0.7-M43 IMPL).
 //
-// **Production-shape preview (lands at IMPL):**
+// **Execution shape (shipped at v0.8-M46 IMPL):**
 //
 //   1. Single upfront `precheckLocalFile` per file path — N file
 //      legs × 1 pre-check each (D3 closure). Whole-call abort on

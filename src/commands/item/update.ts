@@ -497,9 +497,9 @@ export const itemUpdateCommand: CommandModule<
           // v0.8-M46 D2 carve-out fold — single-item multi-file
           // dispatch path. argv parse + pre-check (which returned
           // `kind: 'file_multi'` here) have already run as live
-          // contract; the per-item multi-leg fan-out body is the
-          // pre-flight stub throwing `'m46_preflight_stub'`.
-          // Lifted at v0.8-M46 IMPL.
+          // contract; the per-item multi-leg fan-out body runs N
+          // sequential `add_file_to_column` legs against the single
+          // item (runtime body shipped at v0.8-M46 IMPL).
           await runItemUpdateSingleFileMultiDispatch({
             client,
             multipart,
@@ -916,9 +916,9 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
     if (m38.kind === 'file_bulk_multi') {
       // v0.8-M46 D2 carve-out fold. Hold the file_bulk_multi slot
       // for the multi-leg per-item fan-out below. items_page walker
-      // + confirmation gate still apply; the dispatch helper is a
-      // pre-flight stub throwing `'m46_preflight_stub'` (lifted at
-      // v0.8-M46 IMPL).
+      // + confirmation gate still apply; the dispatch helper fans N
+      // sequential file legs per matched item (runtime body shipped
+      // at v0.8-M46 IMPL).
       m38FileBulkMulti = m38;
     }
   }
@@ -1093,12 +1093,12 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   }
 
   // v0.8-M46 D2 carve-out fold — bulk multi-file `--set` dispatch.
-  // Pre-flight contract diff lands the routing as live contract; the
-  // per-item multi-leg fan-out body is a c8-ignored stub throwing
-  // `'m46_preflight_stub'` (lifted at v0.8-M46 IMPL). Fires AFTER
-  // the items_page walker + confirmation gate (so an agent sees the
-  // matched-count via `confirmation_required` before any dispatch
-  // fans out) and BEFORE the JSON translator path's
+  // The per-item multi-leg fan-out body runs N sequential file legs
+  // per matched item (cross-item parallel under `--concurrency` ×
+  // within-item sequential; runtime body shipped at v0.8-M46 IMPL).
+  // Fires AFTER the items_page walker + confirmation gate (so an
+  // agent sees the matched-count via `confirmation_required` before
+  // any dispatch fans out) and BEFORE the JSON translator path's
   // `resolveAndTranslate` call.
   if (m38FileBulkMulti !== undefined) {
     await runItemUpdateBulkFileMultiDispatch({
@@ -1776,11 +1776,10 @@ export type BulkFileSetData = z.infer<typeof bulkFileSetDataSchema>;
  * column ID + `error` carries the leg's underlying error.
  *
  * **Status: schema landed at v0.8-M46 pre-flight contract diff
- * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
- * Pre-flight runtime path throws `'m46_preflight_stub'` from
- * `runItemUpdateBulkFileMultiDispatch` (below); the schema is
- * the contract IMPL builds against. Mirrors M42's per-item
- * partial-success shape extended with the multi-leg slots.
+ * (Codex R1 P2-2 fix); runtime emit shipped at v0.8-M46 IMPL.**
+ * `runItemUpdateBulkFileMultiDispatch` (below) emits against this
+ * schema. Mirrors M42's per-item partial-success shape extended
+ * with the multi-leg slots.
  */
 export const bulkFileSetMultiResultSchema = z.object({
   item_id: z.string().min(1),
@@ -1846,7 +1845,7 @@ export type BulkFileSetMultiResult = z.infer<
  * the partial-leg success.
  *
  * **Status: schema landed at v0.8-M46 pre-flight contract diff
- * (Codex R1 P2-2 fix); runtime emit lifts at v0.8-M46 IMPL.**
+ * (Codex R1 P2-2 fix); runtime emit shipped at v0.8-M46 IMPL.**
  */
 export const bulkFileSetMultiDataSchema = z.object({
   operation: z.literal('item_update_bulk_file_set_multi'),
@@ -2410,18 +2409,20 @@ export const runItemUpdateBulkFileDispatch = async (
 
 // ============================================================
 // v0.8-M46 multi-file `--set` carve-out fold (D2 closure from
-// v0.6-M38). Two stub helpers — single-item multi-file dispatch
-// + bulk per-item multi-leg fan-out — throwing the transient
-// pre-flight discriminator `'m46_preflight_stub'`. Lifted at
-// v0.8-M46 IMPL in a separate session per workflow.md "Pre-flight
-// contract diff discipline".
+// v0.6-M38). Two helpers — single-item multi-file dispatch + bulk
+// per-item multi-leg fan-out — each firing N sequential
+// `add_file_to_column` legs per item via the shared
+// `dispatchFileLegsSequentially` helper (R-v0.8-NEW-1 lift).
 //
-// **Status: pre-flight stubs landed at v0.8-M46 pre-flight contract
-// diff.** argv parse + pre-check + dispatch routing ship as live
-// contract upstream of these helpers; the per-callShape multi-leg
-// fan-out runtime body is the only c8-ignored leg. parseArgv runs
-// BEFORE the `c8 ignore start` block-wrap per R-NEW-76 (graduated
-// v0.5-M34 pre-flight; wire-dispatch-anchored at v0.7-M43 IMPL).
+// **Status: runtime bodies shipped at v0.8-M46 IMPL.** The
+// v0.8-M46 pre-flight contract diff shipped argv parse + pre-check
+// + dispatch routing as live contract plus c8-ignored stubs
+// throwing `'m46_preflight_stub'`; IMPL swapped the stubs for the
+// per-callShape multi-leg fan-out runtime body below. parseArgv +
+// sibling parse-boundary helpers run BEFORE the wire-dispatch leg
+// per R-NEW-76 (graduated v0.5-M34 pre-flight; wire-dispatch-
+// anchored at v0.7-M43 IMPL) — argv-level failures surface as
+// `usage_error`, not `internal_error`.
 //
 // **D-list closures (v0.8-plan §3 M46 entry):**
 //
@@ -2454,19 +2455,22 @@ export const runItemUpdateBulkFileDispatch = async (
 // **R-class watch-items.**
 //
 //   - R-v0.8-NEW-1 (per-item multi-leg file fan-out helper) —
-//     M46 inlines the fan-out across 3 dispatch helpers (single-
-//     item update / bulk per-item / create-time). R-NEW-58
-//     3-consumer trigger fires at M46 pre-flight; resolution at
-//     M46 IMPL pending the per-callShape envelope-emit shape
-//     comparison.
+//     RESOLVED as LIFT at M46 IMPL. The inner sequential N-leg
+//     loop + partial-failure accumulator lifted to
+//     `dispatchFileLegsSequentially` (src/api/file-column-set.ts);
+//     3 consumers (single-item update / bulk per-item / create-
+//     time). Only the per-callShape envelope decoration stayed
+//     inlined (single-item `multi_file_update_partial_failure` /
+//     bulk per-item-record / create orphan-warn extension).
 //   - R-v0.6-NEW-1 (file-source.ts `precheckLocalFile`) —
 //     already graduated at 5 consumers; M46 calls it N times per
 //     item (one per file path), no new lift work triggered.
 //   - R-v0.6-NEW-2 (`details.reason` discriminator pattern) —
 //     graduated at 5 instances; M46 adds 1 new + extends 1
 //     existing, graduated helper absorbs cleanly.
-//   - R-NEW-76 (parseArgv-BEFORE-c8) — applied at this pre-flight
-//     commit; the c8-ignore boundary drops at IMPL.
+//   - R-NEW-76 (parseArgv-BEFORE-c8) — the c8-ignore boundary
+//     dropped at IMPL; the parseArgv-before-wire-dispatch ordering
+//     invariant it anchors stays load-bearing.
 // ============================================================
 
 interface RunItemUpdateSingleFileMultiDispatchInputs {

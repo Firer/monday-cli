@@ -297,9 +297,9 @@ export type FileColumnSetOutput = z.infer<typeof fileColumnSetOutputSchema>;
  * envelopes).
  *
  * **Status: schema landed at v0.8-M46 pre-flight contract diff;
- * runtime emit lifted at v0.8-M46 IMPL.** Pre-flight runtime path
- * throws `'m46_preflight_stub'` from the c8-ignored stub helper;
- * the schema is the contract IMPL builds against.
+ * runtime emit shipped at v0.8-M46 IMPL.**
+ * `runItemUpdateSingleFileMultiDispatch` (commands/item/update.ts)
+ * emits against this schema on the single-item multi-file path.
  */
 export const fileColumnSetMultiOutputSchema = z
   .object({
