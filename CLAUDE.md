@@ -44,28 +44,42 @@ humans are second-class. Built incrementally via Claude Code on top of
   **117 commands** (M46 adds no new command — it lifts dispatch
   inside existing `item update` / `item create`); `npm audit`
   **0 vulnerabilities**.
-- **Next session:** **v0.8-M47 pre-flight contract diff — stdin
-  file `--set` `<file-col>=-`** (second half of the file-`--set`
-  polish bundle; v0.6-M38 D7 closure). Needs the `--filename`
-  companion shape pinned at pre-flight + one wire-shape probe (does
-  Monday's `add_file_to_column` accept the streaming-from-stdin
-  shape without an explicit filename, or require one?); a potential
-  new "stdin-to-Blob" helper inside `file-source.ts`. Bundle the
-  deferred R-v0.8-NEW-2 (`enforceSingleFileColumnSet` rename) +
-  R-v0.8-NEW-4 (M42/M43 schema parse-test backfill) into the M47
-  cluster per §22 if the file-column-set.ts touch lands there.
-  **Post-M46 refactor-audit (`docs/v0.8-plan.md` §22 +
-  `docs/v0.7-plan.md` §22):** R-v0.7-NEW-5 (fail-fast
-  error-decoration split-and-rebuild scaffold) TRIGGER FIRED — now
-  4 consumers (clear / JSON-bulk / M42 file-bulk / M46
-  file-bulk-multi); lift crystallised (`reThrowDecorated` helper),
-  raised LOW→MEDIUM, wants a standalone `src/api/` error-helper
-  session (spans 4 mutation paths — out of M47 scope). New:
-  R-v0.8-NEW-6 (orphan-warn `causeProjection` builder, 3 consumers,
-  MEDIUM-LOW), R-v0.8-NEW-7 (bare-SHA doc citations fragile under
-  rebase — adopt subject-line refs at next close-docs, MEDIUM),
-  R-v0.8-NEW-8 (Codex audit-point: new emit shape → `outputSchema`
-  advertisement check, LOW-MEDIUM).
+- **Next session:** **`create_column` wire probe for v0.8-M48
+  (writable `board_relation` / `dependency` column settings)** —
+  M48 was ELEVATED to committed v0.8 scope on user demand
+  (2026-05-20), **probe-first**: does `create_column.defaults`
+  accept a `{boardIds, allowMultipleItems}` JSON at create time so
+  the new Connect-Boards column points at a target board (M19
+  shipped an empty create-time settings schema)? The probe gates
+  M48's pre-flight AND decides the **M47-vs-M48 order** (per the
+  user's probe-first selection). Probe with the token in
+  `.env.probe.local`; land the report at
+  `scripts/probe/m48-board-relation-settings.report.txt`. Then open
+  the chosen milestone's pre-flight contract diff. Full M48 skeleton
+  + the 3-outcome probe-design (a accepts verbatim / b needs a
+  different create-time shape / c settings post-create-only →
+  two-leg dispatch) at `docs/v0.8-plan.md` §3 M48 entry.
+
+  **v0.8 committed scope (post-M46-IMPL + 2026-05-20 prioritisation):**
+  - **M47** — stdin file `--set` `<file-col>=-` (D7 closure).
+    `--filename` companion shape + `add_file_to_column`
+    streaming-from-stdin probe; potential stdin-to-Blob helper in
+    `file-source.ts`. R-v0.8-NEW-2 (`enforceSingleFileColumnSet`
+    rename) folds in here (shared `file-column-set.ts` touch).
+  - **M48** — board_relation/dependency writable settings (above).
+  - **v0.8 refactor cluster** (committed, prioritised on user
+    demand) — R-v0.7-NEW-5 `reThrowDecorated` fail-fast-scaffold lift
+    (4 consumers: clear / JSON-bulk / M42 file-bulk / M46
+    file-bulk-multi; needs its own Codex pass + a 4-path coverage
+    ratchet) + R-v0.8-NEW-6 `projectCauseForEnvelope` builder
+    (3 consumers; bundled, both in mutation-path catch arms).
+    Standalone `src/api/` lift — too broad to ride a feature IMPL.
+  - **Release-prep cluster** — R-v0.8-NEW-4 (schema parse-test
+    backfill) folds into its envelope-snapshot probe.
+  - Process/template adoptions (no code milestone): R-v0.8-NEW-7
+    (bare-SHA doc citations fragile under rebase — adopt
+    commit-subject refs at next close-docs) + R-v0.8-NEW-8 (Codex
+    audit-point: new emit shape → `outputSchema` advertisement check).
 
   **v0.8-M46 SHIPPED at `3e6bdc1..1289133`** (R0 IMPL + R1-R2 Codex
   IMPL fix-up rounds; CONVERGED at R3 with zero findings). The
