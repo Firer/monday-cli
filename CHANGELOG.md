@@ -7,6 +7,56 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.7.1] - 2026-05-20 — Live-API hotfix: `is_leaf` schema drift + non-TTY table colour
+
+Emergency patch. `0.7.0` shipped two defects that only surface
+against the **live** Monday API (the test suite mocks the network
+boundary, so all 4124 tests stayed green). No new commands, no
+contract changes — strictly bug fixes. **No breaking changes vs
+`0.7.0`.**
+
+### Fixed
+
+- **`is_leaf` field removed from the board-metadata query (critical).**
+  Monday removed `is_leaf` from the `Board` type at API `2026-01`
+  (confirmed by introspection — `hierarchy_type` is still valid).
+  The shared `BOARD_METADATA_QUERY` still selected it, so Monday
+  rejected the whole query with `validation_failed` ("Cannot query
+  field \"is_leaf\" on type \"Board\""). Because that query backs
+  `loadBoardMetadata` → the column-name resolver, this broke **every
+  board-metadata path**: `board describe` / `columns` / `groups` /
+  `doctor`, `item list` / `search`, and **all `--set` / `--set-raw`
+  column writes** on `item create` / `update` / `set` (the column-
+  value path prequeries board metadata). Against live `2026-01` the
+  CLI was effectively read-by-ID + bare-create only. The query no
+  longer selects `is_leaf`; the `board describe` output **preserves
+  the `is_leaf` key as `null`** (non-breaking per §6.1 — removing the
+  key is deferred to the next major).
+- **Table output no longer leaks ANSI colour into pipes.** `cli-table3`
+  colours its borders grey unconditionally, so `--output table`
+  forced through a pipe emitted `^[[90m`/`^[[39m` around every box
+  character. Colour is now gated on stdout TTY-ness and honours
+  `NO_COLOR` / `FORCE_COLOR` / `--no-color` (`cli.md` "Respect
+  NO_COLOR"). The non-TTY default was already JSON, so this only
+  affected explicitly-forced piped tables.
+
+### Internal
+
+- Added a `RUN_LIVE_TESTS`-gated e2e smoke test
+  (`tests/e2e/live-schema-drift.test.ts`) that runs the exact
+  production `BOARD_METADATA_QUERY` against the live API and asserts
+  no GraphQL errors — catches the `is_leaf` class of field drift
+  before release. Skipped in normal CI; run via
+  `RUN_LIVE_TESTS=1 MONDAY_API_TOKEN=... npm run test:e2e`.
+
+### Known limitations (unchanged, not regressions)
+
+- `monday board column-create --type board_relation --settings` still
+  rejects `boardIds` / `boardId` / `allowMultipleItems` — a deliberate
+  M19 limitation (Monday has no documented `create_column.defaults`
+  shape for linked boards), not a regression. Adding writable
+  Connect-Boards settings is a v0.8 feature pending a wire probe.
+
 ## [0.7.0] - 2026-05-20 — Bulk + create-time file `--set` carve-out folds (M42 + M43)
 
 The "friendly file `--set` reaches every callShape" milestone —
