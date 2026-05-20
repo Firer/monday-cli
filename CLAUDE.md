@@ -44,27 +44,36 @@ humans are second-class. Built incrementally via Claude Code on top of
   (`brace-expansion 5.0.2 → 5.0.5`; not a merge blocker per
   security.md "high = merge blocker"; defer to v0.7 release-
   prep audit-fix or earlier if a Codex round flags it).
-- **Next session:** v0.7-M39 **pre-flight** (API pin bump
-  `2026-01` → `2026-04` + mass-flip of `2026-01` literals across
-  docs/probes/cassettes + envelope-snapshot refresh; per kickoff
-  ship order M42 → M43 → re-probe SDK 15.x → **M39** → M40 → M41).
-  At M43 close-docs (this commit) the SDK 15.x re-probe ran:
-  `npm view @mondaydotcomorg/api versions --json` returns latest
-  `14.0.0` — **SDK 15.x is NOT YET published**. M39 D1 fallback
-  enumeration carries forward to M39 pre-flight:
-  (a) SDK 15.x lift — STILL BLOCKED (re-probe at M39 kickoff);
-  (b) string-literal override on SDK 14.0.0 + hand-rolled zod
-  schemas per the "Boundary-typing trap" pattern — viable
-  (override cost-scrutiny from v0.7 kickoff candidate-selection
-  surfaced this as cheaper than initially framed: per-request
-  `API-Version` header at `src/api/transport.ts:99` is already
-  parameterised + overridable, hand-rolled zod schemas routine
-  per the `.claude/rules/monday-api.md` "Boundary-typing trap");
-  (c) continued wait + sequence-shuffle to ship more milestones
-  first — applied at v0.7 kickoff (M42 + M43 first, M39 third);
-  no more independent milestones remain to shuffle to. M39
-  pre-flight session decides between (b) string-literal override
-  and (c) one more wait cycle.
+- **Next session:** **NOT v0.7-M39 / M40 / M41.** Per session-end
+  directive 2026-05-20: pivot v0.7's remaining scope away from
+  any API-`2026-04`-dependent milestone until `@mondaydotcomorg/
+  api` SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` (or
+  later) natively. The v0.7-M39 string-literal override path is
+  abandoned — the override commits (`bb7c2cc..2e501b5`) were
+  shipped in a prior session then `git reset --hard ea153ee`'d
+  back at session-end 2026-05-20 because the first downstream
+  surface (M40 `set_item_description_content`) turned out to be a
+  premium-feature wire returning opaque `INTERNAL_SERVER_ERROR
+  { service: 'docs-api' }` on free-tier accounts — not worth the
+  override-maintenance overhead for a single user-blocked verb.
+  Findings preserved in user-memory at
+  `~/.claude/projects/-home-nick-code-monday-cli/memory/project_m40_findings_deferred.md`
+  + the M40 probe + report in `git reflog` (M39 commits + M40
+  uncommitted work are recoverable for ~90 days if priorities
+  shift). M41 (`create_doc_blocks` for bulk doc-block create) is
+  similarly `2026-04`-introduced; defers under the same gate.
+  **Recommended candidates for the next session** (none need
+  `2026-04`): finishing v0.7 by treating M42 + M43 as the
+  release content + opening v0.7 release-prep (envelope-snapshot
+  refresh probe + ToC audit + version bump 0.6.0 → 0.7.0 +
+  CHANGELOG + README quickstart + close-docs sweep); OR pivoting
+  to a v0.6.x backlog candidate that lives on the current
+  `2026-01` pin (stdin file `--set`, profile-scoped argument
+  defaults, multi-level subitem creation, cross-board `item
+  move` value-overrides, cross-board search resumable cursor —
+  all carry-forwards from earlier release-preps per
+  `docs/cli-design.md` §13). Reopen a candidate-selection
+  session at the next kickoff to pick.
 
 - **M43 SHIPPED at `5cf4365..c217011`** (R0 IMPL + R1-R3 Codex
   IMPL fix-up commits + R4 CONVERGED with zero findings). The
