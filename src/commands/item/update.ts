@@ -142,21 +142,30 @@ import type { Warning } from '../../utils/output/envelope.js';
 /**
  * Output envelope union — projected-item for the JSON translator
  * path (text / status / dropdown / date / people / etc.) +
- * file-dispatch envelope for the friendly `--set <file-col>=<path>`
- * path. The file-dispatch shape ships across v0.6-M38 (single-item
- * — `operation: 'add_file_to_column'`) and v0.7-M42 (bulk —
- * `operation: 'item_update_bulk_file_set'`; the per-item fan-out's
- * `data.results[i].asset` slots wrap M31's `Asset` projection). The
- * union below admits only the single-item shape because the bulk
- * variant is emitted via its own `bulkFileSetDataSchema` at the
- * `runItemUpdateBulkFileDispatch` helper; agents discriminate on
- * `operation` (present + literal value identifies the variant).
+ * single-item file-dispatch envelopes for the friendly `--set
+ * <file-col>=<path>` path: v0.6-M38 single-file (`operation:
+ * 'add_file_to_column'`) + v0.8-M46 single-item multi-file
+ * (`operation: 'add_files_to_columns'`; `assets[]` wraps M31's
+ * `Asset` projection per file column).
+ *
+ * The union admits only the SINGLE-ITEM shapes. The BULK file
+ * variants — v0.7-M42 (`item_update_bulk_file_set`) + v0.8-M46
+ * (`item_update_bulk_file_set_multi`) — are emitted via their own
+ * `bulkFileSet*DataSchema` at the `runItemUpdateBulk*FileDispatch`
+ * helpers and stay OUT of this union (the bulk per-item-results
+ * shape is structurally distinct from the single-resource `data`
+ * payload this schema describes); agents discriminate on `operation`
+ * (present + literal value identifies the variant).
  */
 export const itemUpdateOutputSchema = z.union([
   projectedItemSchema,
   fileColumnSetOutputSchema,
+  fileColumnSetMultiOutputSchema,
 ]);
-export type ItemUpdateOutput = ProjectedItem | FileColumnSetOutput;
+export type ItemUpdateOutput =
+  | ProjectedItem
+  | FileColumnSetOutput
+  | FileColumnSetMultiOutput;
 
 /**
  * Input shape — supports both single-item and bulk shapes.
@@ -852,8 +861,8 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //          returns `kind: 'file_bulk_multi'` (v0.8-M46 D2
   //          carve-out fold; action body branches into the
   //          per-item multi-leg fan-out helper
-  //          `runItemUpdateBulkFileMultiDispatch` — pre-flight
-  //          stub at this commit, lifts at M46 IMPL).
+  //          `runItemUpdateBulkFileMultiDispatch` — runtime body
+  //          shipped at v0.8-M46 IMPL).
   //        - Multi-file `--set` with duplicate resolved file
   //          columns → throws `'duplicate_resolved_file_columns'`
   //          (mirrors JSON path's cross-token duplicate-resolved-

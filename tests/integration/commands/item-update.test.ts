@@ -1935,17 +1935,18 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(multipart.requests).toHaveLength(1);
     });
 
-    it("v0.8-M46 Codex R2 P3-2 fix: rejects multi-file --set when two distinct argv tokens resolve to the SAME file column ID with 'duplicate_resolved_file_columns' (command-level test asserting the guard fires BEFORE the m46_preflight_stub)", async () => {
-      // v0.8-M46 Codex round-2 P3-2 fix: round-1's P2-1 added a
-      // unit test at the `enforceSingleFileColumnSet` layer, but no
-      // command-level test exercised the duplicate-resolved-column
-      // guard through the action body's pre-check. This integration
-      // test drives `--set attachments=...` + `--set
-      // id:attachments=...` (two distinct argv tokens — name vs
-      // `id:` prefix form — that resolve to the same column ID) +
-      // asserts the rejection fires at the enforcement layer, NOT
-      // the M46 stub. Mirrors the JSON path's cross-token
-      // duplicate-resolved-ID contract at `src/api/resolution-pass.ts`.
+    it("rejects multi-file --set when two distinct argv tokens resolve to the SAME file column ID with 'duplicate_resolved_file_columns' (guard fires at the enforcement layer, before any multi-file dispatch)", async () => {
+      // v0.8-M46 pre-flight Codex round-2 P3-2 fix: pre-flight
+      // round-1's P2-1 added a unit test at the
+      // `enforceSingleFileColumnSet` layer, but no command-level test
+      // exercised the duplicate-resolved-column guard through the
+      // action body's pre-check. This integration test drives `--set
+      // attachments=...` + `--set id:attachments=...` (two distinct
+      // argv tokens — name vs `id:` prefix form — that resolve to the
+      // same column ID) + asserts the rejection fires at the
+      // enforcement layer, before the multi-file dispatch helper runs.
+      // Mirrors the JSON path's cross-token duplicate-resolved-ID
+      // contract at `src/api/resolution-pass.ts`.
       const out = await drive(
         [
           'item',
@@ -1984,8 +1985,9 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
         'duplicate_resolved_file_columns',
       );
       expect(env.error?.details?.column_id).toBe('attachments');
-      // Verify the guard fires BEFORE the M46 stub (the stub's
-      // discriminator must NOT appear on this path).
+      // Reserved-literal regression-guard: the transient pre-flight
+      // `m46_preflight_stub` discriminator must NOT appear on this
+      // path (the duplicate guard rejects before any dispatch).
       expect(out.stderr).not.toContain('m46_preflight_stub');
       expect(out.stdout).not.toContain('m46_preflight_stub');
       // Regression-guard: the v0.6 reserved literal stays absent.

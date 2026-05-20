@@ -273,6 +273,25 @@ export type ItemCreateWithFilesOutput = z.infer<
   typeof itemCreateWithFilesOutputSchema
 >;
 
+/**
+ * Command-registry output union for `monday item create`. The JSON /
+ * single-file create paths emit the canonical `ItemCreateOutput`
+ * (v0.7-M43 deliberately kept its single-file two-leg path on the
+ * canonical shape); v0.8-M46 multi-file create emits the distinct
+ * `item_create_with_files` shape. Both are single-resource `data`
+ * payloads, so both belong in the advertised `outputSchema` union
+ * (agents discriminate on the presence of `operation` /
+ * `applied_file_columns`). Mirrors `item.update`'s union admitting
+ * its single-item file shapes.
+ */
+export const itemCreateCommandOutputSchema = z.union([
+  itemCreateOutputSchema,
+  itemCreateWithFilesOutputSchema,
+]);
+export type ItemCreateCommandOutput = z.infer<
+  typeof itemCreateCommandOutputSchema
+>;
+
 const createItemResponseSchema = z
   .object({
     id: ItemIdSchema,
@@ -802,7 +821,7 @@ const resolveCreateMode = async (
 
 export const itemCreateCommand: CommandModule<
   ParsedInput,
-  ItemCreateOutput
+  ItemCreateCommandOutput
 > = {
   name: 'item.create',
   summary: 'Create a new item or subitem',
@@ -820,7 +839,7 @@ export const itemCreateCommand: CommandModule<
   // create-or-update use `monday item upsert` (M12).
   idempotent: false,
   inputSchema,
-  outputSchema: itemCreateOutputSchema,
+  outputSchema: itemCreateCommandOutputSchema,
   attach: (program, ctx) => {
     const noun = ensureSubcommand(program, 'item', 'Item commands');
     noun
@@ -918,8 +937,8 @@ export const itemCreateCommand: CommandModule<
         //     `--set` entries with distinct file columns; branches
         //     into the v0.8-M46 two-leg-group dispatch helper
         //     `runItemCreateFileMultiDispatch` (D2 carve-out fold
-        //     from v0.6-M38's universal multi-file rejection).
-        //     Pre-flight stub at this commit; lifts at M46 IMPL.
+        //     from v0.6-M38's universal multi-file rejection;
+        //     runtime body shipped at v0.8-M46 IMPL).
         //   - Throws `usage_error` with
         //     `details.reason: 'duplicate_resolved_file_columns'` when
         //     2+ file `--set` entries resolve to the same column ID
