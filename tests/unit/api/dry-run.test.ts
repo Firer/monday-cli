@@ -77,7 +77,6 @@ const board67890 = (): { boards: unknown[] } => ({
       workspace_id: null,
       url: null,
       hierarchy_type: 'top_level',
-      is_leaf: true,
       updated_at: null,
       groups: [],
       columns: [

@@ -110,7 +110,6 @@ const sampleBoardMetadata = {
   workspace_id: '5',
   url: null,
   hierarchy_type: null,
-  is_leaf: true,
   updated_at: null,
   groups: [],
   columns: [

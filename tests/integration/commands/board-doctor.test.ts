@@ -27,7 +27,6 @@ const baseBoard = {
   workspace_id: null,
   url: null,
   hierarchy_type: null,
-  is_leaf: true,
   updated_at: null,
   groups: [],
 };

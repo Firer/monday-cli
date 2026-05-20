@@ -7,9 +7,11 @@
  * The data is cached on disk via `api/cache.ts` (5-minute default TTL,
  * `--no-cache` bypasses) and the cache miss path issues a single
  * GraphQL call against the raw `client.raw<T>` escape hatch — the
- * SDK's typed `boards` query doesn't expose `hierarchy_type` /
- * `is_leaf`, both of which the design's "describe" output requires
- * (`cli-design.md` §2.8).
+ * SDK's typed `boards` query doesn't expose `hierarchy_type`, which
+ * the design's "describe" output requires (`cli-design.md` §2.8).
+ * (`is_leaf` was also fetched here until Monday removed it from the
+ * `Board` type at API 2026-01 — the query no longer selects it; see
+ * the schema comment + memory `project-is-leaf-live-drift`.)
  *
  * The cache layer holds Monday-shape JSON; this module is the *only*
  * place that reshapes Monday's response into the projected
@@ -47,7 +49,12 @@ import { ApiError } from '../utils/errors.js';
 import { unwrapOrThrow } from '../utils/parse-boundary.js';
 import type { Complexity } from '../utils/output/envelope.js';
 
-const BOARD_METADATA_QUERY = `
+// Exported so the RUN_LIVE_TESTS schema-drift smoke test can run the
+// exact production document against the live API — the is_leaf
+// regression (Monday removed the field from `Board` at 2026-01) shipped
+// precisely because the test suite mocks the network boundary and never
+// exercised the real field selection. See tests/e2e/live-schema-drift.test.ts.
+export const BOARD_METADATA_QUERY = `
   query BoardMetadata($ids: [ID!]!) {
     boards(ids: $ids) {
       id
@@ -59,7 +66,6 @@ const BOARD_METADATA_QUERY = `
       workspace_id
       url
       hierarchy_type
-      is_leaf
       items_count
       permissions
       updated_at
@@ -118,7 +124,16 @@ export const boardMetadataSchema = z
     workspace_id: z.string().nullable(),
     url: z.string().nullable(),
     hierarchy_type: z.string().nullable(),
-    is_leaf: z.boolean().nullable(),
+    // Monday removed `is_leaf` from the `Board` type at API 2026-01
+    // (live introspection: the field is gone; the canned query no
+    // longer selects it). Kept optional+nullable so (a) the live
+    // projection parses a response that omits it and (b) pre-removal
+    // on-disk cache entries that still carry it parse cleanly. The
+    // `board describe` output preserves the key (null-projected) to
+    // stay non-breaking per cli-design §6.1 — dropping the output
+    // key entirely is a SemVer-major change deferred to the next
+    // major. See memory `project-is-leaf-live-drift`.
+    is_leaf: z.boolean().nullable().optional(),
     // Optional+nullable so existing pre-M15 cache entries (which
     // didn't carry these fields) parse cleanly post-bump. New
     // BOARD_METADATA_QUERY runs include the fields; the M15 board

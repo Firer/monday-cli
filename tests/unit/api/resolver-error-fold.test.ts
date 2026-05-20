@@ -221,7 +221,6 @@ const archivedBoardResponse = (): { boards: unknown[] } => ({
       workspace_id: null,
       url: null,
       hierarchy_type: null,
-      is_leaf: true,
       updated_at: null,
       groups: [],
       columns: [
@@ -251,7 +250,6 @@ const activeBoardResponse = (): { boards: unknown[] } => ({
       workspace_id: null,
       url: null,
       hierarchy_type: null,
-      is_leaf: true,
       updated_at: null,
       groups: [],
       columns: [
@@ -349,7 +347,6 @@ describe('maybeRemapValidationFailedToArchived', () => {
             workspace_id: null,
             url: null,
             hierarchy_type: null,
-            is_leaf: true,
             updated_at: null,
             groups: [],
             columns: [],
@@ -466,7 +463,6 @@ describe('maybeRemapValidationFailedToArchived', () => {
             workspace_id: null,
             url: null,
             hierarchy_type: null,
-            is_leaf: true,
             updated_at: null,
             groups: [],
             columns: [
@@ -532,7 +528,6 @@ describe('maybeRemapValidationFailedToArchived', () => {
             workspace_id: null,
             url: null,
             hierarchy_type: null,
-            is_leaf: true,
             updated_at: null,
             groups: [],
             columns: [
@@ -589,7 +584,6 @@ describe('maybeRemapValidationFailedToArchived', () => {
             workspace_id: null,
             url: null,
             hierarchy_type: null,
-            is_leaf: true,
             updated_at: null,
             groups: [],
             columns: [

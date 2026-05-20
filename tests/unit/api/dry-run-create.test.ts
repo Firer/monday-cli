@@ -107,7 +107,6 @@ describe('planCreate — tags translator dry-run echo (M19)', () => {
           workspace_id: null,
           url: null,
           hierarchy_type: 'top_level',
-          is_leaf: true,
           updated_at: null,
           groups: [],
           columns: [
@@ -181,7 +180,6 @@ describe('planCreate — board_relation translator dry-run echo (M19 Commit 3)',
           workspace_id: null,
           url: null,
           hierarchy_type: 'top_level',
-          is_leaf: true,
           updated_at: null,
           groups: [],
           columns: [

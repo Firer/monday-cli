@@ -473,7 +473,7 @@ exports[`envelope snapshot — board > board describe 1`] = `
     "groups": [],
     "hierarchy_type": null,
     "id": "111",
-    "is_leaf": true,
+    "is_leaf": null,
     "name": "Tasks",
     "state": "active",
     "updated_at": null,

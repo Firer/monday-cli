@@ -139,7 +139,6 @@ const boardMetadataResponse = (
       workspace_id: null,
       url: null,
       hierarchy_type: null,
-      is_leaf: null,
       items_count: 0,
       permissions: null,
       updated_at: null,

@@ -533,7 +533,6 @@ describe('runPartialSuccessBulkUpdate — foldAndRemap per-item remap (Codex rou
             workspace_id: null,
             url: null,
             hierarchy_type: null,
-            is_leaf: null,
             items_count: null,
             permissions: null,
             updated_at: null,

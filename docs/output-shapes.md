@@ -525,13 +525,15 @@ column carries `writable` + (when writable) `example_set` — concrete
 long_text / numbers / status / dropdown / date / people / link /
 email / phone) and `false` for everything else; `example_set` is
 populated for every writable column. M8 firm-row examples include
-the pipe-form shapes for `link` / `email` / `phone`.
+the pipe-form shapes for `link` / `email` / `phone`. `is_leaf` is
+always `null` (v0.7.1+): Monday removed the field from the `Board`
+type at API `2026-01`, but the key is retained for back-compat.
 
 ```json
 {
   "id": "111", "name": "Tasks", "description": null,
   "state": "active", "board_kind": "public", "workspace_id": "5",
-  "url": null, "hierarchy_type": null, "is_leaf": true,
+  "url": null, "hierarchy_type": null, "is_leaf": null,
   "groups": [],
   "columns": [
     { "id": "status_4", "title": "Status", "type": "status",

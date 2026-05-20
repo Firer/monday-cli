@@ -376,7 +376,6 @@ const metadataResponse = (
           workspace_id: '5',
           url: null,
           hierarchy_type: 'top_level',
-          is_leaf: true,
           updated_at: '2026-04-30T10:00:00Z',
           groups,
           columns,
@@ -438,7 +437,10 @@ describe('monday board describe', () => {
     };
     assertEnvelopeContract(env);
     expect(env.data.hierarchy_type).toBe('top_level');
-    expect(env.data.is_leaf).toBe(true);
+    // Monday removed `is_leaf` from the `Board` type at API 2026-01;
+    // the fixture no longer supplies it and `board describe` null-
+    // projects the preserved output key (board-metadata.ts).
+    expect(env.data.is_leaf).toBe(null);
     const text = env.data.columns.find((c) => c.id === 'name_text');
     const status = env.data.columns.find((c) => c.id === 'status_4');
     const mirror = env.data.columns.find((c) => c.id === 'mirror_x');
@@ -1124,7 +1126,6 @@ describe('monday board update (integration, M15)', () => {
             workspace_id: '5',
             url: 'https://x.monday.com/boards/12345',
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
@@ -1480,7 +1481,6 @@ describe('monday board update (integration, M15)', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: 'top_level',
-      is_leaf: true,
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
@@ -1594,7 +1594,6 @@ describe('monday board update (integration, M15)', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: 'top_level',
-      is_leaf: true,
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
@@ -1696,7 +1695,6 @@ describe('monday board update (integration, M15)', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: 'top_level',
-      is_leaf: true,
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
@@ -1753,7 +1751,6 @@ describe('monday board archive (integration, M15)', () => {
             workspace_id: '5',
             url: 'https://x.monday.com/boards/12345',
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
@@ -1958,7 +1955,6 @@ describe('monday board archive (integration, M15)', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: 'top_level',
-      is_leaf: true,
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
@@ -2273,7 +2269,6 @@ describe('monday board delete (integration, M15)', () => {
                     workspace_id: '5',
                     url: null,
                     hierarchy_type: 'top_level',
-                    is_leaf: true,
                     updated_at: '2026-05-07T11:00:00Z',
                     groups: [],
                     columns: [],
@@ -2367,7 +2362,6 @@ describe('monday board duplicate (integration, M15)', () => {
             workspace_id: '5',
             url: 'https://x.monday.com/boards/12345',
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
@@ -3763,7 +3757,6 @@ describe('monday board column-update (integration, M16)', () => {
             workspace_id: '5',
             url: null,
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [
@@ -4906,7 +4899,6 @@ describe('monday board group-update (integration, M17)', () => {
             workspace_id: '5',
             url: null,
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [
               {
@@ -5430,7 +5422,6 @@ describe('monday board group-archive (integration, M17)', () => {
             workspace_id: '5',
             url: null,
             hierarchy_type: 'top_level',
-            is_leaf: true,
             updated_at: '2026-05-07T11:00:00Z',
             groups: [
               {

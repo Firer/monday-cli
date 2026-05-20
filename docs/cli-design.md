@@ -275,9 +275,14 @@ linked items. Two consequences:
   column metadata to opt-in to inclusion in queries. The CLI's
   `monday board describe` requests this capability so rollup values
   appear in the output.
-- **`hierarchy_type` / `is_leaf`** distinguish parent boards from
-  sub-items boards in the multi-level model. SDK 14.0.0 does not type
-  these fields; the CLI fetches them via raw GraphQL.
+- **`hierarchy_type`** distinguishes parent boards from sub-items
+  boards in the multi-level model. SDK 14.0.0 does not type this field;
+  the CLI fetches it via raw GraphQL. (`is_leaf` was fetched alongside
+  it until Monday removed the field from the `Board` type at API
+  `2026-01` — the query no longer selects it. The `board describe`
+  output retains `is_leaf` as a legacy nullable key, always `null`, so
+  the projection stays non-breaking per §6.1; dropping the key is a
+  future-major change.)
 
 ### 2.9 Other column-write quirks worth knowing
 

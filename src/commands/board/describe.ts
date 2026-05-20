@@ -4,9 +4,11 @@
  *
  * The CLI's introspection endpoint for one board: every column with
  * its parsed `settings_str`, every group, the workspace + folder
- * pointers, hierarchy info (`hierarchy_type` / `is_leaf` — both raw
- * GraphQL because the SDK doesn't type them in 14.0.0), plus a per-
- * writable-column `example_set` so an agent can construct
+ * pointers, hierarchy info (`hierarchy_type` — raw GraphQL because
+ * the SDK doesn't type it in 14.0.0; `is_leaf` was also surfaced here
+ * until Monday removed it from the `Board` type at API 2026-01, and
+ * the output key is now null-projected to stay non-breaking), plus a
+ * per-writable-column `example_set` so an agent can construct
  * `--set <token>=<value>` calls without consulting Monday's docs.
  *
  * Reads through `loadBoardMetadata` (cache-aware). The `example_set`
@@ -267,7 +269,13 @@ export const boardDescribeCommand: CommandModule<
           board_folder_id: result.metadata.board_folder_id,
           url: result.metadata.url,
           hierarchy_type: result.metadata.hierarchy_type,
-          is_leaf: result.metadata.is_leaf,
+          // Monday removed `is_leaf` from the `Board` type at API
+          // 2026-01, so live metadata no longer carries it. Forced to
+          // `null` (not `?? null`) so the value is consistent even when
+          // served from a pre-upgrade on-disk cache entry that still
+          // holds the old boolean. The output key is preserved to stay
+          // non-breaking per §6.1; see board-metadata.ts.
+          is_leaf: null,
           updated_at: result.metadata.updated_at,
           columns: cols.map((c) => ({
             id: c.id,

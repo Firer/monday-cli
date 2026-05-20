@@ -796,7 +796,6 @@ describe('monday item upsert — me-token resolution in --match-by', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: null,
-      is_leaf: true,
       updated_at: null,
       groups: [],
       columns: [
@@ -945,7 +944,6 @@ describe('monday item upsert — F4 column-archived remap', () => {
     workspace_id: '5',
     url: null,
     hierarchy_type: null,
-    is_leaf: true,
     updated_at: null,
     groups: [],
     columns: [
@@ -1118,7 +1116,6 @@ describe('monday item upsert — cache-miss refresh', () => {
       workspace_id: '5',
       url: null,
       hierarchy_type: null,
-      is_leaf: true,
       updated_at: null,
       groups: [],
       columns: [
