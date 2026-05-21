@@ -48,9 +48,12 @@ humans are second-class. Built incrementally via Claude Code on top of
   tests (`item/create.ts` 82.31% → 86.58%; `item/update.ts` bulk-multi
   first-leg fail-fast arm). `item/update.ts` stays 79.42% — its
   residual uncovered arms are the R-v0.7-NEW-5 conditional-spreads,
-  deferred to that lift. **29 ERROR_CODES**; **117 commands** (this
-  session adds neither — a coverage + helper-lift pass); `npm audit`
-  **0 vulnerabilities**.
+  recovered by the refactor-cluster IMPL's 4-path ratchet (now
+  pre-flighted at `ca615e7`). **29 ERROR_CODES**; **117 commands**
+  (the refactor-cluster pre-flight at `ca615e7` adds an unwired,
+  fully-c8-ignored `src/api/error-decoration.ts` stub — no command, no
+  error code, no test/coverage delta; functions denominator drops
+  1352→1350 as the stub is excluded); `npm audit` **0 vulnerabilities**.
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
