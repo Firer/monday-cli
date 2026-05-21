@@ -2057,6 +2057,64 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
         errno_code: 'ENOENT',
       });
     });
+
+    // v0.8-M47 (D7 fold): stdin `<file-col>=-` source. The argv +
+    // `--filename` + sentinel-routing surface is the shipped pre-flight
+    // contract; the live stdin read + Blob + dispatch (and the size-less
+    // dry-run echo) land at M47 IMPL. These pin the surface (stub
+    // envelope) without consuming stdin — the stub throws first.
+    it('v0.8-M47 stdin live: `<file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
+      const out = await drive(
+        ['item', 'set', '12345', 'attachments=-', '--board', '111', '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details).toMatchObject({
+        reason: 'm47_preflight_stub',
+        filename: 'blob',
+      });
+    });
+
+    it('v0.8-M47 stdin dry-run: `<file-col>=- --dry-run` reaches the stub leg; --filename threads through (filename echo)', async () => {
+      const out = await drive(
+        [
+          'item',
+          'set',
+          '12345',
+          'attachments=-',
+          '--filename',
+          'report.pdf',
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details).toMatchObject({
+        reason: 'm47_preflight_stub',
+        filename: 'report.pdf',
+      });
+    });
   });
 
   it('--set-raw with malformed JSON fails fast at argv-parse — no API call fires', async () => {

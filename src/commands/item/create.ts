@@ -117,7 +117,12 @@ import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { assertResponseFieldPresent } from '../../api/response-root.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
-import { precheckLocalFile } from '../../utils/file-source.js';
+import {
+  precheckLocalFile,
+  isStdinFileSetSource,
+  readStdinFileSource,
+  resolveStdinFilename,
+} from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
@@ -332,6 +337,14 @@ const inputSchema = z
     position: positionEnum.optional(),
     relativeTo: ItemIdSchema.optional(),
     createLabelsIfMissing: z.boolean().optional(),
+    // v0.8-M47 (D7 fold): companion to a stdin file `--set
+    // <file-col>=-` source — sets Monday's wire `Asset.name` on the
+    // leg-2 `add_file_to_column`. OPTIONAL; `.min(1)` rejects an empty
+    // `--filename ""` at the parse boundary (Monday `500`s empty
+    // filenames). Default on a stdin source: `DEFAULT_STDIN_FILENAME`
+    // (`"blob"`). Consulted only on a `<file-col>=-` dispatch; ignored
+    // otherwise. See `update.ts` schema for the full rationale.
+    filename: z.string().min(1).optional(),
   })
   .strict();
 
@@ -860,6 +873,10 @@ export const itemCreateCommand: CommandModule<
         'repeatable <col>=<json> raw write (escape hatch — bypasses friendly translator)',
         (value: string, prev: readonly string[]) => [...prev, value],
         [] as readonly string[],
+      )
+      .option(
+        '--filename <name>',
+        "Asset.name for a stdin file `--set <file-col>=-` source (default \"blob\")",
       )
       .option('--parent <iid>', 'create as subitem of this parent item ID')
       .option('--position <method>', 'item placement: "before" | "after" (requires --relative-to)')
@@ -1696,6 +1713,24 @@ interface RunItemCreateFileDispatchInputs {
 const runItemCreateFileDispatch = async (
   inputs: RunItemCreateFileDispatchInputs,
 ): Promise<void> => {
+  // v0.8-M47 (D7 fold): stdin file `--set <file-col>=-` source on the
+  // create-time two-leg path. `routeFileColumnDispatch`'s stdin scope
+  // gate already confirmed this is the sole file entry on the
+  // `'item_create'` callShape; leg-2 sources the Blob from stdin (via
+  // `readStdinFileSource`) instead of `precheckLocalFile`. Leg-1
+  // (`create_item` with bundled non-file `column_values`) + leg-2
+  // (stdin → `add_file_to_column`) under the §5.8 orphan-warn envelope,
+  // plus the size-less dry-run echo, land at the M47 IMPL; the argv +
+  // `--filename` + routing + scope-enforcement surface is the shipped
+  // pre-flight contract. The stub throws `internal_error`
+  // (`m47_preflight_stub`).
+  if (isStdinFileSetSource(inputs.m38.rawValue)) {
+    const filename = resolveStdinFilename(inputs.parsed.filename);
+    await readStdinFileSource(filename);
+    /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
+       `readStdinFileSource` stub body with the live stdin read. */
+    return;
+  }
   // 1) Upfront local file pre-check. Atomicity-before-wire per
   //    cli-design §5.8: pre-checks fire BEFORE any wire round-trip
   //    so a bad path surfaces `usage_error` (exit 1) with

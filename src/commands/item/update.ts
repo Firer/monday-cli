@@ -70,7 +70,12 @@ import {
   type MultiFileLegAsset,
   type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
-import { precheckLocalFile } from '../../utils/file-source.js';
+import {
+  precheckLocalFile,
+  isStdinFileSetSource,
+  readStdinFileSource,
+  resolveStdinFilename,
+} from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
 import type { Asset } from '../../api/assets.js';
 import type { MultipartTransport } from '../../api/multipart-transport.js';
@@ -192,6 +197,17 @@ const inputSchema = z
     // cli-design §5.3 line 961-972 (resolution-time, not parse-time).
     setRaw: z.array(z.string()).default([]),
     name: z.string().min(1).optional(),
+    // v0.8-M47 (D7 fold): companion to a stdin file `--set
+    // <file-col>=-` source — sets Monday's wire `Asset.name`. OPTIONAL
+    // (probe: `add_file_to_column` accepts any non-empty filename;
+    // only an EMPTY one `500`s — `.min(1)` rejects `--filename ""` at
+    // the parse boundary as `usage_error`). Default when omitted on a
+    // stdin source: `DEFAULT_STDIN_FILENAME` (`"blob"`). Consulted ONLY
+    // on a `<file-col>=-` stdin dispatch; ignored otherwise (whether a
+    // stdin source exists is only knowable after column resolution, so
+    // a no-stdin `--filename` is a harmless no-op rather than a
+    // resolution-coupled reject).
+    filename: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
     where: z.array(z.string()).default([]),
     // Empty `--filter-json ''` would slip through `buildQueryParams`
@@ -393,6 +409,10 @@ export const itemUpdateCommand: CommandModule<
         [] as readonly string[],
       )
       .option('--name <n>', 'rename the item')
+      .option(
+        '--filename <name>',
+        "Asset.name for a stdin file `--set <file-col>=-` source (default \"blob\")",
+      )
       .option('--board <bid>', 'board ID (required for bulk; skip lookup for single-item)')
       .option(
         '--where <expr>',
@@ -501,6 +521,7 @@ export const itemUpdateCommand: CommandModule<
             m38,
             isDryRun: globalFlags.dryRun,
             retries: globalFlags.retry,
+            filename: parsed.filename,
             toEmit,
           });
           return;
@@ -859,7 +880,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
   //      boundary, BEFORE the items_page walker + confirmation
   //      gate. The pre-check resolves setEntries against the now-
   //      warm metadata cache and runs
-  //      `enforceSingleFileColumnSet({callShape: 'item_update_bulk'})`:
+  //      `routeFileColumnDispatch({callShape: 'item_update_bulk'})`:
   //
   //        - Multi-file `--set` with distinct file columns →
   //          returns `kind: 'file_bulk_multi'` (v0.8-M46 D2
@@ -1492,7 +1513,7 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
 // closures). The action body's `preCheckM38FileDispatch` runs
 // at the column-resolution boundary BEFORE the dry-run / live
 // split, resolves `setEntries`' column types, applies the mutex
-// check via `enforceSingleFileColumnSet`, and returns either
+// check via `routeFileColumnDispatch`, and returns either
 // `kind: 'json'` (proceed with standard planChanges /
 // resolveAndTranslate path) or `kind: 'file'` (call the helper
 // below to dispatch). Mutex violations (D2 multi-file / mixed,
@@ -1532,12 +1553,29 @@ interface RunItemUpdateSingleFileDispatchInputs {
   readonly m38: Extract<PreCheckM38FileDispatchResult, { kind: 'file' }>;
   readonly isDryRun: boolean;
   readonly retries: number;
+  /** `--filename` for a stdin `<file-col>=-` source (v0.8-M47). */
+  readonly filename: string | undefined;
   readonly toEmit: <T>(response: MondayResponse<T>) => EmitFromNetworkResult;
 }
 
 const runItemUpdateSingleFileDispatch = async (
   inputs: RunItemUpdateSingleFileDispatchInputs,
 ): Promise<void> => {
+  // v0.8-M47 (D7 fold): stdin file `--set <file-col>=-` source. The
+  // pre-check (`routeFileColumnDispatch` stdin scope gate) already
+  // confirmed this is the sole file entry on the single-item callShape;
+  // source the Blob from stdin (via `readStdinFileSource`) instead of a
+  // local path. The argv + `--filename` + routing + scope-enforcement
+  // surface is the shipped pre-flight contract; the stdin read + Blob +
+  // dispatch + emit (live) and the size-less dry-run echo land at M47
+  // IMPL. The stub throws `internal_error` (`m47_preflight_stub`).
+  if (isStdinFileSetSource(inputs.m38.rawValue)) {
+    const filename = resolveStdinFilename(inputs.filename);
+    await readStdinFileSource(filename);
+    /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
+       `readStdinFileSource` stub body with the live stdin read. */
+    return;
+  }
   const precheck = await precheckLocalFile(inputs.m38.rawValue);
   if (inputs.isDryRun) {
     emitDryRun({

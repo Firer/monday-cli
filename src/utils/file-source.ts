@@ -35,12 +35,25 @@
  * 2 M31 consumers cover the pre-check error branches; this module
  * adds direct unit tests for the helper + the buildBlobFromPath
  * sibling.
+ *
+ * **v0.8-M47 stdin sibling.** The file `--set <file-col>=-` stdin
+ * source (D7 fold) is a SEPARATE sibling — {@link readStdinFileSource}
+ * below — not a retrofit into {@link precheckLocalFile} /
+ * {@link buildBlobFromPath}. Those two stay path-only by design: their
+ * fire-point ordering (pre-check BEFORE `resolveClient` so a bad path
+ * surfaces as `usage_error` not `config_error`; Blob build AFTER
+ * column-type validation) is load-bearing and doesn't transfer to a
+ * single non-replayable stream. The stdin source buffers stdin once
+ * (no `fs.stat` is possible on a stream), so it carries no pre-check
+ * size leg; the routing layer (`file-column-set.ts:
+ * routeFileColumnDispatch`) enforces stdin's single-file /
+ * single-target scope BEFORE this helper is reached.
  */
 
 import { stat as fsStat, access as fsAccess, readFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { resolve as resolvePath, basename } from 'node:path';
-import { UsageError, asError, errorCode } from './errors.js';
+import { ApiError, UsageError, asError, errorCode } from './errors.js';
 import { sniffContentType } from './mime.js';
 
 /**
@@ -169,4 +182,116 @@ export const buildBlobFromPath = async (
 ): Promise<Blob> => {
   const bytes = await readFile(precheck.filePath);
   return new Blob([bytes], { type: sniffContentType(precheck.filename) });
+};
+
+/**
+ * Sentinel value selecting stdin as the file source on a file-column
+ * `--set <file-col>=-` (or the `monday item set <iid> <file-col>=-`
+ * positional). v0.8-M47 D7 fold — closes the v0.6-M38 D7 deferral.
+ * A bare `-` is the conventional CLI stdin token (mirrors the
+ * `--body-file -` shape on `monday update create` / `update reply`).
+ */
+export const STDIN_FILE_SENTINEL = '-';
+
+/**
+ * Default filename used for Monday's wire `Asset.name` when a stdin
+ * `<file-col>=-` source is dispatched WITHOUT an explicit
+ * `--filename <name>`. Pinned at the v0.8-M47 pre-flight probe:
+ * `add_file_to_column` accepts any non-empty filename (`"blob"` /
+ * `"stdin"` / a real name all return `200`); only an EMPTY filename
+ * `500`s. `"blob"` is source-agnostic (stdin carries no intrinsic
+ * name) and matches the probe's tested default. Agents that want a
+ * meaningful `Asset.name` pass `--filename`.
+ */
+export const DEFAULT_STDIN_FILENAME = 'blob';
+
+/**
+ * True when a file-column `--set` value selects stdin as its source
+ * (i.e. the agent passed the bare {@link STDIN_FILE_SENTINEL}). Pure
+ * predicate — the actual stdin read happens later via
+ * {@link readStdinFileSource}, AFTER the routing layer
+ * (`file-column-set.ts:routeFileColumnDispatch`) has confirmed the
+ * stdin source is the sole file entry on a single-target callShape.
+ */
+export const isStdinFileSetSource = (value: string): boolean =>
+  value === STDIN_FILE_SENTINEL;
+
+/**
+ * Resolves the wire `Asset.name` for a stdin `<file-col>=-` source:
+ * the agent's `--filename` when present, else
+ * {@link DEFAULT_STDIN_FILENAME}. A non-empty `--filename` is already
+ * guaranteed by the command schemas (`z.string().min(1)`), so this
+ * never returns an empty name (which Monday `500`s). Extracted so the
+ * default-fallback branch is unit-tested once rather than replicated
+ * across the four `<file-col>=-` dispatch sites (`item set` live +
+ * dry-run, single-item `item update`, `item create`).
+ */
+export const resolveStdinFilename = (
+  filename: string | undefined,
+): string => filename ?? DEFAULT_STDIN_FILENAME;
+
+/**
+ * Result of a successful {@link readStdinFileSource} read. Mirrors the
+ * shape {@link buildBlobFromPath} feeds the multipart transport (a Web
+ * `Blob` + the resolved filename) plus the buffered byte length
+ * (`fs.stat` is impossible on a stream, so size is the post-read
+ * buffer length rather than a pre-check measurement).
+ */
+export interface StdinFileSource {
+  /** The buffered stdin bytes wrapped as a Web `Blob`. */
+  readonly blob: Blob;
+  /** Resolved `Asset.name` — `--filename` or {@link DEFAULT_STDIN_FILENAME}. */
+  readonly filename: string;
+  /** Buffered byte length (post-read; `0` rejects upstream — Monday `500`s empty). */
+  readonly fileSizeBytes: number;
+}
+
+/**
+ * Reads the entire stdin stream into memory and wraps it as a Web
+ * `Blob` with a `Content-Type` sniffed from `filename` (so a
+ * `--filename report.pdf` still gets the right mime). The Blob is the
+ * payload the multipart transport sends to Monday's wire `File!`
+ * scalar — same downstream contract as {@link buildBlobFromPath}, but
+ * sourced from a single non-replayable stream rather than a path.
+ *
+ * Unlike {@link precheckLocalFile} there is no pre-read size/readable
+ * pre-check leg: a stream can't be `fs.stat`'d, and reading it to
+ * measure would consume the only copy. Callers therefore reach this
+ * helper only AFTER the routing layer has confirmed (a) exactly one
+ * stdin `<file-col>=-` per call, (b) it is the sole file `--set`
+ * entry, and (c) the callShape is single-target (`item set` /
+ * single-item `item update` / `item create`) — bulk fan-out can't
+ * replay one stream across N items.
+ *
+ * **Status: v0.8-M47 pre-flight stub.** The argv `<file-col>=-` +
+ * `--filename` surface, the `routeFileColumnDispatch` stdin-scope
+ * enforcement, and the cross-doc contract are the shipped pre-flight
+ * contract; this stdin-read + Blob-construction leg lands at the
+ * v0.8-M47 IMPL. The stub throws `internal_error` with
+ * `details.reason: 'm47_preflight_stub'` so the surface is reachable
+ * + regression-pinned without yet consuming stdin.
+ */
+// eslint-disable-next-line @typescript-eslint/require-await -- v0.8-M47 pre-flight stub; live body (M47 IMPL) awaits the stdin read. The `async` + `Promise<StdinFileSource>` signature is the shipped contract.
+export const readStdinFileSource = async (filename: string): Promise<StdinFileSource> => {
+  /* c8 ignore start — v0.8-M47 pre-flight stub; the live stdin read +
+     Blob construction lands at M47 IMPL. The argv + --filename +
+     routing + scope-enforcement surface is the shipped contract; only
+     this leg is stubbed (mirrors M42/M43 `*_preflight_stub` cadence). */
+  throw new ApiError(
+    'internal_error',
+    'readStdinFileSource: v0.8-M47 pre-flight stub — stdin file ' +
+      '`--set <file-col>=-` runtime body lands at the M47 IMPL.',
+    {
+      details: {
+        reason: 'm47_preflight_stub',
+        filename,
+        milestone: 'v0.8-M47',
+        hint:
+          'stdin file `--set` is contract-pinned but not yet ' +
+          'implemented; pass a local file path instead until v0.8-M47 ' +
+          'IMPL ships the stdin read.',
+      },
+    },
+  );
+  /* c8 ignore stop */
 };

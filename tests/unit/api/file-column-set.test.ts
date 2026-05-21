@@ -12,7 +12,7 @@
  *     `itemCreateWithFilesOutputSchema` co-located in update.ts /
  *     create.ts and parse-tested via dynamic imports below).
  *   - {@link FileColumnSetEntry} type narrowing.
- *   - {@link enforceSingleFileColumnSet} runtime behaviour:
+ *   - {@link routeFileColumnDispatch} runtime behaviour:
  *     mutex priority (folded D2 multi-file / D5 bulk / D6 create /
  *     mixed / clean / no-file), `details.reason` discriminators
  *     including the v0.8-M46 `'duplicate_resolved_file_columns'`
@@ -27,7 +27,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  enforceSingleFileColumnSet,
+  routeFileColumnDispatch,
   fileColumnSetOutputSchema,
   type FileColumnSetEntry,
 } from '../../../src/api/file-column-set.js';
@@ -210,9 +210,9 @@ describe('FileColumnSetEntry type — interface shape', () => {
   });
 });
 
-describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
+describe('routeFileColumnDispatch (M38 IMPL mutex check)', () => {
   it("returns kind: 'json' when no setEntries are file-typed (standard JSON translator path applies)", () => {
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_single',
       setEntries: [
         { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
@@ -225,7 +225,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
   });
 
   it("returns kind: 'file' for a clean single-file dispatch path on item_update_single (1 file --set, no other flags)", () => {
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_single',
       setEntries: [
         {
@@ -245,7 +245,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
   });
 
   it("returns kind: 'file' for a clean dispatch on item_set callShape (single positional)", () => {
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_set',
       setEntries: [
         {
@@ -272,7 +272,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // discriminator literal stays RESERVED (no test should assert
     // its surfacing on the clean path); multi-file + mixed gates
     // STILL apply on bulk per the universal mutex rules.
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_bulk',
       setEntries: [
         {
@@ -302,7 +302,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // `'file_set_on_create_unsupported'` literal stays RESERVED in
     // docstrings (a separate test below regression-guards that it
     // never appears in the runtime throw path).
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_create',
       setEntries: [
         {
@@ -329,7 +329,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // entries into file (routes to leg-2) vs non-file (bundles
     // into leg-1) — the enforcement layer just signals the dispatch
     // kind here.
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_create',
       setEntries: [
         {
@@ -359,7 +359,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // flipped the universal multi-file rejection to a clean
     // dispatch kind on the 3 reachable callShapes including
     // `'item_create'`).
-    const clean = enforceSingleFileColumnSet({
+    const clean = routeFileColumnDispatch({
       callShape: 'item_create',
       setEntries: [
         { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
@@ -376,7 +376,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // two-leg-group multi-file dispatch helper. Regression-guard
     // both the M38 reserved literal AND the v0.6 reserved
     // `'file_set_on_create_unsupported'` literal stay absent.
-    const multi = enforceSingleFileColumnSet({
+    const multi = routeFileColumnDispatch({
       callShape: 'item_create',
       setEntries: [
         { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
@@ -405,7 +405,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // out helper. The `'multi_file_set_unsupported'` literal stays
     // RESERVED across the codebase (no test should assert its
     // surfacing on the clean path for these 3 callShapes).
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_single',
       setEntries: [
         {
@@ -433,7 +433,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
   });
 
   it("v0.8-M46 D2 carve-out fold: returns kind: 'file_bulk_multi' on item_update_bulk callShape for 2+ file --set entries", () => {
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_bulk',
       setEntries: [
         { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
@@ -453,7 +453,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
   });
 
   it("v0.8-M46 D2 carve-out fold: returns kind: 'file_create_multi' on item_create callShape for 2+ file --set entries (mixed-rule still suppressed on create)", () => {
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_create',
       setEntries: [
         { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
@@ -478,7 +478,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // partial-failure-envelope discipline by failing fast at the
     // enforcement layer.
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_single',
         setEntries: [
           {
@@ -523,7 +523,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // the gate on the 3 OTHER callShapes (item_update_single +
     // item_update_bulk + item_create); item_set stays defensive.
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_set',
         setEntries: [
           {
@@ -552,7 +552,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
 
   it("throws usage_error.details.reason: 'mixed_file_and_value_sets' for file --set + value --set (D2 mixed leg)", () => {
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_single',
         setEntries: [
           {
@@ -578,7 +578,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
 
   it("throws usage_error.details.reason: 'mixed_file_and_value_sets' for file --set + --set-raw (D2 mixed leg)", () => {
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_single',
         setEntries: [
           {
@@ -601,7 +601,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
 
   it("throws usage_error.details.reason: 'mixed_file_and_value_sets' for file --set + --name (D2 mixed leg)", () => {
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_single',
         setEntries: [
           {
@@ -630,7 +630,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // multi-leg fan-out helper. The `'multi_file_set_unsupported'`
     // literal stays RESERVED; no test should assert its surfacing
     // on the 3 reachable callShapes post-fold.
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_bulk',
       setEntries: [
         { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
@@ -650,7 +650,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // carve-out lifts ONLY the multi-file gate; mixed-rule stays
     // in force on non-create callShapes).
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_single',
         setEntries: [
           { columnId: 'a', columnType: 'file', rawValue: './a.pdf' },
@@ -680,7 +680,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // shapes. Verifies the mutex is a universal rule, not single-
     // item-only.
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_bulk',
         setEntries: [
           { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
@@ -701,7 +701,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
   it("throws usage_error.details.reason: 'mixed_file_and_value_sets' on item_update_bulk callShape with file --set + --name (v0.7-M42 — mixed mutex stays universal on bulk)", () => {
     // Bulk + file + --name combo: same universal mixed-leg rule.
     try {
-      enforceSingleFileColumnSet({
+      routeFileColumnDispatch({
         callShape: 'item_update_bulk',
         setEntries: [
           { columnId: 'attachments', columnType: 'file', rawValue: './a.pdf' },
@@ -722,7 +722,7 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
     // Bulk + value-only --set: pre-check returns `kind: 'json'`
     // and the standard JSON translator path continues. No carve-
     // out fold visible — JSON bulk is unchanged from v0.6.
-    const result = enforceSingleFileColumnSet({
+    const result = routeFileColumnDispatch({
       callShape: 'item_update_bulk',
       setEntries: [
         { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
@@ -731,6 +731,131 @@ describe('enforceSingleFileColumnSet (M38 IMPL mutex check)', () => {
       hasName: false,
     });
     expect(result).toEqual({ kind: 'json' });
+  });
+});
+
+describe('routeFileColumnDispatch — v0.8-M47 stdin `<file-col>=-` scope gate (D7 fold)', () => {
+  // The stdin sentinel `-` sources the file body from stdin. stdin is a
+  // single non-replayable stream, so the contract scopes it to single-
+  // file, single-target dispatch: exactly one `=-` per call, as the
+  // sole file entry, on `item_update_single` / `item_create`. The three
+  // violations reject with `usage_error` + a reserved `details.reason`
+  // (no new ERROR_CODE). A clean stdin source routes through the SAME
+  // single-file `kind: 'file'` / `'file_create'` as a path source — the
+  // rawValue carries `-` and the action body sources from stdin.
+
+  it("returns kind: 'file' for a clean stdin source on item_update_single (rawValue '-')", () => {
+    const result = routeFileColumnDispatch({
+      callShape: 'item_update_single',
+      setEntries: [
+        { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result).toEqual({
+      kind: 'file',
+      columnId: 'attachments',
+      rawValue: '-',
+    });
+  });
+
+  it("returns kind: 'file_create' for a clean stdin source on item_create (rawValue '-')", () => {
+    const result = routeFileColumnDispatch({
+      callShape: 'item_create',
+      setEntries: [
+        { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+      ],
+      setRawEntries: [],
+      hasName: false,
+    });
+    expect(result).toEqual({
+      kind: 'file_create',
+      columnId: 'attachments',
+      rawValue: '-',
+    });
+  });
+
+  it("throws usage_error.details.reason: 'multiple_stdin_file_sets' for 2+ `=-` entries", () => {
+    try {
+      routeFileColumnDispatch({
+        callShape: 'item_update_single',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+          { columnId: 'docs', columnType: 'file', rawValue: '-' },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('multiple_stdin_file_sets');
+      expect(ae.details?.stdin_file_count).toBe(2);
+    }
+  });
+
+  it("throws usage_error.details.reason: 'stdin_file_set_not_sole_file' for stdin `=-` + a path file --set", () => {
+    try {
+      routeFileColumnDispatch({
+        callShape: 'item_update_single',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+          { columnId: 'docs', columnType: 'file', rawValue: './b.pdf' },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('stdin_file_set_not_sole_file');
+      expect(ae.details?.file_count).toBe(2);
+      expect(ae.details?.stdin_file_column_id).toBe('attachments');
+    }
+  });
+
+  it("throws usage_error.details.reason: 'stdin_file_set_on_bulk_unsupported' for `=-` on the bulk callShape", () => {
+    try {
+      routeFileColumnDispatch({
+        callShape: 'item_update_bulk',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('stdin_file_set_on_bulk_unsupported');
+      expect(ae.details?.call_shape).toBe('item_update_bulk');
+    }
+  });
+
+  it("still applies the mixed mutex to a stdin source: `=-` + value --set rejects 'mixed_file_and_value_sets'", () => {
+    // stdin only changes the file SOURCE, not the mutex surface — a
+    // clean stdin source falls through to the same mixed/duplicate
+    // gates as a path source.
+    try {
+      routeFileColumnDispatch({
+        callShape: 'item_update_single',
+        setEntries: [
+          { columnId: 'attachments', columnType: 'file', rawValue: '-' },
+          { columnId: 'status_1', columnType: 'status', rawValue: 'Done' },
+        ],
+        setRawEntries: [],
+        hasName: false,
+      });
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('usage_error');
+      expect(ae.details?.reason).toBe('mixed_file_and_value_sets');
+    }
   });
 });
 

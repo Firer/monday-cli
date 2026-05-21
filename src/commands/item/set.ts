@@ -91,7 +91,12 @@ import {
   fileColumnSetOutputSchema,
   type FileColumnSetOutput,
 } from '../../api/file-column-set.js';
-import { precheckLocalFile } from '../../utils/file-source.js';
+import {
+  precheckLocalFile,
+  isStdinFileSetSource,
+  readStdinFileSource,
+  resolveStdinFilename,
+} from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
@@ -160,6 +165,14 @@ const inputSchema = z
     // of `setExpr` / `setRaw` must be present (validated below).
     setExpr: z.string().min(1).optional(),
     setRaw: z.string().min(1).optional(),
+    // v0.8-M47 (D7 fold): companion to a stdin file `<file-col>=-`
+    // source — sets Monday's wire `Asset.name`. OPTIONAL; `.min(1)`
+    // rejects an empty `--filename ""` at the parse boundary (Monday
+    // `500`s empty filenames). Default on a stdin source:
+    // `DEFAULT_STDIN_FILENAME` (`"blob"`). Consulted only when the
+    // positional resolves to a `file` column AND the value is the `-`
+    // stdin sentinel; ignored otherwise.
+    filename: z.string().min(1).optional(),
     board: BoardIdSchema.optional(),
   })
   .strict()
@@ -202,6 +215,10 @@ export const itemSetCommand: CommandModule<
       .option(
         '--set-raw <expr>',
         '<col>=<json> raw write (escape hatch — bypasses friendly translator)',
+      )
+      .option(
+        '--filename <name>',
+        "Asset.name for a stdin file <file-col>=- source (default \"blob\")",
       )
       // `--dry-run` is a global flag (`src/cli/program.ts`) — read
       // it via `globalFlags.dryRun` rather than redeclaring on this
@@ -315,6 +332,19 @@ export const itemSetCommand: CommandModule<
               if (typeof columnId !== 'string') {
                 throw err;
               }
+              // v0.8-M47 (D7 fold): stdin `<file-col>=-` source. The
+              // dry-run echo (no `file_size_bytes` — a stream can't be
+              // `fs.stat`'d) + the live read land at M47 IMPL; the argv
+              // + `--filename` + sentinel-routing surface is the
+              // shipped pre-flight contract. Stub throws `internal_
+              // error` (`m47_preflight_stub`).
+              if (isStdinFileSetSource(friendly.value)) {
+                const filename = resolveStdinFilename(parsed.filename);
+                await readStdinFileSource(filename);
+                /* c8 ignore next 2 — unreachable until M47 IMPL replaces
+                   the `readStdinFileSource` stub body. */
+                return;
+              }
               const precheck = await precheckLocalFile(friendly.value);
               emitDryRun({
                 ctx,
@@ -411,6 +441,20 @@ export const itemSetCommand: CommandModule<
              non-null per the discriminator above; type-narrow for TS. */
           if (friendly === null) {
             throw new UsageError('item set: friendly narrowing failed (file dispatch)');
+          }
+          // v0.8-M47 (D7 fold): stdin `<file-col>=-` source on the live
+          // path. `item set` is single-positional, so there's no multi-
+          // file / bulk surface to gate — a `-` value simply sources the
+          // upload from stdin. The live stdin read + Blob + dispatch +
+          // emit land at M47 IMPL; the argv + `--filename` + sentinel-
+          // routing surface is the shipped pre-flight contract. Stub
+          // throws `internal_error` (`m47_preflight_stub`).
+          if (isStdinFileSetSource(friendly.value)) {
+            const filename = resolveStdinFilename(parsed.filename);
+            await readStdinFileSource(filename);
+            /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
+               `readStdinFileSource` stub body with the live stdin read. */
+            return;
           }
           // Local file pre-check via `precheckLocalFile` (lifted at
           // R-v0.6-NEW-1; 3-consumer helper). Runs AFTER column

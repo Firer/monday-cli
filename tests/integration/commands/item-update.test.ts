@@ -1611,6 +1611,42 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(multipart.requests).toHaveLength(1);
     });
 
+    it('v0.8-M47 stdin single-item: `--set <file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
+      // The argv + `--filename` + `routeFileColumnDispatch` stdin-scope
+      // enforcement surface is the shipped pre-flight contract; the
+      // stdin read + Blob + dispatch land at M47 IMPL. Pins the surface
+      // (stub envelope) without consuming stdin — the stub throws first.
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          'attachments=-',
+          '--filename',
+          'piped.pdf',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('internal_error');
+      expect(env.error?.details).toMatchObject({
+        reason: 'm47_preflight_stub',
+        filename: 'piped.pdf',
+      });
+    });
+
     it('dry-run single-item: emits D4 planned_changes envelope (no wire mutation)', async () => {
       const out = await drive(
         [
@@ -1938,7 +1974,7 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
     it("rejects multi-file --set when two distinct argv tokens resolve to the SAME file column ID with 'duplicate_resolved_file_columns' (guard fires at the enforcement layer, before any multi-file dispatch)", async () => {
       // v0.8-M46 pre-flight Codex round-2 P3-2 fix: pre-flight
       // round-1's P2-1 added a unit test at the
-      // `enforceSingleFileColumnSet` layer, but no command-level test
+      // `routeFileColumnDispatch` layer, but no command-level test
       // exercised the duplicate-resolved-column guard through the
       // action body's pre-check. This integration test drives `--set
       // attachments=...` + `--set id:attachments=...` (two distinct
@@ -2201,7 +2237,7 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       // translator iterates --set bad_date first, throws
       // usage_error for the invalid date, mutex never fires. The
       // round-1 resolution-boundary pre-check fix runs
-      // enforceSingleFileColumnSet BEFORE translation; mixed
+      // routeFileColumnDispatch BEFORE translation; mixed
       // mutex fires first.
       const dateBoard = {
         ...sampleBoardMetadata,

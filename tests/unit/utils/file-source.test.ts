@@ -18,8 +18,13 @@ import { join } from 'node:path';
 import {
   buildBlobFromPath,
   precheckLocalFile,
+  isStdinFileSetSource,
+  resolveStdinFilename,
+  readStdinFileSource,
+  STDIN_FILE_SENTINEL,
+  DEFAULT_STDIN_FILENAME,
 } from '../../../src/utils/file-source.js';
-import { UsageError } from '../../../src/utils/errors.js';
+import { ApiError, UsageError } from '../../../src/utils/errors.js';
 
 describe('precheckLocalFile (R-v0.6-NEW-1 lift)', () => {
   let tmpRoot: string;
@@ -184,5 +189,48 @@ describe('buildBlobFromPath (R-v0.6-NEW-1 lift)', () => {
     });
 
     expect(blob.type).toBe('application/octet-stream');
+  });
+});
+
+describe('isStdinFileSetSource (v0.8-M47 stdin sentinel detector)', () => {
+  it('is true for the bare `-` sentinel', () => {
+    expect(isStdinFileSetSource(STDIN_FILE_SENTINEL)).toBe(true);
+    expect(isStdinFileSetSource('-')).toBe(true);
+  });
+
+  it('is false for a path, an empty string, and `--` (only exactly `-` selects stdin)', () => {
+    expect(isStdinFileSetSource('./report.pdf')).toBe(false);
+    expect(isStdinFileSetSource('')).toBe(false);
+    expect(isStdinFileSetSource('--')).toBe(false);
+    expect(isStdinFileSetSource('-x')).toBe(false);
+  });
+});
+
+describe('resolveStdinFilename (v0.8-M47 --filename default)', () => {
+  it('returns the provided --filename verbatim when present', () => {
+    expect(resolveStdinFilename('report.pdf')).toBe('report.pdf');
+  });
+
+  it('falls back to DEFAULT_STDIN_FILENAME ("blob") when --filename is absent', () => {
+    expect(resolveStdinFilename(undefined)).toBe(DEFAULT_STDIN_FILENAME);
+    expect(DEFAULT_STDIN_FILENAME).toBe('blob');
+  });
+});
+
+describe('readStdinFileSource (v0.8-M47 pre-flight stub)', () => {
+  it('throws internal_error with details.reason m47_preflight_stub (runtime body lands at M47 IMPL)', async () => {
+    // The argv + --filename + routing + scope-enforcement surface is
+    // the shipped pre-flight contract; the stdin read + Blob leg is
+    // stubbed. Regression-pins the surface without consuming stdin.
+    await expect(readStdinFileSource('blob')).rejects.toBeInstanceOf(ApiError);
+    try {
+      await readStdinFileSource('report.pdf');
+      throw new Error('expected ApiError');
+    } catch (err) {
+      const ae = err as ApiError;
+      expect(ae.code).toBe('internal_error');
+      expect(ae.details?.reason).toBe('m47_preflight_stub');
+      expect(ae.details?.filename).toBe('report.pdf');
+    }
   });
 });

@@ -124,7 +124,7 @@
  *     REJECTED with `'file_set_on_bulk_unsupported'`; v0.7-M42's
  *     pre-flight contract diff returns
  *     `{ kind: 'file_bulk', columnId, rawValue }` from
- *     {@link enforceSingleFileColumnSet} on the clean dispatch
+ *     {@link routeFileColumnDispatch} on the clean dispatch
  *     path so the action body can branch into the per-item
  *     multipart fan-out. Multi-file / mixed mutex rules STILL
  *     apply on bulk (those are universal).
@@ -133,7 +133,7 @@
  *     `'file_set_on_create_unsupported'`; v0.7-M43's pre-flight
  *     contract diff returns
  *     `{ kind: 'file_create', columnId, rawValue }` from
- *     {@link enforceSingleFileColumnSet} on the clean dispatch
+ *     {@link routeFileColumnDispatch} on the clean dispatch
  *     path so the action body can branch into the two-leg
  *     dispatch (`create_item` then `add_file_to_column`).
  *     Multi-file mutex rule STILL applies on create (universal).
@@ -212,7 +212,7 @@
 
 import { z } from 'zod';
 import { ApiError, MondayCliError } from '../utils/errors.js';
-import { buildBlobFromPath } from '../utils/file-source.js';
+import { buildBlobFromPath, isStdinFileSetSource } from '../utils/file-source.js';
 import { addFileToColumn, assetSchema, type Asset } from './assets.js';
 import { resolveColumnWithRefresh, type ResolverWarning } from './columns.js';
 import { foldResolverWarningsIntoError } from './resolver-error-fold.js';
@@ -391,7 +391,7 @@ export interface ExecuteFileColumnSetResult {
  *   1. Parsing argv + collecting `--set` / `--set-raw` / `--name`
  *      entries.
  *   2. Resolving columns via `resolveColumnWithRefresh`.
- *   3. Calling {@link enforceSingleFileColumnSet} to detect the
+ *   3. Calling {@link routeFileColumnDispatch} to detect the
  *      file-column dispatch leg + enforce the mutex rules.
  *   4. Running {@link precheckLocalFile} from
  *      `src/utils/file-source.ts` on the agent-supplied path to
@@ -648,7 +648,7 @@ export const dispatchFileLegsSequentially = async (inputs: {
  * `usage_error` from the parse boundary (this function itself
  * runs AFTER argv parse + column resolution).
  */
-export type FileColumnSetEnforcementResult =
+export type FileColumnDispatchRoute =
   | { readonly kind: 'json' }
   | { readonly kind: 'file'; readonly columnId: string; readonly rawValue: string }
   // v0.7-M42 carve-out fold (D5 closure). Bulk `item update --where
@@ -725,7 +725,7 @@ export type FileColumnSetEnforcementResult =
       }[];
     };
 
-export interface EnforceSingleFileColumnSetInputs {
+export interface RouteFileColumnDispatchInputs {
   /**
    * The call shape — determines which mutex rejections apply.
    *
@@ -814,8 +814,20 @@ export interface EnforceSingleFileColumnSetInputs {
  *
  * Mutex priority (ratified at M38 pre-flight; updated at v0.7-M42
  * + v0.7-M43 pre-flights to fold the D5 bulk + D6 create carve-outs;
- * updated at v0.8-M46 pre-flight to fold the D2 multi-file carve-out):
+ * updated at v0.8-M46 pre-flight to fold the D2 multi-file carve-out;
+ * updated at v0.8-M47 pre-flight to add the stdin scope gate):
  *
+ *   0. **stdin scope gate (v0.8-M47 D7 fold).** When ≥1 file `--set`
+ *      value is the bare `-` stdin sentinel, enforce stdin's single-
+ *      file / single-target scope: `'multiple_stdin_file_sets'` (2+
+ *      `=-`), `'stdin_file_set_not_sole_file'` (stdin + another file
+ *      `--set`), `'stdin_file_set_on_bulk_unsupported'` (`=-` on the
+ *      `'item_update_bulk'` callShape). All `usage_error`; literals
+ *      reserved. A clean stdin source (exactly one `=-`, sole file,
+ *      single-target) falls through to the clean single-file leg and
+ *      returns `kind: 'file'` / `'file_create'` — identical routing to
+ *      a path source; the action body sources the Blob from stdin. The
+ *      mixed + duplicate gates below still apply to a stdin entry.
  *   1. **callShape gate — ONLY `'item_set'` defensive throw remains**
  *      post-v0.8-M46. The v0.6-M38 `'item_update_bulk'` (D5 fold at
  *      v0.7-M42) and `'item_create'` (D6 fold at v0.7-M43) short-
@@ -864,14 +876,108 @@ export interface EnforceSingleFileColumnSetInputs {
  * that the caller runs AFTER this function returns a `kind: 'file*'`
  * result.
  */
-export const enforceSingleFileColumnSet = (
-  inputs: EnforceSingleFileColumnSetInputs,
-): FileColumnSetEnforcementResult => {
+export const routeFileColumnDispatch = (
+  inputs: RouteFileColumnDispatchInputs,
+): FileColumnDispatchRoute => {
   const fileSetEntries = inputs.setEntries.filter(
     (e) => e.columnType === 'file',
   );
   if (fileSetEntries.length === 0) {
     return { kind: 'json' };
+  }
+
+  // v0.8-M47 stdin file `--set` scope gate (D7 fold). A file `--set`
+  // value of the bare `-` sentinel sources the file body from stdin.
+  // stdin is a single non-replayable stream, so the contract scopes it
+  // to single-file, single-target dispatch (D-list closures at
+  // v0.8-plan §3 M47): exactly one `<file-col>=-` per call, as the
+  // SOLE file entry, on a single-target callShape. The three
+  // violations reject with `usage_error` + a reserved `details.reason`
+  // discriminator (no new ERROR_CODE — registry stays 29). A clean
+  // stdin source falls through to the single-file clean leg below and
+  // returns `kind: 'file'` (single-item update) / `'file_create'`
+  // (create) just like a path source — the rawValue carries the `-`
+  // sentinel and the action body's dispatch helper sources from stdin
+  // (via `readStdinFileSource`) instead of `precheckLocalFile`. The
+  // mixed-rule + duplicate-column checks below still apply to a stdin
+  // entry (e.g. `--set f=- --set status=Done` rejects `mixed_file_and_
+  // value_sets`); stdin only changes the file SOURCE, not the mutex
+  // surface around it.
+  const stdinFileEntries = fileSetEntries.filter((e) =>
+    isStdinFileSetSource(e.rawValue),
+  );
+  if (stdinFileEntries.length > 0) {
+    const firstStdin = stdinFileEntries[0];
+    /* c8 ignore next 6 — defensive: length > 0 guarantees [0] is
+       defined; the guard exists for `noUncheckedIndexedAccess`
+       narrowing (mirrors the `fe === undefined` guards below). */
+    if (firstStdin === undefined) {
+      throw new ApiError(
+        'internal_error',
+        'routeFileColumnDispatch: stdin entry narrowing failed',
+      );
+    }
+    if (stdinFileEntries.length > 1) {
+      throw new ApiError(
+        'usage_error',
+        `Only one \`--set <file-col>=-\` stdin source is allowed per call ` +
+          `(stdin is a single non-replayable stream — it can't be split ` +
+          `across multiple file columns). Pass at most one \`<file-col>=-\` ` +
+          `and use local file paths for the rest.`,
+        {
+          details: {
+            reason: 'multiple_stdin_file_sets',
+            stdin_file_count: stdinFileEntries.length,
+            stdin_file_column_ids: stdinFileEntries.map((e) => e.columnId),
+            hint:
+              'at most one `<file-col>=-` per call; source the other file ' +
+              'columns from local paths.',
+          },
+        },
+      );
+    }
+    if (fileSetEntries.length > 1) {
+      throw new ApiError(
+        'usage_error',
+        `A \`--set <file-col>=-\` stdin source must be the only file ` +
+          `\`--set\` entry in the call (stdin is a single stream — it ` +
+          `can't be combined with other file uploads in one invocation). ` +
+          `Run the stdin upload in its own call, or source every file ` +
+          `column from a local path.`,
+        {
+          details: {
+            reason: 'stdin_file_set_not_sole_file',
+            file_count: fileSetEntries.length,
+            stdin_file_column_id: firstStdin.columnId,
+            file_column_ids: fileSetEntries.map((e) => e.columnId),
+            hint:
+              'use `<file-col>=-` alone (e.g. `cat f | monday item set ' +
+              '<iid> <file-col>=-`), or source all file columns from paths.',
+          },
+        },
+      );
+    }
+    if (inputs.callShape === 'item_update_bulk') {
+      throw new ApiError(
+        'usage_error',
+        `\`--set <file-col>=-\` (stdin) is not supported on the bulk ` +
+          `\`monday item update --where ...\` path: stdin is a single ` +
+          `non-replayable stream and can't be fanned out across the ` +
+          `matched item set. Pipe to a temp file and \`--set ` +
+          `<file-col>=<path>\` for bulk, or target one item with ` +
+          `\`monday item update <iid> --set <file-col>=-\`.`,
+        {
+          details: {
+            reason: 'stdin_file_set_on_bulk_unsupported',
+            column_id: firstStdin.columnId,
+            call_shape: inputs.callShape,
+            hint:
+              'stdin file `--set` is single-target only; use a local path ' +
+              'for bulk fan-out or target a single item id.',
+          },
+        },
+      );
+    }
   }
 
   // callShape gate — NO callShape short-circuits at this layer
@@ -959,7 +1065,7 @@ export const enforceSingleFileColumnSet = (
     const fe = fileSetEntries[0];
     /* c8 ignore next 3 */
     if (fe === undefined) {
-      throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (mixed)');
+      throw new ApiError('internal_error', 'routeFileColumnDispatch: file entry narrowing failed (mixed)');
     }
     throw new ApiError(
       'usage_error',
@@ -1074,7 +1180,7 @@ export const enforceSingleFileColumnSet = (
   const fe = fileSetEntries[0];
   /* c8 ignore next 3 */
   if (fe === undefined) {
-    throw new ApiError('internal_error', 'enforceSingleFileColumnSet: file entry narrowing failed (clean)');
+    throw new ApiError('internal_error', 'routeFileColumnDispatch: file entry narrowing failed (clean)');
   }
   if (inputs.callShape === 'item_update_bulk') {
     return { kind: 'file_bulk', columnId: fe.columnId, rawValue: fe.rawValue };
@@ -1144,7 +1250,7 @@ export type PreCheckM38FileDispatchResult =
   // {@link runItemCreateFileDispatch} (in `commands/item/create.ts`).
   // The non-file `--set` / `--set-raw` entries that the mixed-rule
   // suppression on `'item_create'` callShape passes through (see
-  // {@link enforceSingleFileColumnSet}) are NOT carried on this
+  // {@link routeFileColumnDispatch}) are NOT carried on this
   // result — the action body holds the original `--set` / `--set-raw`
   // token lists and bundles them into leg-1's `create_item.column_values`
   // independently. The pre-check returns only the file-column slot
@@ -1324,7 +1430,7 @@ export const preCheckM38FileDispatch = async (
     { length: inputs.setRawCount },
     () => ({ columnId: '', columnType: '' }),
   );
-  const enforcement = enforceSingleFileColumnSet({
+  const enforcement = routeFileColumnDispatch({
     callShape: inputs.callShape,
     setEntries: resolved.map((r) => ({
       columnId: r.columnId,

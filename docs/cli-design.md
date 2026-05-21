@@ -1704,18 +1704,23 @@ monday item search [--board <bid>] [--workspace <wid>] [--favorites] [--max-boar
                                           # and are skipped (not fatal).
                                           # Inaccessible board IDs emit an
                                           # `inaccessible_boards` warning.
-monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>]   # single column write   v0.1 (--set-raw v0.2; file-column `<col>=<path>` v0.6-M38)
+monday item set <iid> (<col>=<val> | --set-raw <col>=<json>) [--board <bid>] [--filename <name>]   # single column write   v0.1 (--set-raw v0.2; file-column `<col>=<path>` v0.6-M38; stdin `<file-col>=-` v0.8-M47)
                                           # positional <col>=<val> uses friendly translator (§5.3)
                                           # --set-raw skips translation; agent supplies wire-shape JSON
                                           # v0.6-M38: file-column dispatch — when <col> resolves to
                                           # type `file`, <value> is treated as a local file path and
                                           # routed via add_file_to_column (multipart). --set-raw
                                           # <file-col>=<json> stays rejected (no JSON wire shape).
+                                          # v0.8-M47 (D7 fold): a bare `-` value (<file-col>=-) sources
+                                          # the upload from stdin; --filename <name> sets Asset.name
+                                          # (OPTIONAL, default "blob"; empty rejected at parse). item
+                                          # set is single-positional, so the stdin scope rules (single
+                                          # source, single-target) are satisfied by construction.
 monday item clear <iid> <col> [--board <bid>]       # clear column value     v0.1
 monday item clear --board <bid> <col> (--where <c>=<v>... | --filter-json <json>) [--yes] [--dry-run]   v0.2
                                           # bulk clear — same gating as item update --where
                                           # live (non-empty match): requires --yes unless --dry-run is set
-monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--board <bid>] [--create-labels-if-missing]   v0.1 (--set-raw v0.2; file-column `--set <file-col>=<path>` v0.6-M38)
+monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--board <bid>] [--create-labels-if-missing] [--filename <name>]   v0.1 (--set-raw v0.2; file-column `--set <file-col>=<path>` v0.6-M38; stdin `--set <file-col>=-` v0.8-M47)
                                           # single-item multi-column atomic update
                                           # at least one of --name / --set / --set-raw required
                                           # --set and --set-raw against the same <col> → usage_error
@@ -1731,6 +1736,15 @@ monday item update <iid> [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<j
                                           # across-items (for bulk). The 'multi_file_set_unsupported'
                                           # discriminator literal stays RESERVED. --set-raw
                                           # <file-col>=<json> stays REJECTED per D3 (permanent).
+                                          # v0.8-M47 (D7 fold): a bare `-` --set value (--set
+                                          # <file-col>=-) sources the upload from stdin; --filename
+                                          # <name> sets Asset.name (OPTIONAL, default "blob"). Scoped
+                                          # to single-file, single-target: exactly one <file-col>=- as
+                                          # the SOLE file --set entry. 2+ stdin --set →
+                                          # 'multiple_stdin_file_sets'; stdin + another file --set →
+                                          # 'stdin_file_set_not_sole_file' (both usage_error; literals
+                                          # reserved; registry stays 29). The mixed-rule still applies
+                                          # (stdin --set + value --set → 'mixed_file_and_value_sets').
 monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--name <n>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--create-labels-if-missing] [--continue-on-error [--concurrency <n>]] [--yes] [--dry-run]   v0.1 (--set-raw v0.2; --continue-on-error v0.3-M25; --concurrency v0.4-M30; file-column --set REJECTED at v0.6-M38; CARVED OUT at v0.7-M42 — pre-flight contract diff lands the argv + pre-check surface; IMPL body at v0.7-M42 IMPL)
                                           # bulk update — at least one of --name / --set / --set-raw required
                                           # v0.7-M42 (D5 carve-out fold from v0.6-M38): file-column
@@ -1744,7 +1758,12 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # (mirrors JSON path's existing duplicate-column
                                           # contract). Mixing with value --set / --set-raw /
                                           # --name still rejects per the universal mixed-leg
-                                          # mutex. --concurrency
+                                          # mutex. v0.8-M47: stdin `--set <file-col>=-` is NOT
+                                          # supported on the bulk path — stdin is a single
+                                          # non-replayable stream and can't fan out across the
+                                          # matched set; rejects 'stdin_file_set_on_bulk_unsupported'
+                                          # (usage_error; literal reserved). Pipe to a temp file +
+                                          # `--set <file-col>=<path>` for bulk. --concurrency
                                           # 1..32 reuses v0.4-M30's dispatchParallel selector over a
                                           # shared MultipartTransport. Pre-check is single upfront
                                           # local file validation (file_not_readable / file_empty
@@ -1782,7 +1801,7 @@ monday item update --board <bid> (--where <c>=<v>... | --filter-json <json>) [--
                                           # `data.summary.{matched,applied,failed}_count` invariant.
                                           # Monday's `concurrency_exceeded` retries via the existing
                                           # retry layer (§2.5) — no new error code surfaces.
-monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>]   v0.2 (file-column --set carve-out fold at v0.7-M43 — create-time two-leg dispatch under §5.8 orphan-warn atomicity envelope)
+monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>]... [--set-raw <col>=<json>]... [--parent <iid>] [--position before|after --relative-to <iid>] [--filename <name>]   v0.2 (file-column --set carve-out fold at v0.7-M43 — create-time two-leg dispatch under §5.8 orphan-warn atomicity envelope; stdin `--set <file-col>=-` v0.8-M47)
                                           # --name empty after trim → usage_error
                                           # duplicate resolved column IDs across --set / --set-raw
                                           # entries → usage_error (covers --set + --set, --set-raw
@@ -1808,6 +1827,14 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # `'file_set_on_create_unsupported'` + the pre-v0.8-M46
                                           # rejection literal `'multi_file_set_unsupported'` are
                                           # both RESERVED post-fold (regression-guarded).
+                                          # v0.8-M47 (D7 fold): a bare `-` --set value (--set
+                                          # <file-col>=-) sources leg-2's upload from stdin;
+                                          # --filename <name> sets Asset.name (OPTIONAL, default
+                                          # "blob"). Single stdin source, sole file --set; stdin +
+                                          # another file --set → 'stdin_file_set_not_sole_file', 2+
+                                          # stdin → 'multiple_stdin_file_sets' (usage_error;
+                                          # reserved). Non-file --set / --set-raw values still bundle
+                                          # into leg-1 (mixed-rule SUPPRESSED on create per D6).
                                           # --set / --set-raw values bundle into the single
                                           # create_item / create_subitem mutation — single
                                           # round-trip on the JSON-only path; on the file-set
@@ -2140,11 +2167,13 @@ monday item upload <iid> --column <col> <file>                                v0
                                           # multipart mutation. `<file>` is
                                           # a local file path resolved
                                           # relative to cwd; stdin (`-`) is
-                                          # NOT supported in v0.4-M31 (a
-                                          # future contract extension may
-                                          # add stdin support once a
-                                          # `--filename <name>` companion
-                                          # flag is pinned). Column must
+                                          # NOT supported on this verb-shaped
+                                          # upload (the friendly `--set
+                                          # <file-col>=-` path carved out
+                                          # stdin at v0.8-M47 with the
+                                          # `--filename <name>` companion;
+                                          # extending it here is a future
+                                          # increment). Column must
                                           # resolve to `type === 'file'` at
                                           # runtime — non-`file` columns
                                           # surface `unsupported_column_type`
@@ -3676,10 +3705,29 @@ CLI: `monday item set <iid> <col>=<val>`. The CLI:
      RESERVED across the codebase — do not reuse for a different
      rejection reason; agent scripts that branch on it will fall
      through to the new dispatch path on v0.7-M42 and later.
-   - **No `--set <file-col>=-` stdin.** Rejects via the existing
-     `<file>` path-string validation (mirrors M31 `monday item
-     upload`'s rejection rationale — no clean `--filename`
-     companion shape pinned for the `--set` syntax).
+   - **stdin `--set <file-col>=-` — CARVED OUT at v0.8-M47** (D7
+     fold from v0.6-M38). At v0.6-M38 → v0.8-M46 this rejected via
+     the existing `<file>` path-string validation (no `--filename`
+     companion shape pinned). v0.8-M47 pins the companion
+     `--filename <name>` flag (OPTIONAL; default `"blob"`; Monday
+     accepts any non-empty `Asset.name` and `500`s only an empty one
+     — probe-pinned) and accepts a bare `-` file `--set` value as a
+     stdin source. Because stdin is a single non-replayable stream,
+     the carve-out is scoped to single-file, single-target dispatch:
+     exactly one `<file-col>=-` per call, as the SOLE file `--set`
+     entry, on `item set` / single-item `item update` / `item
+     create`. The routing layer
+     (`file-column-set.ts:routeFileColumnDispatch`) enforces the
+     scope BEFORE any wire/stdin activity — multi-stdin
+     (`multiple_stdin_file_sets`), stdin mixed with another file
+     `--set` (`stdin_file_set_not_sole_file`), and bulk stdin
+     (`stdin_file_set_on_bulk_unsupported`) all reject with
+     `usage_error` (literals reserved; no new ERROR_CODE — registry
+     stays 29). The mixed-rule + duplicate-column mutexes still apply
+     to a stdin entry (stdin changes only the file SOURCE, not the
+     surrounding mutex surface). The verb-shaped `monday item upload`
+     stays path-only (no stdin) — M47 carves out only the friendly
+     `--set` path.
 
    **Dispatch routing layer.** The dispatch branch fires AFTER
    column resolution at the command action body level — NOT
@@ -3832,7 +3880,7 @@ window. Their `unsupported_column_type` errors carry
 | `link`, `email`, `phone` | **v0.2** (shipped — M8) | Pipe-form translator + URL/email/E.164 validation. |
 | `tags`, `board_relation`, `dependency` | **v0.3** (slipped from v0.2 tentative at M18 close) | Tentative friendly translators planned for v0.3 — need account-tag directory lookup (`tags`) and linked-board enumeration with complexity-budget design (`board_relation` / `dependency`). `--set-raw` accepts these today. |
 | `time_tracking` | v0.3 (verbs registered as documentation-only) | Start/stop semantics — verbs, not value writes. `monday item time-track start/stop` shipped at M20 (`b7690b2`) but reject every invocation today: empirical probe (2026-05-10) confirmed Monday's API does not currently support time_tracking writes via `change_simple_column_value` or `change_column_value`; the verbs are registered for forward-compatibility so agent scripts are stable across the eventual swap when Monday ships API support. |
-| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk + M43 friendly `--set` create) + **v0.8** (M46 friendly multi-file `--set`) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. **v0.7-M43** carved out the create-time path — `monday item create --set <file-col>=<path>` now dispatches a two-leg `create_item` + `add_file_to_column` sequence under the §5.8 orphan-warn atomicity envelope (D1 closure); non-file `--set` / `--set-raw` entries bundle into leg-1 atomically, the file entry routes to leg-2. **v0.8-M46** carved out the multi-file path — `monday item update <iid> --set f1=p1 --set f2=p2 ...` / `monday item update --where ... --set f1=p1 --set f2=p2 ...` / `monday item create --set f1=p1 --set f2=p2 ...` now dispatch per-item multi-leg fan-out (N `add_file_to_column` legs per item, sequential within an item × parallel across items for bulk per `dispatchParallel`). Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` + `runItemUpdateBulkFileMultiDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helpers, the create path adds `runItemCreateFileDispatch` + `runItemCreateFileMultiDispatch` (`src/commands/item/create.ts`) as the two-leg / two-leg-group helpers, and single-item update adds `runItemUpdateSingleFileDispatch` + `runItemUpdateSingleFileMultiDispatch` for the N=1 / N≥2 cases. Mutex rules: Monday wire stays **single-column-per-wire-call** (one file column per `add_file_to_column` round-trip), but the CLI now routes multi-leg fan-out for the 3 reachable callShapes (`'item_update_single'` / `'item_update_bulk'` / `'item_create'`); only `'item_set'` keeps the defensive unreachable `'multi_file_set_unsupported'` throw (single-positional verb is argv-incapable of expressing 2+ file `--set`). Duplicate resolved file-column IDs reject with `'duplicate_resolved_file_columns'` (mirrors JSON path's cross-token duplicate-resolved-ID contract). Mixing with value `--set` / `--set-raw` / `--name` rejects on `'item_set'` / `'item_update_single'` / `'item_update_bulk'` (universal mixed mutex), SUPPRESSED on `'item_create'` (M43 D6 asymmetry — `create_item` natively bundles non-file `column_values` atomically). `--set-raw <file-col>=<json>` stays REJECTED on every callShape (no JSON wire shape for `add_file_to_column`; D3 permanent rejection at `translateRawColumnValue`). |
+| `files` | **v0.4** (M31 verb-shaped) + **v0.6** (M38 friendly `--set` single-item) + **v0.7** (M42 friendly `--set` bulk + M43 friendly `--set` create) + **v0.8** (M46 friendly multi-file `--set` + M47 stdin `--set <file-col>=-`) | **v0.4-M31** shipped `monday item upload <iid> --column <col> <file>` + `monday update upload <uid> <file>` (verb-shaped multipart). **v0.6-M38** shipped the friendly `--set <file-col>=<path>` form on `monday item set` + `monday item update <iid>` (single-item). **v0.7-M42** carved out the bulk path — `monday item update --where ... --set <file-col>=<path>` now dispatches a per-item multipart fan-out (one `add_file_to_column` per matched item) under the `--concurrency` selector + the `--continue-on-error` partial-success envelope. **v0.7-M43** carved out the create-time path — `monday item create --set <file-col>=<path>` now dispatches a two-leg `create_item` + `add_file_to_column` sequence under the §5.8 orphan-warn atomicity envelope (D1 closure); non-file `--set` / `--set-raw` entries bundle into leg-1 atomically, the file entry routes to leg-2. **v0.8-M46** carved out the multi-file path — `monday item update <iid> --set f1=p1 --set f2=p2 ...` / `monday item update --where ... --set f1=p1 --set f2=p2 ...` / `monday item create --set f1=p1 --set f2=p2 ...` now dispatch per-item multi-leg fan-out (N `add_file_to_column` legs per item, sequential within an item × parallel across items for bulk per `dispatchParallel`). Dispatch branches off the standard JSON translator path at the command action body when the resolved column has `type === 'file'`, routing into M31's `addFileToColumn` fetcher via `executeFileColumnSet` (`src/api/file-column-set.ts`); the bulk path adds `runItemUpdateBulkFileDispatch` + `runItemUpdateBulkFileMultiDispatch` (`src/commands/item/update.ts`) as the per-item fan-out helpers, the create path adds `runItemCreateFileDispatch` + `runItemCreateFileMultiDispatch` (`src/commands/item/create.ts`) as the two-leg / two-leg-group helpers, and single-item update adds `runItemUpdateSingleFileDispatch` + `runItemUpdateSingleFileMultiDispatch` for the N=1 / N≥2 cases. Mutex rules: Monday wire stays **single-column-per-wire-call** (one file column per `add_file_to_column` round-trip), but the CLI now routes multi-leg fan-out for the 3 reachable callShapes (`'item_update_single'` / `'item_update_bulk'` / `'item_create'`); only `'item_set'` keeps the defensive unreachable `'multi_file_set_unsupported'` throw (single-positional verb is argv-incapable of expressing 2+ file `--set`). Duplicate resolved file-column IDs reject with `'duplicate_resolved_file_columns'` (mirrors JSON path's cross-token duplicate-resolved-ID contract). Mixing with value `--set` / `--set-raw` / `--name` rejects on `'item_set'` / `'item_update_single'` / `'item_update_bulk'` (universal mixed mutex), SUPPRESSED on `'item_create'` (M43 D6 asymmetry — `create_item` natively bundles non-file `column_values` atomically). `--set-raw <file-col>=<json>` stays REJECTED on every callShape (no JSON wire shape for `add_file_to_column`; D3 permanent rejection at `translateRawColumnValue`). **v0.8-M47** carved out the stdin source (D7 fold) — a bare `-` file `--set` value (`<file-col>=-`) sources the upload from stdin, with an optional `--filename <name>` companion (default `"blob"`) for Monday's `Asset.name`. stdin is a single non-replayable stream, so it is scoped to single-file, single-target dispatch: exactly one `<file-col>=-` per call, as the SOLE file `--set` entry, on `item set` / single-item `item update` / `item create`. The routing layer (`routeFileColumnDispatch`) enforces the scope before any wire/stdin activity — multi-stdin (`'multiple_stdin_file_sets'`), stdin mixed with another file `--set` (`'stdin_file_set_not_sole_file'`), and bulk stdin (`'stdin_file_set_on_bulk_unsupported'`) all reject with `usage_error` (literals reserved; no new ERROR_CODE — registry stays 29). A clean stdin source routes through the same single-file `kind: 'file'` / `'file_create'` as a path source; the action body's dispatch helper sources the Blob from `readStdinFileSource` (`src/utils/file-source.ts`) instead of `precheckLocalFile`. The pre-flight contract diff lands the argv + `--filename` + enforcement surface; the live stdin-read + Blob leg lands at the M47 IMPL. |
 | `mirror`, `formula`, `auto_number`, `creation_log`, `last_updated`, `item_id` | **read-only forever** | Monday-computed; not writable by API. `--set-raw` rejects these too. |
 
 The "read-only forever" row matters for agents: trying `--set` on a
@@ -4331,7 +4379,7 @@ contract:
    `--set` entry routes to leg-2's `add_file_to_column`
    multipart dispatch. The mixed-rule SUPPRESSION on
    `'item_create'` callShape (per `file-column-set.ts:
-   enforceSingleFileColumnSet`) lets non-file values through
+   routeFileColumnDispatch`) lets non-file values through
    the mutex check; 2+ file `--set` entries CARVE OUT at
    **v0.8-M46** (D2 fold) into the multi-leg dispatch
    (`runItemCreateFileMultiDispatch`) extending the two-leg
@@ -6731,8 +6779,12 @@ board metadata projection). `update upload` does not invalidate
   size against a hardcoded ceiling; the rewrap fires only on
   Monday's runtime rejection at IMPL.
 - **File path — local file only.** Stdin (`<file>='-'`) is NOT
-  supported in v0.4-M31. A future contract extension may add
-  stdin once a `--filename <name>` companion flag is pinned.
+  supported on the verb-shaped `monday item upload` /
+  `monday update upload`. The friendly `--set <file-col>=-` path
+  carved out stdin at **v0.8-M47** (D7 fold) with the `--filename
+  <name>` companion flag (§5.3 dispatch-routing layer); extending
+  stdin to the verb-shaped uploads is a future increment that would
+  reuse M47's `readStdinFileSource` source + the `--filename` shape.
 - **No new ERROR_CODE** — failures route through existing
   `usage_error` (file path issues, oversize), `unsupported_
   column_type` (non-`file` column), `not_found` (item/update/
@@ -8998,10 +9050,22 @@ scoped idempotent changes, and post comments narrating its work.**
     (argv + pre-check + routing surface); IMPL R0 SHIPPED at
     `5cf4365` (runtime body for `runItemCreateFileDispatch`
     under the §5.8 orphan-warn atomicity envelope).
-  - `<path>='-'` stdin for file `--set` — surface deferred
-    from M38 per D7; **v0.8-M47 candidate** — opens after M46
-    IMPL closes once the `--filename` companion shape is pinned
-    at M47 pre-flight.
+  - `<path>='-'` stdin for file `--set` — deferred from M38 per
+    D7 → **carve-out fold at v0.8-M47** (pre-flight contract diff
+    lands the argv `<file-col>=-` + `--filename` surface + the
+    `routeFileColumnDispatch` stdin-scope enforcement; the live
+    stdin-read + Blob leg lands at M47 IMPL). Scoped to single-file,
+    single-target dispatch: exactly one `<file-col>=-` per call, as
+    the SOLE file `--set` entry, on `item set` / single-item `item
+    update` / `item create`. stdin is a single non-replayable stream,
+    so multi-stdin (`multiple_stdin_file_sets`), stdin-mixed-with-
+    other-file-`--set` (`stdin_file_set_not_sole_file`), and bulk
+    stdin (`stdin_file_set_on_bulk_unsupported`) all reject with
+    `usage_error` (no new ERROR_CODE — registry stays 29).
+    `--filename <name>` (OPTIONAL; default `"blob"`) sets Monday's
+    wire `Asset.name`; probe-pinned that any non-empty name works and
+    only an empty one `500`s, so the schema's `.min(1)` rejects an
+    empty `--filename ""` at the parse boundary.
   - Cross-board `item move` value-overrides — carried over
     from v0.4 + v0.5 release-prep. Monday's `ColumnMapping
     Input` carries no value slot at API `2026-01`; richer

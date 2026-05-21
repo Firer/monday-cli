@@ -2256,6 +2256,42 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     await rm(workdir, { recursive: true, force: true });
   });
 
+  it('v0.8-M47 stdin create-time: `--set <file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
+    // The stdin branch precedes leg-1 in `runItemCreateFileDispatch`,
+    // so the stub throws before any `create_item` / `add_file_to_column`
+    // wire round-trip (only column resolution fires). The argv +
+    // `--filename` + routing surface is the shipped pre-flight contract;
+    // the leg-1/leg-2-from-stdin body lands at M47 IMPL.
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'From a pipe',
+        '--set',
+        'attachments=-',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details).toMatchObject({
+      reason: 'm47_preflight_stub',
+      filename: 'blob',
+    });
+  });
+
   it('live: two-leg dispatch fires `create_item` then `add_file_to_column` and emits the canonical ItemCreateOutput envelope (v0.6-M38 → v0.7-M43 D6 fold)', async () => {
     // Happy path: leg-1 creates the item (no bundled column_values
     // since the only `--set` is the file entry); leg-2 attaches the
@@ -2346,7 +2382,7 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
   });
 
   it('live: D6 mixed-set asymmetry — non-file `--set` values bundle into leg-1 `column_values` atomically; file entry routes to leg-2 (SUPPRESSED mixed-rule on item_create)', async () => {
-    // The D6 SUPPRESSION at enforceSingleFileColumnSet on
+    // The D6 SUPPRESSION at routeFileColumnDispatch on
     // 'item_create' callShape lets a non-file `--set status=Done`
     // through alongside the file `--set attachments=...`. The action
     // body partitions: leg-1 bundles status into column_values atomically
