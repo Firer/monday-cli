@@ -288,11 +288,27 @@ const emptySettingsSchema = z.object({}).strict();
  * `BoardIdSchema`), so accept either a JSON integer or a numeric
  * string and coerce to the wire integer. Mirrors the
  * `.transform().pipe()` coercion idiom in `item/history.ts`.
+ *
+ * The post-coercion `Number.isSafeInteger` guard is load-bearing, not
+ * cosmetic: `Number("99999999999999999999")` (or a JSON-number literal
+ * above 2^53−1) silently ROUNDS to a different integer that still
+ * passes `.int().positive()`, so without the guard the wire would
+ * carry a corrupted board ID. Mirrors the same `Number.isSafeInteger`
+ * rejection `deriveAllowedBoards` / `parseRelationItemIds` apply to
+ * board-relation item IDs (`api/column-values.ts`).
  */
 const relationBoardIdSchema = z
   .union([z.number().int(), z.string().regex(/^\d+$/u)])
   .transform((v) => (typeof v === 'number' ? v : Number(v)))
-  .pipe(z.number().int().positive());
+  .pipe(
+    z
+      .number()
+      .int()
+      .positive()
+      .refine(Number.isSafeInteger, {
+        message: 'board ID exceeds the safe integer range (must be ≤ 2^53−1)',
+      }),
+  );
 
 /**
  * `board_relation` create-time `--settings` (v0.8-M48). Wires the

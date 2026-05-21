@@ -3885,6 +3885,44 @@ describe('monday board column-create — board_relation / dependency settings (v
     expect(env.error?.code).toBe('usage_error');
   });
 
+  it('rejects board_relation unsafe numeric-string boardIds (> 2^53−1) rather than silently rounding', async () => {
+    // Number("99999999999999999999") rounds to 1e20, which passes
+    // .int().positive() — without the Number.isSafeInteger guard the
+    // wire would carry a CORRUPTED board ID. Mirrors the relation-item
+    // safe-integer rejection. Codex pre-flight R2 P2-1.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'X',
+        '--settings', '{"boardIds":["99999999999999999999"]}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('board_relation');
+  });
+
+  it('rejects board_relation unsafe JSON-number boardId (> 2^53−1) rather than silently rounding', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'X',
+        '--settings', '{"boardId":99999999999999999999}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+  });
+
   // --- dependency: same-board (D1) ----------------------------------------
 
   it('dry-run: dependency accepts allowMultipleItems (the same-board-honoured knob)', async () => {
