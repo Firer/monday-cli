@@ -58,26 +58,31 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **pre-flight contract diff for the v0.8 refactor
-  cluster** — SELECTED 2026-05-21 at candidate-selection (binding
-  `AskUserQuestion`; M47 + M48 weighed and moved to standby). The
-  cluster lands two crystallised lifts (standalone `src/api/`):
-  **R-v0.7-NEW-5** `reThrowDecorated` fail-fast-scaffold lift (4
-  consumers: clear / JSON-bulk / M42 file-bulk / M46 file-bulk-multi)
-  + **R-v0.8-NEW-6** `projectCauseForEnvelope` builder (3 consumers,
-  bundled — both in mutation-path catch arms). Needs its own Codex
-  pass + a **4-path coverage ratchet** that recovers the
-  conditional-spread arms left uncovered in `item/update.ts` (79.42%)
-  — those were intentionally NOT force-covered at the R-v0.8-NEW-10
-  close, deferred to this lift; the ratchet also widens the thin
-  global branch margin (95.47% vs 95.45% floor). **Rationale for
-  picking it first:** consolidates the fail-fast scaffold across the
-  M42/M46 file-set mutation paths *before* M47 would add a 5th touch,
-  and widens coverage margin ahead of further feature work. Run the
-  pre-flight discipline (`workflow.md`): it's an internal lift (no
-  wire surface, no probe), so → stub the lift's signature + the
-  4-path delegation → Codex pre-flight review. **Standby (both probe
-  DONE, neither blocked):** (a) M47 — stdin file `--set`
+- **Next session:** **v0.8 refactor-cluster IMPL** — swap the two
+  c8-ignored stubs in `src/api/error-decoration.ts` for runtime
+  bodies, delegate the **7 inline call sites** to them, run the
+  **4-path coverage ratchet**, then Codex IMPL review. **Pre-flight is
+  DONE this session:** both helper signatures pinned + stub-landed
+  (`src/api/error-decoration.ts`, unwired + fully c8-ignored) + the
+  inline-vs-lift boundary table + PD1–PD5 decisions + the ratchet plan
+  documented at `docs/v0.8-plan.md` §3 "Pre-flight (stub commit)";
+  **Codex pre-flight R1 CONVERGED (0 P1)** — P2-1 (c8-ignore moved
+  above the function declarations so `functions` denominator drops
+  1352→1350, FNF:0 for the module) + P3-1 (ratchet plan now drives the
+  ApiError-arm's OWN `cause` spread, 5 spreads not 4) both applied +
+  gate-verified. **IMPL work:** (i) `reThrowDecorated` body = the typed
+  `usage_error`→`UsageError` / else→`ApiError` split + the 5
+  conditional-spread metadata arms; (ii) `projectCauseForEnvelope` body
+  = the `{code,message}` + optional-`details` builder; (iii) delegate
+  the 4 `reThrowDecorated` sites (clear `:839` / JSON-bulk `:1437` /
+  M42 `:2159` / M46-multi `:2854`) + 3 `projectCauseForEnvelope` sites
+  (create `:1976` / `:2373` / update `:2602`), REMOVING the now-covered
+  c8-ignores (clear `:832`–`:873`; create `:1984` / `:2377`); (iv) the
+  focused `tests/unit/api/error-decoration.test.ts` ratchet — recovers
+  the conditional-spread arms left uncovered in `item/update.ts`
+  (~80%) + widens the thin global branch margin (95.47% vs 95.45%
+  floor). **Standby (both probe DONE, neither blocked):** (a) M47 —
+  stdin file `--set`
   `<file-col>=-` (D7 closure; `--filename` OPTIONAL, default a
   non-empty placeholder; R-v0.8-NEW-2 rename folds in); (b) M48 —
   writable board_relation settings (`create_column`, JSON not
@@ -91,15 +96,18 @@ humans are second-class. Built incrementally via Claude Code on top of
   NEXT after M49; M47 + M48 drop to standby behind it):
   - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
     `2ec67ad`** (Codex R1 CONVERGED, live-verified).
-  - **v0.8 refactor cluster** — **← NEXT (selected 2026-05-21).**
-    R-v0.7-NEW-5 `reThrowDecorated` fail-fast-scaffold lift (4
-    consumers: clear / JSON-bulk / M42 file-bulk / M46 file-bulk-multi;
-    needs its own Codex pass + a 4-path coverage ratchet) + R-v0.8-NEW-6
+  - **v0.8 refactor cluster** — **← IMPL NEXT (pre-flight DONE
+    2026-05-21, Codex R1 CONVERGED 0 P1; stub at
+    `src/api/error-decoration.ts`).** R-v0.7-NEW-5 `reThrowDecorated`
+    fail-fast-scaffold lift (4 consumers: clear / JSON-bulk / M42
+    file-bulk / M46 file-bulk-multi) + R-v0.8-NEW-6
     `projectCauseForEnvelope` builder (3 consumers; bundled, both in
     mutation-path catch arms). Standalone `src/api/` lift — too broad
     to ride a feature IMPL. Picked first to consolidate the fail-fast
     scaffold across the M42/M46 file-set paths before M47 adds a 5th
-    touch, and to widen the thin coverage margin.
+    touch, and to widen the thin coverage margin. IMPL: swap stubs for
+    runtime bodies + delegate the 7 sites + the 4-path ratchet +
+    Codex IMPL review.
   - **M47** *(standby)* — stdin file `--set` `<file-col>=-` (D7 closure).
     **UNBLOCKED by M49.** Probe DONE: `--filename` is OPTIONAL (any
     non-empty name works — `"stdin"` / default `"blob"`; empty → 500),
