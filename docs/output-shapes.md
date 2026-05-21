@@ -952,13 +952,22 @@ predictable.
 (malformed JSON → `usage_error`, exit 1, before any network
 call). For types in `WRITABLE_COLUMN_TYPES`, validated against
 a per-type zod schema (status: `{labels?}`; dropdown:
-`{labels?}`; numbers: `{unit?}`; text / long_text / date /
-people / link / email / phone: empty `{}`). Type-mismatched
+`{labels?}`; numbers: `{unit?}`; board_relation (v0.8-M48):
+`{boardIds?, boardId?, allowMultipleItems?,
+allowCreateReflectionColumn?}` — `boardIds`/`boardId` int-coerced
+from JSON int or numeric string; dependency (v0.8-M48,
+same-board): `{allowMultipleItems?}` only — cross-board
+`boardIds`/`boardId` reject with a `usage_error` pointing at
+`--type board_relation`; text / long_text / date / people /
+link / email / phone / tags: empty `{}`). Type-mismatched
 settings (e.g. `--type text --settings '{"labels":[]}'`) →
 `usage_error` with `details: {column_type, expected_keys,
-actual_keys, hint}`. Raw-writable / read-only-forever / files-
-shaped types skip type-specific validation (well-formed JSON
-only; Monday validates server-side).
+actual_keys, hint}`. board_relation/dependency wrap their
+validated `--settings` under `defaults.settings` on the wire
+(read back UNWRAPPED on `settings_str`); the dry-run echo shows
+the unwrapped agent shape. Raw-writable / read-only-forever /
+files-shaped types skip type-specific validation (well-formed
+JSON only; Monday validates server-side).
 
 Dry-run shape per cli-design §6.4 column-create variant —
 minimal `{operation: "create_column", board_id, type, title,
