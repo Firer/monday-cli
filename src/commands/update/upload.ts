@@ -80,11 +80,11 @@ const inputSchema = z
       .string()
       .min(1, {
         message:
-          '<file> must be a non-empty local file path; stdin (`-`) is not supported in v0.4-M31 (a future contract extension may add stdin support once a `--filename <name>` companion flag is pinned).',
+          '<file> must be a non-empty local file path; `monday update upload` is path-only (it attaches to an Update via `Update.assets`, not a file column, so there is no stdin `--set` equivalent). Pass a local file path resolved relative to cwd.',
       })
       .refine((p) => p !== '-', {
         message:
-          '<file> cannot be `-` — stdin upload is not supported in v0.4-M31. Pass a local file path resolved relative to cwd. A future contract extension may add stdin support once a `--filename <name>` companion flag is pinned.',
+          '<file> cannot be `-` — `monday update upload` is path-only. It attaches to an Update (not a file column), so there is no stdin `--set` equivalent. Pass a local file path resolved relative to cwd.',
       }),
   })
   .strict();
@@ -121,7 +121,7 @@ export const updateUploadCommand: CommandModule<
           '',
           'Notes:',
           '  - Uploads cross the wire as multipart/form-data (different transport from JSON-only verbs).',
-          '  - File path is resolved relative to the cwd; stdin (`-`) is not supported in this release.',
+          '  - File path is resolved relative to the cwd; `upload` is path-only (attaches to an Update, not a file column — no stdin `--set` equivalent).',
           '  - Re-running with the same args creates a second Asset; `add_file_to_update` is not idempotent.',
           '',
         ].join('\n'),
