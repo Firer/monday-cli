@@ -31,6 +31,24 @@ modules / commands / ERROR_CODES / cli-design sections runs through:
    `§9` preconditions tick + `§22` R-class log + cli-design SHA
    backfills + `CLAUDE.md` status flip.
 
+**Stub-literal naming + RESERVED-literal regression-guard.** When step
+2's c8-ignored stub throws, give it an `internal_error` (or the
+milestone's natural code) with a `details.reason: 'mNN_preflight_stub'`
+literal — milestone-tagged so an integration test can pin the stubbed
+surface verbatim (`expect(...).toMatchObject({ reason:
+'mNN_preflight_stub' })`) at pre-flight. At step 4 the live body
+replaces the throw and the literal disappears from runtime output. From
+that point the literal stays **RESERVED across the codebase** — never
+reused for a different rejection — and a regression-guard integration
+test asserts it never reappears in emitted stdout/stderr
+(`expect(out.stdout).not.toContain('mNN_preflight_stub')`). The same
+RESERVED discipline applies to any milestone-specific `details.reason`
+discriminator the pre-flight introduces (the v0.6/v0.7 file-`--set`
+folds reserved `file_set_on_bulk_unsupported` /
+`file_set_on_create_unsupported` / `multi_file_set_unsupported` this
+way). Graduated v0.8-M47 IMPL after four instances (`m42`/`m43`/`m46`/
+`m47_preflight_stub`).
+
 ## Pre-IMPL cross-doc grep for surface-extending milestones
 
 When an IMPL session extends an existing helper/surface with a new
