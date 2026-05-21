@@ -7,6 +7,256 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.8.0] - 2026-05-22 — File-upload P1 fix + multi-file / stdin file `--set` + writable board_relation/dependency settings (M49 + M46 + M47 + M48)
+
+The release whose headline is a **fix**, not a feature: **M49 repairs
+the file-upload wire format**. Published `0.7.0` (and every release
+back to v0.4-M31) shipped the Apollo GraphQL multipart-request spec
+(`operations` / `map` / numbered parts), which **live Monday rejects**
+— so `monday item upload`, `monday update upload`, and every friendly
+file `--set` was broken against the real API for five milestones
+(M31 / M38 / M42 / M43 / M46) while the test suite stayed green
+against a fixture that asserted the *wrong* wire shape. `0.8.0` emits
+Monday's native multipart shape (`query` + a sibling `variables`
+field + a string-encoded `map` + a named file part, POSTed to
+`/v2/file`) and is **the first release where file uploads actually
+work against live Monday** — live-verified via a `RUN_LIVE_TESTS`-
+gated upload smoke test that drives the real transport. **If you use
+any file upload, upgrade from `0.7.0`.**
+
+On top of the fix, three feature folds close long-standing deferrals:
+multi-file `--set` per call (M46, closes v0.6-M38 D2), stdin file
+`--set <file-col>=-` (M47, closes v0.6-M38 D7), and writable create-
+time `board_relation` / `dependency` column settings (M48). Plus an
+internal `src/api/` error-decoration refactor cluster. **No breaking
+changes vs `0.7.0` — every v0.8 surface is additive; the output
+envelope and 29 stable error codes are unchanged.** Built
+incrementally as M49 + the refactor cluster + M46 + M47 + M48.
+
+**Re-scope note 2026-05-21.** v0.8 re-scoped from its original
+SKELETON (Monday API `2026-07` pin + user-entity migration M44 +
+`user activity` M45) to **stay on API `2026-01`** and ship the
+v0.6 / v0.7 carve-out folds above — mirroring the v0.7 pivot verbatim.
+`@mondaydotcomorg/api` is still pinned at 14.0.0 (baking `2026-01`);
+no SDK 15.x (`2026-04`) or 16.x (`2026-07`) had published at the
+candidate-selection commit, so M44 / M45 + the v0.7-deferred M39 /
+M40 / M41 cluster stay deferred to a future release (re-open when the
+SDK publishes natively AND a paid-tier sandbox is available for the
+M40 wire probe).
+
+### Breaking changes vs `0.7.0`
+
+**None.** Every command, error code, envelope key, and warning shape
+shipped in `0.7.0` is preserved. v0.8 only adds (and fixes the
+upload wire shape — a fix that makes previously-broken uploads work,
+not a contract change: the dry-run echo + read-side `settings_str`
+shapes are byte-stable).
+
+### Surface
+
+**117 commands shipped (unchanged from v0.7).** M46 / M47 / M48
+extend existing verbs rather than adding noun namespaces — M46 + M47
+add file-source dispatch shapes to `item set` / `item update` /
+`item create`; M48 adds the `--settings` flag's reach to
+`board column-create` for two more column types. The friendly
+translator stays JSON-output-shaped for the existing writable types.
+
+**🚨 File-upload wire-format fix (M49) — `src/api/multipart-transport.ts`.**
+The transport now POSTs Monday's native multipart shape to `/v2/file`:
+a `query` field carrying the mutation, a sibling `variables` field, a
+string-encoded `map` (not the Apollo nested-object form), and the file
+under a named part matching the map. The bug never surfaced in tests
+because the mocked multipart fixture validated `operationName` +
+`match_filename` + `match_variables` but **never the form structure**
+— so it accepted a request the live wire would 4xx. The fix backs the
+corrected fixture assertion with a `RUN_LIVE_TESTS`-gated live smoke
+test (one of the three skipped tests by default). No command surface,
+flag, or envelope changes — the same `item upload` / `update upload` /
+file `--set` calls now succeed live instead of failing.
+
+**Multi-file `--set` per call (M46) — `monday item update` (single +
+bulk) + `monday item create`.** Lifts v0.6-M38's single-file gate:
+multiple `--set <file-col>=<path>` entries per call fire N sequential
+`add_file_to_column` legs per item, with a per-leg partial-failure
+accumulator. Three reachable callShapes (single-item update / bulk
+update / create) each emit an `operation`-discriminated envelope
+(`add_files_to_columns` / `item_update_bulk_file_set_multi` /
+`item_create_with_files`). The inner sequential N-leg loop +
+accumulator lifted to `dispatchFileLegsSequentially`
+(`src/api/file-column-set.ts`, 3 consumers — R-v0.8-NEW-1 LIFT).
+
+**Stdin file `--set <file-col>=-` (M47) — `monday item set` /
+`item update <iid>` / `item create`.** A bare `-` file `--set` value
+sources the upload from stdin. **Single-file, single-target only**
+(stdin is one non-replayable stream — not available on bulk
+`--where`). `--filename <name>` names the multipart part (default
+`blob`, with the MIME type sniffed from the filename). An empty pipe
+rejects `usage_error` with `details.reason: "stdin_file_empty"`
+before any wire call. `monday item create` reads stdin **before**
+leg-1 `create_item`, so an empty pipe never orphans a created item.
+
+**Writable `board_relation` / `dependency` create-time settings
+(M48) — `monday board column-create --type <t> --settings <json>`.**
+The existing `--settings <json>` flag now accepts per-type settings
+for two more column types: `board_relation` takes
+`{"boardIds":[123,456]}` (ints, coerced from JSON ints or numeric
+strings with a `Number.isSafeInteger` guard); `dependency` is
+same-board only and takes `{"allowMultipleItems"?:bool}` (a
+`boardIds` / `boardId` key on `dependency` rejects with
+`usage_error.details.rejected_keys`). On the wire these two types
+wrap their settings under `defaults: {settings: {…}}` (the M48
+single dispatch-site ternary); the other settings-accepting types
+(`status` / `dropdown` / `numbers`) pass `defaults: settings`
+unwrapped. The wrap is **wire-only** — the dry-run echo and the
+read-side `Column.settings_str` stay unwrapped (agent shape). Monday
+validates board existence (a non-existent `boardIds` target →
+`not_found`).
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** Every v0.8
+rejection routes through existing codes with `details.reason` /
+`details.rejected_keys` discriminators: M47's `"stdin_file_empty"`
+(`usage_error`) joins the existing file-dispatch discriminator family
+under the R-v0.6-NEW-2 per-status-detail pattern (graduated at v0.7);
+M48's `dependency` board-target rejection is an existing `usage_error`
+with `details.rejected_keys`.
+
+**New `operation`-discriminated emit shapes (M46).** Three new
+multi-file envelopes — `add_files_to_columns` (single-item update),
+`item_update_bulk_file_set_multi` (bulk), `item_create_with_files`
+(create) — each pinned by its own schema and emitted via
+`emitMutation`. Per the R-v0.8-NEW-8 audit-point + the M42 union-
+exclusion precedent, single-resource shapes advertise in the command
+registry's `outputSchema`; bulk per-item-results shapes document
+their exclusion.
+
+**Stdin source echo (M47).** On a `<file-col>=-` dispatch the envelope
+carries `file_size_bytes` = the buffered stdin byte length (not an
+`fs.stat`), and the dry-run `planned_changes` file descriptor reads
+`(stdin)` rather than a path. The field is additive per §6.4.
+
+**No new envelope keys, no new warning shapes** beyond the M46
+multi-file `operation` discriminators + the M47 stdin echo above.
+M46 / M47 reuse the M31 multipart wire's success-envelope shape; M48
+reuses the M16 `create_column` JSON envelope (its wire change is
+input-side only — `defaults` wrap — so the returned `Column`
+projection is unchanged).
+
+### Upgrade notes
+
+- **File uploads now work live.** No code or flag change is needed —
+  `monday item upload` / `monday update upload` / file `--set` calls
+  that silently failed (or 4xx'd) against `0.7.0` succeed on `0.8.0`.
+  This is the single most important reason to upgrade.
+- **`multi_file_set_unsupported` (v0.6-M38 D2) is DROPPED.** v0.8-M46
+  picks up multiple file `--set` entries per call on update (single +
+  bulk) + create. The rejection no longer fires on those paths.
+- **The v0.6-M38 D7 stdin file-`--set` deferral is CLOSED.** v0.8-M47
+  picks up stdin file `--set <file-col>=-` on set / update-single /
+  create. Bulk `--where` still rejects stdin with
+  `usage_error.details.reason: "stdin_file_set_on_bulk_unsupported"`
+  (one non-replayable stream can't fan out across N matched items).
+- **`board column-create --type board_relation|dependency --settings`
+  now succeeds** where it previously had no documented shape (M19's
+  "no documented shape" was REFUTED by the M48 probe). `dependency`
+  is same-board only — an explicit board target coerces to the host
+  board.
+- **Multi-level subitem `--parent` rejection slipped `v0.8` → `v0.9`.**
+  Monday's `sub_items_board` still carries no `subtasks` column at API
+  `2026-01`; the `details.deferred_to` value moves forward one release
+  (5th consecutive slip).
+
+### Internals worth highlighting
+
+- **R-v0.8-NEW-9 (mocked transport must mirror the real wire)
+  RESOLVED at M49 — and graduated into `.claude/rules/testing.md`.**
+  The five-milestone P1 was caused by a mock that validated a
+  multipart shape the live wire would reject. The fix corrected the
+  fixture assertion to the native form AND added a `RUN_LIVE_TESTS`-
+  gated live smoke test for the seam; the "mock at the boundary, but
+  the mock must reject what the wire would reject" rule now lives in
+  testing.md with this incident as the worked example.
+- **v0.8 refactor cluster SHIPPED** (`refactor(api): lift
+  reThrowDecorated + projectCauseForEnvelope`). R-v0.7-NEW-5
+  (`reThrowDecorated` fail-fast scaffold, 4 consumers) + R-v0.8-NEW-6
+  (`projectCauseForEnvelope` builder, 3 consumers) lifted to
+  `src/api/error-decoration.ts`; 7 sites delegate. Branch coverage
+  95.47% → 95.88%; `item/update.ts` 79.42% → 87.27%. Codex IMPL
+  CONVERGED R4.
+- **R-v0.6-NEW-1 reached its 6th consumer** at M46 (multi-file
+  dispatch) — already graduated at 5 post-v0.7, scaled cleanly with
+  no internal-shape change. **R-v0.8-NEW-1** (`dispatchFileLegs
+  Sequentially`) lifted at M46 with 3 consumers.
+- **R-NEW-82 graduated discipline applied at its 6th-consecutive
+  consumer.** The release-prep cross-doc grep caught one stale
+  `deferred_to: "v0.8"` slot (multi-level subitem, slipped to
+  `"v0.9"`) + one ToC drift (M46 / M47 / M48 annotations missing from
+  `docs/output-shapes.md`'s `item (mutations)` + `board` rows).
+- **R-NEW-84 graduated discipline applied.** The v0.8 release-prep
+  cluster ships zero production semantic changes modulo the
+  `'v0.8'` → `'v0.9'` literal flip in the multi-level subitem
+  rejection slot; gates carry verification (Codex review skipped).
+- **R-v0.8-NEW-4 (M42/M43 schema parse-test backfill) stays
+  deferred.** Its trigger was "act if the release-prep envelope-
+  snapshot probe surfaces a schema-shape inconsistency"; the probe
+  ran clean (zero diff), so the backfill remains a low-priority
+  belt-and-suspenders candidate.
+- **R-v0.8-NEW-7 (commit-subject-line refs over bare SHAs) adopted**
+  at the v0.8 close-docs — NEW plan-doc / CHANGELOG prose prefers
+  milestone-relative commit references, with rebase-volatile SHA
+  ranges riding alongside as a convenience.
+- **Two-AI review** ran for each v0.8 feature milestone's pre-flight
+  + IMPL (M49 CONVERGED R1; refactor cluster R4; M46 R3; M47 R1;
+  M48 R2). The release-prep cluster skipped Codex per R-NEW-84.
+  Per-milestone Codex breakdowns live in the post-mortems in
+  [`docs/v0.8-plan.md`](./docs/v0.8-plan.md) §3.
+
+### Tests + quality gates
+
+- **4254 tests pass + 3 skipped** (was 4124 + 1 at `0.7.0`). The 3
+  skips: the 2 pre-existing + the new `RUN_LIVE_TESTS`-gated
+  multipart-upload live smoke test (M49). All green on Node 22 + 24.
+- **Coverage at branches 95.91% / functions 98.97%** against the
+  floor 95 / 95.45 / 95 / 95 — comfortably above the branch floor
+  (the refactor cluster lifted it 95.47% → 95.88%, and the M46/M48
+  dispatch arms are fully covered). Floor unchanged across
+  `0.7.0` → `0.8.0`.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.8
+  release-prep (zero diff vs M48 IMPL close, 162 snapshots); folded
+  into close-docs prose per the v0.5 / v0.6 / v0.7 precedent (a
+  zero-diff probe doesn't warrant its own commit).
+- **Five test layers held**: unit, integration (`FixtureTransport` +
+  `MultipartFixtureTransport`), E2E (subprocess against fixture
+  server), envelope-shape snapshot suite, published-tarball E2E —
+  plus the new `RUN_LIVE_TESTS`-gated live-wire smoke tests.
+- **`npm audit` reports `0 vulnerabilities`** — no audit-fix folded
+  in this cycle (unlike the v0.7 release-prep bump).
+
+### Documentation
+
+- **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — the v0.8 plan
+  carries the M49 + refactor-cluster + M46 + M47 + M48 milestone
+  closes (§3), per-milestone decision logs, the R-class register
+  (§22, incl. R-v0.8-NEW-9's RESOLVED narrative), and the §7 release
+  exit checklist.
+- **[`.claude/rules/testing.md`](./.claude/rules/testing.md)** — new
+  "the mock must reject what the real wire rejects" rule, with the
+  M49 five-milestone P1 as the worked example + the
+  `RUN_LIVE_TESTS`-gated live-smoke pattern.
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** — M46
+  multi-file, M47 stdin, and M48 board_relation/dependency settings
+  body sections; ToC rows for `item (mutations)` + `board` updated to
+  enumerate the v0.8 milestone annotations (caught at the v0.8
+  release-prep ToC audit — 6th consecutive R-NEW-82 ratification).
+- **README.md** — quickstart step 13 extended to the full v0.6 → v0.8
+  file-`--set` family (M46 multi-file + M47 stdin) with the M49 P1-fix
+  warning; Scope section gains a "v0.8.0 (current)" entry + re-scope
+  note; prior-release labels cascade; the "next" block reframes to
+  v0.9.
+
+[0.8.0]: https://github.com/Firer/monday-cli/releases/tag/v0.8.0
+
 ## [0.7.0] - 2026-05-20 — Bulk + create-time file `--set` carve-out folds (M42 + M43)
 
 The "friendly file `--set` reaches every callShape" milestone —
