@@ -1065,6 +1065,45 @@ monday board column-create <bid> --type <type> --title <t> [--description <d>] [
                                           # (Monday validates server-side;
                                           # the CLI can't model every type's
                                           # settings exhaustively).
+                                          # `board_relation` / `dependency`
+                                          # create-time settings (v0.8-M48):
+                                          # `--settings
+                                          # '{"boardIds":[123,456],
+                                          # "allowMultipleItems":true}'` on a
+                                          # `board_relation` column wires the
+                                          # Connect-Boards link at create time.
+                                          # The agent passes the relation
+                                          # config at the TOP level; the CLI
+                                          # WRAPS it under a `settings` key on
+                                          # the wire (`defaults: {settings:
+                                          # {...}}`) — the M48 probe pinned this
+                                          # shape (`get_column_type_schema`).
+                                          # The read-side `Column.settings_str`
+                                          # is the UNWRAPPED inner object, so
+                                          # agents see the same unwrapped shape
+                                          # on input + read-back; the wrapper is
+                                          # a wire-only detail (same
+                                          # `--settings`-hides-`defaults`
+                                          # asymmetry as the simple types).
+                                          # `boardIds` / `boardId` accept JSON
+                                          # integers OR numeric strings (agents
+                                          # read board IDs as branded strings)
+                                          # and coerce to the wire integer.
+                                          # `dependency` is SAME-BOARD (D1):
+                                          # Monday coerces an arbitrary target
+                                          # to the host board, so it accepts
+                                          # only `allowMultipleItems`;
+                                          # `boardIds` / `boardId` on a
+                                          # `dependency` `--settings` reject
+                                          # with `usage_error` (`details:
+                                          # {column_type, rejected_keys, hint}`)
+                                          # pointing at `--type board_relation`
+                                          # for cross-board links. Monday
+                                          # validates board existence
+                                          # server-side (non-existent target →
+                                          # `not_found`); no CLI pre-flight
+                                          # board-existence read. ZERO new
+                                          # ERROR_CODES (registry stays 29).
                                           # Idempotent: NO — re-running creates
                                           # a second column with the same title
                                           # (Monday auto-generates a fresh
@@ -5688,9 +5727,12 @@ mutation verbs produce different planned-change shapes; the
   `settings` slot echoes the agent's `--settings <json>`
   argument verbatim — argv-parse already validated it as
   well-formed JSON and (where M16 ships a per-type schema)
-  type-shape-correct, so the dry-run's `settings` is the same
-  object the wire mutation would carry as its `defaults: JSON`
-  argument:
+  type-shape-correct, so for most types the dry-run's
+  `settings` is the same object the wire mutation would carry
+  as its `defaults: JSON` argument (the **v0.8-M48
+  `board_relation` / `dependency` exception** below echoes the
+  unwrapped agent shape, which the CLI wraps under `defaults.
+  settings` on the wire):
 
   ```json
   {
@@ -5728,6 +5770,26 @@ mutation verbs produce different planned-change shapes; the
   hiding the wire mismatch from agents; the dry-run's
   `settings` slot mirrors the input-side semantic, not the
   output-side string serialisation.
+
+  **v0.8-M48 — `board_relation` / `dependency` create-time
+  settings.** `--settings '{"boardIds":[123],"allowMultiple
+  Items":true}'` on a `board_relation` column wires the
+  Connect-Boards link at create time. The probe-pinned wire
+  shape nests the relation config under a `settings` key inside
+  `defaults` (`defaults: {settings: {boardIds:[123],...}}`),
+  while the read-side `Column.settings_str` returns the
+  UNWRAPPED inner object — so the dry-run's `settings` slot
+  echoes the unwrapped agent shape (matching read-back), and
+  the CLI applies the `settings` wrap only on the live wire.
+  `boardIds` / `boardId` accept JSON integers or numeric strings
+  and coerce to the wire integer. `dependency` is **same-board**
+  (Monday coerces an arbitrary target to the host board), so it
+  accepts only `allowMultipleItems`; `boardIds` / `boardId` on a
+  `dependency` `--settings` reject with `usage_error` (`details:
+  {column_type, rejected_keys, hint}`) pointing at `--type
+  board_relation`. No new ERROR_CODES (registry stays 29); a
+  non-existent target board surfaces Monday's server-side
+  `not_found` (no CLI pre-flight board-existence read).
 
 - **Column-update shape** (`board column-update`; v0.2 M16).
   Single-leg dry-run with a preflight `board describe`-shaped

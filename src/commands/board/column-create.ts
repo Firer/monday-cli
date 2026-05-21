@@ -56,13 +56,31 @@
  * malformed JSON → `usage_error` exit 1, before any network call.
  * For types in `WRITABLE_COLUMN_TYPES`, validated against a
  * per-type zod schema (status: `{labels?}`; dropdown: `{labels?}`;
- * numbers: `{unit?}`; date / text / long_text / people / link /
- * email / phone: empty `{}`). Type-mismatched settings (e.g.
+ * numbers: `{unit?}`; board_relation:
+ * `{boardIds?, boardId?, allowMultipleItems?, allowCreateReflectionColumn?}`;
+ * dependency: `{allowMultipleItems?}` — same-board only, see below;
+ * date / text / long_text / people / link / email / phone / tags:
+ * empty `{}`). Type-mismatched settings (e.g.
  * `--type text --settings '{"labels":[]}'`) → `usage_error` with
  * `details: {column_type, expected_keys, actual_keys, hint}`.
  * Raw-writable / read-only-forever / files-shaped types skip
  * type-specific validation — `--settings` for these types only
  * requires well-formed JSON (Monday validates server-side).
+ *
+ * **`board_relation` / `dependency` create-time settings (v0.8-M48).**
+ * `--settings '{"boardIds":[123,456]}'` on a `board_relation` column
+ * wires the Connect-Boards link at create time. The agent passes the
+ * relation config at the TOP level; the CLI wraps it under a
+ * `settings` key on the wire (`defaults: {settings: {…}}`) — the M48
+ * probe pinned this shape. `boardIds` / `boardId` accept either JSON
+ * integers or numeric strings (agents read board IDs as branded
+ * strings elsewhere) and coerce to the wire integer. `dependency`
+ * diverges: it is **same-board** (Monday coerces an arbitrary target
+ * to the host board), so it accepts only `allowMultipleItems`;
+ * `boardIds` / `boardId` on a `dependency` `--settings` reject with a
+ * `usage_error` pointing at `--type board_relation`. Monday validates
+ * board existence server-side (a non-existent target → `not_found`);
+ * the CLI does not pre-flight a board-existence read.
  *
  * **Live-envelope projection.** Returned `Maybe<Column>` is projected
  * through `columnProjectionSchema` (the M16 R45-lifted shared shape)
@@ -94,7 +112,7 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { UsageError } from '../../utils/errors.js';
+import { ApiError, UsageError } from '../../utils/errors.js';
 import { isPlainObject, parseJsonArg } from '../../utils/json.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
@@ -214,8 +232,13 @@ const COLUMN_TYPE_VALUES = [
  * every time Monday adds a setting key). The contract pins the
  * SHAPE (per-type validation against a per-type schema), the M16
  * implementation owns the field set. Status / dropdown / numbers
- * cover the documented happy paths; the rest reject anything because
- * Monday has no documented `defaults: JSON` shape for them.
+ * cover the documented happy paths; v0.8-M48 added the
+ * `board_relation` / `dependency` create-time relation config
+ * (`boardRelationSettingsSchema` / `dependencySettingsSchema` —
+ * probe-pinned via `get_column_type_schema`); the remaining simple
+ * types (text / long_text / date / people / link / email / phone /
+ * tags) reject any keys because Monday has no documented
+ * `defaults: JSON` shape for them.
  *
  * Status `labels` accepts both shapes Monday tolerates: bare
  * `string[]` (the labels in order) and `Record<string,string>`
@@ -256,6 +279,71 @@ const numbersSettingsSchema = z
 const emptySettingsSchema = z.object({}).strict();
 
 /**
+ * A Monday board ID as it appears inside a `board_relation`
+ * `--settings` payload. Monday's `create_column.defaults.settings`
+ * wants **integers** for `boardIds` / `boardId` (the M48 probe pinned
+ * this — `get_column_type_schema(type: board_relation)` types them
+ * `[<integer>]` / `<integer>`). Agents, however, read board IDs as
+ * branded numeric *strings* everywhere else (`board describe`,
+ * `BoardIdSchema`), so accept either a JSON integer or a numeric
+ * string and coerce to the wire integer. Mirrors the
+ * `.transform().pipe()` coercion idiom in `item/history.ts`.
+ */
+const relationBoardIdSchema = z
+  .union([z.number().int(), z.string().regex(/^\d+$/u)])
+  .transform((v) => (typeof v === 'number' ? v : Number(v)))
+  .pipe(z.number().int().positive());
+
+/**
+ * `board_relation` create-time `--settings` (v0.8-M48). Wires the
+ * Connect-Boards column at its target board(s) at create time. Field
+ * set pinned by the M48 probe (`get_column_type_schema(type:
+ * board_relation)` + a live create+readback): `boardIds` (array) AND
+ * `boardId` (scalar) are both honoured; empty `{boardIds:[]}` is an
+ * accepted degenerate (unconfigured column), self-reference is
+ * accepted, and Monday validates board *existence* server-side
+ * (`{boardIds:[999…]}` → `Resource not found` → existing `not_found`).
+ * So the CLI does NOT pre-flight a board-existence round-trip — only
+ * structural / type validation. All keys optional, `.strict()`.
+ *
+ * The validated object is the agent's TOP-LEVEL shape; the live wire
+ * leg wraps it under a `settings` key (`defaults: {settings: {…}}`) —
+ * see `CREATE_TIME_SETTINGS_WRAP_TYPES`. The read-side `settings_str`
+ * is the UNWRAPPED inner object, so agents see the same unwrapped
+ * shape on input + read-back; the `settings` wrapper is a wire-only
+ * detail (the same `--settings`-hides-`defaults` asymmetry M16 already
+ * established).
+ */
+const boardRelationSettingsSchema = z
+  .object({
+    boardIds: z.array(relationBoardIdSchema).optional(),
+    boardId: relationBoardIdSchema.optional(),
+    allowMultipleItems: z.boolean().optional(),
+    allowCreateReflectionColumn: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * `dependency` create-time `--settings` (v0.8-M48, D1 — same-board).
+ * The M48 probe found `dependency` DIVERGES from `board_relation`: an
+ * arbitrary target `boardId` is NOT honoured — Monday coerces it to
+ * the host board + auto-adds `dependencyNewInfra`. Dependency columns
+ * are effectively same-board. So this schema accepts only the
+ * same-board-honoured knob (`allowMultipleItems`); the cross-board
+ * target keys (`boardIds` / `boardId`) reject with a targeted
+ * `usage_error` BEFORE this schema runs (see
+ * `rejectDependencyBoardTargets`) so agents get "use board_relation
+ * for cross-board" rather than a silent host-board coercion. Auto-
+ * managed keys (`dependencyNewInfra`, `dependency_mode`) are NOT
+ * exposed — Monday owns them. `.strict()` rejects anything else.
+ */
+const dependencySettingsSchema = z
+  .object({
+    allowMultipleItems: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * Per-writable-type schema lookup. Used by `validateWritableSettings`
  * to reject type-mismatched `--settings` payloads at argv-parse time.
  */
@@ -278,18 +366,25 @@ const WRITABLE_SETTINGS_SCHEMAS: Readonly<
   // write time. Conservative empty schema mirrors `link` / `email` /
   // `phone` / `date` / `people`.
   tags: emptySettingsSchema,
-  // M19 Commit 3: `board_relation`'s linked-board list is configured
-  // through Monday's UI rather than via `create_column.defaults` —
-  // there's no documented JSON shape Monday accepts at column-create
-  // time. The friendly translator validates per-item membership at
-  // write time against `column.settings.boardIds`. Conservative
-  // empty schema.
-  board_relation: emptySettingsSchema,
-  // M19 Commit 4: `dependency` mirrors `board_relation` —
-  // dependencyBoards configured via Monday's UI, no documented
-  // create-time JSON shape, per-item validation at write time
-  // against `column.settings.dependencyBoards`.
-  dependency: emptySettingsSchema,
+  // v0.8-M48: `board_relation`'s linked-board list IS configurable at
+  // create time via `create_column.defaults.settings` — the M19 "no
+  // documented JSON shape / UI-only" assumption was REFUTED by the M48
+  // probe (`get_column_type_schema` + a live create+readback). The
+  // friendly `--settings '{"boardIds":[…]}'` wires the target board(s)
+  // at create time (wrapped under `defaults.settings`; read back
+  // unwrapped on `settings_str`). Per-item membership validation at
+  // write time (M19's `board-relation-validation.ts`) is unchanged —
+  // that's the item-VALUE `--set` path, a separate surface from this
+  // column-CONFIG path.
+  board_relation: boardRelationSettingsSchema,
+  // v0.8-M48 (D1 — same-board): `dependency` accepts only the
+  // same-board-honoured knob (`allowMultipleItems`). The M48 probe
+  // showed an arbitrary target `boardId` is coerced to the host board,
+  // so the cross-board keys (`boardIds` / `boardId`) reject with a
+  // targeted usage_error before this schema runs
+  // (`rejectDependencyBoardTargets`) pointing agents at
+  // `--type board_relation` for cross-board links.
+  dependency: dependencySettingsSchema,
 };
 
 /**
@@ -313,8 +408,63 @@ const WRITABLE_SETTINGS_EXPECTED_KEYS: Readonly<
   email: [],
   phone: [],
   tags: [],
-  board_relation: [],
-  dependency: [],
+  // v0.8-M48: board_relation create-time settings (boardIds/boardId
+  // are the cross-board target; allowMultipleItems +
+  // allowCreateReflectionColumn the relation knobs).
+  board_relation: ['boardIds', 'boardId', 'allowMultipleItems', 'allowCreateReflectionColumn'],
+  // v0.8-M48 (D1 — same-board): only allowMultipleItems is honoured;
+  // boardIds/boardId reject with a targeted hint before this list is
+  // surfaced.
+  dependency: ['allowMultipleItems'],
+};
+
+/**
+ * Writable types whose validated `--settings` object must be WRAPPED
+ * under a `settings` key on the wire (`defaults: {settings: {…}}`)
+ * rather than passed through as `defaults` directly (v0.8-M48). The
+ * M48 probe pinned this for `board_relation` / `dependency`: their
+ * create-time relation config nests under `settings` inside
+ * `defaults`, while the read-side `settings_str` is the UNWRAPPED
+ * inner object. status / dropdown / numbers etc. pass `--settings`
+ * straight through as `defaults` (no wrap). The wrap is a wire-only
+ * detail — agents see the unwrapped shape on input + read-back.
+ */
+const CREATE_TIME_SETTINGS_WRAP_TYPES: ReadonlySet<string> = new Set([
+  'board_relation',
+  'dependency',
+]);
+
+/**
+ * Cross-board target keys a `dependency` `--settings` payload must NOT
+ * carry (v0.8-M48 D1). Rejected with a targeted `usage_error` so the
+ * agent gets "dependency is same-board; use board_relation for
+ * cross-board" instead of `.strict()`'s generic "unrecognized key" —
+ * and crucially instead of Monday's silent coercion of the target to
+ * the host board (the divergence the M48 probe found).
+ */
+const rejectDependencyBoardTargets = (
+  parsed: Readonly<Record<string, unknown>>,
+): void => {
+  const rejected = (['boardIds', 'boardId'] as const).filter((k) =>
+    Object.prototype.hasOwnProperty.call(parsed, k),
+  );
+  if (rejected.length === 0) return;
+  throw new UsageError(
+    `--settings: dependency columns are same-board — ` +
+      `${rejected.join(', ')} ${rejected.length > 1 ? 'are' : 'is'} not ` +
+      `honoured at create time (Monday wires the dependency to the host ` +
+      `board regardless).`,
+    {
+      details: {
+        column_type: 'dependency',
+        rejected_keys: rejected,
+        hint:
+          'omit boardIds/boardId for dependency columns (they accept only ' +
+          'allowMultipleItems via --settings); use `--type board_relation` ' +
+          'for a cross-board link.',
+      },
+    },
+  );
 };
 
 /**
@@ -368,6 +518,12 @@ const parseSettingsFlag = (
     );
   }
   if (isWritableColumnType(columnType)) {
+    // v0.8-M48 D1: reject dependency's cross-board target keys with a
+    // targeted hint BEFORE the per-type schema (whose `.strict()`
+    // would otherwise emit a generic unrecognized-key message).
+    if (columnType === 'dependency') {
+      rejectDependencyBoardTargets(parsed);
+    }
     const schema = WRITABLE_SETTINGS_SCHEMAS[columnType];
     const result = schema.safeParse(parsed);
     if (!result.success) {
@@ -506,6 +662,7 @@ export const boardColumnCreateCommand: CommandModule<
     'monday board column-create 12345 --type text --title "Notes"',
     'monday board column-create 12345 --type status --title "Priority" --settings \'{"labels":["Low","Med","High"]}\'',
     'monday board column-create 12345 --type numbers --title "Cost" --settings \'{"unit":"USD"}\' --description "Budgeted cost"',
+    'monday board column-create 12345 --type board_relation --title "Linked Sprints" --settings \'{"boardIds":[67890],"allowMultipleItems":true}\'',
     'monday board column-create 12345 --type country --title "Region" --json',
     'monday board column-create 12345 --type text --title "Preview" --dry-run --json',
   ],
@@ -524,7 +681,7 @@ export const boardColumnCreateCommand: CommandModule<
       .requiredOption('--type <type>', 'column type (e.g. text, status, numbers — full ColumnType enum)')
       .requiredOption('--title <t>', 'column title')
       .option('--description <d>', 'column description')
-      .option('--settings <json>', 'type-specific settings JSON (status/dropdown labels, numbers unit, etc.)')
+      .option('--settings <json>', 'type-specific settings JSON (status/dropdown labels, numbers unit, board_relation boardIds, etc.)')
       .addHelpText(
         'after',
         ['', 'Examples:', ...boardColumnCreateCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
@@ -594,6 +751,38 @@ export const boardColumnCreateCommand: CommandModule<
           variables.description = parsed.description;
         }
         if (settings !== undefined) {
+          if (CREATE_TIME_SETTINGS_WRAP_TYPES.has(parsed.type)) {
+            // v0.8-M48 PRE-FLIGHT STUB. The argv surface ships live —
+            // the per-type settings schema, the int coercion, the
+            // dependency board-target rejection, and the dry-run echo
+            // above are all real. Only the LIVE wire-wrap leg
+            // (`variables.defaults = {settings}`) + its mocked-wire
+            // assertion test land at the M48 IMPL. Stubbed because the
+            // wire shape (`defaults: {settings: {…}}`) is the M19-bug
+            // class — wrong wrap = silently-inert settings — and is
+            // worth isolating into a focused IMPL review against a
+            // transport mock that mirrors the probe-confirmed wire.
+            // `m48_preflight_stub` is RESERVED post-IMPL (regression-
+            // guarded; never reused). parseArgv + parseSettingsFlag
+            // already ran above, so invalid argv still surfaces as
+            // usage_error (R-NEW-76), not this internal_error.
+            /* c8 ignore start */
+            throw new ApiError(
+              'internal_error',
+              'board column-create: v0.8-M48 pre-flight stub — the ' +
+                `create-time \`defaults.settings\` wrap for ${parsed.type} ` +
+                'columns lands at the M48 IMPL.',
+              {
+                details: {
+                  reason: 'm48_preflight_stub',
+                  column_type: parsed.type,
+                  board_id: parsed.boardId,
+                  milestone: 'v0.8-M48',
+                },
+              },
+            );
+            /* c8 ignore stop */
+          }
           variables.defaults = settings;
         }
 

@@ -3735,6 +3735,336 @@ describe('monday board column-create (integration, M16)', () => {
 });
 
 // =============================================================================
+// v0.8-M48 PRE-FLIGHT — writable board_relation / dependency create-time
+// settings (cli-design §4.3 column-create + §6.4 dry-run). The argv surface
+// ships live (per-type schema, int coercion, dependency same-board rejection,
+// dry-run echo); the live wire-wrap (`defaults: {settings: {…}}`) is a
+// c8-ignored stub throwing `m48_preflight_stub` until the M48 IMPL.
+// =============================================================================
+
+describe('monday board column-create — board_relation / dependency settings (v0.8-M48 pre-flight)', () => {
+  type SettingsDryRun = EnvelopeShape & {
+    data: null;
+    planned_changes: readonly {
+      operation: string;
+      type: string;
+      settings?: Record<string, unknown>;
+    }[];
+  };
+  type SettingsError = EnvelopeShape & {
+    error?: {
+      code: string;
+      message?: string;
+      details?: {
+        reason?: string;
+        column_type?: string;
+        rejected_keys?: readonly string[];
+        expected_keys?: readonly string[];
+        milestone?: string;
+        board_id?: string;
+        hint?: string;
+      };
+    };
+  };
+
+  // --- board_relation: schema + coercion (live argv via dry-run) ----------
+
+  it('dry-run: board_relation echoes the validated --settings object (boardIds + allowMultipleItems)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'Linked Sprints',
+        '--settings', '{"boardIds":[67890,67891],"allowMultipleItems":true}',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stdout) as SettingsDryRun;
+    expect(env.meta.source).toBe('none');
+    const plan = env.planned_changes[0];
+    expect(plan?.operation).toBe('create_column');
+    expect(plan?.type).toBe('board_relation');
+    // Dry-run echoes the UNWRAPPED agent shape (the wire wraps it under
+    // `settings` at IMPL; the echo mirrors input-side semantics).
+    expect(plan?.settings).toEqual({ boardIds: [67890, 67891], allowMultipleItems: true });
+  });
+
+  it('dry-run: board_relation coerces numeric-string boardIds/boardId to wire integers', async () => {
+    // Agents read board IDs as branded numeric strings (board describe);
+    // the schema accepts strings and coerces to int so the wire gets the
+    // integer Monday's defaults.settings requires. toEqual distinguishes
+    // 67890 (number) from "67890" (string), pinning the coercion.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'Linked',
+        '--settings', '{"boardIds":["67890"],"boardId":"67891"}',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as SettingsDryRun;
+    expect(env.planned_changes[0]?.settings).toEqual({ boardIds: [67890], boardId: 67891 });
+  });
+
+  it('dry-run: board_relation accepts the degenerate empty {boardIds:[]} (unconfigured column) + allowCreateReflectionColumn', async () => {
+    // Monday accepts empty boardIds at create (probe). Don't over-reject
+    // at the parse boundary — only structural / type validation.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'Empty',
+        '--settings', '{"boardIds":[],"allowCreateReflectionColumn":false}',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as SettingsDryRun;
+    expect(env.planned_changes[0]?.settings).toEqual({ boardIds: [], allowCreateReflectionColumn: false });
+  });
+
+  it('rejects board_relation --settings with an unrecognized key (strict) as usage_error with expected_keys', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'X',
+        '--settings', '{"notAKey":1}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('board_relation');
+    expect(env.error?.details?.expected_keys).toEqual([
+      'boardIds', 'boardId', 'allowMultipleItems', 'allowCreateReflectionColumn',
+    ]);
+  });
+
+  it('rejects board_relation non-integer boardIds (non-numeric string) as usage_error', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'X',
+        '--settings', '{"boardIds":["not-a-number"]}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('board_relation');
+  });
+
+  it('rejects board_relation non-integer boardId (fractional number) as usage_error', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'X',
+        '--settings', '{"boardId":1.5}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+  });
+
+  // --- dependency: same-board (D1) ----------------------------------------
+
+  it('dry-run: dependency accepts allowMultipleItems (the same-board-honoured knob)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'Blocks',
+        '--settings', '{"allowMultipleItems":true}',
+        '--dry-run', '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as SettingsDryRun;
+    expect(env.planned_changes[0]?.type).toBe('dependency');
+    expect(env.planned_changes[0]?.settings).toEqual({ allowMultipleItems: true });
+  });
+
+  it('rejects dependency --settings boardIds with a targeted same-board usage_error (rejected_keys + board_relation hint)', async () => {
+    // D1: dependency is same-board — Monday silently coerces an arbitrary
+    // target to the host board, so reject boardIds at the parse boundary
+    // with a hint pointing at board_relation rather than shipping the
+    // silent coercion. Runs in parseSettingsFlag BEFORE resolveClient, so
+    // requests stays 0 (argv-level → usage_error, R-NEW-76).
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'X',
+        '--settings', '{"boardIds":[67890]}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('dependency');
+    expect(env.error?.details?.rejected_keys).toEqual(['boardIds']);
+    expect(env.error?.details?.hint).toMatch(/board_relation/);
+    expect(env.error?.message).toMatch(/same-board/);
+  });
+
+  it('rejects dependency --settings boardId (scalar) too', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'X',
+        '--settings', '{"boardId":67890}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.rejected_keys).toEqual(['boardId']);
+  });
+
+  it('rejects dependency --settings carrying BOTH boardIds + boardId (plural message)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'X',
+        '--settings', '{"boardIds":[1],"boardId":2}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.details?.rejected_keys).toEqual(['boardIds', 'boardId']);
+    expect(env.error?.message).toMatch(/are not honoured/);
+  });
+
+  it('rejects dependency --settings with an unrecognized non-board key (strict, after the board-target check passes)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'X',
+        '--settings', '{"allowCreateReflectionColumn":true}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(1);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details?.column_type).toBe('dependency');
+    expect(env.error?.details?.expected_keys).toEqual(['allowMultipleItems']);
+  });
+
+  // --- pre-flight stub pins (live wire-wrap leg) --------------------------
+
+  it('PIN: live board_relation --settings throws the m48_preflight_stub (wire-wrap leg lands at IMPL; no wire call fires)', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'Linked',
+        '--settings', '{"boardIds":[67890]}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe('m48_preflight_stub');
+    expect(env.error?.details?.column_type).toBe('board_relation');
+    expect(env.error?.details?.milestone).toBe('v0.8-M48');
+    expect(env.error?.details?.board_id).toBe('12345');
+  });
+
+  it('PIN: live dependency --settings throws the m48_preflight_stub', async () => {
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'dependency',
+        '--title', 'Blocks',
+        '--settings', '{"allowMultipleItems":true}',
+        '--json',
+      ],
+      { interactions: [] },
+    );
+    expect(out.exitCode).toBe(2);
+    expect(out.requests).toBe(0);
+    const env = parseEnvelope(out.stderr) as SettingsError;
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details?.reason).toBe('m48_preflight_stub');
+    expect(env.error?.details?.column_type).toBe('dependency');
+  });
+
+  it('live board_relation WITHOUT --settings does NOT hit the stub (only the settings-wrap leg is stubbed)', async () => {
+    // board_relation with no --settings carries no defaults to wrap, so
+    // the create_column call fires normally — proving the stub guards
+    // only the settings path, not the type.
+    const out = await drive(
+      [
+        'board', 'column-create', '12345',
+        '--type', 'board_relation',
+        '--title', 'Linked',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: { boardId: '12345', columnType: 'board_relation', title: 'Linked' },
+            response: {
+              data: {
+                create_column: {
+                  id: 'rel_1',
+                  title: 'Linked',
+                  type: 'board_relation',
+                  description: null,
+                  archived: false,
+                  settings_str: '{"boardIds":[]}',
+                  width: null,
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & { data: { id: string; type: string } };
+    expect(env.ok).toBe(true);
+    expect(env.data.type).toBe('board_relation');
+  });
+});
+
+// =============================================================================
 // M16 — board column-update (cli-design §4.3 + §6.4 + §8 fan-out invalidation)
 // =============================================================================
 
