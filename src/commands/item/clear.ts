@@ -73,6 +73,7 @@ import {
   foldAndRemap,
   foldResolverWarningsIntoError,
 } from '../../api/resolver-error-fold.js';
+import { reThrowDecorated } from '../../api/error-decoration.js';
 import { planClear } from '../../api/dry-run.js';
 import { resolveBoardId } from '../../api/item-board-lookup.js';
 import { buildColumnArchivedError } from '../../api/resolution-pass.js';
@@ -829,48 +830,21 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
            defined record. The fallback covers the contrived no-
            details edge case. */
         const existing = remapped.details ?? {};
-        /* c8 ignore next 12 — defensive: foldAndRemap only emits
-           usage_error for a translator-side argv mismatch (e.g.
-           --set X=bad alongside --set-raw X={...}); bulk clear has
-           no --set / --set-raw values to translate (it operates on
-           the resolved column ID + the per-type clear payload). The
-           branch is kept symmetric with bulk update's per-item
-           failure handling so the two surfaces stay diff-able. */
-        if (remapped.code === 'usage_error') {
-          throw new UsageError(remapped.message, {
-            ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-            details: {
-              ...existing,
-              applied_count: appliedItems.length,
-              applied_to: appliedItems.map((i) => i.id),
-              failed_at_item: itemId,
-              matched_count: matchedItemIds.length,
-            },
-          });
-        }
-        // Conditional spreads mirror bulk update's MondayCliError →
-        // ApiError reconstruction. Each `?? :` carries metadata only
-        // when present on the source error; the per-Monday-error
-        // permutations (httpStatus / mondayCode / requestId /
-        // retryAfterSeconds set or unset) come from Monday's error
-        // shape and aren't all exercised by a single fixture.
-        /* c8 ignore start */
-        throw new ApiError(remapped.code, remapped.message, {
-          ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-          ...(remapped.httpStatus === undefined ? {} : { httpStatus: remapped.httpStatus }),
-          ...(remapped.mondayCode === undefined ? {} : { mondayCode: remapped.mondayCode }),
-          ...(remapped.requestId === undefined ? {} : { requestId: remapped.requestId }),
-          retryable: remapped.retryable,
-          ...(remapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: remapped.retryAfterSeconds }),
-          details: {
-            ...existing,
-            applied_count: appliedItems.length,
-            applied_to: appliedItems.map((i) => i.id),
-            failed_at_item: itemId,
-            matched_count: matchedItemIds.length,
-          },
+        // The typed split (usage_error → UsageError, else → ApiError)
+        // plus the conditional wire-metadata spreads now live in the
+        // shared `reThrowDecorated` helper (R-v0.7-NEW-5); bulk clear
+        // assembles its own bulk-progress decoration and delegates.
+        // The usage_error arm is unreachable here (bulk clear has no
+        // --set / --set-raw to translate) but the helper covers both
+        // arms in its focused unit test, so this site no longer needs
+        // the c8-ignore the inlined split carried.
+        reThrowDecorated(remapped, {
+          ...existing,
+          applied_count: appliedItems.length,
+          applied_to: appliedItems.map((i) => i.id),
+          failed_at_item: itemId,
+          matched_count: matchedItemIds.length,
         });
-        /* c8 ignore stop */
       }
     }
   }

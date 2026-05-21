@@ -99,6 +99,10 @@ import {
   foldAndRemap,
   mergeResolverWarningsIntoError,
 } from '../../api/resolver-error-fold.js';
+import {
+  projectCauseForEnvelope,
+  reThrowDecorated,
+} from '../../api/error-decoration.js';
 import { planChanges } from '../../api/dry-run.js';
 import { buildQueryParams } from '../../api/filters.js';
 import {
@@ -1432,34 +1436,16 @@ const runBulk = async (inputs: RunBulkInputs): Promise<void> => {
           resolutionSource: remapSource,
         });
         // Decorate with bulk-progress details so agents can see how
-        // many items mutated successfully before the failure.
+        // many items mutated successfully before the failure, then
+        // delegate the typed split + wire-metadata spreads to the
+        // shared `reThrowDecorated` helper (R-v0.7-NEW-5).
         const existing = remapped.details ?? {};
-        if (remapped.code === 'usage_error') {
-          throw new UsageError(remapped.message, {
-            ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-            details: {
-              ...existing,
-              applied_count: appliedItems.length,
-              applied_to: appliedItems.map((i) => i.id),
-              failed_at_item: itemId,
-              matched_count: matchedItemIds.length,
-            },
-          });
-        }
-        throw new ApiError(remapped.code, remapped.message, {
-          ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-          ...(remapped.httpStatus === undefined ? {} : { httpStatus: remapped.httpStatus }),
-          ...(remapped.mondayCode === undefined ? {} : { mondayCode: remapped.mondayCode }),
-          ...(remapped.requestId === undefined ? {} : { requestId: remapped.requestId }),
-          retryable: remapped.retryable,
-          ...(remapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: remapped.retryAfterSeconds }),
-          details: {
-            ...existing,
-            applied_count: appliedItems.length,
-            applied_to: appliedItems.map((i) => i.id),
-            failed_at_item: itemId,
-            matched_count: matchedItemIds.length,
-          },
+        reThrowDecorated(remapped, {
+          ...existing,
+          applied_count: appliedItems.length,
+          applied_to: appliedItems.map((i) => i.id),
+          failed_at_item: itemId,
+          matched_count: matchedItemIds.length,
         });
       }
       throw err;
@@ -1704,13 +1690,15 @@ const runItemUpdateSingleFileDispatch = async (
 //   - R-NEW-72 (post-fix-up cross-doc grep) — apply at every
 //     Codex IMPL fix-up round that flips a contract surface.
 //
-// **Future lift candidate.** The fail-fast error-decoration block
-// (`if (err.code === 'usage_error') { throw new UsageError(...) } else
-// { throw new ApiError(...) }`) is byte-equivalent across this
-// helper and the JSON-bulk action body (R-NEW-58 2-consumer
-// trigger). Lift candidate fires at the 3rd consumer (M43 create-
-// time fold may add one if its rollback / orphan-warn shape
-// re-uses the same decoration).
+// **R-v0.7-NEW-5 — SHIPPED (v0.8 refactor cluster).** The fail-fast
+// error-decoration block (the `usage_error → UsageError` / else →
+// `ApiError` typed split + the conditional wire-metadata spreads)
+// reached 4 consumers (this helper + the JSON-bulk action body + the
+// M46 file-bulk-multi path + bulk clear) and was lifted to
+// `reThrowDecorated` in `src/api/error-decoration.ts`. Each site now
+// assembles its own `details` decoration and delegates the typed
+// split; the helper carries the focused unit test that recovers the
+// conditional-spread branch coverage.
 // ============================================================
 
 /**
@@ -2119,9 +2107,9 @@ export const runItemUpdateBulkFileDispatch = async (
           // fail-fast error so a follow-up read doesn't serve stale
           // metadata. Mirrors the M38 single-item invalidate-on-
           // success pattern; the JSON-bulk fail-fast path has the
-          // same gap (unchanged by this commit — separate lift
-          // candidate per the future-lift-candidate note in the
-          // module docstring).
+          // same cache-invalidation gap (still-open lift candidate,
+          // unrelated to the now-shipped R-v0.7-NEW-5 error-decoration
+          // lift).
           if (appliedAssets.length > 0) {
             await invalidateBoard(inputs.boardId, inputs.ctx.env);
           }
@@ -2144,10 +2132,11 @@ export const runItemUpdateBulkFileDispatch = async (
             noCache: inputs.noCache,
             resolutionSource: remapSource,
           });
-          // Same decoration shape as the JSON-bulk fail-fast path
-          // (lines ~1334-1361 above). Preserves the existing error
-          // class' fields and grafts `applied_count` / `applied_to`
-          // / `failed_at_item` / `matched_count` onto `details`.
+          // Same decoration shape as the JSON-bulk fail-fast path in
+          // `runBulk` above. Grafts `applied_count` / `applied_to` /
+          // `failed_at_item` / `matched_count` onto `details`, then
+          // delegates the typed split to `reThrowDecorated` (which
+          // preserves the existing error class' wire-metadata fields).
           const existing = remapped.details ?? {};
           const decoration = {
             ...existing,
@@ -2156,33 +2145,7 @@ export const runItemUpdateBulkFileDispatch = async (
             failed_at_item: itemId,
             matched_count: inputs.matchedItemIds.length,
           };
-          if (remapped.code === 'usage_error') {
-            throw new UsageError(remapped.message, {
-              ...(remapped.cause === undefined
-                ? {}
-                : { cause: remapped.cause }),
-              details: decoration,
-            });
-          }
-          throw new ApiError(remapped.code, remapped.message, {
-            ...(remapped.cause === undefined
-              ? {}
-              : { cause: remapped.cause }),
-            ...(remapped.httpStatus === undefined
-              ? {}
-              : { httpStatus: remapped.httpStatus }),
-            ...(remapped.mondayCode === undefined
-              ? {}
-              : { mondayCode: remapped.mondayCode }),
-            ...(remapped.requestId === undefined
-              ? {}
-              : { requestId: remapped.requestId }),
-            retryable: remapped.retryable,
-            ...(remapped.retryAfterSeconds === undefined
-              ? {}
-              : { retryAfterSeconds: remapped.retryAfterSeconds }),
-            details: decoration,
-          });
+          reThrowDecorated(remapped, decoration);
         }
         // Non-CliError programmer bug — re-throw to the runner's
         // catch-all (surfaces as `internal_error` whole-call;
@@ -2599,13 +2562,7 @@ const runItemUpdateSingleFileMultiDispatch = async (
       await invalidateBoard(inputs.boardId, inputs.ctx.env);
     }
     const cause = dispatch.failure.cause;
-    const causeProjection: Record<string, unknown> = {
-      code: cause.code,
-      message: cause.message,
-    };
-    if (cause.details !== undefined) {
-      causeProjection.details = cause.details;
-    }
+    const causeProjection = projectCauseForEnvelope(cause);
     throw new ApiError(
       'internal_error',
       `Multi-file \`--set\` on item ${inputs.itemId} partially failed: ` +
@@ -2851,29 +2808,7 @@ const runItemUpdateBulkFileMultiDispatch = async (
           file_count: fileCount,
           file_column_ids: fileColumnIds,
         };
-        if (remapped.code === 'usage_error') {
-          throw new UsageError(remapped.message, {
-            ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-            details: decoration,
-          });
-        }
-        throw new ApiError(remapped.code, remapped.message, {
-          ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
-          ...(remapped.httpStatus === undefined
-            ? {}
-            : { httpStatus: remapped.httpStatus }),
-          ...(remapped.mondayCode === undefined
-            ? {}
-            : { mondayCode: remapped.mondayCode }),
-          ...(remapped.requestId === undefined
-            ? {}
-            : { requestId: remapped.requestId }),
-          retryable: remapped.retryable,
-          ...(remapped.retryAfterSeconds === undefined
-            ? {}
-            : { retryAfterSeconds: remapped.retryAfterSeconds }),
-          details: decoration,
-        });
+        reThrowDecorated(remapped, decoration);
       }
       fullyApplied.push({ itemId, assets: dispatch.assets });
     }

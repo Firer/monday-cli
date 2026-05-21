@@ -4,27 +4,25 @@
  * R-v0.8-NEW-6; full pattern detail in `docs/v0.7-plan.md` §22
  * R-v0.7-NEW-5).
  *
- * **Status: PRE-FLIGHT STUB — runtime bodies + the 7 call-site rewires
- * + the focused unit tests land at the v0.8 refactor-cluster IMPL
- * session.** Both functions below are c8-ignored stub throws this
- * session; NEITHER is wired into a call site yet. The 7 inline sites
- * (4 `reThrowDecorated`, 3 `projectCauseForEnvelope`) stay byte-for-byte
- * as they are until IMPL swaps the stub for the runtime body and
- * delegates each site. This mirrors the v0.6-M38 `file-column-set.ts`
- * pre-flight-stub-then-IMPL shape, minus the wire/argv surface — this
- * is a pure internal lift (no probe, no new ERROR_CODES, no cli-design
- * section, no new command). See R-v0.7-NEW-3 for the stub-body
- * conventions (the `details.reason: '<id>_preflight_stub'` +
- * `details.milestone` discriminator pair); R-NEW-76's
- * parseArgv-BEFORE-c8 boundary rule does NOT apply here because the
- * helpers have no argv surface to ship.
+ * **Status: SHIPPED at the v0.8 refactor-cluster IMPL.** Both runtime
+ * bodies below replace the pre-flight c8-ignored stub throws; the 7
+ * inline sites (4 `reThrowDecorated`, 3 `projectCauseForEnvelope`) now
+ * delegate the lifted surface, and the focused unit suite
+ * (`tests/unit/api/error-decoration.test.ts`) drives the coverage
+ * ratchet (the conditional-spread arms that previously dragged
+ * `item/update.ts` to ~80%). This was a pure internal lift — no probe,
+ * no new ERROR_CODES, no cli-design section, no new command,
+ * byte-for-byte behaviour-preserving at every site. The pre-flight
+ * shape mirrored v0.6-M38 `file-column-set.ts` (stub-then-IMPL, minus
+ * the wire/argv surface); R-NEW-76's parseArgv-BEFORE-c8 boundary rule
+ * did NOT apply here because the helpers have no argv surface.
  *
  * **Why a dedicated cluster (not folded into a feature milestone).**
  * `reThrowDecorated` spans 4 unrelated mutation paths (item-clear-bulk
  * / JSON-bulk / M42 file-bulk / M46 file-bulk-multi) — too broad to
  * ride one feature's IMPL, and 3 of the 4 are unrelated to M47/M48's
- * feature work. The lift is scheduled ahead of M47 specifically so the
- * fail-fast scaffold is consolidated BEFORE M47 would add a 5th touch.
+ * feature work. The lift landed ahead of M47 specifically so the
+ * fail-fast scaffold was consolidated BEFORE M47 would add a 5th touch.
  *
  * ---
  *
@@ -44,9 +42,10 @@
  *   conditional-spread metadata arms (`cause` on both arms;
  *   `httpStatus` / `mondayCode` / `requestId` / `retryAfterSeconds`
  *   plus the unconditional `retryable: remapped.retryable` on the
- *   ApiError arm). These spreads are the uncovered branches that drag
- *   `item/update.ts` to 79.42% — consolidating them into ONE helper +
- *   ONE focused unit test recovers the margin (the 4-path ratchet).
+ *   ApiError arm). These spreads were the uncovered branches that
+ *   dragged `item/update.ts` to 79.42% — consolidating them into ONE
+ *   helper + ONE focused unit test recovered the margin (the 4-path
+ *   ratchet; `item/update.ts` branches 79.42% → 87.27%).
  *
  * **STAYS INLINE (the over-fit boundary — each site's own work):** the
  *   `foldAndRemap` call, `const existing = remapped.details ?? {}`, and
@@ -70,10 +69,10 @@
  * **LIFTED:** ONLY the ~4-line projection builder — seed
  *   `{ code, message }` from the (already-remapped, or raw-`MondayCliError`)
  *   error, then conditionally attach `details`. (At the two create
- *   sites the `if (err.details !== undefined)` arm is currently
- *   c8-ignored as defensive; the builder's own unit test drives both a
- *   details-present and a details-absent error, so the IMPL DROPS those
- *   c8-ignore directives and genuinely covers both arms.)
+ *   sites the `if (err.details !== undefined)` arm was c8-ignored as
+ *   defensive while inlined; the builder's own unit test now drives
+ *   both a details-present and a details-absent error, so this lift
+ *   dropped those c8-ignore directives and genuinely covers both arms.)
  *
  * **STAYS INLINE (why this is structurally distinct from
  *   `reThrowDecorated`, not the same lift):** the surrounding
@@ -90,7 +89,7 @@
  *   full distinctness argument.
  */
 
-import { ApiError, type MondayCliError } from '../utils/errors.js';
+import { ApiError, UsageError, type MondayCliError } from '../utils/errors.js';
 
 /**
  * Re-throws a `foldAndRemap`-decorated bulk/fail-fast error, rebuilding
@@ -100,8 +99,8 @@ import { ApiError, type MondayCliError } from '../utils/errors.js';
  * `validation_failed → column_archived` stale-cache remap, and has
  * assembled the full `details` decoration (its `...existing` spread
  * plus the per-site progress slots). This helper owns ONLY the typed
- * split: `usage_error` rebuilds as `UsageError` (imported at IMPL);
- * any other code rebuilds as {@link ApiError} preserving the wire metadata
+ * split: `usage_error` rebuilds as {@link UsageError}; any other code
+ * rebuilds as {@link ApiError} preserving the wire metadata
  * (`httpStatus` / `mondayCode` / `requestId` / `retryAfterSeconds` /
  * `retryable`) via conditional spreads. Always throws — return type is
  * `never` so callers don't need a trailing unreachable statement.
@@ -111,32 +110,33 @@ import { ApiError, type MondayCliError } from '../utils/errors.js';
  * @param details the fully-assembled decoration record (already
  *   including the `...existing` spread of `remapped.details`)
  */
-/* c8 ignore start -- pre-flight stub: the WHOLE declaration is wrapped
-   (not just the body) so this unwired function stays fully out of the
-   coverage denominator INCLUDING the `functions` metric — wrapping only
-   the body still counts `FN:reThrowDecorated` as FNF/FNH:0 (Codex
-   pre-flight R1 P2-1). The runtime typed-split body + the 4 call-site
-   delegations + the focused unit test land at the v0.8 refactor-cluster
-   IMPL session (R-v0.7-NEW-3 stub-body conventions). */
 export function reThrowDecorated(
   remapped: MondayCliError,
   details: Record<string, unknown>,
 ): never {
-  throw new ApiError(
-    'internal_error',
-    'reThrowDecorated: pre-flight stub — the runtime typed-split body ' +
-      'lands at the v0.8 refactor-cluster IMPL',
-    {
-      details: {
-        reason: 'refactor_cluster_preflight_stub',
-        milestone: 'v0.8-refactor-cluster',
-        helper: 'reThrowDecorated',
-        remapped_code: remapped.code,
-        detail_keys: Object.keys(details),
-      },
-    },
-  );
-  /* c8 ignore stop */
+  // usage_error rebuilds as UsageError — the only metadata it carries
+  // is the optional `cause` chain. Every other code rebuilds as
+  // ApiError preserving the wire metadata via conditional spreads
+  // (each `?? :` attaches a field only when the source error carried
+  // it; the per-Monday-error permutations of httpStatus / mondayCode /
+  // requestId / retryAfterSeconds set-or-unset aren't all exercised by
+  // any single call site, which is why they lived as uncovered branches
+  // before this lift folded them into one tested helper).
+  if (remapped.code === 'usage_error') {
+    throw new UsageError(remapped.message, {
+      ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
+      details,
+    });
+  }
+  throw new ApiError(remapped.code, remapped.message, {
+    ...(remapped.cause === undefined ? {} : { cause: remapped.cause }),
+    ...(remapped.httpStatus === undefined ? {} : { httpStatus: remapped.httpStatus }),
+    ...(remapped.mondayCode === undefined ? {} : { mondayCode: remapped.mondayCode }),
+    ...(remapped.requestId === undefined ? {} : { requestId: remapped.requestId }),
+    retryable: remapped.retryable,
+    ...(remapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: remapped.retryAfterSeconds }),
+    details,
+  });
 }
 
 /**
@@ -150,27 +150,19 @@ export function reThrowDecorated(
  *   projected into the agent-inspectable `details.cause` slot
  * @returns the projection record for embedding under `details.cause`
  */
-/* c8 ignore start -- pre-flight stub: the WHOLE declaration is wrapped
-   (same `functions`-metric reason as `reThrowDecorated` above; Codex
-   pre-flight R1 P2-1). The runtime builder body + the 3 call-site
-   delegations + the focused unit test (both details-present +
-   details-absent arms) land at the v0.8 refactor-cluster IMPL session;
-   unwired this session. */
 export function projectCauseForEnvelope(
   err: MondayCliError,
 ): Record<string, unknown> {
-  throw new ApiError(
-    'internal_error',
-    'projectCauseForEnvelope: pre-flight stub — the runtime builder ' +
-      'body lands at the v0.8 refactor-cluster IMPL',
-    {
-      details: {
-        reason: 'refactor_cluster_preflight_stub',
-        milestone: 'v0.8-refactor-cluster',
-        helper: 'projectCauseForEnvelope',
-        err_code: err.code,
-      },
-    },
-  );
-  /* c8 ignore stop */
+  const projection: Record<string, unknown> = {
+    code: err.code,
+    message: err.message,
+  };
+  // `details` is optional on MondayCliError; attach it only when the
+  // source error carried one. Both arms are driven by the helper's
+  // focused unit test, so the two create-site call sites can drop the
+  // c8-ignore that previously masked the details-absent arm.
+  if (err.details !== undefined) {
+    projection.details = err.details;
+  }
+  return projection;
 }

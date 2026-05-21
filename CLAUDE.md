@@ -35,25 +35,26 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** **4203 tests pass + 3 skipped** (post-M49 skips:
-  the 2 pre-existing + the RUN_LIVE_TESTS-gated multipart-upload smoke
-  test; the new green count adds the R-v0.8-NEW-11 shared-helper unit
-  suite + the M46 coverage-arm tests). **✅ CI `test:coverage` now
-  PASSES:** global **branch coverage 95.47% (4452/4663) vs the 95.45%
-  floor** — the R-v0.8-NEW-10 gap (was 95.14%) is closed. Done by
-  (i) the **R-v0.8-NEW-11** transport-helper lift (the duplicated
-  defensive arms in `transport.ts` + `multipart-transport.ts` collapse
-  into one tested `fetch-transport-helpers.ts`; all three now ZERO
-  uncovered arms) + (ii) targeted M46 multi-file `--set` dispatch-arm
-  tests (`item/create.ts` 82.31% → 86.58%; `item/update.ts` bulk-multi
-  first-leg fail-fast arm). `item/update.ts` stays 79.42% — its
-  residual uncovered arms are the R-v0.7-NEW-5 conditional-spreads,
-  recovered by the refactor-cluster IMPL's 4-path ratchet (now
-  pre-flighted at `ca615e7`). **29 ERROR_CODES**; **117 commands**
-  (the refactor-cluster pre-flight at `ca615e7` adds an unwired,
-  fully-c8-ignored `src/api/error-decoration.ts` stub — no command, no
-  error code, no test/coverage delta; functions denominator drops
-  1352→1350 as the stub is excluded); `npm audit` **0 vulnerabilities**.
+- **Live numbers:** **4211 tests pass + 3 skipped** (3 skips: the 2
+  pre-existing + the RUN_LIVE_TESTS-gated multipart-upload smoke test;
+  the +8 vs the prior 4203 is the refactor-cluster's
+  `tests/unit/api/error-decoration.test.ts` 4-path ratchet). **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.88%
+  (4444/4635) vs the 95.45% floor** (was 95.47% before the refactor
+  cluster — the R-v0.8-NEW-10 gap, originally 95.14%, stays closed).
+  The **v0.8 refactor cluster** (`reThrowDecorated` +
+  `projectCauseForEnvelope` lift; see below) recovered the
+  R-v0.7-NEW-5 conditional-spread arms: **`item/update.ts` branches
+  79.42% → 87.27%** (the arms left the command-file denominators and
+  landed COVERED in `src/api/error-decoration.ts`'s helper). Earlier
+  contributors still hold: the **R-v0.8-NEW-11** transport-helper lift
+  (`fetch-transport-helpers.ts`, all three transports ZERO uncovered
+  arms) + the M46 dispatch-arm tests (`item/create.ts` 82.31% →
+  86.58%). **29 ERROR_CODES**; **117 commands** (the refactor cluster
+  added no command/error-code — a pure internal lift); **functions
+  99.11% (1340/1352)** (the 2 helpers are now wired + counted + hit,
+  rejoining the denominator COVERED — vs the pre-flight stub's
+  excluded 1350); `npm audit` **0 vulnerabilities**.
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -61,56 +62,47 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.8 refactor-cluster IMPL** — swap the two
-  c8-ignored stubs in `src/api/error-decoration.ts` for runtime
-  bodies, delegate the **7 inline call sites** to them, run the
-  **4-path coverage ratchet**, then Codex IMPL review. **Pre-flight is
-  DONE this session:** both helper signatures pinned + stub-landed
-  (`src/api/error-decoration.ts`, unwired + fully c8-ignored) + the
-  inline-vs-lift boundary table + PD1–PD5 decisions + the ratchet plan
-  documented at `docs/v0.8-plan.md` §3 "Pre-flight (stub commit)";
-  **Codex pre-flight R1 CONVERGED (0 P1)** — P2-1 (c8-ignore moved
-  above the function declarations so `functions` denominator drops
-  1352→1350, FNF:0 for the module) + P3-1 (ratchet plan now drives the
-  ApiError-arm's OWN `cause` spread, 5 spreads not 4) both applied +
-  gate-verified. **IMPL work:** (i) `reThrowDecorated` body = the typed
-  `usage_error`→`UsageError` / else→`ApiError` split + the 5
-  conditional-spread metadata arms; (ii) `projectCauseForEnvelope` body
-  = the `{code,message}` + optional-`details` builder; (iii) delegate
-  the 4 `reThrowDecorated` sites (clear `:839` / JSON-bulk `:1437` /
-  M42 `:2159` / M46-multi `:2854`) + 3 `projectCauseForEnvelope` sites
-  (create `:1976` / `:2373` / update `:2602`), REMOVING the now-covered
-  c8-ignores (clear `:832`–`:873`; create `:1984` / `:2377`); (iv) the
-  focused `tests/unit/api/error-decoration.test.ts` ratchet — recovers
-  the conditional-spread arms left uncovered in `item/update.ts`
-  (~80%) + widens the thin global branch margin (95.47% vs 95.45%
-  floor). **Standby (both probe DONE, neither blocked):** (a) M47 —
-  stdin file `--set`
-  `<file-col>=-` (D7 closure; `--filename` OPTIONAL, default a
-  non-empty placeholder; R-v0.8-NEW-2 rename folds in); (b) M48 —
-  writable board_relation settings (`create_column`, JSON not
-  multipart; open D1 `dependency`-divergence decision for its
-  pre-flight). **v0.8-M49 is DONE** (`2ec67ad`):
-  `src/api/multipart-transport.ts` emits Monday's native multipart
-  shape; full close at `docs/v0.8-plan.md` §3 M49.
+- **Next session:** **v0.8 candidate-selection** (R-NEW-75 — ≥2
+  backlog candidates remain: M47 + M48 + release-prep). Run the
+  dedicated pre-pre-flight: scope each against the five dimensions
+  (wire-shape novelty / transport seam / destructive gate / R-class
+  triggers / Codex round estimate), recommend ONE with neutral
+  trade-offs, then `AskUserQuestion` for the binding pick. Candidates:
+  (a) **M47** — stdin file `--set` `<file-col>=-` (D7 closure;
+  UNBLOCKED by M49; probe DONE — `--filename` OPTIONAL, default a
+  non-empty placeholder; R-v0.8-NEW-2 `enforceSingleFileColumnSet`
+  rename folds in); (b) **M48** — writable board_relation/dependency
+  settings (`create_column`, JSON not multipart; probe DONE outcome
+  (b); open D1 `dependency`-divergence decision at its pre-flight);
+  (c) **release-prep cluster** (R-v0.8-NEW-4 schema parse-test backfill
+  folds into its envelope-snapshot probe). **✅ v0.8 refactor cluster
+  SHIPPED 2026-05-21** (`refactor(api): lift reThrowDecorated +
+  projectCauseForEnvelope`): both stubs swapped for runtime bodies, 7
+  sites delegated, 6 c8-ignores removed, 4-path ratchet landed; Codex
+  IMPL CONVERGED at R4 (0 P1/P2 across all 4 rounds — pure W9 prose
+  drift); branches 95.47% → 95.88%, `item/update.ts` 79.42% → 87.27%.
+  **v0.8-M49 is DONE** (`2ec67ad`): `src/api/multipart-transport.ts`
+  emits Monday's native multipart shape; full close at
+  `docs/v0.8-plan.md` §3 M49.
 
   **v0.8 committed scope (post-M49), rough build order** (revised
-  2026-05-21 at candidate-selection — the refactor cluster moves to
-  NEXT after M49; M47 + M48 drop to standby behind it):
+  2026-05-21 — M49 + the refactor cluster SHIPPED; M47 + M48 +
+  release-prep remain, next session runs candidate-selection among
+  them):
   - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
     `2ec67ad`** (Codex R1 CONVERGED, live-verified).
-  - **v0.8 refactor cluster** — **← IMPL NEXT (pre-flight DONE
-    2026-05-21, Codex R1 CONVERGED 0 P1; stub at
-    `src/api/error-decoration.ts`).** R-v0.7-NEW-5 `reThrowDecorated`
-    fail-fast-scaffold lift (4 consumers: clear / JSON-bulk / M42
-    file-bulk / M46 file-bulk-multi) + R-v0.8-NEW-6
-    `projectCauseForEnvelope` builder (3 consumers; bundled, both in
-    mutation-path catch arms). Standalone `src/api/` lift — too broad
-    to ride a feature IMPL. Picked first to consolidate the fail-fast
-    scaffold across the M42/M46 file-set paths before M47 adds a 5th
-    touch, and to widen the thin coverage margin. IMPL: swap stubs for
-    runtime bodies + delegate the 7 sites + the 4-path ratchet +
-    Codex IMPL review.
+  - **v0.8 refactor cluster** — **✅ SHIPPED 2026-05-21**
+    (`refactor(api): lift reThrowDecorated + projectCauseForEnvelope`;
+    pre-flight `ca615e7`, Codex IMPL CONVERGED R4, 0 P1/P2).
+    R-v0.7-NEW-5 `reThrowDecorated` fail-fast-scaffold lift (4
+    consumers: clear / JSON-bulk / M42 file-bulk / M46 file-bulk-multi)
+    + R-v0.8-NEW-6 `projectCauseForEnvelope` builder (3 consumers;
+    bundled, both in mutation-path catch arms) now live in
+    `src/api/error-decoration.ts`; the 7 sites delegate. Standalone
+    `src/api/` lift consolidated the fail-fast scaffold across the
+    M42/M46 file-set paths before M47 adds a 5th touch, and widened the
+    thin coverage margin (branches 95.47% → 95.88%; `item/update.ts`
+    79.42% → 87.27%). Full close at `docs/v0.8-plan.md` §3 + §22.
   - **M47** *(standby)* — stdin file `--set` `<file-col>=-` (D7 closure).
     **UNBLOCKED by M49.** Probe DONE: `--filename` is OPTIONAL (any
     non-empty name works — `"stdin"` / default `"blob"`; empty → 500),

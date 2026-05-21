@@ -112,6 +112,7 @@ import {
   foldAndRemap,
   mergeResolverWarningsIntoError,
 } from '../../api/resolver-error-fold.js';
+import { projectCauseForEnvelope } from '../../api/error-decoration.js';
 import { planCreate, type CreateMode } from '../../api/dry-run.js';
 import { loadBoardMetadata } from '../../api/board-metadata.js';
 import { assertResponseFieldPresent } from '../../api/response-root.js';
@@ -1555,20 +1556,22 @@ const executeCreateSubitem = async (
 // `src/utils/file-source.ts` (R-v0.6-NEW-1 4th-consumer site;
 // 5-consumer graduation threshold not yet hit).
 //
-// **R-v0.7-NEW-5 inline decision.** The fail-fast error-
-// decoration block (`if (err.code === 'usage_error') {
-// throw UsageError(...) } else { throw ApiError(...) }` with
-// stale-cache remap + per-record `applied_count` / `applied_
-// to` / `failed_at_item` / `matched_count` decoration) at
-// JSON-bulk `update.ts:1334-1361` + file-bulk
-// `runItemUpdateBulkFileDispatch` does NOT tip to its 3rd
-// consumer at v0.7-M43 IMPL: M43's leg-2 catch is structurally
-// distinct (always-`internal_error` outer code with the
-// remapped error embedded as a `details.cause` JSON projection,
-// vs preserve-remapped-code with typed re-throw + decoration).
-// The lift stays deferred at 2 consumers; v0.7-plan §22
-// R-v0.7-NEW-5 carries the rationale + future-consumer
-// triggers.
+// **R-v0.7-NEW-5 inline decision (still holds post-lift).** The
+// fail-fast error-decoration block (`if (err.code ===
+// 'usage_error') { throw UsageError(...) } else { throw
+// ApiError(...) }` with stale-cache remap + per-record
+// `applied_count` / `applied_to` / `failed_at_item` /
+// `matched_count` decoration) shipped as `reThrowDecorated`
+// (`src/api/error-decoration.ts`) at the v0.8 refactor cluster,
+// across its 4 bulk fail-fast consumers. M43's leg-2 catch here
+// is structurally distinct and so does NOT delegate to it:
+// always-`internal_error` outer code with the remapped error
+// embedded as a `details.cause` JSON projection, vs
+// preserve-remapped-code with typed re-throw + decoration. This
+// site instead delegates only the cause projection to
+// R-v0.8-NEW-6's `projectCauseForEnvelope`; v0.7-plan §22
+// R-v0.7-NEW-5 "M43 IMPL outcome" carries the distinctness
+// rationale.
 // ============================================================
 
 interface RunItemCreateFileDispatchInputs {
@@ -1972,19 +1975,11 @@ const runItemCreateFileDispatch = async (
       // shape; the remapped error embeds as `details.cause` JSON
       // projection so the agent sees `{code, message, details?}`
       // for the underlying failure. Error.cause threads the
-      // remapped error for stack debugging in `--debug` mode.
-      const causeProjection: Record<string, unknown> = {
-        code: remapped.code,
-        message: remapped.message,
-      };
-      // Defensive: M31's wire-error rewraps (and foldAndRemap) always
-      // populate `details` on the returned error in practice; the
-      // undefined-arm exists only to satisfy the optional shape on
-      // the `MondayCliError` type.
-      /* c8 ignore next 3 */
-      if (remapped.details !== undefined) {
-        causeProjection.details = remapped.details;
-      }
+      // remapped error for stack debugging in `--debug` mode. The
+      // shared `projectCauseForEnvelope` builder (R-v0.8-NEW-6) owns
+      // the `{code, message, details?}` shape; its focused unit test
+      // covers the details-absent arm this site previously c8-ignored.
+      const causeProjection = projectCauseForEnvelope(remapped);
 
       const createdItemId = leg1Result.projected.id;
       throw new ApiError(
@@ -2370,14 +2365,9 @@ const runItemCreateFileMultiDispatch = async (
       resolutionSource: inputs.metaSource ?? 'live',
     });
 
-    const causeProjection: Record<string, unknown> = {
-      code: remapped.code,
-      message: remapped.message,
-    };
-    /* c8 ignore next 3 */
-    if (remapped.details !== undefined) {
-      causeProjection.details = remapped.details;
-    }
+    // Shared cause-projection builder (R-v0.8-NEW-6) — same
+    // `{code, message, details?}` shape as the M43 single-file site.
+    const causeProjection = projectCauseForEnvelope(remapped);
 
     const failedColumn = dispatch.failure.failedColumn;
     throw new ApiError(
