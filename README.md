@@ -49,7 +49,7 @@ Requires **Node.js ≥ 22**.
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
 #
 #    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.7.0 — the verb surfaces a clear `usage_error.details.reason:
+#    v0.8.0 — the verb surfaces a clear `usage_error.details.reason:
 #    oauth_unregistered` pointing here. Authenticate via the env var.
 export MONDAY_API_TOKEN="<your-token>"
 
@@ -117,8 +117,8 @@ monday user team-list --json
 monday user team-create --name "Platform" --users 7,9 --json
 monday user team-add-members <tid> --users 11,13 --json
 
-# 13. Files-shaped friendly `--set` writes — the v0.6 → v0.7 carve-out
-#     set, all four CLI shapes reaching Monday's `add_file_to_column`
+# 13. Files-shaped friendly `--set` writes — the v0.6 → v0.8 carve-out
+#     set, every CLI shape reaching Monday's `add_file_to_column`
 #     multipart wire:
 #     - v0.6-M38 ships single-item friendly `--set <file-col>=<path>`
 #       on `monday item set` + `monday item update <iid>` (sibling-
@@ -130,9 +130,21 @@ monday user team-add-members <tid> --users 11,13 --json
 #       --set <file-col>=<path>` as a two-leg `create_item` +
 #       `add_file_to_column` dispatch under the §5.8 orphan-warn
 #       atomicity envelope.
-#     The v0.4-M31 verb-shaped `monday item upload` path remains as
-#     the alternative. `--dry-run` emits `planned_changes` on every
-#     shape without the multipart round-trip.
+#     - v0.8-M46 lifts the single-file gate: multiple `--set
+#       <file-col>=<path>` entries per call across update (single +
+#       bulk) + create, each firing a sequential `add_file_to_column`
+#       leg with a per-leg partial-failure accumulator.
+#     - v0.8-M47 sources an upload from stdin with a bare `-`
+#       (`<file-col>=-`, single-file / single-target; `--filename`
+#       names the part, default `blob`; empty pipe rejects
+#       `usage_error.details.reason: stdin_file_empty`).
+#     ⚠ v0.8-M49 P1 FIX: published v0.7.0 shipped the Apollo multipart
+#     spec, which live Monday REJECTS — so every real upload was broken
+#     in 0.7.0. v0.8.0 emits Monday's native multipart shape and is the
+#     first release where these uploads actually work against live
+#     Monday (live-verified). The v0.4-M31 verb-shaped `monday item
+#     upload` path remains as the alternative. `--dry-run` emits
+#     `planned_changes` on every shape without the multipart round-trip.
 monday item set 67890 'Attachments'=./screenshot.png --json
 monday item update 67890 --set 'Attachments'=./diagram.png --json
 monday item update 67890 --set 'Attachments'=./report.pdf --dry-run --json
@@ -140,8 +152,10 @@ monday item update --board 12345 --where status=Backlog \
   --set 'Attachments'=./report.pdf --yes --continue-on-error \
   --concurrency 4 --json                # v0.7-M42 bulk file dispatch
 monday item create --board 12345 --name "Field report" \
-  --set 'Attachments'=./report.pdf --set status='Working on it' \
-  --json                                # v0.7-M43 create-time file --set
+  --set 'Attachments'=./report.pdf --set 'Spec'=./spec.pdf \
+  --set status='Working on it' --json   # v0.8-M46 multi-file create-time
+cat report.pdf | monday item set 67890 'Attachments'=- \
+  --filename report.pdf --json          # v0.8-M47 stdin file --set
 
 # 14. Find-or-create with idempotent matching (v0.2)
 #     Re-running with the same args is safe — 0/1/2+ matches route to
@@ -228,7 +242,7 @@ Every JSON response uses the same universal envelope:
   "meta": {
     "schema_version": "1",
     "api_version": "2026-01",
-    "cli_version": "0.7.0",
+    "cli_version": "0.8.0",
     "request_id": "0e6f1a7b-...",
     "source": "live",
     "cache_age_seconds": null,
@@ -328,7 +342,38 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.7.0 (current — `monday-cli@0.7.0` on npm):**
+**v0.8.0 (current — `monday-cli@0.8.0` on npm):**
+the v0.7 surface PLUS — most importantly — the 🚨 P1 file-upload
+wire-format **FIX** (M49). Published v0.7.0 shipped the Apollo
+multipart spec, which live Monday rejects, so `monday item upload` /
+`monday update upload` / every friendly file `--set` was broken
+against live Monday for five milestones (M31/M38/M42/M43/M46).
+v0.8.0 emits Monday's native multipart shape (`query` + sibling
+`variables` + string-`map` + named part, POSTed to `/v2/file`) and
+is the **first release where file uploads actually work live**
+(live-verified via a `RUN_LIVE_TESTS`-gated smoke test). On top of
+the fix, three feature folds: multi-file `--set` per call across
+update (single + bulk) + create (M46, lifting the single-file gate);
+stdin file `--set <file-col>=-` with `--filename` (M47); and writable
+create-time `board_relation` / `dependency` column settings via
+`monday board column-create --type board_relation --settings
+'{"boardIds":[…]}'` (M48). Plus an internal `src/api/` error-
+decoration refactor cluster. **No breaking changes vs v0.7.0** — the
+v0.8 surface is additive (the output envelope + 29 stable error codes
+are unchanged); M49 is a fix that ships in the same minor. Built
+incrementally as M49 + the refactor cluster + M46 + M47 + M48.
+
+**Re-scope note 2026-05-21.** v0.8 re-scoped from its original
+SKELETON (Monday API `2026-07` pin + user-entity migration M44 +
+`user activity` M45) to **stay on API `2026-01`** and ship the
+v0.6/v0.7 carve-out folds above — mirroring the v0.7 pivot verbatim.
+`@mondaydotcomorg/api` is still pinned at 14.0.0 (baking `2026-01`);
+no SDK 15.x (`2026-04`) or 16.x (`2026-07`) has published, so M44 /
+M45 + the v0.7-deferred M39 / M40 / M41 cluster stay deferred to a
+future release. See [CHANGELOG.md](./CHANGELOG.md) for the full
+per-milestone release notes.
+
+**v0.7.0 (the previous release):**
 the v0.6 surface PLUS the two file-`--set` carve-outs deferred at
 v0.6-M38 — bulk `monday item update --where ... --set <file-col>=
 <path>` (M42, per-item multipart fan-out under `--concurrency` /
@@ -336,26 +381,23 @@ v0.6-M38 — bulk `monday item update --where ... --set <file-col>=
 <file-col>=<path>` (M43, two-leg `create_item` + `add_file_to_
 column` dispatch under the §5.8 orphan-warn atomicity envelope).
 **No breaking changes vs v0.6.0** — the v0.7 surface is additive
-(M42 + M43 only). Built incrementally as two milestones (M42 +
-M43); both close v0.6-M38 D5 / D6 deferrals so the friendly file-
-`--set` form now reaches every callShape (single-item / bulk /
-create-time). The originally-planned Monday API `2026-04` pin
-bump (M39) + `monday item set-description` (M40) + `monday doc
-block-create-bulk` (M41) DEFERRED at 2026-05-20 pending
-`@mondaydotcomorg/api` SDK 15.x publishing with
-`CURRENT_VERSION = '2026-04'` natively — see the per-milestone
-breakdown below. See [CHANGELOG.md](./CHANGELOG.md) for the full
-per-milestone release notes.
+(M42 + M43 only). Both close v0.6-M38 D5 / D6 deferrals so the
+friendly file-`--set` form reaches every callShape (single-item /
+bulk / create-time). **NOTE:** file uploads in published v0.7.0 are
+live-broken (the M49 P1 above) — upgrade to v0.8.0 for working
+uploads. The originally-planned Monday API `2026-04` pin bump (M39)
++ `monday item set-description` (M40) + `monday doc block-create-bulk`
+(M41) DEFERRED at 2026-05-20 pending `@mondaydotcomorg/api` SDK 15.x.
 
-**OAuth deferral (unchanged from v0.6.0).** `monday auth login` is
+**OAuth deferral (unchanged from v0.7.0).** `monday auth login` is
 registered but the canonical Monday OAuth app is not registered in
-v0.7.0; the verb surfaces a clear `usage_error.details.reason:
+v0.8.0; the verb surfaces a clear `usage_error.details.reason:
 oauth_unregistered` pointing at `MONDAY_API_TOKEN`. Multi-profile
 config + per-profile credentials cache work fully against API
-tokens; OAuth registration revisits in v0.7.x / v0.8 contingent on
+tokens; OAuth registration revisits in v0.8.x / v0.9 contingent on
 user demand.
 
-**v0.6.0 (the previous release):**
+**v0.6.0 (the prior release):**
 the v0.5 surface PLUS files-shaped friendly `--set <file-col>=<path>`
 writes on `monday item set` + `monday item update` (single-item
 paths), closing the v0.4 → v0.5 → v0.6 carry-over of the inline
@@ -367,7 +409,7 @@ v0.6 surface is additive (M38 only). Built as a single milestone
 (M38). The bulk + create-time carve-outs deferred at v0.6-M38
 (D5 / D6) carry forward to v0.7 (above).
 
-**v0.5.0 (the prior release):**
+**v0.5.0 (the earlier release):**
 the v0.4 surface PLUS the full team-writer surface
 (`monday user team-list/get/create/delete/add-members/remove-members`),
 the full Monday workdocs CRUD mutation surface — doc-level
@@ -377,7 +419,7 @@ and doc-content import (`monday doc import-html/append-markdown`) —
 closing the v0.4-M32 workdocs-mutation deferral. **16 new CLI
 verbs across 9 wire mutations.** Built incrementally across M34–M37.
 
-**v0.4.0 (the earlier release):**
+**v0.4.0 (an even-earlier release):**
 the v0.3 surface PLUS long-poll item activity streaming
 (`monday item watch <iid>` — NDJSON), parallel bulk dispatch
 (`monday item update --where ... --concurrency <N>`), asset uploads
@@ -387,7 +429,7 @@ workdocs CRUD mutation surface deferred to v0.5; shipped at v0.5),
 and shell completion (`monday completion bash|zsh|fish`). Built
 incrementally across M29–M33.
 
-**v0.3.0 (an even-earlier release):**
+**v0.3.0 (a yet-earlier release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -780,16 +822,23 @@ row `tags`, `board_relation`, `dependency`.
   `unsupported_column_type` / `not_found` / `validation_failed`
   codes with `details.reason` discrimination).
 
-**v0.8 (next):** **Carry-forward backlog** (unpicked
+**v0.9 (next):** **Carry-forward backlog** (unpicked
 candidates remain in cli-design.md §13 slipped-candidates list
-pending future candidate-selection sessions): multi-level
-subitems remain conditional on Monday's data model surfacing
-them (slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 across
-four consecutive release-preps — Monday's `sub_items_board`
-still carries no `subtasks` column at API `2026-01`, and v0.7
-pivoted away from API `2026-04` at 2026-05-20 so the data-
-model probe gate moves to v0.8's planned `2026-07` pin);
-cross-board `item move` value-overrides (Monday's
+pending future candidate-selection sessions). The v0.6-M38 D2
+multi-file `--set` + D7 stdin file-`--set` deferrals **SHIPPED**
+at v0.8-M46 / v0.8-M47, so they leave the backlog. Still
+deferred: the original v0.8 SKELETON's user-entity migration
+(M44) + `user activity` (M45) + the Monday API `2026-07` pin
+defer pending `@mondaydotcomorg/api` SDK 16.x; the v0.7-deferred
+M39 (API `2026-04` pin) + M40 (`item set-description`) + M41
+(`doc block-create-bulk`) re-open when SDK 15.x ships `2026-04`
+natively AND a paid-tier sandbox is available for the M40 wire
+probe (v0.8 stayed on `2026-01` — SDK still 14.0.0, no 15.x/16.x
+published). Multi-level subitems remain conditional on Monday's
+data model surfacing them (slipped from v0.4 → v0.5 → v0.6 →
+v0.7 → v0.8 → v0.9 across five consecutive release-preps —
+Monday's `sub_items_board` still carries no `subtasks` column at
+API `2026-01`); cross-board `item move` value-overrides (Monday's
 `ColumnMappingInput` still carries no value slot — slipped four
 times for the same reason); resumable cross-board cursor
 pagination (per-board cursor-lifetime under aggregation needs
@@ -799,14 +848,7 @@ cli/config.toml` with a `[profiles.<name>.defaults]` table
 carrying scoping args; requires a prerequisite §13 carve-out
 Decision at pre-flight distinguishing aliases-as-stored-
 command-strings (still non-goal) from defaults-as-stored-flag-
-values (carve-out)). Multi-file `--set` per call (v0.6-M38 D2
-deferral) and file-`--set` stdin support (v0.6-M38 D7 deferral)
-remain v0.7.x / future candidates. **v0.7-deferred milestones**:
-M39 (API pin `2026-04`) + M40 (`item set-description`) + M41
-(`doc block-create-bulk`) re-open when `@mondaydotcomorg/api`
-SDK 15.x ships natively — earliest target is v0.8 if Monday's
-SDK cadence holds (≈2 months between major SDK bumps per the
-13.0.0 / 14.0.0 / 15.0.0 trajectory).
+values (carve-out)).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) for the
