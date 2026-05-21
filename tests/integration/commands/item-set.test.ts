@@ -17,6 +17,7 @@ import {
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { resolveCacheRoot, writeEntry } from '../../../src/api/cache.js';
 import {
   assertEnvelopeContract,
@@ -2058,12 +2059,20 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
       });
     });
 
-    // v0.8-M47 (D7 fold): stdin `<file-col>=-` source. The argv +
-    // `--filename` + sentinel-routing surface is the shipped pre-flight
-    // contract; the live stdin read + Blob + dispatch (and the size-less
-    // dry-run echo) land at M47 IMPL. These pin the surface (stub
-    // envelope) without consuming stdin — the stub throws first.
-    it('v0.8-M47 stdin live: `<file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
+    // v0.8-M47 (D7 fold): stdin `<file-col>=-` source. `item set` is
+    // single-positional, so the stdin sentinel just sources the upload
+    // from the piped stream — no multi-file / bulk surface to gate.
+    it('v0.8-M47 stdin live: `<file-col>=-` buffers stdin + dispatches add_file_to_column; filename defaults to "blob"', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'blob',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
       const out = await drive(
         ['item', 'set', '12345', 'attachments=-', '--board', '111', '--json'],
         {
@@ -2074,17 +2083,100 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
             },
           ],
         },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([Buffer.from('STDIN-pdf-bytes')]),
+        },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr);
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details).toMatchObject({
-        reason: 'm47_preflight_stub',
+      expect(out.exitCode).toBe(0);
+      // Regression guard (M42/M43/M46 reserved-literal discipline):
+      // the pre-flight stub literal never appears in runtime output.
+      expect(out.stdout).not.toContain('m47_preflight_stub');
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          item_id: string;
+          column_id: string;
+          filename: string;
+          file_size_bytes: number;
+          asset: { id: string };
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
         filename: 'blob',
+        file_size_bytes: 'STDIN-pdf-bytes'.length,
+        asset: { id: '555000111' },
       });
+      expect(env.meta.source).toBe('live');
+      // Multipart wire fired once with the buffered stdin bytes.
+      expect(multipart.requests).toHaveLength(1);
+      const req = multipart.requests[0]!;
+      expect(req.operationName).toBe('AddFileToColumn');
+      expect(req.filename).toBe('blob');
+      expect(Buffer.from(req.fileBytes).toString('utf8')).toBe(
+        'STDIN-pdf-bytes',
+      );
+      // No extension on "blob" → octet-stream.
+      expect(req.fileType).toBe('application/octet-stream');
     });
 
-    it('v0.8-M47 stdin dry-run: `<file-col>=- --dry-run` reaches the stub leg; --filename threads through (filename echo)', async () => {
+    it('v0.8-M47 stdin live: `--filename report.pdf` sets the wire Asset.name + sniffs application/pdf', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'set',
+          '12345',
+          'attachments=-',
+          '--filename',
+          'report.pdf',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([Buffer.from('PDF-bytes-fixture')]),
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: { filename: string; file_size_bytes: number };
+      };
+      expect(env.data.filename).toBe('report.pdf');
+      expect(env.data.file_size_bytes).toBe('PDF-bytes-fixture'.length);
+      const req = multipart.requests[0]!;
+      expect(req.filename).toBe('report.pdf');
+      expect(req.fileType).toBe('application/pdf');
+    });
+
+    it('v0.8-M47 stdin dry-run: emits the D4 size-less echo (file_path "-", filename, NO file_size_bytes); does not read stdin or fire the wire', async () => {
+      // A multipart fixture that would throw if any wire call fired —
+      // the dry-run must not dispatch.
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
       const out = await drive(
         [
           'item',
@@ -2106,14 +2198,61 @@ describe('monday item set — --set-raw escape hatch (M8)', () => {
             },
           ],
         },
+        {
+          multipartTransport: multipart,
+          // Non-empty stdin: if the dry-run wrongly consumed + dispatched
+          // it, the empty multipart cassette would throw (exit 2). The
+          // size-less echo + zero wire calls prove the preview path
+          // never reads stdin.
+          stdin: Readable.from([Buffer.from('SHOULD-NOT-BE-READ')]),
+        },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr);
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details).toMatchObject({
-        reason: 'm47_preflight_stub',
+      expect(out.exitCode).toBe(0);
+      expect(out.stdout).not.toContain('m47_preflight_stub');
+      const env = parseEnvelope(out.stdout);
+      expect(env.ok).toBe(true);
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      expect(meta.source).toBe('none');
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      const entry = envWithPlanned.planned_changes?.[0] ?? {};
+      expect(entry).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
+        file_path: '-',
         filename: 'report.pdf',
       });
+      expect(entry).not.toHaveProperty('file_size_bytes');
+      expect(multipart.requests).toHaveLength(0);
+    });
+
+    it('v0.8-M47 stdin live: empty stdin payload rejects usage_error (stdin_file_empty) — no wire call fires', async () => {
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        ['item', 'set', '12345', 'attachments=-', '--board', '111', '--json'],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([]),
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details).toMatchObject({ reason: 'stdin_file_empty' });
+      expect(multipart.requests).toHaveLength(0);
     });
   });
 

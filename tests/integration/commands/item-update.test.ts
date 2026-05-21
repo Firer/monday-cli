@@ -31,6 +31,7 @@ import {
   it,
 } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -1611,11 +1612,17 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
       expect(multipart.requests).toHaveLength(1);
     });
 
-    it('v0.8-M47 stdin single-item: `--set <file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
-      // The argv + `--filename` + `routeFileColumnDispatch` stdin-scope
-      // enforcement surface is the shipped pre-flight contract; the
-      // stdin read + Blob + dispatch land at M47 IMPL. Pins the surface
-      // (stub envelope) without consuming stdin — the stub throws first.
+    it('v0.8-M47 stdin single-item live: `--set <file-col>=-` buffers stdin + dispatches add_file_to_column; --filename threads to the wire Asset.name', async () => {
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'piped.pdf',
+            response: { data: { add_file_to_column: sampleAsset } },
+          },
+        ],
+        { assertExhaustive: false },
+      );
       const out = await drive(
         [
           'item',
@@ -1637,14 +1644,124 @@ describe('monday item update — --set-raw escape hatch (M8, single-item path)',
             },
           ],
         },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([Buffer.from('PIPED-pdf-bytes')]),
+        },
       );
-      expect(out.exitCode).toBe(2);
-      const env = parseEnvelope(out.stderr);
-      expect(env.error?.code).toBe('internal_error');
-      expect(env.error?.details).toMatchObject({
-        reason: 'm47_preflight_stub',
+      expect(out.exitCode).toBe(0);
+      expect(out.stdout).not.toContain('m47_preflight_stub');
+      const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+        data: {
+          operation: string;
+          column_id: string;
+          filename: string;
+          file_size_bytes: number;
+          asset: { id: string };
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
         filename: 'piped.pdf',
+        file_size_bytes: 'PIPED-pdf-bytes'.length,
       });
+      expect(env.meta.source).toBe('live');
+      expect(multipart.requests).toHaveLength(1);
+      const req = multipart.requests[0]!;
+      expect(req.filename).toBe('piped.pdf');
+      expect(Buffer.from(req.fileBytes).toString('utf8')).toBe(
+        'PIPED-pdf-bytes',
+      );
+      expect(req.fileType).toBe('application/pdf');
+    });
+
+    it('v0.8-M47 stdin single-item dry-run: emits the D4 size-less echo (file_path "-", no file_size_bytes); no wire mutation', async () => {
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          'attachments=-',
+          '--board',
+          '111',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([Buffer.from('SHOULD-NOT-BE-READ')]),
+        },
+      );
+      expect(out.exitCode).toBe(0);
+      const env = parseEnvelope(out.stdout);
+      expect(env.ok).toBe(true);
+      const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+      expect(meta.dry_run).toBe(true);
+      expect(meta.source).toBe('none');
+      const envWithPlanned = env as EnvelopeShape & {
+        planned_changes?: readonly Record<string, unknown>[];
+      };
+      const entry = envWithPlanned.planned_changes?.[0] ?? {};
+      expect(entry).toMatchObject({
+        operation: 'add_file_to_column',
+        item_id: '12345',
+        column_id: 'attachments',
+        file_path: '-',
+        // --filename absent → default "blob".
+        filename: 'blob',
+      });
+      expect(entry).not.toHaveProperty('file_size_bytes');
+      expect(multipart.requests).toHaveLength(0);
+    });
+
+    it('v0.8-M47 stdin single-item live: empty stdin rejects usage_error (stdin_file_empty); no wire call fires', async () => {
+      const multipart = createInlineMultipartFixtureTransport([], {
+        assertExhaustive: false,
+      });
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '12345',
+          '--set',
+          'attachments=-',
+          '--board',
+          '111',
+          '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'BoardMetadata',
+              response: { data: { boards: [fileBoard] } },
+            },
+          ],
+        },
+        {
+          multipartTransport: multipart,
+          stdin: Readable.from([]),
+        },
+      );
+      expect(out.exitCode).toBe(1);
+      const env = parseEnvelope(out.stderr);
+      expect(env.error?.code).toBe('usage_error');
+      expect(env.error?.details).toMatchObject({ reason: 'stdin_file_empty' });
+      expect(multipart.requests).toHaveLength(0);
     });
 
     it('dry-run single-item: emits D4 planned_changes envelope (no wire mutation)', async () => {

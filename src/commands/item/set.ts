@@ -96,7 +96,9 @@ import {
   isStdinFileSetSource,
   readStdinFileSource,
   resolveStdinFilename,
+  STDIN_FILE_SENTINEL,
 } from '../../utils/file-source.js';
+import { addFileToColumn } from '../../api/assets.js';
 import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
@@ -332,17 +334,30 @@ export const itemSetCommand: CommandModule<
               if (typeof columnId !== 'string') {
                 throw err;
               }
-              // v0.8-M47 (D7 fold): stdin `<file-col>=-` source. The
-              // dry-run echo (no `file_size_bytes` — a stream can't be
-              // `fs.stat`'d) + the live read land at M47 IMPL; the argv
-              // + `--filename` + sentinel-routing surface is the
-              // shipped pre-flight contract. Stub throws `internal_
-              // error` (`m47_preflight_stub`).
+              // v0.8-M47 (D7 fold): stdin `<file-col>=-` dry-run echo.
+              // D4: a stream can't be `fs.stat`'d without consuming it,
+              // so the echo carries `file_path: '-'` + `filename` but
+              // OMITS `file_size_bytes` (additive per §6.4 — omission is
+              // non-breaking). The dry-run is a preview, so it MUST NOT
+              // read stdin.
               if (isStdinFileSetSource(friendly.value)) {
                 const filename = resolveStdinFilename(parsed.filename);
-                await readStdinFileSource(filename);
-                /* c8 ignore next 2 — unreachable until M47 IMPL replaces
-                   the `readStdinFileSource` stub body. */
+                emitDryRun({
+                  ctx,
+                  programOpts: program.opts(),
+                  plannedChanges: [
+                    {
+                      operation: 'add_file_to_column',
+                      item_id: parsed.itemId,
+                      column_id: columnId,
+                      file_path: STDIN_FILE_SENTINEL,
+                      filename,
+                    },
+                  ],
+                  source: 'none',
+                  cacheAgeSeconds: null,
+                  apiVersion,
+                });
                 return;
               }
               const precheck = await precheckLocalFile(friendly.value);
@@ -444,16 +459,59 @@ export const itemSetCommand: CommandModule<
           }
           // v0.8-M47 (D7 fold): stdin `<file-col>=-` source on the live
           // path. `item set` is single-positional, so there's no multi-
-          // file / bulk surface to gate — a `-` value simply sources the
-          // upload from stdin. The live stdin read + Blob + dispatch +
-          // emit land at M47 IMPL; the argv + `--filename` + sentinel-
-          // routing surface is the shipped pre-flight contract. Stub
-          // throws `internal_error` (`m47_preflight_stub`).
+          // file / bulk surface to gate — a `-` value sources the upload
+          // from stdin. Buffer stdin once via `readStdinFileSource`
+          // (mime sniffed from `--filename`, default `"blob"`), then
+          // dispatch the pre-built Blob through M31's `addFileToColumn`
+          // fetcher directly (the path leg's `executeFileColumnSet`
+          // builds its Blob from a path; stdin's Blob is already in
+          // hand). Emit the same M31-shaped `FileColumnSetOutput` as the
+          // path leg, sourcing `filename` / `file_size_bytes` from the
+          // buffered stdin read rather than `fs.stat`.
           if (isStdinFileSetSource(friendly.value)) {
             const filename = resolveStdinFilename(parsed.filename);
-            await readStdinFileSource(filename);
-            /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
-               `readStdinFileSource` stub body with the live stdin read. */
+            const stdinSource = await readStdinFileSource(ctx.stdin, filename);
+            const result = await addFileToColumn({
+              client,
+              multipart,
+              itemId: parsed.itemId,
+              columnId: resolution.match.column.id,
+              file: stdinSource.blob,
+              filename: stdinSource.filename,
+              signal: ctx.signal,
+              retries: globalFlags.retry,
+            });
+            // §8 single-leg cache invalidation BEFORE emit (mirrors the
+            // path leg + M31 ordering).
+            await invalidateBoard(boardId, ctx.env);
+            const stdinData: FileColumnSetOutput = {
+              operation: 'add_file_to_column',
+              item_id: parsed.itemId,
+              column_id: resolution.match.column.id,
+              filename: stdinSource.filename,
+              file_size_bytes: stdinSource.fileSizeBytes,
+              asset: result.asset,
+            };
+            emitMutation({
+              ctx,
+              data: stdinData,
+              schema: fileColumnSetOutputSchema,
+              programOpts: program.opts(),
+              warnings: resolverWarnings.map((w) => ({
+                code: w.code,
+                message: w.message,
+                details: w.details,
+              })),
+              ...toEmit({
+                data: result.asset,
+                complexity: result.complexity,
+                stats: { attempts: 1, totalBackoffMs: 0 },
+              }),
+              source: 'live',
+              cacheAgeSeconds: null,
+              complexity: result.complexity,
+              resolvedIds: { [token]: resolution.match.column.id },
+            });
             return;
           }
           // Local file pre-check via `precheckLocalFile` (lifted at

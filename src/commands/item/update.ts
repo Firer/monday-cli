@@ -75,9 +75,10 @@ import {
   isStdinFileSetSource,
   readStdinFileSource,
   resolveStdinFilename,
+  STDIN_FILE_SENTINEL,
 } from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
-import type { Asset } from '../../api/assets.js';
+import { addFileToColumn, type Asset } from '../../api/assets.js';
 import type { MultipartTransport } from '../../api/multipart-transport.js';
 import {
   dispatchSequential,
@@ -1565,15 +1566,73 @@ const runItemUpdateSingleFileDispatch = async (
   // pre-check (`routeFileColumnDispatch` stdin scope gate) already
   // confirmed this is the sole file entry on the single-item callShape;
   // source the Blob from stdin (via `readStdinFileSource`) instead of a
-  // local path. The argv + `--filename` + routing + scope-enforcement
-  // surface is the shipped pre-flight contract; the stdin read + Blob +
-  // dispatch + emit (live) and the size-less dry-run echo land at M47
-  // IMPL. The stub throws `internal_error` (`m47_preflight_stub`).
+  // local path. Dry-run emits the D4 size-less echo WITHOUT consuming
+  // stdin; live buffers stdin once + dispatches the pre-built Blob via
+  // M31's `addFileToColumn` fetcher (the path leg's
+  // `executeFileColumnSet` builds its Blob from a path — stdin's is
+  // already in hand) + emits the same M31-shaped envelope.
   if (isStdinFileSetSource(inputs.m38.rawValue)) {
     const filename = resolveStdinFilename(inputs.filename);
-    await readStdinFileSource(filename);
-    /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
-       `readStdinFileSource` stub body with the live stdin read. */
+    if (inputs.isDryRun) {
+      emitDryRun({
+        ctx: inputs.ctx,
+        programOpts: inputs.programOpts,
+        plannedChanges: [
+          {
+            operation: 'add_file_to_column',
+            item_id: inputs.itemId,
+            column_id: inputs.m38.columnId,
+            file_path: STDIN_FILE_SENTINEL,
+            filename,
+          },
+        ],
+        source: 'none',
+        cacheAgeSeconds: null,
+        warnings: inputs.m38.warnings,
+        apiVersion: inputs.apiVersion,
+      });
+      return;
+    }
+    const stdinSource = await readStdinFileSource(inputs.ctx.stdin, filename);
+    const stdinResult = await addFileToColumn({
+      client: inputs.client,
+      multipart: inputs.multipart,
+      itemId: inputs.itemId,
+      columnId: inputs.m38.columnId,
+      file: stdinSource.blob,
+      filename: stdinSource.filename,
+      signal: inputs.ctx.signal,
+      retries: inputs.retries,
+    });
+    await invalidateBoard(inputs.boardId, inputs.ctx.env);
+    const stdinData: FileColumnSetOutput = {
+      operation: 'add_file_to_column',
+      item_id: inputs.itemId,
+      column_id: inputs.m38.columnId,
+      filename: stdinSource.filename,
+      file_size_bytes: stdinSource.fileSizeBytes,
+      asset: stdinResult.asset,
+    };
+    emitMutation({
+      ctx: inputs.ctx,
+      data: stdinData,
+      schema: fileColumnSetOutputSchema,
+      programOpts: inputs.programOpts,
+      warnings: inputs.m38.warnings.map((w) => ({
+        code: w.code,
+        message: w.message,
+        details: w.details,
+      })),
+      ...inputs.toEmit({
+        data: stdinResult.asset,
+        complexity: stdinResult.complexity,
+        stats: { attempts: 1, totalBackoffMs: 0 },
+      }),
+      source: 'live',
+      cacheAgeSeconds: null,
+      complexity: stdinResult.complexity,
+      resolvedIds: { [inputs.m38.token]: inputs.m38.columnId },
+    });
     return;
   }
   const precheck = await precheckLocalFile(inputs.m38.rawValue);

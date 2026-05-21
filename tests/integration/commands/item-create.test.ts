@@ -49,6 +49,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -2256,12 +2257,147 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
     await rm(workdir, { recursive: true, force: true });
   });
 
-  it('v0.8-M47 stdin create-time: `--set <file-col>=-` reaches the stub leg (internal_error m47_preflight_stub) — runtime body lands at M47 IMPL', async () => {
-    // The stdin branch precedes leg-1 in `runItemCreateFileDispatch`,
-    // so the stub throws before any `create_item` / `add_file_to_column`
-    // wire round-trip (only column resolution fires). The argv +
-    // `--filename` + routing surface is the shipped pre-flight contract;
-    // the leg-1/leg-2-from-stdin body lands at M47 IMPL.
+  it('v0.8-M47 stdin create-time live: two-leg `create_item` then stdin → `add_file_to_column`; --filename threads to the wire', async () => {
+    const multipart = createInlineMultipartFixtureTransport(
+      [
+        {
+          operation_name: 'AddFileToColumn',
+          match_filename: 'piped.pdf',
+          response: { data: { add_file_to_column: buildAsset('asset-stdin') } },
+        },
+      ],
+      { assertExhaustive: false },
+    );
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'From a pipe',
+        '--set',
+        'attachments=-',
+        '--filename',
+        'piped.pdf',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+          {
+            operation_name: 'ItemCreateTopLevel',
+            // Only `--set` was the file entry (routed to leg-2), so
+            // leg-1 ships `columnValues: null`.
+            match_variables: {
+              boardId: '111',
+              itemName: 'From a pipe',
+              columnValues: null,
+            },
+            response: { data: { create_item: newItem } },
+          },
+        ],
+      },
+      {
+        multipartTransport: multipart,
+        stdin: Readable.from([Buffer.from('PIPED-create-bytes')]),
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).not.toContain('m47_preflight_stub');
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; name: string; board_id: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    assertEnvelopeContract(env);
+    // Envelope stays the canonical ItemCreateOutput on `data` (leg-1's
+    // projection) — byte-equivalent to the path-sourced create.
+    expect(env.data).toEqual({
+      id: '99001',
+      name: 'Refactor login',
+      board_id: '111',
+      group_id: 'topics',
+    });
+    expect(env.resolved_ids).toEqual({ attachments: 'attachments' });
+    // Leg-2 fired once against leg-1's new item ID, carrying the
+    // buffered stdin bytes under the `--filename` Asset.name.
+    expect(multipart.requests).toHaveLength(1);
+    const req = multipart.requests[0]!;
+    expect(req.operationName).toBe('AddFileToColumn');
+    expect(req.filename).toBe('piped.pdf');
+    expect(Buffer.from(req.fileBytes).toString('utf8')).toBe(
+      'PIPED-create-bytes',
+    );
+    expect(req.fileType).toBe('application/pdf');
+  });
+
+  it('v0.8-M47 stdin create-time dry-run: two planned_changes entries (create_item + add_file_to_column); entry-2 carries file_path "-" with no item_id / no file_size_bytes; no wire fires', async () => {
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: false,
+    });
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--board',
+        '111',
+        '--name',
+        'From a pipe',
+        '--set',
+        'attachments=-',
+        '--filename',
+        'piped.pdf',
+        '--dry-run',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [fileBoard] } },
+          },
+        ],
+      },
+      {
+        multipartTransport: multipart,
+        stdin: Readable.from([Buffer.from('SHOULD-NOT-BE-READ')]),
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.ok).toBe(true);
+    const meta = env.meta as EnvelopeShape['meta'] & { dry_run?: boolean };
+    expect(meta.dry_run).toBe(true);
+    const envWithPlanned = env as EnvelopeShape & {
+      planned_changes?: readonly Record<string, unknown>[];
+    };
+    const changes = envWithPlanned.planned_changes ?? [];
+    const fileChange = changes.find(
+      (c) => c.operation === 'add_file_to_column',
+    );
+    expect(fileChange).toMatchObject({
+      operation: 'add_file_to_column',
+      column_id: 'attachments',
+      file_path: '-',
+      filename: 'piped.pdf',
+    });
+    // Entry-2 omits item_id (the item doesn't exist at dry-run time)
+    // and file_size_bytes (a stream can't be fs.stat'd; D4).
+    expect(fileChange).not.toHaveProperty('item_id');
+    expect(fileChange).not.toHaveProperty('file_size_bytes');
+    expect(multipart.requests).toHaveLength(0);
+  });
+
+  it('v0.8-M47 stdin create-time live: empty stdin rejects usage_error (stdin_file_empty) BEFORE leg-1 — no item is created (no orphan)', async () => {
+    // The stdin read fires before leg-1, so an empty pipe rejects
+    // without ever calling `create_item` — no orphan item, no wire
+    // round-trip beyond the column-resolution metadata fetch.
+    const multipart = createInlineMultipartFixtureTransport([], {
+      assertExhaustive: false,
+    });
     const out = await drive(
       [
         'item',
@@ -2282,14 +2418,17 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
           },
         ],
       },
+      {
+        multipartTransport: multipart,
+        stdin: Readable.from([]),
+      },
     );
-    expect(out.exitCode).toBe(2);
+    expect(out.exitCode).toBe(1);
     const env = parseEnvelope(out.stderr);
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details).toMatchObject({
-      reason: 'm47_preflight_stub',
-      filename: 'blob',
-    });
+    expect(env.error?.code).toBe('usage_error');
+    expect(env.error?.details).toMatchObject({ reason: 'stdin_file_empty' });
+    // Neither leg-1 (create_item) nor leg-2 (add_file_to_column) fired.
+    expect(multipart.requests).toHaveLength(0);
   });
 
   it('live: two-leg dispatch fires `create_item` then `add_file_to_column` and emits the canonical ItemCreateOutput envelope (v0.6-M38 → v0.7-M43 D6 fold)', async () => {

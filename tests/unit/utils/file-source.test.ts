@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import {
   buildBlobFromPath,
   precheckLocalFile,
@@ -24,7 +25,7 @@ import {
   STDIN_FILE_SENTINEL,
   DEFAULT_STDIN_FILENAME,
 } from '../../../src/utils/file-source.js';
-import { ApiError, UsageError } from '../../../src/utils/errors.js';
+import { UsageError } from '../../../src/utils/errors.js';
 
 describe('precheckLocalFile (R-v0.6-NEW-1 lift)', () => {
   let tmpRoot: string;
@@ -217,20 +218,71 @@ describe('resolveStdinFilename (v0.8-M47 --filename default)', () => {
   });
 });
 
-describe('readStdinFileSource (v0.8-M47 pre-flight stub)', () => {
-  it('throws internal_error with details.reason m47_preflight_stub (runtime body lands at M47 IMPL)', async () => {
-    // The argv + --filename + routing + scope-enforcement surface is
-    // the shipped pre-flight contract; the stdin read + Blob leg is
-    // stubbed. Regression-pins the surface without consuming stdin.
-    await expect(readStdinFileSource('blob')).rejects.toBeInstanceOf(ApiError);
+describe('readStdinFileSource (v0.8-M47 stdin file source)', () => {
+  const streamOf = (...chunks: readonly (string | Buffer)[]): Readable =>
+    Readable.from(
+      chunks.map((c) => (typeof c === 'string' ? Buffer.from(c, 'utf8') : c)),
+    );
+
+  it('buffers stdin into a Blob with the resolved filename + byte length', async () => {
+    const source = await readStdinFileSource(
+      streamOf('PDF-', 'bytes'),
+      'report.pdf',
+    );
+    expect(source.filename).toBe('report.pdf');
+    expect(source.fileSizeBytes).toBe('PDF-bytes'.length);
+    expect(await source.blob.text()).toBe('PDF-bytes');
+  });
+
+  it('sniffs the Blob content-type from the filename extension', async () => {
+    const pdf = await readStdinFileSource(streamOf('x'), 'report.pdf');
+    expect(pdf.blob.type).toBe('application/pdf');
+  });
+
+  it('falls back to application/octet-stream for the default "blob" filename (no extension)', async () => {
+    const blob = await readStdinFileSource(
+      streamOf('x'),
+      DEFAULT_STDIN_FILENAME,
+    );
+    expect(blob.blob.type).toBe('application/octet-stream');
+  });
+
+  it('preserves binary bytes verbatim (no UTF-8 trim, unlike the body-text reader)', async () => {
+    const bytes = Buffer.from([0x00, 0xff, 0x10, 0x0a]);
+    const source = await readStdinFileSource(streamOf(bytes), 'blob');
+    expect(source.fileSizeBytes).toBe(4);
+    expect(new Uint8Array(await source.blob.arrayBuffer())).toEqual(
+      new Uint8Array(bytes),
+    );
+  });
+
+  it('rejects an empty stdin payload as usage_error (stdin_file_empty) — Monday rejects 0-byte uploads', async () => {
+    await expect(readStdinFileSource(streamOf(), 'blob')).rejects.toBeInstanceOf(
+      UsageError,
+    );
     try {
-      await readStdinFileSource('report.pdf');
-      throw new Error('expected ApiError');
+      await readStdinFileSource(streamOf(), 'report.pdf');
+      throw new Error('expected UsageError');
     } catch (err) {
-      const ae = err as ApiError;
-      expect(ae.code).toBe('internal_error');
-      expect(ae.details?.reason).toBe('m47_preflight_stub');
-      expect(ae.details?.filename).toBe('report.pdf');
+      const ue = err as UsageError;
+      expect(ue.code).toBe('usage_error');
+      expect(ue.details?.reason).toBe('stdin_file_empty');
+      expect(ue.details?.filename).toBe('report.pdf');
+      expect(ue.details?.file_size_bytes).toBe(0);
+    }
+  });
+
+  it('rejects an unwired stdin slot as usage_error (stdin_not_wired) — defensive programmer-wiring guard', async () => {
+    await expect(readStdinFileSource(undefined, 'blob')).rejects.toBeInstanceOf(
+      UsageError,
+    );
+    try {
+      await readStdinFileSource(undefined, 'blob');
+      throw new Error('expected UsageError');
+    } catch (err) {
+      const ue = err as UsageError;
+      expect(ue.code).toBe('usage_error');
+      expect(ue.details?.reason).toBe('stdin_not_wired');
     }
   });
 });

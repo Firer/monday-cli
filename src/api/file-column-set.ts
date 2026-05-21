@@ -203,10 +203,14 @@
  * clean stdin source routes through the same single-file
  * `kind: 'file'` / `'file_create'` as a path source; the action
  * body sources the Blob from `readStdinFileSource`
- * (`src/utils/file-source.ts`) instead of {@link buildBlobFromPath}.
- * **Pre-flight stub:** the live stdin-read + Blob leg + the
- * size-less dry-run echo land at the M47 IMPL; the argv +
- * `--filename` + enforcement surface is the shipped contract. The
+ * (`src/utils/file-source.ts`) instead of {@link buildBlobFromPath},
+ * then dispatches it through M31's `addFileToColumn` fetcher directly
+ * (the path leg builds its Blob inside {@link executeFileColumnSet};
+ * the stdin Blob is already in hand). Live read + dispatch shipped at
+ * the v0.8-M47 IMPL alongside the size-less dry-run echo (D4 — a
+ * stream can't be `fs.stat`'d, so the echo omits `file_size_bytes`);
+ * an empty stdin payload rejects `usage_error` with
+ * `details.reason: 'stdin_file_empty'` before any wire activity. The
  * verb-shaped `monday item upload` stays path-only (no stdin) —
  * M47 carves out only the friendly `--set` path.
  *

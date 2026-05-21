@@ -106,6 +106,7 @@ import {
   preCheckM38FileDispatch,
   type PreCheckM38FileDispatchResult,
 } from '../../api/file-column-set.js';
+import { addFileToColumn } from '../../api/assets.js';
 import type { MultipartTransport } from '../../api/multipart-transport.js';
 import type { RunContext } from '../../cli/run.js';
 import {
@@ -122,6 +123,8 @@ import {
   isStdinFileSetSource,
   readStdinFileSource,
   resolveStdinFilename,
+  STDIN_FILE_SENTINEL,
+  type LocalFilePrecheck,
 } from '../../utils/file-source.js';
 import { invalidateBoard } from '../../api/cache.js';
 import type { Warning } from '../../utils/output/envelope.js';
@@ -1659,6 +1662,21 @@ interface RunItemCreateFileDispatchInputs {
 }
 
 /**
+ * Resolved file source for the create-time leg-2 dispatch (v0.8-M47).
+ * Discriminates the upfront-pre-checked local path from a deferred
+ * stdin source so the dry-run echo, the pre-leg-1 stdin read, and the
+ * leg-2 dispatch each branch on a single tag rather than inverse
+ * `undefined` checks:
+ *   - `path`: {@link precheckLocalFile} ran upfront (atomicity-before-
+ *     wire); the Blob build stays deferred to {@link executeFileColumnSet}.
+ *   - `stdin`: a `<file-col>=-` sentinel; the read is deferred (dry-run
+ *     must not consume stdin; live reads once BEFORE leg-1).
+ */
+type CreateFileSource =
+  | { readonly kind: 'path'; readonly precheck: LocalFilePrecheck }
+  | { readonly kind: 'stdin'; readonly filename: string };
+
+/**
  * Two-leg create-time file dispatch helper. Runs:
  *
  *   1. Single upfront {@link precheckLocalFile} on the file `--set`
@@ -1713,32 +1731,23 @@ interface RunItemCreateFileDispatchInputs {
 const runItemCreateFileDispatch = async (
   inputs: RunItemCreateFileDispatchInputs,
 ): Promise<void> => {
-  // v0.8-M47 (D7 fold): stdin file `--set <file-col>=-` source on the
-  // create-time two-leg path. `routeFileColumnDispatch`'s stdin scope
-  // gate already confirmed this is the sole file entry on the
-  // `'item_create'` callShape; leg-2 sources the Blob from stdin (via
-  // `readStdinFileSource`) instead of `precheckLocalFile`. Leg-1
-  // (`create_item` with bundled non-file `column_values`) + leg-2
-  // (stdin → `add_file_to_column`) under the §5.8 orphan-warn envelope,
-  // plus the size-less dry-run echo, land at the M47 IMPL; the argv +
-  // `--filename` + routing + scope-enforcement surface is the shipped
-  // pre-flight contract. The stub throws `internal_error`
-  // (`m47_preflight_stub`).
-  if (isStdinFileSetSource(inputs.m38.rawValue)) {
-    const filename = resolveStdinFilename(inputs.parsed.filename);
-    await readStdinFileSource(filename);
-    /* c8 ignore next 2 — unreachable until M47 IMPL replaces the
-       `readStdinFileSource` stub body with the live stdin read. */
-    return;
-  }
-  // 1) Upfront local file pre-check. Atomicity-before-wire per
-  //    cli-design §5.8: pre-checks fire BEFORE any wire round-trip
-  //    so a bad path surfaces `usage_error` (exit 1) with
-  //    `details.reason: 'file_not_readable'` / `'file_empty'`
-  //    without burning either wire leg. R-v0.6-NEW-1 4th-consumer
-  //    site (M31 upload + M38 single-item + M42 file-bulk + here);
-  //    5-consumer graduation threshold not yet hit.
-  const precheck = await precheckLocalFile(inputs.m38.rawValue);
+  // 1) Resolve the file source. v0.8-M47 (D7 fold) adds the stdin
+  //    `<file-col>=-` source alongside the path source:
+  //    - path: upfront `precheckLocalFile`. Atomicity-before-wire per
+  //      cli-design §5.8 — a bad path surfaces `usage_error` (exit 1)
+  //      with `details.reason: 'file_not_readable'` / `'file_empty'`
+  //      BEFORE either wire leg; the Blob build stays deferred to
+  //      `executeFileColumnSet` after leg-1. R-v0.6-NEW-1 consumer.
+  //    - stdin: a `<file-col>=-` sentinel (scope-gated to the sole
+  //      file entry by `routeFileColumnDispatch`). The read is DEFERRED
+  //      here: dry-run must not consume stdin, and the live read fires
+  //      once BEFORE leg-1 so an empty pipe rejects without orphaning a
+  //      created item.
+  const fileSource: CreateFileSource = isStdinFileSetSource(
+    inputs.m38.rawValue,
+  )
+    ? { kind: 'stdin', filename: resolveStdinFilename(inputs.parsed.filename) }
+    : { kind: 'path', precheck: await precheckLocalFile(inputs.m38.rawValue) };
 
   // 2) Partition setEntries: the file entry's `token` matches
   //    `inputs.m38.token` (the pre-check identified it); every
@@ -1805,14 +1814,26 @@ const runItemCreateFileDispatch = async (
     // dry-run shape minus `item_id` (the item doesn't exist yet).
     // `file_path` is the argv-derived raw value per cli-design §6.4;
     // resolved absolute path lives in pre-check rejections, not in
-    // the success-shaped dry-run envelope.
-    const fileEntry = {
-      operation: 'add_file_to_column' as const,
-      column_id: inputs.m38.columnId,
-      file_path: inputs.m38.rawValue,
-      filename: precheck.filename,
-      file_size_bytes: precheck.fileSizeBytes,
-    };
+    // the success-shaped dry-run envelope. v0.8-M47 (D4): a stdin
+    // source echoes `file_path: '-'` + `filename` but OMITS
+    // `file_size_bytes` (a stream can't be `fs.stat`'d without
+    // consuming it; additive per §6.4, so omission is non-breaking)
+    // and MUST NOT read stdin here (dry-run is a preview).
+    const fileEntry =
+      fileSource.kind === 'stdin'
+        ? {
+            operation: 'add_file_to_column' as const,
+            column_id: inputs.m38.columnId,
+            file_path: STDIN_FILE_SENTINEL,
+            filename: fileSource.filename,
+          }
+        : {
+            operation: 'add_file_to_column' as const,
+            column_id: inputs.m38.columnId,
+            file_path: inputs.m38.rawValue,
+            filename: fileSource.precheck.filename,
+            file_size_bytes: fileSource.precheck.fileSizeBytes,
+          };
 
     const plannedChanges = [
       ...planResult.plannedChanges,
@@ -1918,6 +1939,16 @@ const runItemCreateFileDispatch = async (
   const columnValues =
     translated.length === 0 ? null : bundleColumnValues(translated);
 
+  // v0.8-M47: when the file source is stdin, buffer it ONCE here —
+  // BEFORE leg-1's `create_item` — so an empty / unwired pipe rejects
+  // (`usage_error`) without orphaning a created item. A path source
+  // keeps its Blob build deferred to `executeFileColumnSet` below
+  // (after leg-1) so a leg-1 failure doesn't pay for the read.
+  const stdinSource =
+    fileSource.kind === 'stdin'
+      ? await readStdinFileSource(inputs.ctx.stdin, fileSource.filename)
+      : undefined;
+
   // Leg-1: create_item or create_subitem. F4 remap on failure
   // mirrors the JSON path's catch arm (cache-served resolution +
   // Monday rejecting as `validation_failed` → check live archived
@@ -1968,25 +1999,49 @@ const runItemCreateFileDispatch = async (
   // Leg-2: add_file_to_column via M31's multipart fetcher. On
   // success, build the create envelope below; on `MondayCliError`,
   // surface the D1 orphan-warn envelope with the freshly-created
-  // item ID as the recovery handle.
-  const fileEntry: FileColumnSetEntry = {
-    columnId: inputs.m38.columnId,
-    columnType: 'file',
-    rawValue: inputs.m38.rawValue,
-    filePath: precheck.filePath,
-    filename: precheck.filename,
-    fileSizeBytes: precheck.fileSizeBytes,
-  };
-
+  // item ID as the recovery handle. The source diverges: a path leg
+  // builds its Blob from the pre-checked path inside
+  // `executeFileColumnSet`; a stdin leg (v0.8-M47) dispatches the
+  // Blob already buffered before leg-1 directly via `addFileToColumn`.
   try {
-    await executeFileColumnSet({
-      client: inputs.client,
-      multipart: inputs.multipart,
-      itemId: leg1Result.projected.id,
-      entry: fileEntry,
-      signal: inputs.ctx.signal,
-      retries: inputs.retries,
-    });
+    if (fileSource.kind === 'stdin') {
+      /* c8 ignore next 6 — defensive: a stdin source buffered
+         `stdinSource` before leg-1 above; the guard exists for TS
+         narrowing (kind 'stdin' ⟹ stdinSource defined). */
+      if (stdinSource === undefined) {
+        throw new ApiError(
+          'internal_error',
+          'runItemCreateFileDispatch: stdin source not buffered before leg-2',
+        );
+      }
+      await addFileToColumn({
+        client: inputs.client,
+        multipart: inputs.multipart,
+        itemId: leg1Result.projected.id,
+        columnId: inputs.m38.columnId,
+        file: stdinSource.blob,
+        filename: stdinSource.filename,
+        signal: inputs.ctx.signal,
+        retries: inputs.retries,
+      });
+    } else {
+      const fileEntry: FileColumnSetEntry = {
+        columnId: inputs.m38.columnId,
+        columnType: 'file',
+        rawValue: inputs.m38.rawValue,
+        filePath: fileSource.precheck.filePath,
+        filename: fileSource.precheck.filename,
+        fileSizeBytes: fileSource.precheck.fileSizeBytes,
+      };
+      await executeFileColumnSet({
+        client: inputs.client,
+        multipart: inputs.multipart,
+        itemId: leg1Result.projected.id,
+        entry: fileEntry,
+        signal: inputs.ctx.signal,
+        retries: inputs.retries,
+      });
+    }
   } catch (err) {
     if (err instanceof MondayCliError) {
       // foldAndRemap surfaces `column_archived` for cache-served

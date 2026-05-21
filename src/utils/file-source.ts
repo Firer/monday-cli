@@ -53,7 +53,7 @@
 import { stat as fsStat, access as fsAccess, readFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { resolve as resolvePath, basename } from 'node:path';
-import { ApiError, UsageError, asError, errorCode } from './errors.js';
+import { UsageError, asError, errorCode } from './errors.js';
 import { sniffContentType } from './mime.js';
 
 /**
@@ -249,10 +249,17 @@ export interface StdinFileSource {
 /**
  * Reads the entire stdin stream into memory and wraps it as a Web
  * `Blob` with a `Content-Type` sniffed from `filename` (so a
- * `--filename report.pdf` still gets the right mime). The Blob is the
- * payload the multipart transport sends to Monday's wire `File!`
- * scalar — same downstream contract as {@link buildBlobFromPath}, but
- * sourced from a single non-replayable stream rather than a path.
+ * `--filename report.pdf` still gets the right mime; the default
+ * {@link DEFAULT_STDIN_FILENAME} `"blob"` carries no extension →
+ * `application/octet-stream`). The Blob is the payload the multipart
+ * transport sends to Monday's wire `File!` scalar — same downstream
+ * contract as {@link buildBlobFromPath}, but sourced from a single
+ * non-replayable stream rather than a path.
+ *
+ * `stdin` is the runner-threaded stream (`ctx.stdin`, wired from
+ * `process.stdin`) rather than a global read so integration tests can
+ * inject a deterministic `Readable` — mirrors `readSourceContent`'s
+ * stdin handling for the `--body-file -` surface.
  *
  * Unlike {@link precheckLocalFile} there is no pre-read size/readable
  * pre-check leg: a stream can't be `fs.stat`'d, and reading it to
@@ -261,37 +268,62 @@ export interface StdinFileSource {
  * stdin `<file-col>=-` per call, (b) it is the sole file `--set`
  * entry, and (c) the callShape is single-target (`item set` /
  * single-item `item update` / `item create`) — bulk fan-out can't
- * replay one stream across N items.
+ * replay one stream across N items. The bytes buffer fully into
+ * memory (same in-memory model as {@link buildBlobFromPath}).
  *
- * **Status: v0.8-M47 pre-flight stub.** The argv `<file-col>=-` +
- * `--filename` surface, the `routeFileColumnDispatch` stdin-scope
- * enforcement, and the cross-doc contract are the shipped pre-flight
- * contract; this stdin-read + Blob-construction leg lands at the
- * v0.8-M47 IMPL. The stub throws `internal_error` with
- * `details.reason: 'm47_preflight_stub'` so the surface is reachable
- * + regression-pinned without yet consuming stdin.
+ * Throws {@link UsageError}:
+ *   - `'stdin_file_empty'` — stdin produced zero bytes. Monday rejects
+ *     empty uploads server-side (`FILE_SIZE_LIMIT_EXCEEDED`); the CLI
+ *     surfaces the rejection with a clearer hint via this local check,
+ *     mirroring {@link precheckLocalFile}'s `'file_empty'` discipline.
+ *   - `'stdin_not_wired'` — `stdin` is `undefined` (the runner did not
+ *     thread a stream). Defensive: production always wires
+ *     `process.stdin`; reachable only via direct misuse / a bare-`run`
+ *     test that omits the slot.
+ *
+ * No TTY guard: like the `--body-file -` sibling (`readSourceContent`)
+ * the helper reads the stream to EOF regardless of TTY-ness — a closed
+ * / empty pipe surfaces as `'stdin_file_empty'`; an interactive
+ * terminal blocks until EOF exactly as `--body-file -` does. The
+ * stdout-`isTTY` flag on `ctx` is the output-mode signal, not stdin's.
  */
-// eslint-disable-next-line @typescript-eslint/require-await -- v0.8-M47 pre-flight stub; live body (M47 IMPL) awaits the stdin read. The `async` + `Promise<StdinFileSource>` signature is the shipped contract.
-export const readStdinFileSource = async (filename: string): Promise<StdinFileSource> => {
-  /* c8 ignore start — v0.8-M47 pre-flight stub; the live stdin read +
-     Blob construction lands at M47 IMPL. The argv + --filename +
-     routing + scope-enforcement surface is the shipped contract; only
-     this leg is stubbed (mirrors M42/M43 `*_preflight_stub` cadence). */
-  throw new ApiError(
-    'internal_error',
-    'readStdinFileSource: v0.8-M47 pre-flight stub — stdin file ' +
-      '`--set <file-col>=-` runtime body lands at the M47 IMPL.',
-    {
-      details: {
-        reason: 'm47_preflight_stub',
-        filename,
-        milestone: 'v0.8-M47',
-        hint:
-          'stdin file `--set` is contract-pinned but not yet ' +
-          'implemented; pass a local file path instead until v0.8-M47 ' +
-          'IMPL ships the stdin read.',
+export const readStdinFileSource = async (
+  stdin: NodeJS.ReadableStream | undefined,
+  filename: string,
+): Promise<StdinFileSource> => {
+  if (stdin === undefined) {
+    throw new UsageError(
+      'stdin file `--set <file-col>=-` requested a stdin source, but no ' +
+        'stdin stream is wired into the runner. This is a programmer ' +
+        'wiring bug.',
+      { details: { reason: 'stdin_not_wired' } },
+    );
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of stdin) {
+    chunks.push(Buffer.from(chunk));
+  }
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length === 0) {
+    throw new UsageError(
+      'stdin produced an empty payload (0 bytes); Monday rejects empty ' +
+        'uploads server-side. Pipe non-empty content into ' +
+        '`<file-col>=-`, or pass a non-empty file path.',
+      {
+        details: {
+          reason: 'stdin_file_empty',
+          filename,
+          file_size_bytes: 0,
+          hint:
+            'Monday returns FILE_SIZE_LIMIT_EXCEEDED on empty uploads. ' +
+            'Pipe non-empty content into `<file-col>=-` or use a file path.',
+        },
       },
-    },
-  );
-  /* c8 ignore stop */
+    );
+  }
+  return {
+    blob: new Blob([bytes], { type: sniffContentType(filename) }),
+    filename,
+    fileSizeBytes: bytes.length,
+  };
 };
