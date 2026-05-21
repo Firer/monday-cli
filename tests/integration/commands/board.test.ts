@@ -4202,10 +4202,11 @@ describe('monday board column-create — board_relation / dependency settings (v
     );
   });
 
-  it('live board_relation WITHOUT --settings does NOT hit the stub (only the settings-wrap leg is stubbed)', async () => {
+  it('live board_relation WITHOUT --settings fires create_column with no defaults (the wrap is settings-gated, not type-gated)', async () => {
     // board_relation with no --settings carries no defaults to wrap, so
-    // the create_column call fires normally — proving the stub guards
-    // only the settings path, not the type.
+    // the create_column call fires with `variables.defaults` absent —
+    // the `{settings}` wrap is reached only inside `if (settings !==
+    // undefined)`, gated on the presence of --settings, not the type.
     const out = await drive(
       [
         'board', 'column-create', '12345',
