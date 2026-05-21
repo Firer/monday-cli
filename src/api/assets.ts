@@ -278,9 +278,9 @@ export interface AddFileToColumnInputs {
    * explicitly — `MondayClient.signal` is private + multipart
    * dispatch bypasses `MondayClient.raw`, so no implicit fallback
    * exists. Abort propagation follows the standard
-   * `--timeout` / SIGINT plumbing (`src/api/transport.ts`'s
-   * `combineSignals` mirrors the multipart-transport's own
-   * combined-signal logic at IMPL).
+   * `--timeout` / SIGINT plumbing (the shared `combineSignals` in
+   * `src/api/fetch-transport-helpers.ts`, used by both the JSON +
+   * multipart transports — R-v0.8-NEW-11 lift).
    *
    * **Retry semantics pinned (cli-design §2.5).** Asset upload
    * honors the global `--retry <n>` contract: the IMPL session

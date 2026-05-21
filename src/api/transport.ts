@@ -1,4 +1,10 @@
-import { ApiError, errorCode } from '../utils/errors.js';
+import { ApiError } from '../utils/errors.js';
+import {
+  combineSignals,
+  describeFetchError,
+  headersToRecord,
+  isAbortError,
+} from './fetch-transport-helpers.js';
 
 /**
  * Transport interface (`v0.1-plan.md` §2 pre-flight, §5.2).
@@ -162,116 +168,4 @@ export const createFetchTransport = (
       };
     },
   };
-};
-
-const isAbortError = (err: unknown): boolean => {
-  if (err instanceof Error) {
-    return err.name === 'AbortError' || err.name === 'TimeoutError';
-  }
-  return false;
-};
-
-/**
- * Builds a generic, URL-free message for a thrown `fetch` exception.
- *
- * Why not `err.message`. Node's undici embeds the request URL into
- * the messages of common transport errors — `ECONNREFUSED https://
- * api.example/v2?token=...`, `getaddrinfo ENOTFOUND
- * api.example`, etc. If `MONDAY_API_URL` is misconfigured to carry
- * the token (or any other secret), the literal token lands in
- * `ApiError.message`. The runner's redactor would catch it on emit,
- * but `security.md` forbids the token entering `Error.message` in
- * the first place — the rule is defence-in-depth, not "we'll fix it
- * downstream". The original error is still attached via `cause`,
- * which a future debug log surfaces through `redact()` (key + value
- * scan) rather than verbatim.
- *
- * Maps the common shapes to short, stable codes:
- *  - DNS / hostname unresolvable  → `dns lookup failed`
- *  - ECONNREFUSED / ECONNRESET    → `connection refused`
- *  - SSL/TLS issue                → `tls error`
- *  - generic Error                → `fetch failed`
- *  - non-Error throw              → `fetch failed`
- */
-const describeFetchError = (err: unknown): string => {
-  if (err instanceof Error) {
-    const code = errorCode(err);
-    if (code !== undefined) {
-      if (code.startsWith('ENOTFOUND') || code.startsWith('EAI_')) {
-        return 'fetch failed: dns lookup failed';
-      }
-      if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
-        return 'fetch failed: connection refused';
-      }
-      if (code === 'CERT_HAS_EXPIRED' || code.startsWith('UNABLE_TO_')) {
-        return 'fetch failed: tls error';
-      }
-    }
-    // Sniff the message for the same common shapes when err.code
-    // isn't surfaced (older fetch impls, wrapped TypeErrors).
-    const lower = err.message.toLowerCase();
-    if (lower.includes('econnrefused') || lower.includes('connection refused')) {
-      return 'fetch failed: connection refused';
-    }
-    if (
-      lower.includes('enotfound') ||
-      lower.includes('eai_again') ||
-      lower.includes('getaddrinfo')
-    ) {
-      return 'fetch failed: dns lookup failed';
-    }
-    return 'fetch failed';
-  }
-  return 'fetch failed';
-};
-
-const headersToRecord = (
-  headers: Headers,
-): Readonly<Record<string, string>> => {
-  const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    out[key] = value;
-  });
-  return out;
-};
-
-/**
- * Mirrors `AbortSignal.any` in environments that don't have it yet.
- * Prefers the platform implementation when available so tests
- * exercise the real path.
- */
-const combineSignals = (
-  ...signals: readonly (AbortSignal | undefined)[]
-): AbortSignal => {
-  const real = signals.filter((s): s is AbortSignal => s !== undefined);
-  const [first, ...rest] = real;
-  if (first === undefined) {
-    return new AbortController().signal;
-  }
-  if (rest.length === 0) {
-    return first;
-  }
-  if (typeof AbortSignal.any === 'function') {
-    return AbortSignal.any(real);
-  }
-  /* c8 ignore start — legacy fallback for runtimes without
-     `AbortSignal.any` (Node < 19). Repo's engines pin to Node 22+,
-     so this path is never hit in CI or dev. Kept for safety in case
-     a downstream embedder runs an older Node. */
-  const ctrl = new AbortController();
-  for (const s of real) {
-    if (s.aborted) {
-      ctrl.abort(s.reason);
-      break;
-    }
-    s.addEventListener(
-      'abort',
-      () => {
-        ctrl.abort(s.reason);
-      },
-      { once: true },
-    );
-  }
-  return ctrl.signal;
-  /* c8 ignore stop */
 };

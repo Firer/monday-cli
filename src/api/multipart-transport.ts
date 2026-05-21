@@ -85,8 +85,9 @@
  * The transport DOES own signal threading: callers pass `signal`
  * on every `request()` (required slot on
  * {@link MultipartTransportRequest}); abort propagation follows
- * the standard `AbortSignal.any(timeout, caller)` chain mirroring
- * `transport.ts`'s `combineSignals` (lands at IMPL).
+ * the standard `AbortSignal.any(timeout, caller)` chain via the
+ * shared `combineSignals` in `fetch-transport-helpers.ts`
+ * (R-v0.8-NEW-11 lift — same helper the JSON transport uses).
  *
  * **Status: runtime body shipped at v0.4-M31 IMPL; wire format
  * corrected at v0.8-M49.** The M31 build emitted the Apollo/jaydenseric
@@ -117,7 +118,13 @@
  *     `url_thumbnail`).
  */
 
-import { ApiError, errorCode } from '../utils/errors.js';
+import { ApiError } from '../utils/errors.js';
+import {
+  combineSignals,
+  describeFetchError,
+  headersToRecord,
+  isAbortError,
+} from './fetch-transport-helpers.js';
 
 /**
  * One multipart request: the GraphQL document (query + variables +
@@ -177,8 +184,9 @@ export interface MultipartTransportRequest {
   /**
    * Caller-supplied signal threaded into the underlying `fetch`'s
    * `signal` option (combined with `AbortSignal.timeout(timeoutMs)`
-   * at IMPL via `AbortSignal.any` mirroring `transport.ts`'s
-   * `combineSignals`). Required — callers MUST pass `ctx.signal`
+   * via the shared `combineSignals` in `fetch-transport-helpers.ts`,
+   * the same helper the JSON transport uses). Required — callers MUST
+   * pass `ctx.signal`
    * explicitly so SIGINT + `--timeout` propagate to the in-flight
    * multipart upload.
    */
@@ -380,83 +388,4 @@ const deriveFileEndpoint = (endpoint: string): string => {
   const url = new URL(endpoint);
   url.pathname = `${url.pathname.replace(/\/+$/u, '')}/file`;
   return url.toString();
-};
-
-const isAbortError = (err: unknown): boolean => {
-  if (err instanceof Error) {
-    return err.name === 'AbortError' || err.name === 'TimeoutError';
-  }
-  return false;
-};
-
-/**
- * Mirrors `transport.ts:describeFetchError`. Extracted to keep
- * messaging stable across the JSON + multipart paths — agents
- * reading either envelope's `error.message` see the same vocabulary
- * for connection / DNS / TLS failures regardless of which transport
- * issued the call.
- */
-const describeFetchError = (err: unknown): string => {
-  if (err instanceof Error) {
-    const code = errorCode(err);
-    if (code !== undefined) {
-      if (code.startsWith('ENOTFOUND') || code.startsWith('EAI_')) {
-        return 'fetch failed: dns lookup failed';
-      }
-      if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
-        return 'fetch failed: connection refused';
-      }
-      if (code === 'CERT_HAS_EXPIRED' || code.startsWith('UNABLE_TO_')) {
-        return 'fetch failed: tls error';
-      }
-    }
-    const lower = err.message.toLowerCase();
-    if (lower.includes('econnrefused') || lower.includes('connection refused')) {
-      return 'fetch failed: connection refused';
-    }
-    if (
-      lower.includes('enotfound') ||
-      lower.includes('eai_again') ||
-      lower.includes('getaddrinfo')
-    ) {
-      return 'fetch failed: dns lookup failed';
-    }
-    return 'fetch failed';
-  }
-  return 'fetch failed';
-};
-
-const headersToRecord = (
-  headers: Headers,
-): Readonly<Record<string, string>> => {
-  const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    out[key] = value;
-  });
-  return out;
-};
-
-/**
- * Mirrors `transport.ts:combineSignals` — prefer the platform
- * `AbortSignal.any` when available (Node 22+ pin always satisfies
- * this) and synthesise a controller for the legacy fallback path.
- */
-const combineSignals = (
-  ...signals: readonly (AbortSignal | undefined)[]
-): AbortSignal => {
-  const real = signals.filter((s): s is AbortSignal => s !== undefined);
-  const [first, ...rest] = real;
-  /* c8 ignore next 3 — defensive guard; production callers always
-     pass at least one signal (the caller's `ctx.signal` is REQUIRED
-     on `MultipartTransportRequest`). */
-  if (first === undefined) {
-    return new AbortController().signal;
-  }
-  /* c8 ignore next 3 — production callers always combine the
-     caller's signal with `AbortSignal.timeout(...)`, so this branch
-     is unreachable from the request() pipeline. */
-  if (rest.length === 0) {
-    return first;
-  }
-  return AbortSignal.any(real);
 };
