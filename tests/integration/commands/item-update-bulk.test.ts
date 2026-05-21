@@ -4697,6 +4697,66 @@ describe('monday item update bulk — --concurrency (M30 parallel dispatch)', ()
       expect(out.stderr).not.toContain('m46_preflight_stub');
     });
 
+    it("fail-fast bulk multi-file: FIRST item's FIRST leg fails — no board-cache invalidate (nothing landed), applied_to: [] decoration", async () => {
+      // Boundary complementing the test above: the very first leg of
+      // the first matched item fails, so neither a prior item fully
+      // applied NOR did this item land any leg — the invalidate-before-
+      // rethrow guard is skipped (no wire state mutated). `applied_to`
+      // is empty; `applied_file_columns_per_item` maps the failed item
+      // to an empty leg list.
+      const multipart = createInlineMultipartFixtureTransport(
+        [
+          {
+            operation_name: 'AddFileToColumn',
+            match_filename: 'report-1.pdf',
+            response: { errors: [{ message: 'Internal server error' }] },
+            http_status: 500,
+          },
+        ],
+        { assertExhaustive: false },
+      );
+      const out = await drive(
+        [
+          'item',
+          'update',
+          '--board',
+          '111',
+          '--where',
+          'status_1=Backlog',
+          '--set',
+          `attachments=${reportPath1}`,
+          '--set',
+          `attachments_2=${reportPath2}`,
+          '--yes',
+          '--json',
+        ],
+        { interactions: [fileBoardMetadataMulti, itemsPageWithTwo] },
+        { multipartTransport: multipart },
+      );
+      expect(out.exitCode).toBe(2);
+      const env = parseEnvelope(out.stderr) as EnvelopeShape & {
+        error?: {
+          code: string;
+          details?: {
+            applied_to?: string[];
+            applied_count?: number;
+            applied_file_columns_per_item?: Record<string, string[]>;
+            failed_at_item?: string;
+            failed_file_column?: string;
+          };
+        };
+      };
+      // Nothing landed anywhere — the first item is the failed item.
+      expect(env.error?.details?.applied_to).toEqual([]);
+      expect(env.error?.details?.applied_count).toBe(0);
+      expect(env.error?.details?.failed_at_item).toBe('12345');
+      expect(env.error?.details?.failed_file_column).toBe('attachments');
+      expect(env.error?.details?.applied_file_columns_per_item).toEqual({
+        '12345': [],
+      });
+      expect(out.stderr).not.toContain('m46_preflight_stub');
+    });
+
     it("--continue-on-error bulk multi-file: per-item partial failure lands as results[i].error + applied_file_columns + failed_file_column; envelope stays ok: true", async () => {
       // Item 12345 fully succeeds; item 23456 partial-fails on leg-2.
       // Sequential (no --concurrency) keeps multipart ordering
