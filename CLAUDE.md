@@ -35,30 +35,28 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** **4253 tests pass + 3 skipped** (3 skips
+- **Live numbers:** **4254 tests pass + 3 skipped** (3 skips
   unchanged: the 2 pre-existing + the RUN_LIVE_TESTS-gated
-  multipart-upload smoke test; the +16 vs the prior 4237 is the
-  **v0.8-M48 pre-flight** — the `board_relation` / `dependency`
-  create-time settings describe block in `board.test.ts`:
-  schema/int-coercion/dependency-same-board-reject/dry-run echo + the
-  2 `m48_preflight_stub` PIN tests + the 2 unsafe-integer rejection
-  tests). **✅ CI `test:coverage` PASSES:** global **branch coverage
-  95.91% (4484/4675) vs the 95.45% floor** (was 95.9% (4474/4665) at
-  M47 IMPL close; the M48 pre-flight adds +10 covered branches — the
-  new per-type schema arms + the dependency board-target reject + the
-  settings-wrap branch; the `m48_preflight_stub` throw is c8-ignored,
-  so it doesn't count). **29 ERROR_CODES**; **117 commands** (M48 added
-  neither — `--settings` is an existing flag; `m48_preflight_stub` is a
-  transient `details.reason` stub literal that disappears at M48 IMPL;
-  the dependency board-target rejection is an existing `usage_error`
-  with a new `details.rejected_keys` shape); **functions 98.97%
-  (1349/1363)** (the +3 denominator vs 1346/1360 is the
-  `relationBoardIdSchema` `.transform` arrow + `rejectDependencyBoard
-  Targets` + its `.filter` arrow — all covered); `npm audit` **0
-  vulnerabilities**. Earlier coverage contributors still hold: the
-  **v0.8 refactor cluster** (`item/update.ts` 79.42% → 87.27%),
-  **R-v0.8-NEW-11** transport-helper lift, the M46 dispatch-arm tests
-  (`item/create.ts` 82.31% → 86.58%).
+  multipart-upload smoke test; the +16 pre-flight block plus the
+  **v0.8-M48 IMPL** net +1 — the 2 `m48_preflight_stub` PIN tests
+  converted to 2 live wire-shape assertions (`match_variables:
+  {defaults: {settings: {…}}}`, whole-`defaults` JSON.stringify-pinned)
+  + a RESERVED-literal regression guard). **✅ CI `test:coverage`
+  PASSES:** global **branch coverage 95.91% (4484/4675) vs the 95.45%
+  floor** (HOLDS across the M48 IMPL — the removed c8-ignored stub block
+  contributed no counted branches, and the new `variables.defaults =
+  CREATE_TIME_SETTINGS_WRAP_TYPES.has(type) ? {settings} : settings`
+  ternary's two arms are both covered: board_relation/dependency hit the
+  `{settings}` arm, status/dropdown/numbers hit the bare arm). **29
+  ERROR_CODES**; **117 commands** (M48 added neither — `--settings` is
+  an existing flag; the `m48_preflight_stub` `details.reason` literal
+  has DISAPPEARED from runtime at IMPL and stays RESERVED, regression-
+  guarded; the dependency board-target rejection is an existing
+  `usage_error` with a `details.rejected_keys` shape); **functions
+  98.97% (1349/1363)**; `npm audit` **0 vulnerabilities**. Earlier
+  coverage contributors still hold: the **v0.8 refactor cluster**
+  (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11** transport-helper
+  lift, the M46 dispatch-arm tests (`item/create.ts` 82.31% → 86.58%).
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -66,29 +64,34 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.8-M48 IMPL** — swap the `m48_preflight_stub`
-  for the live `defaults: {settings: {…}}` wire-wrap. The pre-flight
-  (`fbd60a6..0ca0d81`, Codex CONVERGED R3) shipped the argv surface
-  LIVE: the `board_relation` schema (`boardIds`/`boardId` int-coerced
-  from JSON int OR numeric string with a `Number.isSafeInteger` guard;
-  `allowMultipleItems`; `allowCreateReflectionColumn`), the
-  `dependency` same-board schema (accepts `allowMultipleItems`; rejects
-  cross-board `boardIds`/`boardId` with a targeted `usage_error` per
-  D1 option (c) — user demand: "I want dependencies, same-board is
-  fine"), and the dry-run echo (unwrapped agent shape, mirroring
-  read-back). IMPL: in `src/commands/board/column-create.ts`, replace
-  the c8-ignored stub (gated on `CREATE_TIME_SETTINGS_WRAP_TYPES.has(
-  type)` + `settings !== undefined`) with `variables.defaults =
-  {settings}`; add a mocked-wire assertion test
-  (`match_variables: {defaults: {settings: {…}}}`, mirroring the M16
-  `defaults: $defaults` wire-shape pin) + a regression-guard that
-  `m48_preflight_stub` never reappears in emitted output (the literal
-  is RESERVED post-IMPL). The `create_column` call is plain JSON (NOT
-  multipart) + the wire shape is probe-confirmed (live create+readback)
-  + read-back is UNWRAPPED, so the mocked-transport assertion is
-  trustworthy — no RUN_LIVE_TESTS gate needed (unlike M49's multipart).
-  Full close + D-list at `docs/v0.8-plan.md` §3 M48. After M48 IMPL,
-  **release-prep is the LAST v0.8 unit** (standing decision).
+- **Next session:** **v0.8 release-prep** — the LAST v0.8 unit
+  (standing decision). All v0.8 feature milestones have now SHIPPED
+  (M49 + refactor cluster + M47 + **M48**). Release-prep is the 6-commit
+  baseline (`workflow.md` R-NEW-82): envelope-snapshot refresh probe +
+  ToC audit + deferral slip (`deferred_to: "v0.8"` cross-doc grep) +
+  README quickstart refresh + version bump 0.7.0 → 0.8.0 + CHANGELOG
+  [0.8.0] + close-docs sweep. R-v0.8-NEW-4 (schema parse-test backfill)
+  folds into the envelope-snapshot probe. The two process/template
+  adoptions land here too (no code milestone): R-v0.8-NEW-7 (bare-SHA
+  doc citations → commit-subject refs) + R-v0.8-NEW-8 (Codex
+  audit-point: new emit shape → `outputSchema` advertisement check).
+  **✅ v0.8-M48 SHIPPED 2026-05-21** (`4803cbf` IMPL feat + `f79bb16`
+  R1 P3 prose fix-up; Codex IMPL CONVERGED R2, 0 P1/P2 across both
+  rounds): the `m48_preflight_stub` c8-ignored stub swapped for the live
+  `variables.defaults = CREATE_TIME_SETTINGS_WRAP_TYPES.has(type) ?
+  {settings} : settings` wrap (single dispatch-site ternary); the 2 stub
+  PIN tests converted to live wire-shape assertions
+  (`match_variables: {defaults: {settings: {…}}}`, whole-`defaults`
+  JSON.stringify-pinned so a bare pass-through regression fails) + a
+  RESERVED-literal regression guard. The wrap is wire-only — dry-run
+  echo + read-side `settings_str` stay UNWRAPPED (agent shape). Plain
+  JSON (not multipart) + probe-confirmed wire, so no RUN_LIVE_TESTS gate
+  (unlike M49). `ApiError` import dropped. The `m48_preflight_stub`
+  literal has DISAPPEARED from runtime + stays RESERVED. R-v0.8-NEW-19
+  (3-parallel-structure schema-registry/wrap-set fold) + R-v0.8-NEW-20
+  (suspected dependency item-VALUE `--set` live-drift) stay filed
+  watch-items — neither tripped by M48 IMPL. Full close + D-list at
+  `docs/v0.8-plan.md` §3 M48.
   **✅ v0.8-M47 SHIPPED 2026-05-21** (`0d99ea7`,
   `feat(item): live stdin file --set <file-col>=- (v0.8-M47 IMPL)`):
   the `readStdinFileSource` stub swapped for the live stdin buffer →
@@ -105,9 +108,9 @@ humans are second-class. Built incrementally via Claude Code on top of
   R-v0.8-NEW-17 verb-shaped upload hints refreshed (`d686177`).
   **R-v0.8-NEW-2 RESOLVED** at the M47 pre-flight
   (`enforceSingleFileColumnSet` → `routeFileColumnDispatch`). Full
-  close + D-list at `docs/v0.8-plan.md` §3 M47. **M48 then release-prep
-  are the last two v0.8 units** (release-prep runs last). **✅ v0.8
-  refactor cluster SHIPPED 2026-05-21**
+  close + D-list at `docs/v0.8-plan.md` §3 M47. (M48 has since SHIPPED
+  — `4803cbf` — leaving **release-prep as the last v0.8 unit**.) **✅
+  v0.8 refactor cluster SHIPPED 2026-05-21**
   (`refactor(api): lift reThrowDecorated + projectCauseForEnvelope`;
   Codex IMPL CONVERGED R4; branches 95.47% → 95.88%). **v0.8-M49 DONE**
   (`2ec67ad`): `src/api/multipart-transport.ts` emits Monday's native
@@ -115,9 +118,9 @@ humans are second-class. Built incrementally via Claude Code on top of
 
   **v0.8 committed scope (post-M49), rough build order** (revised
   2026-05-21 — M49 + the refactor cluster + **M47 SHIPPED** (`0d99ea7`,
-  Codex IMPL CONVERGED R1); **M48 PRE-FLIGHT DONE** (`fbd60a6..0ca0d81`,
-  Codex CONVERGED R3); **M48 IMPL is the next session**, then
-  release-prep last):
+  Codex IMPL CONVERGED R1) + **M48 SHIPPED** (`4803cbf` IMPL +
+  `f79bb16` fix-up, Codex IMPL CONVERGED R2); **release-prep is the
+  next + LAST v0.8 unit**):
   - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
     `2ec67ad`** (Codex R1 CONVERGED, live-verified).
   - **v0.8 refactor cluster** — **✅ SHIPPED 2026-05-21**
@@ -143,19 +146,22 @@ humans are second-class. Built incrementally via Claude Code on top of
     **R-v0.8-NEW-2 RESOLVED** at pre-flight (`enforceSingleFileColumnSet`
     → `routeFileColumnDispatch`); R-v0.8-NEW-15 not-tipped,
     R-v0.8-NEW-16 graduated (`da62add`), R-v0.8-NEW-17 done (`d686177`).
-  - **M48** *(PRE-FLIGHT DONE `fbd60a6..0ca0d81`, Codex CONVERGED R3;
-    IMPL NEXT)* — board_relation/dependency writable settings.
-    Pre-flight shipped the argv surface live (per-type schemas, int
-    coercion with a `Number.isSafeInteger` guard, the `dependency`
-    same-board reject per D1 option (c), the dry-run echo); the live
-    `defaults: {settings:{boardIds:[int],...}}` wire-wrap is a
-    `m48_preflight_stub` until IMPL. Probe: outcome (b) live-confirmed;
-    single-leg; M19 "no documented shape" REFUTED; read back as
-    UNWRAPPED `settings_str`; Monday validates board existence →
-    `not_found`; `dependency` diverges (same-board — arbitrary target
-    coerced to host). Independent of M49 — `create_column` is JSON, not
-    multipart. Full close + D-list at §3 M48 entry; raw report at
-    `scripts/probe/m48-board-relation-settings.report.txt`.
+  - **M48** — board_relation/dependency writable settings. **✅
+    SHIPPED 2026-05-21** (pre-flight `fbd60a6..0ca0d81` Codex CONVERGED
+    R3; IMPL `4803cbf` feat + `f79bb16` R1 P3 fix-up, Codex IMPL
+    CONVERGED R2). Pre-flight shipped the argv surface live (per-type
+    schemas, int coercion with a `Number.isSafeInteger` guard, the
+    `dependency` same-board reject per D1 option (c), the dry-run echo);
+    IMPL swapped the `m48_preflight_stub` for the live
+    `variables.defaults = ...has(type) ? {settings} : settings` wrap +
+    the whole-`defaults` wire-shape assertion + the RESERVED-literal
+    guard. Probe: outcome (b) live-confirmed; single-leg; M19 "no
+    documented shape" REFUTED; read back as UNWRAPPED `settings_str`;
+    Monday validates board existence → `not_found`; `dependency`
+    diverges (same-board — arbitrary target coerced to host).
+    Independent of M49 — `create_column` is JSON, not multipart; no
+    RUN_LIVE_TESTS gate. Full close + D-list at §3 M48 entry; raw report
+    at `scripts/probe/m48-board-relation-settings.report.txt`.
   - **Release-prep cluster** — R-v0.8-NEW-4 (schema parse-test
     backfill) folds into its envelope-snapshot probe.
   - Process/template adoptions (no code milestone): R-v0.8-NEW-7
