@@ -11,20 +11,19 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.7.0` on npm (`latest` dist-tag,
-  2026-05-20T15:48:07Z). **✅ v0.8.0 release-prep SHIPPED 2026-05-22 —
-  ready for publish; EXTERNALLY BLOCKED on user push + `npm publish` +
-  annotated `v0.8.0` tag + GitHub release** (harness can't push or
-  authenticate npm — see "Next session"). The 🚨 P1 file-upload wire
-  fix (v0.8-M49, `2ec67ad`) ships in v0.8.0: published v0.7.0 uploads
-  (`item upload` / `update upload` / file `--set` — M31/M38/M42/M43/M46)
-  shipped the Apollo multipart spec that live Monday rejects, so they
-  stay **live-broken in the published v0.7.0 artifact until v0.8.0
-  publishes**. `multipart-transport.ts` now emits Monday's native shape
-  (`query` + sibling `variables` + string-`map` + named part, POSTed to
-  `/v2/file`); live-verified via a RUN_LIVE_TESTS-gated smoke test
-  (R-v0.8-NEW-9 RESOLVED + graduated into `testing.md`).
-  **v0.8 release-prep cluster** (`66d5142..<close-docs>`, 6 commits;
+- **Published:** `monday-cli@0.8.0` on npm (`latest` dist-tag,
+  2026-05-21T23:45:48Z). **v0.8.0 published — release complete.**
+  Annotated `v0.8.0` tag pushed pointing at `090fb76`; GitHub release
+  live at https://github.com/Firer/monday-cli/releases/tag/v0.8.0. The
+  🚨 P1 file-upload wire fix (v0.8-M49, `2ec67ad`) is now
+  **LIVE-RESOLVED in the published artifact**: `item upload` /
+  `update upload` / file `--set` — broken in published v0.7.0 across
+  M31/M38/M42/M43/M46 by the Apollo multipart spec that live Monday
+  rejects — now work live. `multipart-transport.ts` emits Monday's
+  native shape (`query` + sibling `variables` + string-`map` + named
+  part, POSTed to `/v2/file`); live-verified via a RUN_LIVE_TESTS-gated
+  smoke test (R-v0.8-NEW-9 RESOLVED + graduated into `testing.md`).
+  **v0.8 release-prep cluster** (`66d5142..090fb76`, 6 commits;
   mirrors the v0.7 precedent + one extra user-requested commit):
   deferral slip v0.8 → v0.9 + ToC M46/M47/M48 sync
   (`66d5142`, `slip stale v0.8 deferral to v0.9`) / README v0.8
@@ -34,7 +33,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   help-text cleanup** stripping internal §/version/M-number refs from
   `monday help` + verb `--help` (`40a58d0`, user-requested — also fixed
   a stale `doc` noun description still claiming "read-only at v0.4") /
-  close-docs sweep (`<close-docs>`). Envelope-snapshot refresh probe ran
+  close-docs sweep (`090fb76`). Envelope-snapshot refresh probe ran
   clean (zero diff vs M48 IMPL close, 162 snapshots) — folded into this
   close-docs prose per the v0.5/v0.6/v0.7 precedent. Previous:
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
@@ -72,23 +71,17 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **coordinate the v0.8.0 publish, then v0.9
-  candidate-selection.** v0.8 release-prep SHIPPED this session
-  (`66d5142..<close-docs>`); v0.8.0 is feature-complete + gate-green.
-  The publish is EXTERNALLY BLOCKED on the user (harness can't push or
-  authenticate npm): (1) `git push origin main`; (2) `npm publish`;
-  (3) annotated `v0.8.0` tag at the close-docs commit + push; (4)
-  GitHub release at the tag (draft via `gh release create` once the tag
-  is pushed — mirror the v0.7.0 notes shape); (5) a post-publish flip
-  commit (CLAUDE.md "Published: `monday-cli@0.8.0` … release complete";
-  the M49 P1 fix is then LIVE-RESOLVED in the published artifact) +
-  backfill the `<close-docs>` SHA placeholders in `docs/v0.8-plan.md`.
-  Then **v0.9 candidate-selection** (R-NEW-75 dedicated session): the
+- **Next session:** **v0.9 candidate-selection** (R-NEW-75 dedicated
+  session). **v0.8.0 is PUBLISHED + release-complete** — push + `npm
+  publish` + annotated `v0.8.0` tag (`090fb76`) + GitHub release all
+  done (npm 2026-05-21T23:45:48Z); v0.8 release-prep SHIPPED at
+  `66d5142..090fb76`, and this post-publish flip commit completes the
+  release (status + LIVE-RESOLVED + SHA-backfill; needs a push). The
   v0.9 backlog is M44 / M45 (user-entity migration + `user activity`) +
   the v0.7-deferred M39 / M40 / M41 cluster — all gated on
   `@mondaydotcomorg/api` SDK 15.x (`2026-04`) / 16.x (`2026-07`)
   publishing, which had not happened at the v0.8 candidate-selection
-  commit (SDK still 14.0.0). Process adoptions at this close-docs:
+  commit (SDK still 14.0.0). Process adoptions at the v0.8 close-docs:
   **R-v0.8-NEW-7 ADOPTED** (commit-subject refs over bare SHAs in NEW
   prose); **R-v0.8-NEW-8 + R-v0.8-NEW-4 stay deferred watch-items**
   (M47/M48 added no new emit shape, so the `outputSchema` audit-point
