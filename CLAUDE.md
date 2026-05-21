@@ -62,20 +62,22 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.8 candidate-selection** (R-NEW-75 — ≥2
-  backlog candidates remain: M47 + M48 + release-prep). Run the
-  dedicated pre-pre-flight: scope each against the five dimensions
-  (wire-shape novelty / transport seam / destructive gate / R-class
-  triggers / Codex round estimate), recommend ONE with neutral
-  trade-offs, then `AskUserQuestion` for the binding pick. Candidates:
-  (a) **M47** — stdin file `--set` `<file-col>=-` (D7 closure;
-  UNBLOCKED by M49; probe DONE — `--filename` OPTIONAL, default a
-  non-empty placeholder; R-v0.8-NEW-2 `enforceSingleFileColumnSet`
-  rename folds in); (b) **M48** — writable board_relation/dependency
-  settings (`create_column`, JSON not multipart; probe DONE outcome
-  (b); open D1 `dependency`-divergence decision at its pre-flight);
-  (c) **release-prep cluster** (R-v0.8-NEW-4 schema parse-test backfill
-  folds into its envelope-snapshot probe). **✅ v0.8 refactor cluster
+- **Next session:** **v0.8-M47 pre-flight contract diff** — stdin
+  file `--set` `<file-col>=-` (closes the v0.6-M38 D7 deferral). **SELECTED
+  2026-05-21** at candidate-selection (R-NEW-75) over M48 + release-prep:
+  picked because it continues the just-refactored file-path thread
+  (`file-column-set.ts` was the refactor cluster's surface), carries
+  **zero open design decisions** (M48 still has open D1
+  `dependency`-divergence), folds the **R-v0.8-NEW-2**
+  `enforceSingleFileColumnSet` rename at its named trigger, and closes
+  the last v0.6-M38 file `--set` carve-out. M48 + release-prep stay
+  STANDBY (release-prep runs last, shipping the M49 P1 fix). Probe DONE:
+  `--filename` OPTIONAL (any non-empty name works, default a non-empty
+  placeholder; empty → 500). No new transport seam (reuses the
+  M49-fixed `add_file_to_column` multipart path); new surface is an
+  in-process stdin→Blob source in `file-source.ts`. No destructive
+  gate. Codex est. ~3 IMPL rounds. Run the **Pre-flight contract diff
+  discipline** (workflow.md) — NOT an IMPL. **✅ v0.8 refactor cluster
   SHIPPED 2026-05-21** (`refactor(api): lift reThrowDecorated +
   projectCauseForEnvelope`): both stubs swapped for runtime bodies, 7
   sites delegated, 6 c8-ignores removed, 4-path ratchet landed; Codex
@@ -86,9 +88,9 @@ humans are second-class. Built incrementally via Claude Code on top of
   `docs/v0.8-plan.md` §3 M49.
 
   **v0.8 committed scope (post-M49), rough build order** (revised
-  2026-05-21 — M49 + the refactor cluster SHIPPED; M47 + M48 +
-  release-prep remain, next session runs candidate-selection among
-  them):
+  2026-05-21 — M49 + the refactor cluster SHIPPED; **M47 SELECTED as
+  the next pre-flight** at candidate-selection (R-NEW-75); M48 +
+  release-prep stay STANDBY behind it, release-prep last):
   - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
     `2ec67ad`** (Codex R1 CONVERGED, live-verified).
   - **v0.8 refactor cluster** — **✅ SHIPPED 2026-05-21**
@@ -103,7 +105,8 @@ humans are second-class. Built incrementally via Claude Code on top of
     M42/M46 file-set paths before M47 adds a 5th touch, and widened the
     thin coverage margin (branches 95.47% → 95.88%; `item/update.ts`
     79.42% → 87.27%). Full close at `docs/v0.8-plan.md` §3 + §22.
-  - **M47** *(standby)* — stdin file `--set` `<file-col>=-` (D7 closure).
+  - **M47** *(SELECTED — next pre-flight)* — stdin file `--set`
+    `<file-col>=-` (D7 closure).
     **UNBLOCKED by M49.** Probe DONE: `--filename` is OPTIONAL (any
     non-empty name works — `"stdin"` / default `"blob"`; empty → 500),
     so default a non-empty placeholder. R-v0.8-NEW-2
