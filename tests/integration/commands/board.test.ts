@@ -3735,14 +3735,15 @@ describe('monday board column-create (integration, M16)', () => {
 });
 
 // =============================================================================
-// v0.8-M48 PRE-FLIGHT — writable board_relation / dependency create-time
-// settings (cli-design §4.3 column-create + §6.4 dry-run). The argv surface
-// ships live (per-type schema, int coercion, dependency same-board rejection,
-// dry-run echo); the live wire-wrap (`defaults: {settings: {…}}`) is a
-// c8-ignored stub throwing `m48_preflight_stub` until the M48 IMPL.
+// v0.8-M48 — writable board_relation / dependency create-time settings
+// (cli-design §4.3 column-create + §6.4 dry-run). The argv surface (per-type
+// schema, int coercion, dependency same-board rejection, dry-run echo) ships
+// alongside the live wire-wrap (`defaults: {settings: {…}}`) — pre-flight
+// stubbed the wrap leg; IMPL swapped it for the live wrap + the wire-shape
+// assertion + the RESERVED-literal regression guard below.
 // =============================================================================
 
-describe('monday board column-create — board_relation / dependency settings (v0.8-M48 pre-flight)', () => {
+describe('monday board column-create — board_relation / dependency settings (v0.8-M48)', () => {
   type SettingsDryRun = EnvelopeShape & {
     data: null;
     planned_changes: readonly {
@@ -3756,12 +3757,9 @@ describe('monday board column-create — board_relation / dependency settings (v
       code: string;
       message?: string;
       details?: {
-        reason?: string;
         column_type?: string;
         rejected_keys?: readonly string[];
         expected_keys?: readonly string[];
-        milestone?: string;
-        board_id?: string;
         hint?: string;
       };
     };
@@ -4020,9 +4018,19 @@ describe('monday board column-create — board_relation / dependency settings (v
     expect(env.error?.details?.expected_keys).toEqual(['allowMultipleItems']);
   });
 
-  // --- pre-flight stub pins (live wire-wrap leg) --------------------------
+  // --- live wire-wrap leg (the M48 IMPL surface) --------------------------
 
-  it('PIN: live board_relation --settings throws the m48_preflight_stub (wire-wrap leg lands at IMPL; no wire call fires)', async () => {
+  it('live: board_relation --settings wraps the validated object under defaults.settings on the wire (NOT passed through bare)', async () => {
+    // The M48-load-bearing assertion. The agent passes the relation
+    // config at the TOP level (`{"boardIds":[67890]}`); the wire must
+    // nest it under a `settings` key inside `defaults`
+    // (`defaults: {settings: {boardIds:[67890]}}`) — the probe-confirmed
+    // create-time shape. A regression that passes the object through
+    // bare as `defaults` (the status/dropdown path) would silently
+    // create an UNCONFIGURED relation column — the M19-bug class. The
+    // matcher JSON.stringify-compares the whole `defaults` value, so a
+    // missing `settings` wrapper fails here. boardIds is an INTEGER on
+    // the wire (the schema int-coerced it).
     const out = await drive(
       [
         'board', 'column-create', '12345',
@@ -4031,19 +4039,53 @@ describe('monday board column-create — board_relation / dependency settings (v
         '--settings', '{"boardIds":[67890]}',
         '--json',
       ],
-      { interactions: [] },
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'board_relation',
+              title: 'Linked',
+              defaults: { settings: { boardIds: [67890] } },
+            },
+            // Wire-shape pin: the variable name MUST be `defaults`
+            // (mirrors the M16 status pin) — `settings_str` is the
+            // read-side serialisation, not a write arg.
+            match_query: /defaults: \$defaults/,
+            response: {
+              data: {
+                create_column: {
+                  id: 'rel_1',
+                  title: 'Linked',
+                  type: 'board_relation',
+                  description: null,
+                  archived: false,
+                  // Read-side is the UNWRAPPED inner object — agents see
+                  // the same shape on input + read-back.
+                  settings_str: '{"boardIds":[67890]}',
+                  width: null,
+                },
+              },
+            },
+          },
+        ],
+      },
     );
-    expect(out.exitCode).toBe(2);
-    expect(out.requests).toBe(0);
-    const env = parseEnvelope(out.stderr) as SettingsError;
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details?.reason).toBe('m48_preflight_stub');
-    expect(env.error?.details?.column_type).toBe('board_relation');
-    expect(env.error?.details?.milestone).toBe('v0.8-M48');
-    expect(env.error?.details?.board_id).toBe('12345');
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; type: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('rel_1');
+    expect(env.data.type).toBe('board_relation');
   });
 
-  it('PIN: live dependency --settings throws the m48_preflight_stub', async () => {
+  it('live: dependency --settings wraps allowMultipleItems under defaults.settings on the wire (same wrap mechanic, same-board)', async () => {
+    // dependency reaches the wrap with only the same-board-honoured knob
+    // (boardIds/boardId were rejected upstream by
+    // rejectDependencyBoardTargets), so the wire carries
+    // `defaults: {settings: {allowMultipleItems:true}}`.
     const out = await drive(
       [
         'board', 'column-create', '12345',
@@ -4052,14 +4094,112 @@ describe('monday board column-create — board_relation / dependency settings (v
         '--settings', '{"allowMultipleItems":true}',
         '--json',
       ],
-      { interactions: [] },
+      {
+        interactions: [
+          {
+            operation_name: 'ColumnCreate',
+            match_variables: {
+              boardId: '12345',
+              columnType: 'dependency',
+              title: 'Blocks',
+              defaults: { settings: { allowMultipleItems: true } },
+            },
+            match_query: /defaults: \$defaults/,
+            response: {
+              data: {
+                create_column: {
+                  id: 'dep_1',
+                  title: 'Blocks',
+                  type: 'dependency',
+                  description: null,
+                  archived: false,
+                  settings_str: '{"allowMultipleItems":true}',
+                  width: null,
+                },
+              },
+            },
+          },
+        ],
+      },
     );
-    expect(out.exitCode).toBe(2);
-    expect(out.requests).toBe(0);
-    const env = parseEnvelope(out.stderr) as SettingsError;
-    expect(env.error?.code).toBe('internal_error');
-    expect(env.error?.details?.reason).toBe('m48_preflight_stub');
-    expect(env.error?.details?.column_type).toBe('dependency');
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; type: string };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.id).toBe('dep_1');
+    expect(env.data.type).toBe('dependency');
+  });
+
+  it("'m48_preflight_stub' literal stays RESERVED: M48 IMPL no longer surfaces it; the literal MUST NOT reappear from any column-create surface (live wrap success + dry-run + dependency reject)", async () => {
+    // Regression-guard mirroring the M43/M46/M47 reserved-literal
+    // pattern (workflow.md). The IMPL swap of the pre-flight stub for
+    // the live `defaults.settings` wrap leaves the literal RESERVED — a
+    // future re-introduction (half-applied revert, programmer
+    // regression) would fail this test. Drives each surface separately
+    // because the literal could land in any emit path independently.
+    const assertLiteralAbsent = (
+      label: string,
+      out: { stdout: string; stderr: string },
+    ): void => {
+      expect(out.stdout, `${label}: stdout`).not.toContain('m48_preflight_stub');
+      expect(out.stderr, `${label}: stderr`).not.toContain('m48_preflight_stub');
+    };
+
+    // Surface 1 — live board_relation wrap success.
+    assertLiteralAbsent(
+      'live board_relation wrap',
+      await drive(
+        [
+          'board', 'column-create', '12345',
+          '--type', 'board_relation', '--title', 'Linked',
+          '--settings', '{"boardIds":[67890]}', '--json',
+        ],
+        {
+          interactions: [
+            {
+              operation_name: 'ColumnCreate',
+              match_variables: { defaults: { settings: { boardIds: [67890] } } },
+              response: {
+                data: {
+                  create_column: {
+                    id: 'rel_1', title: 'Linked', type: 'board_relation',
+                    description: null, archived: false,
+                    settings_str: '{"boardIds":[67890]}', width: null,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ),
+    );
+
+    // Surface 2 — dry-run echo (no wire call).
+    assertLiteralAbsent(
+      'dry-run echo',
+      await drive(
+        [
+          'board', 'column-create', '12345',
+          '--type', 'board_relation', '--title', 'Linked',
+          '--settings', '{"boardIds":[67890]}', '--dry-run', '--json',
+        ],
+        { interactions: [] },
+      ),
+    );
+
+    // Surface 3 — dependency board-target rejection (usage_error).
+    assertLiteralAbsent(
+      'dependency reject',
+      await drive(
+        [
+          'board', 'column-create', '12345',
+          '--type', 'dependency', '--title', 'Blocks',
+          '--settings', '{"boardIds":[67890]}', '--json',
+        ],
+        { interactions: [] },
+      ),
+    );
   });
 
   it('live board_relation WITHOUT --settings does NOT hit the stub (only the settings-wrap leg is stubbed)', async () => {

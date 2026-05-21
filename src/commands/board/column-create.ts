@@ -112,7 +112,7 @@ import { ensureSubcommand, type CommandModule } from '../types.js';
 import { emitDryRun, emitMutation } from '../emit.js';
 import { resolveClient } from '../../api/resolve-client.js';
 import { parseArgv } from '../parse-argv.js';
-import { ApiError, UsageError } from '../../utils/errors.js';
+import { UsageError } from '../../utils/errors.js';
 import { isPlainObject, parseJsonArg } from '../../utils/json.js';
 import { unwrapOrThrow } from '../../utils/parse-boundary.js';
 import { BoardIdSchema } from '../../types/ids.js';
@@ -767,39 +767,19 @@ export const boardColumnCreateCommand: CommandModule<
           variables.description = parsed.description;
         }
         if (settings !== undefined) {
-          if (CREATE_TIME_SETTINGS_WRAP_TYPES.has(parsed.type)) {
-            // v0.8-M48 PRE-FLIGHT STUB. The argv surface ships live —
-            // the per-type settings schema, the int coercion, the
-            // dependency board-target rejection, and the dry-run echo
-            // above are all real. Only the LIVE wire-wrap leg
-            // (`variables.defaults = {settings}`) + its mocked-wire
-            // assertion test land at the M48 IMPL. Stubbed because the
-            // wire shape (`defaults: {settings: {…}}`) is the M19-bug
-            // class — wrong wrap = silently-inert settings — and is
-            // worth isolating into a focused IMPL review against a
-            // transport mock that mirrors the probe-confirmed wire.
-            // `m48_preflight_stub` is RESERVED post-IMPL (regression-
-            // guarded; never reused). parseArgv + parseSettingsFlag
-            // already ran above, so invalid argv still surfaces as
-            // usage_error (R-NEW-76), not this internal_error.
-            /* c8 ignore start */
-            throw new ApiError(
-              'internal_error',
-              'board column-create: v0.8-M48 pre-flight stub — the ' +
-                `create-time \`defaults.settings\` wrap for ${parsed.type} ` +
-                'columns lands at the M48 IMPL.',
-              {
-                details: {
-                  reason: 'm48_preflight_stub',
-                  column_type: parsed.type,
-                  board_id: parsed.boardId,
-                  milestone: 'v0.8-M48',
-                },
-              },
-            );
-            /* c8 ignore stop */
-          }
-          variables.defaults = settings;
+          // v0.8-M48: board_relation / dependency create-time settings
+          // nest under a `settings` key inside `defaults` on the wire
+          // (`defaults: {settings: {…}}`) — the probe-confirmed shape
+          // (`get_column_type_schema` + a live create+readback). The
+          // validated `settings` object is the agent's UNWRAPPED top-
+          // level shape (same as the read-side `settings_str`), so the
+          // wrap is a wire-only detail. status / dropdown / numbers /
+          // etc. pass `--settings` straight through as `defaults` (no
+          // wrap). `boardIds`/`boardId` were int-coerced + safe-integer
+          // -guarded at parse time, so the wire carries integers.
+          variables.defaults = CREATE_TIME_SETTINGS_WRAP_TYPES.has(parsed.type)
+            ? { settings }
+            : settings;
         }
 
         // §8 single-leg call-site contract via `withBoardInvalidation
