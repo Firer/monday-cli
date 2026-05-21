@@ -48,12 +48,12 @@ export const devReleaseListCommand: CommandModule<
     const dev = ensureSubcommand(
       program,
       'dev',
-      'Monday Dev workflow shortcuts (cli-design §2.7 — convention, not API)',
+      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
     );
     const release = ensureSubcommand(
       dev,
       'release',
-      'Release workflow verbs (three-level depth per cli-design §5.2 carve-out 1)',
+      'Release workflow verbs',
     );
     release
       .command('list')

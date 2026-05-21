@@ -59,12 +59,12 @@ export const devTaskBlockCommand: CommandModule<
     const dev = ensureSubcommand(
       program,
       'dev',
-      'Monday Dev workflow shortcuts (cli-design §2.7 — convention, not API)',
+      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
     );
     const task = ensureSubcommand(
       dev,
       'task',
-      'Task workflow verbs (three-level depth per cli-design §5.2 carve-out 1)',
+      'Task workflow verbs',
     );
     task
       .command('block <itemId>')

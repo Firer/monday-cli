@@ -114,7 +114,7 @@ export const teamRemoveMembersCommand: CommandModule<
           ...teamRemoveMembersCommand.examples.map((e) => `  ${e}`),
           '',
           'Notes:',
-          '  - Envelope is per-cli-design §6.1 partial-success (`results: [{user_id, ok, ...}]`).',
+          '  - Envelope is a partial-success result (`results: [{user_id, ok, ...}]`).',
           '  - Re-removing an absent member is a no-op (surfaces as `successful_users[]`).',
           '',
         ].join('\n'),

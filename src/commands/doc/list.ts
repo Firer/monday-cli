@@ -124,7 +124,7 @@ export const docListCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'doc',
-      'Document commands (workdocs; read-only at v0.4 — see cli-design §13 v0.4 entry)',
+      'Workdoc commands',
     );
     noun
       .command('list')

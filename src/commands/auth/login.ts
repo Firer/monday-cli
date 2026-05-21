@@ -203,7 +203,7 @@ export const authLoginCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'auth',
-      'OAuth-issued credentials cache (cli-design §7.3 / §7.4)',
+      'Manage stored authentication credentials',
     );
     noun
       .command('login')

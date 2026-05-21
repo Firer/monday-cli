@@ -498,7 +498,7 @@ export const completionCommand: CommandModule<
           'Notes:',
           '  - Default output is the raw shell script on stdout (no envelope).',
           '    The standard install pipes to your rc file (see examples).',
-          '  - --json wraps the script in the §6 envelope (data: { shell, script }).',
+          '  - --json wraps the script in the standard JSON envelope (data: { shell, script }).',
           '  - --table / --output table|text|ndjson are rejected (not applicable to a script).',
           '',
         ].join('\n'),

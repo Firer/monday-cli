@@ -50,7 +50,7 @@ export const itemTimeTrackStopCommand: CommandModule<
 > = {
   name: 'item.time-track.stop',
   summary:
-    'Stop the current time-tracking session on an item (documentation-only at v0.3 — Monday API support pending)',
+    'Stop the current time-tracking session on an item (documentation-only — Monday API support pending)',
   examples: [
     'monday item time-track stop 12345 --column duration',
     'monday item time-track stop 12345 --column id:duration_a --board 67890',
@@ -67,7 +67,7 @@ export const itemTimeTrackStopCommand: CommandModule<
     const subnoun = ensureSubcommand(
       noun,
       'time-track',
-      'Time-tracking column verbs (cli-design §5.2 carve-out 2)',
+      'Time-tracking column verbs',
     );
     subnoun
       .command('stop <itemId>')

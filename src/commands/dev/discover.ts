@@ -67,7 +67,7 @@ export const devDiscoverCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'dev',
-      'Monday Dev workflow shortcuts (cli-design §2.7 — convention, not API)',
+      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
     );
     noun
       .command('discover')

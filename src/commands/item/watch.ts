@@ -281,8 +281,8 @@ export const itemWatchCommand: CommandModule<
           'SIGINT triggers a graceful drain + trailer emit + exit 130.',
           '',
           'Monday\'s activity_logs has an empirically-measured propagation lag',
-          '>30s on freshly-edited boards (M24 pre-flight finding 2026-05-11);',
-          'cadence faster than 30s would generate polls against unpropagated data.',
+          '>30s on freshly-edited boards; a cadence faster than 30s would',
+          'generate polls against unpropagated data.',
           '',
         ].join('\n'),
       )

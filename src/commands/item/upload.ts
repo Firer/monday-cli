@@ -128,7 +128,7 @@ const inputSchema = z
       })
       .refine((p) => p !== '-', {
         message:
-          '<file> cannot be `-` — `monday item upload` is path-only. To stream from stdin, use `cat file | monday item set <iid> <file-col>=- [--filename <name>]` (v0.8-M47); pass a local file path here.',
+          '<file> cannot be `-` — `monday item upload` is path-only. To stream from stdin, use `cat file | monday item set <iid> <file-col>=- [--filename <name>]`; pass a local file path here.',
       }),
   })
   .strict();
@@ -151,14 +151,14 @@ export const itemUploadCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'item',
-      'Item commands (cli-design §4.3 ITEM)',
+      'Item commands',
     );
     noun
       .command('upload <itemId> <file>')
       .description(itemUploadCommand.summary)
       .requiredOption(
         '--column <c>',
-        'Column ID on the target board. Must resolve to a `file`-typed column at runtime; non-`file` columns surface `unsupported_column_type` per cli-design §5.3.',
+        'Column ID on the target board. Must resolve to a `file`-typed column at runtime; non-`file` columns surface `unsupported_column_type`.',
       )
       .addHelpText(
         'after',
@@ -169,7 +169,7 @@ export const itemUploadCommand: CommandModule<
           '',
           'Notes:',
           '  - Uploads cross the wire as multipart/form-data (different transport from JSON-only verbs).',
-          '  - File path is resolved relative to the cwd; `upload` is path-only. For stdin, use `cat file | monday item set <iid> <file-col>=- [--filename <name>]` (v0.8-M47).',
+          '  - File path is resolved relative to the cwd; `upload` is path-only. For stdin, use `cat file | monday item set <iid> <file-col>=- [--filename <name>]`.',
           '  - Re-running with the same args creates a second Asset; `add_file_to_column` is not idempotent.',
           '',
         ].join('\n'),

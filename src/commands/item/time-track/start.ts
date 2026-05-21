@@ -79,7 +79,7 @@ export const itemTimeTrackStartCommand: CommandModule<
 > = {
   name: 'item.time-track.start',
   summary:
-    'Start a time-tracking session on an item (documentation-only at v0.3 — Monday API support pending)',
+    'Start a time-tracking session on an item (documentation-only — Monday API support pending)',
   examples: [
     'monday item time-track start 12345 --column duration',
     'monday item time-track start 12345 --column id:duration_a --board 67890',
@@ -97,7 +97,7 @@ export const itemTimeTrackStartCommand: CommandModule<
     const subnoun = ensureSubcommand(
       noun,
       'time-track',
-      'Time-tracking column verbs (cli-design §5.2 carve-out 2)',
+      'Time-tracking column verbs',
     );
     subnoun
       .command('start <itemId>')

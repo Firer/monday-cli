@@ -124,7 +124,7 @@ export const teamAddMembersCommand: CommandModule<
           ...teamAddMembersCommand.examples.map((e) => `  ${e}`),
           '',
           'Notes:',
-          '  - Envelope is per-cli-design §6.1 partial-success (`results: [{user_id, ok, ...}]`).',
+          '  - Envelope is a partial-success result (`results: [{user_id, ok, ...}]`).',
           '  - Re-adding an existing member is a no-op (surfaces as `successful_users[]`).',
           '',
         ].join('\n'),

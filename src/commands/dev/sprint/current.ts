@@ -53,12 +53,12 @@ export const devSprintCurrentCommand: CommandModule<
     const dev = ensureSubcommand(
       program,
       'dev',
-      'Monday Dev workflow shortcuts (cli-design §2.7 — convention, not API)',
+      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
     );
     const sprint = ensureSubcommand(
       dev,
       'sprint',
-      'Sprint workflow verbs (three-level depth per cli-design §5.2 carve-out 1)',
+      'Sprint workflow verbs',
     );
     sprint
       .command('current')

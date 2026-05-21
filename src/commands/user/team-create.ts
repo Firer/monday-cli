@@ -142,7 +142,7 @@ export const teamCreateCommand: CommandModule<
           'Notes:',
           '  - Monday allows duplicate team names; this verb is non-idempotent.',
           '  - `--dry-run` emits the planned `create_team` operation + resolved input fields (no wire call fires; `meta.source: "none"`).',
-          '  - `--parent <ptid>` is deferred to v0.5.x (hierarchical-team UX TBD).',
+          '  - `--parent <ptid>` is not yet supported (hierarchical-team UX TBD).',
           '  - No `--description` slot — Monday\'s Team object carries no description field.',
           '',
         ].join('\n'),

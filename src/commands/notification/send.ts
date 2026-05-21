@@ -94,7 +94,7 @@ export const notificationSendCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'notification',
-      'Notification commands (outbound writes via Monday\'s create_notification mutation)',
+      'Send notifications to Monday users',
     );
     noun
       .command('send')

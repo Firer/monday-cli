@@ -598,14 +598,14 @@ export const itemSearchCommand: CommandModule<
 > = {
   name: 'item.search',
   summary:
-    'Search items by column value (any_of) on one board (v0.1) or across many boards (v0.3-M23 — --workspace / --favorites / no-scoping-lever)',
+    'Search items by column value (any_of) on one board or across many boards (--workspace / --favorites / no-scoping-lever)',
   examples: [
     "monday item search --board 12345 --where 'status=Done'",
     "monday item search --board 12345 --where 'status=Done' --where 'status=Backlog'",
     'monday item search --board 12345 --where owner=me --json',
     'monday item search --board 12345 --where status=Done --all --output ndjson',
-    'monday item search --favorites --where status=Done                     # v0.3-M23',
-    'monday item search --workspace 67890 --where status=Done --max-boards 50  # v0.3-M23',
+    'monday item search --favorites --where status=Done',
+    'monday item search --workspace 67890 --where status=Done --max-boards 50',
   ],
   idempotent: true,
   inputSchema,
@@ -626,18 +626,18 @@ export const itemSearchCommand: CommandModule<
       // with `--workspace` / `--favorites` enforced at the schema layer
       // (`.superRefine`); missing-all-of-three is treated as
       // "all-accessible-boards" cross-board mode at M23 implementation.
-      .option('--board <bid>', 'board ID (v0.1 single-board path; omit for v0.3 cross-board)')
+      .option('--board <bid>', 'board ID (single-board path; omit for cross-board search)')
       .option(
         '--workspace <wid>',
-        'workspace ID (v0.3-M23 cross-board scoping lever; mutually exclusive with --board / --favorites)',
+        'workspace ID (cross-board scoping lever; mutually exclusive with --board / --favorites)',
       )
       .option(
         '--favorites',
-        "v0.3-M23 cross-board scoping lever — use the current user's `board favorites` set; mutually exclusive with --board / --workspace",
+        "cross-board scoping lever — use the current user's `board favorites` set; mutually exclusive with --board / --workspace",
       )
       .option(
         '--max-boards <n>',
-        `v0.3-M23 cross-board fan-out cap (default ${String(DEFAULT_MAX_BOARDS)}, hard cap ${String(HARD_CAP_MAX_BOARDS)}; ignored on the single-board path)`,
+        `cross-board fan-out cap (default ${String(DEFAULT_MAX_BOARDS)}, hard cap ${String(HARD_CAP_MAX_BOARDS)}; ignored on the single-board path)`,
       )
       .requiredOption(
         '--where <expr>',

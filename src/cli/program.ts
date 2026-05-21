@@ -90,7 +90,7 @@ export const buildProgram = (
     .option('-v, --verbose', 'debug logs to stderr (tokens redacted)')
     .option('--no-color', 'disable colour output')
     .option('--no-cache', 'skip the local board-metadata cache')
-    .option('--profile <name>', 'config profile (v0.3+; "default" only in v0.1)')
+    .option('--profile <name>', 'config profile to use')
     .option('--api-version <v>', 'override the API-Version header')
     .option('--timeout <ms>', 'per-request timeout in milliseconds')
     .option('--retry <n>', 'max retries on transient errors')

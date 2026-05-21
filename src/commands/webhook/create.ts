@@ -78,7 +78,7 @@ export const webhookCreateCommand: CommandModule<
     const noun = ensureSubcommand(
       program,
       'webhook',
-      'Webhook commands (board-scoped; CLI never receives — see cli-design §1 permanent non-goals)',
+      'Manage board webhooks (register, list, delete)',
     );
     noun
       .command('create <boardId>')
