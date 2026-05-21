@@ -35,42 +35,42 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** **4170 tests pass + 3 skipped** (post-M49: the 2
-  pre-existing skips + the new RUN_LIVE_TESTS-gated multipart-upload
-  smoke test). **⚠️ CI is RED on the `test:coverage` step:** the
-  now-measured global **branch coverage is 95.14% vs the 95.45%
-  floor** (15 branches short). This is PRE-EXISTING and not M49 — the
-  parent commit (`f2dd552`) measures the identical 95.14% (verified
-  via a clean worktree run, which finally cleared the R-v0.7-NEW-8
-  EAGAIN block that had kept the M46 number "PENDING"). The deficit
-  is M46's multi-file `--set` additions: `item/update.ts` (43
-  uncovered branches, 79.42%) + `item/create.ts` (29, 82.31%) — the
-  exact surface flagged "coverage PENDING" at M46 close. **DEFERRED**
-  by user decision (2026-05-21) to a dedicated M46-coverage pass; see
-  `docs/v0.8-plan.md` §22 **R-v0.8-NEW-10**. **29 ERROR_CODES**;
-  **117 commands** (M49 adds no new command — it fixes the shared
-  multipart transport seam); `npm audit` **0 vulnerabilities**.
-- **CI status:** the v0.7.0 table-colour test flake (root cause:
-  cli-table3's `@colors/colors` caches its enabled-state from ambient
-  TTY detection, so `color: true` emitted no ANSI in a non-TTY CI
-  worker) is **FIXED** at `a14802d` — `renderTable` now makes the
-  resolved colour decision authoritative. Once R-v0.8-NEW-10's
-  coverage gap is closed, CI goes fully green.
-- **Next session:** two candidates, plus one CI prerequisite:
-  **(0) R-v0.8-NEW-10 — close the M46 coverage gap** so CI goes green
-  (recover ≥15 branches in `item/update.ts` + `item/create.ts`;
-  user-deferred from the M49 session). **Ride R-v0.8-NEW-11** on this
-  session — lifting the four helpers `multipart-transport.ts`
-  duplicates from `transport.ts` (`describeFetchError` / `combineSignals`
-  / `isAbortError` / `headersToRecord`) recovers the SAME defensive
-  branch that's uncovered in both copies (`transport.ts:249` +
-  `multipart-transport.ts:409`). **(a) M47 — stdin file `--set`
-  `<file-col>=-`** — now UNBLOCKED (M49 fixed the shared upload
-  transport). **(b) M48 — writable board_relation settings** —
-  independent (it's `create_column`, JSON not multipart; probe
-  already done). Run the candidate-selection discipline
-  (`workflow.md`) if 2+ remain. **v0.8-M49 is DONE** (`2ec67ad`):
-  `src/api/multipart-transport.ts` now emits Monday's native multipart
+- **Live numbers:** **4203 tests pass + 3 skipped** (post-M49 skips:
+  the 2 pre-existing + the RUN_LIVE_TESTS-gated multipart-upload smoke
+  test; the new green count adds the R-v0.8-NEW-11 shared-helper unit
+  suite + the M46 coverage-arm tests). **✅ CI `test:coverage` now
+  PASSES:** global **branch coverage 95.47% (4452/4663) vs the 95.45%
+  floor** — the R-v0.8-NEW-10 gap (was 95.14%) is closed. Done by
+  (i) the **R-v0.8-NEW-11** transport-helper lift (the duplicated
+  defensive arms in `transport.ts` + `multipart-transport.ts` collapse
+  into one tested `fetch-transport-helpers.ts`; all three now ZERO
+  uncovered arms) + (ii) targeted M46 multi-file `--set` dispatch-arm
+  tests (`item/create.ts` 82.31% → 86.58%; `item/update.ts` bulk-multi
+  first-leg fail-fast arm). `item/update.ts` stays 79.42% — its
+  residual uncovered arms are the R-v0.7-NEW-5 conditional-spreads,
+  deferred to that lift. **29 ERROR_CODES**; **117 commands** (this
+  session adds neither — a coverage + helper-lift pass); `npm audit`
+  **0 vulnerabilities**.
+- **CI status:** **fully green.** The v0.7.0 table-colour test flake
+  (root cause: cli-table3's `@colors/colors` caches its enabled-state
+  from ambient TTY detection, so `color: true` emitted no ANSI in a
+  non-TTY CI worker) is **FIXED** at `a14802d` — `renderTable` now
+  makes the resolved colour decision authoritative; the
+  `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
+  R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
+- **Next session:** CI is green (R-v0.8-NEW-10 + R-v0.8-NEW-11 closed
+  this session). Two feature candidates remain — run the
+  candidate-selection discipline (`workflow.md`) since 2+ remain:
+  **(a) M47 — stdin file `--set` `<file-col>=-`** — UNBLOCKED (M49
+  fixed the shared upload transport; probe DONE — `--filename` is
+  OPTIONAL, default a non-empty placeholder; R-v0.8-NEW-2 rename folds
+  in). **(b) M48 — writable board_relation settings** — independent
+  (it's `create_column`, JSON not multipart; probe COMPLETE). Plus the
+  committed **v0.8 refactor cluster** (R-v0.7-NEW-5 `reThrowDecorated`
+  + R-v0.8-NEW-6 `projectCauseForEnvelope` — standalone `src/api/`
+  lift; the R-v0.7-NEW-5 ratchet recovers the conditional-spread arms
+  left uncovered in `item/update.ts`). **v0.8-M49 is DONE** (`2ec67ad`):
+  `src/api/multipart-transport.ts` emits Monday's native multipart
   shape; full close at `docs/v0.8-plan.md` §3 M49.
 
   **v0.8 committed scope (post-M49), rough build order:**
