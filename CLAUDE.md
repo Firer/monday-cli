@@ -35,31 +35,27 @@ humans are second-class. Built incrementally via Claude Code on top of
   https://github.com/Firer/monday-cli/releases/tag/v0.7.0. Previous:
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.7.0`.
-- **Live numbers:** **4226 tests pass + 3 skipped** (3 skips: the 2
+- **Live numbers:** **4237 tests pass + 3 skipped** (3 skips: the 2
   pre-existing + the RUN_LIVE_TESTS-gated multipart-upload smoke test;
-  the +15 vs the prior 4211 is the **v0.8-M47 pre-flight** — the
-  `routeFileColumnDispatch` stdin scope-gate unit tests + the
-  `file-source.ts` stdin-helper unit tests + the `item set` / `update`
-  / `create` stdin stub-envelope integration tests). **✅ CI
-  `test:coverage` PASSES:** global **branch coverage 95.89%
-  (4462/4653) vs the 95.45% floor** (was 95.88% before M47 pre-flight;
-  the stdin gate's defensive narrowing + the c8-ignored stub leg keep
-  the margin).
-  The **v0.8 refactor cluster** (`reThrowDecorated` +
-  `projectCauseForEnvelope` lift; see below) recovered the
-  R-v0.7-NEW-5 conditional-spread arms: **`item/update.ts` branches
-  79.42% → 87.27%** (the arms left the command-file denominators and
-  landed COVERED in `src/api/error-decoration.ts`'s helper). Earlier
-  contributors still hold: the **R-v0.8-NEW-11** transport-helper lift
-  (`fetch-transport-helpers.ts`, all three transports ZERO uncovered
-  arms) + the M46 dispatch-arm tests (`item/create.ts` 82.31% →
-  86.58%). **29 ERROR_CODES**; **117 commands** (neither the refactor
-  cluster nor M47 added a command/error-code — M47's `<file-col>=-` is
-  a new argv *value*, not a verb; the new rejections route through
-  existing `usage_error`); **functions 99.11% (1346/1358)** (the +6 vs
-  1340/1352 is M47's `file-source.ts` stdin helpers + the
-  `routeFileColumnDispatch`-internal additions, all covered); `npm
-  audit` **0 vulnerabilities**.
+  the +11 vs the prior 4226 is the **v0.8-M47 IMPL** — the stub-envelope
+  integration tests + the `readStdinFileSource` stub unit test were
+  swapped for real live / dry-run / empty-stdin tests across
+  `file-source.ts` + `item set` / `update` / `create`). **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.9%
+  (4474/4665) vs the 95.45% floor** (was 95.89% at M47 pre-flight; the
+  live stdin branches add real covered arms).
+  **29 ERROR_CODES**; **117 commands** (M47 added neither — `<file-col>=-`
+  is a new argv *value*, not a verb; `stdin_file_empty` /
+  `stdin_not_wired` are new `usage_error` `details.reason`
+  discriminators); **functions 98.97% (1346/1360)** (the +2 denominator
+  vs 1346/1358 is the `resolverWarnings.map` callbacks on the new stdin
+  emit blocks — empty in fixtures, exactly mirroring the pre-existing
+  path-version callbacks; the W9 known coverage shape, Codex IMPL R1
+  clear); `npm audit` **0 vulnerabilities**. Earlier coverage
+  contributors still hold: the **v0.8 refactor cluster**
+  (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11**
+  transport-helper lift, the M46 dispatch-arm tests (`item/create.ts`
+  82.31% → 86.58%).
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -67,44 +63,45 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.8-M47 IMPL** — swap the
-  `readStdinFileSource` pre-flight stub for the live runtime body.
-  **The M47 pre-flight contract diff is DONE** (`f5353e4..a424293`;
-  Codex pre-flight **CONVERGED at R2** — R1 0 P1/0 P2 + 2 P3 W9 prose
-  → fix `a424293`, R2 0 findings). The argv `<file-col>=-` +
-  `--filename` surface + the `routeFileColumnDispatch` stdin-scope
-  enforcement (single-file, single-target: multi-stdin /
-  stdin-not-sole / bulk-stdin all reject `usage_error`) are SHIPPED +
-  REAL; only the live stdin-read + Blob leg is stubbed
-  (`m47_preflight_stub`). **IMPL task:** in `src/utils/file-source.ts`
-  replace `readStdinFileSource`'s stub body with the real stdin buffer
-  → `Blob` (mime sniffed from `--filename`, default `"blob"`), then
-  wire the four dispatch sites (`item set` live + dry-run, single-item
-  `item update`, `item create`) to (a) dispatch the buffered Blob
-  through `add_file_to_column` on the live path + (b) emit the
-  size-less dry-run echo per D4 (`file_path: '-'` + `filename`, no
-  `file_size_bytes`). Reuses the M49-fixed `add_file_to_column`
-  multipart path (no new transport seam). The `m47_preflight_stub`
-  literal stays RESERVED post-IMPL (regression-guarded, like M42/M43).
-  No destructive gate. Codex est. ~2-3 IMPL rounds (W9-dominant). Full
-  pre-flight close + D-list + contract-term checklist at
-  `docs/v0.8-plan.md` §3 M47. **R-v0.8-NEW-2 RESOLVED** (the
-  `enforceSingleFileColumnSet` → `routeFileColumnDispatch` rename
-  shipped in the pre-flight). M48 + release-prep stay STANDBY
-  (release-prep runs last). **✅ v0.8 refactor cluster SHIPPED
-  2026-05-21** (`refactor(api): lift reThrowDecorated +
-  projectCauseForEnvelope`): both stubs swapped for runtime bodies, 7
-  sites delegated, 6 c8-ignores removed, 4-path ratchet landed; Codex
-  IMPL CONVERGED at R4 (0 P1/P2 across all 4 rounds — pure W9 prose
-  drift); branches 95.47% → 95.88%, `item/update.ts` 79.42% → 87.27%.
-  **v0.8-M49 is DONE** (`2ec67ad`): `src/api/multipart-transport.ts`
-  emits Monday's native multipart shape; full close at
-  `docs/v0.8-plan.md` §3 M49.
+- **Next session:** **v0.8-M48 pre-flight** — writable
+  `board_relation` / `dependency` column settings (the gating
+  `create_column` probe is COMPLETE: outcome (b) confirmed; create-time
+  `defaults: {settings:{boardIds:[int],...}}` wires the relation, read
+  back as unwrapped `settings_str`; single-leg, JSON `create_column`, no
+  multipart). **Candidate-selection (R-NEW-75) inlined, not a dedicated
+  session:** M48 + release-prep are the only two units left, and
+  release-prep runs LAST by standing decision — so M48 is the obvious
+  pick (one obvious candidate ⇒ inline per R-NEW-75). Full skeleton +
+  probe result at `docs/v0.8-plan.md` §3 M48 (raw at
+  `scripts/probe/m48-board-relation-settings.report.txt`). Pre-flight
+  opens the contract diff next.
+  **✅ v0.8-M47 SHIPPED 2026-05-21** (`0d99ea7`,
+  `feat(item): live stdin file --set <file-col>=- (v0.8-M47 IMPL)`):
+  the `readStdinFileSource` stub swapped for the live stdin buffer →
+  `Blob` (mime sniffed from `--filename`, default `"blob"`) → M31's
+  `add_file_to_column` fetcher; the four dispatch sites (`item set`
+  live + dry-run, single-item `item update`, `item create` two-leg
+  under §5.8 orphan-warn) + the D4 size-less dry-run echo wired; empty
+  stdin rejects `usage_error` (`stdin_file_empty`); `item create` reads
+  stdin BEFORE leg-1 so an empty pipe never orphans. **Codex IMPL
+  CONVERGED at R1** (0 P1/P2/P3, 11 watch-items clear). R-v0.8-NEW-15
+  considered-but-not-tipped (no shared dispatch helper — composes the
+  existing `readStdinFileSource` + `addFileToColumn`, per-site emit
+  inline). R-v0.8-NEW-16 GRADUATED into `workflow.md` (`da62add`);
+  R-v0.8-NEW-17 verb-shaped upload hints refreshed (`d686177`).
+  **R-v0.8-NEW-2 RESOLVED** at the M47 pre-flight
+  (`enforceSingleFileColumnSet` → `routeFileColumnDispatch`). Full
+  close + D-list at `docs/v0.8-plan.md` §3 M47. **M48 then release-prep
+  are the last two v0.8 units** (release-prep runs last). **✅ v0.8
+  refactor cluster SHIPPED 2026-05-21**
+  (`refactor(api): lift reThrowDecorated + projectCauseForEnvelope`;
+  Codex IMPL CONVERGED R4; branches 95.47% → 95.88%). **v0.8-M49 DONE**
+  (`2ec67ad`): `src/api/multipart-transport.ts` emits Monday's native
+  multipart shape; full close at `docs/v0.8-plan.md` §3 M49.
 
   **v0.8 committed scope (post-M49), rough build order** (revised
-  2026-05-21 — M49 + the refactor cluster SHIPPED; **M47 pre-flight
-  DONE** (`f5353e4..a424293`, Codex CONVERGED R2) — **M47 IMPL is the
-  next session**; M48 + release-prep stay STANDBY behind it,
+  2026-05-21 — M49 + the refactor cluster + **M47 SHIPPED** (`0d99ea7`,
+  Codex IMPL CONVERGED R1); **M48 pre-flight is the next session**, then
   release-prep last):
   - **M49** — 🚨 P1 file-upload wire-format fix. **SHIPPED in-tree
     `2ec67ad`** (Codex R1 CONVERGED, live-verified).
@@ -120,18 +117,18 @@ humans are second-class. Built incrementally via Claude Code on top of
     M42/M46 file-set paths before M47 adds a 5th touch, and widened the
     thin coverage margin (branches 95.47% → 95.88%; `item/update.ts`
     79.42% → 87.27%). Full close at `docs/v0.8-plan.md` §3 + §22.
-  - **M47** *(PRE-FLIGHT DONE — IMPL next)* — stdin file `--set`
-    `<file-col>=-` (D7 closure). Pre-flight contract diff
-    `f5353e4..a424293` (Codex CONVERGED R2): argv `<file-col>=-` +
-    `--filename` (default `"blob"`) + `routeFileColumnDispatch`
-    stdin-scope enforcement REAL; live stdin-read + Blob leg stubbed
-    (`m47_preflight_stub`). Scoped single-file/single-target (stdin is
-    one non-replayable stream). **IMPL** swaps the
-    `readStdinFileSource` stub for the live read + wires the 4 dispatch
-    sites + the size-less dry-run echo. **R-v0.8-NEW-2 RESOLVED**
-    (`enforceSingleFileColumnSet` → `routeFileColumnDispatch` shipped
-    in the pre-flight).
-  - **M48** *(standby)* — board_relation/dependency writable settings
+  - **M47** — stdin file `--set` `<file-col>=-` (D7 closure). **✅
+    SHIPPED at `0d99ea7`** (Codex IMPL CONVERGED R1). Pre-flight diff
+    `f5353e4..a424293` (Codex CONVERGED R2); IMPL swapped the
+    `readStdinFileSource` stub for the live stdin → `Blob` →
+    `add_file_to_column` leg + wired the 4 dispatch sites + the D4
+    size-less dry-run echo. Scoped single-file/single-target (stdin is
+    one non-replayable stream). `stdin_file_empty` rejects an empty
+    pipe; `item create` reads stdin before leg-1 (no orphan).
+    **R-v0.8-NEW-2 RESOLVED** at pre-flight (`enforceSingleFileColumnSet`
+    → `routeFileColumnDispatch`); R-v0.8-NEW-15 not-tipped,
+    R-v0.8-NEW-16 graduated (`da62add`), R-v0.8-NEW-17 done (`d686177`).
+  - **M48** *(NEXT — pre-flight)* — board_relation/dependency writable settings
     (probe COMPLETE — outcome (b) live-confirmed; single-leg; M19
     "no documented shape" REFUTED; create-time `defaults:
     {settings:{boardIds:[int],...}}` wires the relation, read back as
