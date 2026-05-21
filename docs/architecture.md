@@ -1847,11 +1847,14 @@ BODY level (NOT inside the translator). The translator
 (`translateColumnValueAsync` in `src/api/column-values.ts`)
 stays JSON-output-shaped for the 13 writable allowlisted types;
 the file-column dispatch is a SIBLING branch routed at
-`src/commands/item/{set,update}.ts` that fires AFTER column
+`src/commands/item/{set,update,create}.ts` that fires AFTER column
 resolution when `resolution.match.column.type === 'file'`.
 Routed via `executeFileColumnSet` in
 `src/api/file-column-set.ts`, which itself wraps M31's
-`addFileToColumn` fetcher verbatim.
+`addFileToColumn` fetcher verbatim (a stdin source — v0.8-M47
+`<file-col>=-` — sources the Blob from `readStdinFileSource`
+in `src/utils/file-source.ts` and calls `addFileToColumn`
+directly, the Blob being already in hand).
 
 This asymmetry is at the AGENT-INPUT boundary, NOT the wire
 boundary (M31's asymmetry #3 above is wire-boundary-only —
@@ -1859,17 +1862,24 @@ the multipart wire shape diverges from JSON; M38's asymmetry
 is that the agent's `--set` token transitions across two
 wire shapes based on column type). The mutex rules at the
 column-resolution boundary preserve the per-call atomicity
-guarantee — single file `--set` only on every callShape
-(universal multi-file mutex); mixing with value `--set` /
-`--set-raw` / `--name` rejects on `'item_set'` /
-`'item_update_single'` / `'item_update_bulk'` (universal mixed
-mutex), SUPPRESSED on `'item_create'` per v0.7-M43 D6 asymmetry
-(`create_item` natively bundles non-file `column_values`
-atomically into leg-1). Single-item ships at v0.6-M38; bulk
-ships at v0.7-M42 as a per-item multipart fan-out under
-`--concurrency`; create-time ships at v0.7-M43 as a two-leg
-`create_item` + `add_file_to_column` dispatch under the §5.8
-orphan-warn atomicity envelope. Documented inline in
+guarantee. Multi-file `--set` per call CARVED OUT at v0.8-M46
+for the 3 reachable callShapes (`'item_update_single'` /
+`'item_update_bulk'` / `'item_create'`) — N sequential
+`add_file_to_column` legs per item (× parallel across items for
+bulk); only `'item_set'` keeps the defensive (argv-unreachable)
+`'multi_file_set_unsupported'` throw. Duplicate resolved
+file-column IDs reject `'duplicate_resolved_file_columns'`.
+Mixing with value `--set` / `--set-raw` / `--name` rejects on
+`'item_set'` / `'item_update_single'` / `'item_update_bulk'`
+(universal mixed mutex), SUPPRESSED on `'item_create'` per
+v0.7-M43 D6 asymmetry (`create_item` natively bundles non-file
+`column_values` atomically into leg-1). Single-item ships at
+v0.6-M38; bulk ships at v0.7-M42 as a per-item multipart fan-out
+under `--concurrency`; create-time ships at v0.7-M43 as a
+two-leg `create_item` + `add_file_to_column` dispatch under the
+§5.8 orphan-warn atomicity envelope; multi-file per call ships at
+v0.8-M46; the stdin source (`<file-col>=-`, single-file /
+single-target) ships at v0.8-M47. Documented inline in
 `src/api/file-column-set.ts`'s module docstring +
 `cli-design.md` §5.3 step 4 / step 5 "File-column dispatch
 leg" + §5.8 atomicity discipline + the §13 v0.6 / v0.7 entries.

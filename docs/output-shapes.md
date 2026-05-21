@@ -2159,6 +2159,40 @@ Dry-run shape mirrors `item upload --dry-run` verbatim:
 }
 ```
 
+**v0.8-M47 stdin source** (`<file-col>=-`). A bare `-` file `--set`
+value sources the upload from stdin (single-file, single-target only:
+`monday item set` / single-item `monday item update` / `monday item
+create`; an optional `--filename <name>` sets Monday's `Asset.name`,
+default `"blob"`). The **live** envelope is byte-identical to the path
+shape above — `filename` is the resolved `--filename` (not a basename)
+and `file_size_bytes` is the buffered stdin byte length (not an
+`fs.stat`). The **dry-run** echo differs in two slots: `file_path` is
+the literal `"-"`, and `file_size_bytes` is **OMITTED** (a stream
+can't be `fs.stat`'d without consuming it, and the dry-run must not
+read stdin; the field is additive per §6.4 so omission is
+non-breaking):
+
+```json
+{
+  "ok": true, "data": null,
+  "meta": { ..., "dry_run": true, "source": "none" },
+  "planned_changes": [
+    { "operation": "add_file_to_column",
+      "item_id": "12345",
+      "column_id": "files",
+      "file_path": "-",
+      "filename": "report.pdf" }
+  ]
+}
+```
+
+For `monday item create --set <file-col>=-` the dry-run carries the
+two-entry shape (a `create_item` / `create_subitem` entry then the
+`add_file_to_column` entry); entry-2 omits `item_id` (no item exists at
+dry-run time) AND `file_size_bytes` (stdin). An empty stdin payload
+rejects `usage_error` with `details.reason: "stdin_file_empty"` before
+any wire activity.
+
 **`--set-raw <file-col>=<json>` STAYS REJECTED at v0.6-M38** per
 D3 closure. The escape-hatch contract requires a JSON wire shape
 Monday's `change_column_value` accepts; `add_file_to_column` is
