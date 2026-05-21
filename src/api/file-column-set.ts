@@ -186,14 +186,29 @@
  * rejection see the full set of working alternatives rather
  * than just the M38 single-item form.
  *
- * **D7 closure — `<path>='-'` stdin support OUT OF SCOPE.**
- * Mirrors M31 `monday item upload`'s rejection rationale — no
- * clean `--filename` companion shape pinned for `--set
- * <file-col>=-` syntax (stdin reads byte-anonymously; the
- * filename is the load-bearing handle for Monday's wire
- * `Asset.name` slot). v0.8-M47 candidate — opens once
- * `--filename` companion shape is pinned at M47 pre-flight
- * (M47 ships after M46 IMPL closes per v0.8-plan PIVOT block).
+ * **D7 closure — `<path>='-'` stdin support CARVED OUT at
+ * v0.8-M47.** Deferred from v0.6-M38 (no `--filename` companion
+ * shape pinned then); v0.8-M47 pins the OPTIONAL `--filename
+ * <name>` companion (default `"blob"`; Monday accepts any non-empty
+ * `Asset.name` and `500`s only an empty one — probe-pinned) and
+ * accepts a bare `-` file `--set` value as a stdin source. Because
+ * stdin is a single non-replayable stream, the carve-out is scoped
+ * to single-file, single-target dispatch: exactly one
+ * `<file-col>=-` per call, as the SOLE file `--set` entry, on
+ * `item set` / single-item `item update` / `item create`.
+ * {@link routeFileColumnDispatch}'s stdin scope gate (mutex
+ * priority 0) enforces it — `'multiple_stdin_file_sets'` /
+ * `'stdin_file_set_not_sole_file'` / `'stdin_file_set_on_bulk_
+ * unsupported'` reject with `usage_error` (literals reserved). A
+ * clean stdin source routes through the same single-file
+ * `kind: 'file'` / `'file_create'` as a path source; the action
+ * body sources the Blob from `readStdinFileSource`
+ * (`src/utils/file-source.ts`) instead of {@link buildBlobFromPath}.
+ * **Pre-flight stub:** the live stdin-read + Blob leg + the
+ * size-less dry-run echo land at the M47 IMPL; the argv +
+ * `--filename` + enforcement surface is the shipped contract. The
+ * verb-shaped `monday item upload` stays path-only (no stdin) —
+ * M47 carves out only the friendly `--set` path.
  *
  * **No new ERROR_CODE (D8 closure; registry stays at 29).** All
  * M38-specific rejections route through existing `usage_error`
