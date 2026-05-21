@@ -5772,8 +5772,9 @@ mutation verbs produce different planned-change shapes; the
   output-side string serialisation.
 
   **v0.8-M48 — `board_relation` / `dependency` create-time
-  settings.** `--settings '{"boardIds":[123],"allowMultiple
-  Items":true}'` on a `board_relation` column wires the
+  settings.** On a `board_relation` column,
+  `--settings '{"boardIds":[123]}'` (optionally with
+  `"allowMultipleItems":true`) wires the
   Connect-Boards link at create time. The probe-pinned wire
   shape nests the relation config under a `settings` key inside
   `defaults` (`defaults: {settings: {boardIds:[123],...}}`),
