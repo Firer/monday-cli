@@ -236,7 +236,12 @@ humans are second-class. Built incrementally via Claude Code on top of
   cluster (API `2026-04` pin + `set_item_description_content` +
   `create_doc_blocks`) RE-OPENS only when `@mondaydotcomorg/api`
   SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` natively
-  AND a paid-tier sandbox is available for the M40 wire probe.
+  AND the M40 `set_item_description_content` wire becomes reachable
+  (2026-05-22 re-probe on a new admin-scoped free-tier account: still
+  untyped `INTERNAL_SERVER_ERROR { service: 'docs-api' }` across all
+  variations, while workspace docs work on the SAME account → most
+  likely a Monday-side defect specific to item descriptions, NOT
+  paid-tier gating; v0.7-plan §3 M40 + user-memory).
   The M39 override commits (`bb7c2cc..2e501b5`) + M40 uncommitted
   work are recoverable in `git reflog` for ~90 days; M40 findings
   preserved in user-memory at
