@@ -283,6 +283,18 @@ linked items. Two consequences:
   output retains `is_leaf` as a legacy nullable key, always `null`, so
   the projection stays non-breaking per §6.1; dropping the key is a
   future-major change.)
+- **Multi-level subitem nesting (v0.9-M50).** `item create --parent
+  <iid>` creates nested subitems on multi-level boards: the subitems
+  live on the parent's *host* board (not a separate, auto-generated
+  sub_items_board), and the host board's self-referencing `subtasks`
+  column lets nesting reach Monday's documented 5-layer depth —
+  verified depth-3+ at API `2026-01` (the CLI's pin) by the 2026-05-22
+  dev-board probe, so it is NOT SDK-gated. Classic boards keep the
+  depth-1 model (Monday auto-generates a sub_items_board for an item's
+  direct subitems, but that board carries no `subtasks` column of its
+  own, so classic deep-nesting past depth-1 has no data-model home).
+  A single unified `create_subitem` dispatch serves both — see §6.4
+  "Subitem variant" + §5.8.
 
 ### 2.9 Other column-write quirks worth knowing
 
@@ -1881,10 +1893,17 @@ monday item create --board <bid> --name <n> [--group <gid>] [--set <col>=<val>].
                                           # leg-1 atomically while the file entry routes to
                                           # leg-2 (see §5.8)
                                           # --parent <iid> → create_subitem; column resolution
-                                          # targets the subitems board, not the parent's board.
-                                          # Classic boards only — multi-level boards rejected
-                                          # with usage_error carrying details.hierarchy_type;
-                                          # multi-level subitem support deferred to v0.3
+                                          # targets the board the parent's `subtasks` column
+                                          # links to (settings_str.boardIds[0]) — the auto-
+                                          # generated sub_items_board on classic boards, the
+                                          # host board itself on multi-level boards (the column
+                                          # self-references). BOTH hierarchy_type values nest
+                                          # via one unified path (v0.9-M50 lifted the prior
+                                          # multi_level rejection; nesting works depth-3+ at API
+                                          # 2026-01 — closes M28). Only board-capability gate:
+                                          # a --set against a board with no subtasks lane →
+                                          # usage_error (classic deep-nesting past depth-1 has
+                                          # no home; no hierarchy_type-keyed rejection)
                                           # --parent is mutually exclusive with --group and
                                           # --position/--relative-to (subitems don't live in
                                           # groups; their position is parent-scoped, not
@@ -5027,13 +5046,27 @@ mutation verbs produce different planned-change shapes; the
   position is parent-scoped, not relative-to-arbitrary-item)
   — argv-parse rejects with `usage_error`, so neither slot
   appears in the subitem dry-run shape. `resolved_ids` and
-  `diff` keep the same per-column shape. **Classic boards
-  only:** subitem creation against multi-level boards
-  (`hierarchy_type: "multi_level"` per §2.8 — where subitems
-  live on the parent's board rather than an auto-generated
-  subitems board) is rejected with `usage_error` carrying
-  `details.hierarchy_type`. Multi-level subitem support is
-  deferred to v0.3.
+  `diff` keep the same per-column shape. **Both hierarchy
+  types (v0.9-M50):** subitem creation works on classic AND
+  multi-level boards. On multi-level boards
+  (`hierarchy_type: "multi_level"` per §2.8) subitems live on
+  the parent's host board rather than an auto-generated
+  subitems board; the host board's self-referencing
+  `subtasks` column makes nesting reach depth-3+ at API
+  `2026-01` (the CLI's pin — verified by the 2026-05-22
+  dev-board probe, NOT SDK-gated). The dry-run shape is
+  identical for both — `board_id` stays omitted and column
+  resolution targets whichever board the parent's `subtasks`
+  column links to. M50 lifted the prior `multi_level`
+  rejection (which shipped through v0.8.0 with a now-false
+  claim that the data model carried no subitems home) and
+  closes the M28 deferral. The only board-capability gate
+  left is the data-model `subtasks`-column check: a `--set`
+  against a board with no subitems lane — e.g. a classic
+  `sub_items_board`, which carries no `subtasks` column of
+  its own, so classic deep-nesting past depth-1 has no home
+  — surfaces `usage_error`. There is no
+  `hierarchy_type`-keyed rejection.
 
 - **Item-archive shape** (`item archive`; v0.2 M10).
   `operation: "archive_item"`, `item_id`, and `item: <projected
@@ -9002,9 +9035,22 @@ scoped idempotent changes, and post comments narrating its work.**
 - Cross-board search resumable cursor — slipped from v0.4
   release-prep; per-board cursor-lifetime under aggregation
   remains the load-bearing design issue.
-- Multi-level subitem creation — slipped from v0.4 release-prep;
-  conditional on Monday's data model surfacing `subtasks` on
-  `sub_items_board` at API `2026-01`+.
+- Multi-level subitem creation — slipped v0.4 → v0.5 → v0.6 → v0.7
+  → v0.8, **picked up at v0.9-M50** (pre-flight contract done; IMPL
+  next). The original deferral premise (Monday's data model surfaces
+  no `subtasks` home) was REFUTED for multi-level boards by the
+  2026-05-22 dev-board probe: multi-level boards carry a
+  self-referencing `subtasks` column, so `create_subitem` nests to
+  depth-3+ on the host board at API `2026-01` (the CLI's pin — NOT
+  SDK-gated). M50 lifts the shipped-incorrect `item create --parent`
+  `multi_level` rejection (which shipped through v0.8.0 with a
+  now-false "no subtasks column" claim) via a single unified
+  dispatch. The premise still holds for the classic `sub_items_board`
+  (no `subtasks` column of its own → classic deep-nesting past
+  depth-1 has no home), so that path keeps the data-model
+  `deriveSubitemsBoardId` `usage_error`. Zero new ERROR_CODE
+  (registry stays 29); zero new wire surface (`create_subitem` is
+  the existing M9 mutation).
 - Profile-scoped argument defaults — filed at v0.6 kickoff
   candidate-selection session as a new feature candidate (NOT a
   v0.5 slip). Extends `~/.monday-cli/config.toml` (M19/M21) with
@@ -9142,9 +9188,11 @@ scoped idempotent changes, and post comments narrating its work.**
     v0.4 + v0.5 release-prep; per-board cursor-lifetime
     under aggregation remains the load-bearing design issue.
   - Multi-level subitem creation — carried over from v0.4 +
-    v0.5 release-prep; conditional on Monday's data model
-    surfacing `subtasks` on `sub_items_board` at API
-    `2026-01`+.
+    v0.5 release-prep; **picked up at v0.9-M50**. The premise
+    was refuted for multi-level boards (they self-reference a
+    `subtasks` column, so nesting works depth-3+ at API
+    `2026-01`); see the v0.5-section entry above + §2.8 +
+    §6.4 "Subitem variant".
   - Profile-scoped argument defaults — filed at v0.6 kickoff
     candidate-selection session. Extends `~/.monday-cli/
     config.toml` (M19/M21) with `[profiles.<name>.defaults]`
