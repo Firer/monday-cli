@@ -91,8 +91,18 @@ describe.skipIf(!LIVE)('live schema drift (RUN_LIVE_TESTS)', () => {
 
     const get = await post(BOARD_GET_QUERY, { ids: [boardId] });
     expect(get.errors, JSON.stringify(get.errors)).toBeUndefined();
+    // Assert the field is actually SELECTED + returned, not just that
+    // the query validates — removing `hierarchy_type` from the document
+    // would leave a valid query, so the `errors`-only check can't catch
+    // a selection regression.
+    const getBoard = (get.data as { boards?: Record<string, unknown>[] } | undefined)
+      ?.boards?.[0];
+    expect(getBoard).toHaveProperty('hierarchy_type');
 
     const list = await post(BOARD_LIST_QUERY, { limit: 1, page: 1 });
     expect(list.errors, JSON.stringify(list.errors)).toBeUndefined();
+    const listBoard = (list.data as { boards?: Record<string, unknown>[] } | undefined)
+      ?.boards?.[0];
+    expect(listBoard).toHaveProperty('hierarchy_type');
   });
 });

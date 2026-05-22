@@ -515,8 +515,10 @@ same field set — including `hierarchy_type`.
 ### `board find <name>`
 
 Single resource on unique match (after NFC + case-fold). Multi-match
-without `--first` raises `ambiguous_name`. Narrow projection — no
-`url` / `items_count` (BoardFind GraphQL doc selects less).
+without `--first` raises `ambiguous_name`. Narrow projection — selects
+`url` but omits `board_folder_id` / `items_count` / `updated_at` /
+`permissions` / `hierarchy_type` (the BoardFind GraphQL doc selects
+less than the canonical board projection).
 
 ```json
 { "id": "111", "name": "Tasks", "description": null,

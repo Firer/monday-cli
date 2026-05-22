@@ -67,6 +67,10 @@ describe('monday board list', () => {
         interactions: [
           {
             operation_name: 'BoardList',
+            // Pin that the production document SELECTS hierarchy_type
+            // (v0.9-M51) — a mock supplying the field would otherwise
+            // mask a regression that dropped it from BOARD_LIST_QUERY.
+            match_query: /hierarchy_type/,
             response: { data: { boards: [sampleBoard] } },
           },
         ],
@@ -132,6 +136,10 @@ describe('monday board get', () => {
           {
             operation_name: 'BoardGet',
             match_variables: { ids: ['111'] },
+            // Pin that the shared fragment SELECTS hierarchy_type
+            // (v0.9-M51) — without this a fragment regression that
+            // dropped the field would still pass (the mock supplies it).
+            match_query: /hierarchy_type/,
             response: {
               data: {
                 boards: [
