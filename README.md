@@ -47,133 +47,104 @@ Requires **Node.js ≥ 22**.
 ```bash
 # 1. Set your Monday API token (admin or member; guests can't mint one).
 #    Get one at https://<your-org>.monday.com/admin/integrations/api
-#
-#    OAuth login (`monday auth login`) is registered but deferred in
-#    v0.8.0 — the verb surfaces a clear `usage_error.details.reason:
-#    oauth_unregistered` pointing here. Authenticate via the env var.
+#    (`monday auth login` is registered but the OAuth flow is not yet
+#    available — authenticate via the env var.)
 export MONDAY_API_TOKEN="<your-token>"
 
 # 2. Smoke test — confirm the token works.
 monday account whoami --json
 
-# 3. Install shell completion (v0.4-M33 — bash / zsh / fish).
-#    The default mode emits raw script bytes on stdout (so the redirect
-#    works); `--json` opts INTO the §6 envelope.
+# 3. Install shell completion (bash / zsh / fish). The default mode
+#    emits raw script bytes on stdout (so the redirect works); `--json`
+#    opts into the envelope.
 monday completion bash >> ~/.bashrc        # or .zshrc / config.fish
 
-# 4. Is everything wired up? (v0.3 diagnostics cluster)
-monday status --json                       # 7-probe DNS/TCP/TLS/auth/cache matrix
+# 4. Is everything wired up?
+monday status --json                       # DNS / TCP / TLS / auth / cache probe matrix
 monday usage --json                        # remaining daily Monday API operations
 
-# 5. List a board's items (replace 12345 with your board ID)
+# 5. Discover a board's shape (columns / groups / views).
+monday board describe 12345 --json         # full schema + example_set per writable column
+monday board views 12345 --json            # views only (Kanban / Gantt / Calendar / Table / …)
+
+# 6. List a board's items.
 monday item list --board 12345 --json
 
-# 6. File a new task (v0.2)
+# 7. File a new task.
 monday item create --board 12345 --name "Refactor login" \
   --set status=Backlog --set 'Due date'=+1w --json
 
-# 7. Long-poll for activity on an item (v0.4-M29 — NDJSON stream).
+# 8. Long-poll for activity on an item (NDJSON stream).
 #    Per-event NDJSON record + a `{"_meta": {...}}` trailer carrying
 #    the session counters. Use `--once` to drain backlog without
 #    polling further; SIGINT (Ctrl-C) drains gracefully and exits 130.
 monday item watch 67890 --once             # or --max-events 50 --max-duration 1h
 
-# 8. Upload a file to a column or update (v0.4-M31 — multipart wire).
-#    `add_file_to_column` for item columns; `add_file_to_update` for
-#    comment attachments. Both surface `--dry-run` for an envelope
-#    preview without the multipart round-trip.
+# 9. Upload a file to a column or to an update (comment).
+#    Both surface `--dry-run` for an envelope preview without the
+#    multipart round-trip.
 monday item upload 67890 --column 'Attachments' ./screenshot.png --json
 monday update upload <update-id> ./diagram.png --json
 
-# 9. Parallel partial-success bulk updates (v0.4-M30).
-#    `--concurrency <N>` (range 1..32) opts into parallel dispatch on
-#    the M25 partial-success path. Envelope is byte-equivalent to the
-#    sequential `--concurrency 1` default; input order is preserved
-#    in `data.results[]` regardless of completion order.
+# 10. Parallel partial-success bulk updates. `--concurrency <N>` (1..32)
+#     opts into parallel dispatch; envelope is byte-equivalent to the
+#     sequential `--concurrency 1` default, input order is preserved in
+#     `data.results[]` regardless of completion order.
 monday item update --where status=Backlog --set status='Working on it' \
   --board 12345 --yes --continue-on-error --concurrency 4 --json
 
-# 10. Browse the workdocs surface (v0.4-M32 — read-only at v0.4).
+# 11. Browse the workdocs surface.
 monday doc list --workspace 5 --order-by used_at --limit 10 --json
 monday doc get 88001 --json                # full Document with blocks
 
-# 11. Workdocs CRUD (v0.5-M35 + v0.5-M36 + v0.5-M37 — the full
-#     mutation surface deferred at v0.4-M32 D8 closure).
-#     Doc-level CRUD (M35): create / rename / delete / duplicate.
+# 12. Workdocs CRUD. Doc-level: create / rename / delete / duplicate.
 monday doc create-in-workspace --workspace 5 --name "Design notes" --json
 monday doc rename 88001 --name "Design notes (v2)" --json
 monday doc duplicate 88001 --with-updates --json
 monday doc delete 88001 --yes --json
-#     Doc-block CRUD (M36): block-create / block-update / block-delete.
-#     16-value `DocBlockContentType` enum for `--type`.
+#     Per-block: block-create / block-update / block-delete.
 monday doc block-create 88001 --type normal_text --content '{"text":"hi"}' --json
-#     Bulk import from HTML / markdown (M37): no per-block round-trips.
+#     Bulk import from HTML / markdown — no per-block round-trips.
 monday doc import-html --workspace 5 --html ./page.html --title "Imported" --json
 monday doc append-markdown 88001 --markdown ./notes.md --json
 
-# 12. Team writers (v0.5-M34 — deferred from v0.4 at the post-M33
-#     candidate-selection session). Six new verbs under `monday user`.
+# 13. Team writers.
 monday user team-list --json
 monday user team-create --name "Platform" --users 7,9 --json
 monday user team-add-members <tid> --users 11,13 --json
 
-# 13. Files-shaped friendly `--set` writes — the v0.6 → v0.8 carve-out
-#     set, every CLI shape reaching Monday's `add_file_to_column`
-#     multipart wire:
-#     - v0.6-M38 ships single-item friendly `--set <file-col>=<path>`
-#       on `monday item set` + `monday item update <iid>` (sibling-
-#       branch dispatch at the column-resolution boundary).
-#     - v0.7-M42 ships the bulk variant on `monday item update --where
-#       ... --set <file-col>=<path>` (per-item multipart fan-out under
-#       `--concurrency` / `--continue-on-error`).
-#     - v0.7-M43 ships the create-time variant on `monday item create
-#       --set <file-col>=<path>` as a two-leg `create_item` +
-#       `add_file_to_column` dispatch under the §5.8 orphan-warn
-#       atomicity envelope.
-#     - v0.8-M46 lifts the single-file gate: multiple `--set
-#       <file-col>=<path>` entries per call across update (single +
-#       bulk) + create, each firing a sequential `add_file_to_column`
-#       leg with a per-leg partial-failure accumulator.
-#     - v0.8-M47 sources an upload from stdin with a bare `-`
-#       (`<file-col>=-`, single-file / single-target; `--filename`
-#       names the part, default `blob`; empty pipe rejects
-#       `usage_error.details.reason: stdin_file_empty`).
-#     ⚠ v0.8-M49 P1 FIX: published v0.7.0 shipped the Apollo multipart
-#     spec, which live Monday REJECTS — so every real upload was broken
-#     in 0.7.0. v0.8.0 emits Monday's native multipart shape and is the
-#     first release where these uploads actually work against live
-#     Monday (live-verified). The v0.4-M31 verb-shaped `monday item
-#     upload` path remains as the alternative. `--dry-run` emits
-#     `planned_changes` on every shape without the multipart round-trip.
+# 14. File-column friendly `--set` writes — every shape reaching
+#     Monday's file-upload wire. `--dry-run` emits `planned_changes` on
+#     any of these without the multipart round-trip.
 monday item set 67890 'Attachments'=./screenshot.png --json
 monday item update 67890 --set 'Attachments'=./diagram.png --json
-monday item update 67890 --set 'Attachments'=./report.pdf --dry-run --json
 monday item update --board 12345 --where status=Backlog \
   --set 'Attachments'=./report.pdf --yes --continue-on-error \
-  --concurrency 4 --json                # v0.7-M42 bulk file dispatch
+  --concurrency 4 --json                   # bulk file dispatch
 monday item create --board 12345 --name "Field report" \
   --set 'Attachments'=./report.pdf --set 'Spec'=./spec.pdf \
-  --set status='Working on it' --json   # v0.8-M46 multi-file create-time
+  --set status='Working on it' --json      # multi-file at create-time
 cat report.pdf | monday item set 67890 'Attachments'=- \
-  --filename report.pdf --json          # v0.8-M47 stdin file --set
+  --filename report.pdf --json             # stdin file source
 
-# 14. Find-or-create with idempotent matching (v0.2)
-#     Re-running with the same args is safe — 0/1/2+ matches route to
-#     create / update / `ambiguous_match` (one of the 29 stable error codes).
+# 15. Find-or-create with idempotent matching. Re-running with the
+#     same args is safe — 0 / 1 / 2+ matches route to create / update
+#     / `ambiguous_match` (a stable error code agents can key off).
 monday item upsert --board 12345 --name "Refactor login" \
   --match-by name --set status='Working on it' --json
 
-# 15. Move a ticket forward, then comment on it
+# 16. Move a ticket forward, then comment on it.
 monday item set 67890 status=Done --json
 monday update create 67890 --body "Shipped in PR #1234" --json
 
-# 16. Monday Dev convention layer (v0.3 — sprint/epic/release/task)
-#     First-time setup auto-detects boards by Monday's stock template names.
+# 17. Monday Dev convention layer (sprint / epic / release / task).
+#     First-time setup auto-detects boards by Monday's stock template
+#     names.
 monday dev discover --apply --json         # writes ~/.monday-cli/config.toml
 monday dev sprint current --json           # the active sprint
 monday dev task list --mine --json         # my open tasks
 
-# 17. Outbound writes (v0.3 — webhooks + notifications)
+# 18. Outbound writes — webhooks + notifications.
 monday webhook list 12345 --json
 monday notification send --user 7 --target 67890 \
   --target-type item --text "PTAL" --json
