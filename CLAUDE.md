@@ -188,22 +188,41 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10.x / v0.11 candidate-selection** per
-  R-NEW-75. ≥2 backlog candidates remain at v0.10 close: C cross-
-  board `item move` value-overrides; E profile-scoped argument
-  defaults; G `Item.description` read-side paired with v0.7-M40
-  reopen; D resumable cross-board cursor (design-blocked on
-  per-board cursor-lifetime under aggregation, cli-design §13).
-  Plus R-v0.10-NEW-4 (fold `--maxWorkers=2` into the
-  `test:coverage` npm script) as a work-of-opportunity candidate
-  — fold whenever `package.json` is next touched, or include in
-  a v0.10.x release-prep. **Re-probe `@mondaydotcomorg/api`** at
-  candidate-selection: if SDK 15.x publishes (baking `2026-04`),
-  M39/M40/M41 reopen and preempts the C/E/G backlog (M40 already
-  feature-confirmed on multi_level boards via the 2026-05-22
-  probe sweep — only the M39 SDK gate remains). If still 14.0.0
-  (6th-consecutive stall), 5th-consecutive pivot is the default
-  expectation across the C/E/G/D backlog. **Post-publish
+- **Next session:** **v0.11-G pre-flight contract diff.** v0.11
+  candidate-selection ran 2026-05-22 per R-NEW-75 over the
+  C/D/E/G + R-v0.10-NEW-4 backlog. SDK probe:
+  `@mondaydotcomorg/api@14.0.0` — **5th-consecutive stall**
+  (v0.6 → v0.10), so M39/M40/M41 (SDK 15.x → API `2026-04`) +
+  M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED. User picked
+  **G — `Item.description` read-side, ships standalone** (the
+  2026-05-22-at-M52-close pair-with-M40 user binding BROKEN at
+  this candidate-selection per the 2-question round-trip);
+  **E (profile-scoped argument defaults) queued for v0.12**; C
+  stays-filed (4 slips on Monday's `ColumnMappingInput` no-value-
+  slot at API `2026-01`); D stays design-blocked.
+  **R-v0.10-NEW-4 RESOLVED inline at `085e999`** —
+  `--maxWorkers=2` folded into the `test:coverage` script
+  (work-of-opportunity per the v0.10 post-publish refactor-audit
+  finding). **v0.11-G scope:** unblock the v0.9-M52-surfaced
+  read gap where `ITEM_FIELDS_FRAGMENT`
+  (`src/api/item-helpers.ts`) doesn't select `description`, so
+  every item-read verb
+  (`item get`/`list`/`find`/`search`/`subitems`/`history`)
+  returns items without descriptions. Pre-flight binding
+  decisions: shape (a) extend `ITEM_FIELDS_FRAGMENT` (universal
+  projection — heavier) vs (b) dedicated `monday item
+  get-description <iid>` verb (narrow projection — mirrors
+  M52's `board views` carve-out); plus the **open empirical
+  probe** for `Item.description` field availability at API
+  `2026-01` (the CLI pin — the 2026-05-22 dev-board sweep
+  confirmed OBJECT type at `2026-04` but didn't test `2026-01`
+  availability). Same SDK-drift class as
+  `hierarchy_type`/`views`; the M52-graduated `match_query`
+  selection-pin two-layer guard (cassette + RUN_LIVE_TESTS smoke
+  per `.claude/rules/testing.md`) applies. **No
+  `docs/v0.11-plan.md` opens this session** per the v0.10
+  precedent (`5d89754` — plan-doc opens at the first pre-flight
+  contract diff commit of the milestone). **Post-publish
   refactor-audit ran 2026-05-22** over `36d705d..177b40c`
   (recency window: release-prep cluster + post-publish flip) —
   process-only cluster (matching v0.9's precedent at `253233f`),
