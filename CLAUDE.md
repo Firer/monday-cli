@@ -397,8 +397,12 @@ detail, and R-class refactor backlog, **read the plan docs** —
    M28 deferral + fixes the shipped-incorrect `item create --parent`
    rejection) + **M51** `hierarchy_type` surfacing / `board duplicate`
    multi-level path + **M52** board views read. M50 empirically
-   pre-probed (nesting works at `2026-01`). M39/M40/M41 (SDK 15.x) +
-   M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0.
+   pre-probed (nesting works at `2026-01`); **M50 pre-flight DONE**
+   (`9675f6a..e41b467`). M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
+   stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
+   the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
+   v0.8 watch-items R-v0.8-NEW-19/20/21/22 + promoted R-v0.8-NEW-23/24/25
+   → M50/M51/M52).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
