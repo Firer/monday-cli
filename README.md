@@ -313,14 +313,13 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.9.0 (current).** Adds multi-level board support: subitem
-nesting on `multi_level` boards (lifts a v0.8.0 rejection that
-wrongly blocked the operation), board hierarchy now readable across
-every board verb, and a new `monday board views` verb projecting
-view metadata (Kanban / Gantt / Calendar / Table / Form / Chart).
-**118 commands** across boards, items (single + bulk via `--where`),
-columns, groups, workspaces, teams, workdocs, updates, files, and
-the `monday dev` workflow namespace. No breaking changes vs v0.8.0.
+**v0.10.0 (current).** Internal cleanup — no behaviour change.
+Collapses duplicate noun-description literals across the command
+registry into a single source of truth so command help text can no
+longer silently drift from the canonical phrasing. **118 commands**
+across boards, items (single + bulk via `--where`), columns, groups,
+workspaces, teams, workdocs, updates, files, and the `monday dev`
+workflow namespace. No breaking changes vs v0.9.0.
 
 **What's next.** Roadmap headlines (see
 [`docs/cli-design.md`](./docs/cli-design.md) §13 for the full
