@@ -196,7 +196,7 @@ humans are second-class. Built incrementally via Claude Code on top of
 - **Next session:** **v0.10-M53 IMPL** for the **`NOUN_DESCRIPTIONS`
   single-source-of-truth lift** (R-v0.8-NEW-22 graduation; v0.8-plan
   §22 → now PROMOTED to v0.10-plan §22). **M53 pre-flight CLOSED
-  2026-05-22** (`<pre-flight-sha>`; additive signature stub + map
+  2026-05-22** (`c48510f`; additive signature stub + map
   skeleton, all ~120 existing `ensureSubcommand(...)` call sites
   compile unchanged). Pre-flight shipped: new
   `src/commands/noun-descriptions.ts` carrying the 18-entry
@@ -568,7 +568,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    R-v0.8-NEW-22 candidate (filed at v0.8 post-publish; demonstrated
    shipped bug: `doc` "read-only at v0.4" + `update`
    `'cli-design §4.3 UPDATE'` ref leaking into help). **M53
-   pre-flight CLOSED 2026-05-22** (`<pre-flight-sha>` — additive
+   pre-flight CLOSED 2026-05-22** (`c48510f` — additive
    signature stub + new `src/commands/noun-descriptions.ts` module +
    12 new `tests/unit/commands/types.test.ts` tests; all ~120
    existing call sites compile unchanged). §22 R-class register
