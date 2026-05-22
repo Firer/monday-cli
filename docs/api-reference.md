@@ -214,7 +214,8 @@ M16 and M17 ship the full board-structure mutation surface plus
 introduce the **§8 eager-invalidation contract**: every board-
 structure mutation calls `invalidateBoard(boardId)` post-success
 so a same-process `board describe` / `board groups` / `board
-columns` sees fresh state without TTL eviction.
+columns` / `board views` (v0.9-M52) sees fresh state without TTL
+eviction.
 
 ### Columns (M16)
 
@@ -363,10 +364,15 @@ commands to see them. Mutations against an archived column return
 `monday board describe <bid>` is the single richest read in v0.1 —
 columns + groups + `hierarchy_type` + `is_leaf` + per-column
 `example_set` of suggested `--set` invocations for every writable
-column type. Agents that have run `board describe` once can
-construct a mutation against any M5b-writable column without
-consulting Monday's docs. Ships live for v0.1 reads; M5b mutations
-read it through the cached `loadBoardMetadata` helper.
+column type, plus the v0.9-M52 `views[]` slot. Agents that have run
+`board describe` once can construct a mutation against any
+M5b-writable column without consulting Monday's docs. Ships live for
+v0.1 reads; M5b mutations read it through the cached
+`loadBoardMetadata` helper.
+
+The v0.9-M52 `monday board views <bid>` verb projects the same
+`views[]` slot as a standalone read — mirrors `board columns` / `board
+groups`. Lighter than `describe` when you only need view metadata.
 
 `monday board doctor <bid>` (M6) layers diagnostics on top of the
 same metadata: duplicate column titles (would cause

@@ -539,6 +539,9 @@ the pipe-form shapes for `link` / `email` / `phone`. `is_leaf` is
 always `null` (v0.7.1+): Monday removed the field from the `Board`
 type at API `2026-01`, but the key is retained for back-compat.
 
+v0.9-M52 adds a `views[]` slot — same projection as `board views
+<bid>` (see below).
+
 ```json
 {
   "id": "111", "name": "Tasks", "description": null,
@@ -559,6 +562,14 @@ type at API `2026-01`, but the key is retained for back-compat.
       "example_set": ["--set mobile='+15551234567|US'"] },
     { "id": "mirror_x", "title": "Mirror", "type": "mirror",
       "writable": false, "example_set": null }
+  ],
+  "views": [
+    { "id": "50590968", "name": "Kanban", "type": null,
+      "source_view_id": null,
+      "settings_str": "{}", "view_specific_data_str": "{}",
+      "settings": {}, "sort": [], "filter": null,
+      "filter_user_id": null, "filter_team_id": null,
+      "tags": null, "access_level": "edit" }
   ]
 }
 ```
@@ -581,6 +592,31 @@ Collection of groups.
 [
   { "id": "topics", "title": "Topics", "color": "red",
     "position": "1.000", "archived": false, "deleted": false }
+]
+```
+
+### `board views <id>` (v0.9-M52)
+
+Collection of views (the projection from `describe.views`). 13 fields
+1:1 with Monday's `BoardView` wire shape. `type` is **nullable** — a
+Kanban view's `type` is `null` on the wire; `name` is the reliable
+human-readable discriminator. `settings_str` and the typed `settings`
+JSON scalar are DISTINCT wire fields and can carry different data on
+the same view (e.g. table views: `settings_str` = `{"view_subtype":
+null}` but `settings` = `{"app_feature_id": N}`). `view_specific_data_str`
+carries `view_url` / `mobile_url` deeplinks on most views. No
+`--include-archived` flag (the wire has no archived-view distinction).
+
+```json
+[
+  { "id": "49951480", "name": "Table", "type": "FeatureBoardView",
+    "source_view_id": "174157286",
+    "settings_str": "{}",
+    "view_specific_data_str": "{\"view_url\":\"https://...\",\"mobile_url\":\"https://...?mode=mobile\"}",
+    "settings": { "app_feature_id": 100739 },
+    "sort": null, "filter": null,
+    "filter_user_id": null, "filter_team_id": null,
+    "tags": null, "access_level": "edit" }
 ]
 ```
 

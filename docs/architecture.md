@@ -119,7 +119,8 @@
   per-account user directory, schema version pin. `0600` mode +
   atomic writes (tmp + rename) + permission verification on read.
 - `api/board-metadata.ts` (M3) — cache-aware `loadBoardMetadata`
-  shared by `board describe` / `columns` / `groups`. Returns
+  shared by `board describe` / `columns` / `groups` / `views`
+  (v0.9-M52 added the views surface). Returns
   `{ metadata, source, cacheAgeSeconds, complexity }` so verbose-mode
   complexity flows through cache-aware commands.
 - `api/columns.ts` (M3) — read-side §5.3 column resolver:

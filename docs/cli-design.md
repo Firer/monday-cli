@@ -682,6 +682,25 @@ monday board find <name> [--workspace <wid>] [--first]                       v0.
                                           # selects fewer fields) — NO
                                           # `hierarchy_type`.
 monday board describe <bid>               # full schema; see §11.2           v0.1
+                                          # v0.9-M52: gains a `views[]`
+                                          # slot per the BoardView wire
+                                          # projection (13 fields 1:1).
+monday board views <bid>                  # list a board's views             v0.9
+                                          # (Kanban/Gantt/Calendar/Table/…).
+                                          # Mirrors `board columns` / `board
+                                          # groups` — loads via
+                                          # `loadBoardMetadata` (cached) and
+                                          # projects to a BoardView[]
+                                          # collection. Surfaces all 13 wire
+                                          # fields 1:1 (id, name, type,
+                                          # source_view_id, settings_str,
+                                          # view_specific_data_str, settings,
+                                          # sort, filter, filter_user_id,
+                                          # filter_team_id, tags,
+                                          # access_level). Raw GraphQL — the
+                                          # BoardView type is SDK 14.0.0-
+                                          # untyped, the `is_leaf` /
+                                          # `hierarchy_type` SDK-drift class.
 monday board doctor <bid>                 # diagnostics; see §11.2           v0.1
 monday board subscribers <bid>                                               v0.1
 monday board favorites                    # current user's starred boards   v0.3
@@ -8146,9 +8165,26 @@ to largest scope:
   - Groups (id, title, color, position, archived, deleted).
   - `hierarchy_type` and `is_leaf` (multi-level boards; via raw
     GraphQL — see §2.8).
+  - **Views (v0.9-M52).** A `views[]` slot — same projection as
+    `monday board views <bid>` — listing the board's views with `id`,
+    `name`, `type` (Monday's view-kind string; **nullable** — the
+    Kanban view's `type` is null on the wire, so `name` is the
+    reliable label discriminator), `source_view_id`, `settings_str`,
+    `view_specific_data_str` (carries `view_url` + `mobile_url`
+    deeplinks on table-style views), the typed `settings` JSON scalar,
+    `sort`, `filter`, `filter_user_id`, `filter_team_id`, `tags`, and
+    `access_level`. Raw GraphQL per SDK drift (BoardView is SDK
+    14.0.0-untyped). The `--include-archived` flag does NOT apply to
+    views (the wire has no archived-view distinction).
   - For each writable column type, an **example `--set` value** in
     the response so an agent reading `describe` once has everything
     it needs to write.
+- `monday board views <bid>` — collection projection of the same
+  views slot. Use this when you only need view metadata (lighter than
+  `describe`); use `describe` for the columns / groups / `example_set`
+  surface as well. Reuses `loadBoardMetadata`'s cache — a follow-up
+  `describe` / `columns` / `groups` / `views` against the same board
+  pays one fetch.
 - `monday board doctor <bid>` — diagnostics. Surfaces:
   - Duplicate column titles (would cause `ambiguous_column` on
     title-based `--set`).
