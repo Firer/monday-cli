@@ -267,6 +267,50 @@ bump + CHANGELOG + close-docs sweep.
 
 R-NEW-82 (graduated v0.5 release-prep).
 
+## Post-publish flip commit pattern
+
+After `npm publish` lands the release, write ONE small commit that
+flips status forward + retires the placeholders the close-docs
+commit couldn't fill itself. The close-docs commit can't reference
+its own SHA, so it leaves `<close-docs>` placeholders that the
+post-publish commit backfills once `git rev-parse HEAD` is stable.
+
+The shape (4 steps, single commit):
+
+1. **Flip CLAUDE.md "Status" → "Published".** Replace the
+   "release-prep SHIPPED — ready for publish, EXTERNALLY BLOCKED"
+   sentence with "Published: `monday-cli@<version>` on npm
+   (`latest` dist-tag, `<timestamp>`). **v<version> published —
+   release complete.**" Quote the actual `npm view monday-cli
+   time.<version>` timestamp — don't paraphrase or round. Cite
+   the annotated tag + the GitHub release URL.
+2. **Backfill `<close-docs>` / `<close-docs-sha>` placeholders →
+   the close-docs commit SHA.** `rg '<close-docs' CLAUDE.md
+   docs/v<version>-plan.md` must return 0 hits after the edits.
+3. **Tick §7's pending-publish checklist line** in the plan-doc
+   (`- [ ]` → `- [x]`) with the npm timestamp + tag SHA in the
+   body; add a "Post-publish flip applied <date>" note to §3's
+   release-prep close subsection with the full publish timeline.
+4. **Drop the publish-coordination prefix from "Next session".**
+   The pointer in CLAUDE.md goes straight to v<version>.x /
+   v<version+1> candidate-selection per R-NEW-75 (or whatever
+   the actual next-work pointer is for that cycle).
+
+**Skip Codex review** — post-publish flip is mechanical/docs-only;
+R-NEW-84 applies; gates (`typecheck && lint && test`) carry
+verification. Commit subject mirrors prior cycles:
+`docs(v<version>-post-publish): flip status → release complete +
+backfill SHAs`.
+
+R-v0.9-NEW-13 (graduated v0.10 post-publish — 3rd consecutive
+clean-shape instance formalising the pattern: v0.8 `3f30891`
+established the shape; v0.9 `ea8f34e` confirmed stability; v0.10's
+post-publish flip met the graduation threshold. v0.7 `d4ca55e`
+was a combined audit + flip, not the clean 4-step shape this rule
+formalises). Cross-refs R-NEW-82 (the parent release-prep
+discipline) + R-NEW-84 (the mechanical/process-only Codex-skip
+carve-out that applies here too).
+
 ## Candidate-selection session when ≥2 backlog candidates remain
 
 When a feature-cluster closes and 2+ candidates remain on the

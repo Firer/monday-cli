@@ -11,18 +11,17 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Status:** `monday-cli@0.10.0` **release-prep SHIPPED — ready
-  for publish, EXTERNALLY BLOCKED on user push + npm publish.**
-  Currently published: `monday-cli@0.9.0` on npm (`latest` dist-tag,
-  2026-05-22T16:38:40Z; annotated `v0.9.0` tag at `ee96681`; GitHub
-  release at https://github.com/Firer/monday-cli/releases/tag/v0.9.0).
-  Once `npm publish` lands, the v0.10-M53 `NOUN_DESCRIPTIONS` single-
-  source-of-truth lift will be LIVE: ~120 duplicate
+- **Published:** `monday-cli@0.10.0` on npm (`latest` dist-tag,
+  2026-05-22T21:24:43Z). **v0.10.0 published — release complete.**
+  Annotated `v0.10.0` tag pushed pointing at `c9eceba`; GitHub
+  release live at https://github.com/Firer/monday-cli/releases/tag/v0.10.0.
+  The v0.10-M53 `NOUN_DESCRIPTIONS` single-source-of-truth lift is
+  **LIVE in the published artifact**: ~120 duplicate
   `ensureSubcommand` literals collapsed into one 18-entry map at
   `src/commands/noun-descriptions.ts`, with the `update/upload.ts`
   `'cli-design §4.3 UPDATE'` internal-ref leak structurally fixed in
   the same migration. **v0.10 release-prep cluster**
-  (`36d705d..<close-docs>`, 4 commits; mirrors the v0.9 precedent
+  (`36d705d..c9eceba`, 4 commits; mirrors the v0.9 precedent
   minus the ToC-audit commit — audit ran CLEAN so the conditional
   commit was skipped per the v0.9 help-text-grep-clean precedent):
   README Scope flip — flipped current to v0.10.0 with internal-
@@ -33,7 +32,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   `npm audit` clean (`50c0b9b`) / CHANGELOG [0.10.0] one-line user-
   impact framing per `feedback_public_docs_clean` ("internal cleanup;
   no behaviour change", `579a36d`) / close-docs sweep
-  (`<close-docs>`). Envelope-snapshot refresh probe ran clean (zero
+  (`c9eceba`). Envelope-snapshot refresh probe ran clean (zero
   diff vs M53 IMPL close, 162 snapshots) — folded into this close-
   docs prose per the v0.5/v0.6/v0.7/v0.8/v0.9 precedent.
   R-NEW-82 **8th-consecutive ratification** (zero stale
@@ -43,7 +42,10 @@ humans are second-class. Built incrementally via Claude Code on top of
   production `src/**/*.ts` semantic changes); R-v0.9-NEW-15 RESOLVED
   at v0.10 release-prep (first dedicated consumer of the widened
   checklist); R-v0.8-NEW-21 STAYS-FILED after 3rd-consecutive CLEAN
-  hygiene grep (rule-graduation criterion still UNMET). Previous:
+  hygiene grep (rule-graduation criterion still UNMET); R-v0.9-NEW-13
+  GRADUATED into `.claude/rules/workflow.md` at this post-publish
+  flip — "Post-publish flip commit pattern", 3rd-instance threshold
+  met across v0.7 + v0.8 + v0.9 + v0.10 (4 consecutive). Previous:
   `monday-cli@0.9.0` (tag `v0.9.0` at `ee96681`, 2026-05-22T16:38:40Z);
   `monday-cli@0.8.0` (tag `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z);
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z).
@@ -186,33 +188,53 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10 post-publish flip → v0.10.x / v0.11
-  candidate-selection** per R-NEW-75. (1) After the user pushes +
-  tags + `npm publish` lands `monday-cli@0.10.0`, write a small
-  post-publish flip commit: CLAUDE.md "Status:" sentence flips to
-  "Published: `monday-cli@0.10.0` on npm (`latest` dist-tag,
-  <date>). **v0.10.0 published — release complete.**" + backfill
-  `<close-docs>` SHA placeholders to the close-docs commit SHA +
-  the npm publish timestamp + tag SHA. Mirrors v0.9's
-  `ea8f34e..253233f` post-publish cluster. **R-v0.9-NEW-13**
-  (post-publish flip pattern) hits 3rd-instance and graduates into
-  `.claude/rules/workflow.md` at this commit — cite v0.7 + v0.8 +
-  v0.9 + v0.10 as the four consecutive instances. (2) Then run a
-  dedicated v0.10.x / v0.11 candidate-selection session per
-  R-NEW-75 5-dimension scoping over the remaining backlog (C
-  cross-board `item move` value-overrides; E profile-scoped
-  argument defaults; G `Item.description` read-side paired with
-  v0.7-M40 reopen; D resumable cross-board cursor — design-blocked
-  on per-board cursor-lifetime under aggregation, cli-design §13).
-  Re-probe `@mondaydotcomorg/api` at candidate-selection — if SDK
-  15.x publishes (baking `2026-04`), M39/M40/M41 reopen and
-  preempts the C/E/G backlog. **✅ v0.10-M53 SHIPPED 2026-05-22**
-  — see `docs/v0.10-plan.md` §3 "M53 — IMPL close" + §3 "release-
-  prep — close" + §22 R-class register for the full narrative
-  (per the `feedback_public_docs_clean` propagation forward, the
+- **Next session:** **v0.10.x / v0.11 candidate-selection** per
+  R-NEW-75. ≥2 backlog candidates remain at v0.10 close: C cross-
+  board `item move` value-overrides; E profile-scoped argument
+  defaults; G `Item.description` read-side paired with v0.7-M40
+  reopen; D resumable cross-board cursor (design-blocked on
+  per-board cursor-lifetime under aggregation, cli-design §13).
+  Plus R-v0.10-NEW-4 (fold `--maxWorkers=2` into the
+  `test:coverage` npm script) as a work-of-opportunity candidate
+  — fold whenever `package.json` is next touched, or include in
+  a v0.10.x release-prep. **Re-probe `@mondaydotcomorg/api`** at
+  candidate-selection: if SDK 15.x publishes (baking `2026-04`),
+  M39/M40/M41 reopen and preempts the C/E/G backlog (M40 already
+  feature-confirmed on multi_level boards via the 2026-05-22
+  probe sweep — only the M39 SDK gate remains). If still 14.0.0
+  (6th-consecutive stall), 5th-consecutive pivot is the default
+  expectation across the C/E/G/D backlog. Also consider a v0.10
+  post-publish refactor-audit (optional, user-driven) over the
+  recency window `36d705d..<post-publish-flip>` — the v0.9
+  precedent at `253233f` filed 3 candidates + caught a README
+  drift, but only fire if surveying the cluster surfaces real
+  candidates. v0.10.0 is **PUBLISHED + release-complete** (npm
+  `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`;
+  release-prep `36d705d..c9eceba`). v0.10 feature-cluster scope
+  is fully shipped — **M53** NOUN_DESCRIPTIONS lift — and the
+  release-prep cluster landed in 4 commits (matching v0.9's
+  4-commit shape; ToC audit skipped after CLEAN audit per the
+  "if clean, skip" precedent). Process adoptions at the v0.10
+  close-docs: R-NEW-82 **8th-consecutive ratification** (zero
+  stale `deferred_to: "v0.10"` slots, by construction —
+  pure-refactor IMPL shipped no deferred wire leg); R-NEW-84
+  graduated-discipline applied (Codex skipped on the mechanical/
+  process-only cluster); R-v0.9-NEW-15 RESOLVED at v0.10
+  release-prep (first dedicated consumer of the widened
+  checklist); R-v0.8-NEW-21 STAYS-FILED after 3rd-consecutive
+  CLEAN hygiene grep (rule-graduation criterion still UNMET, 4th
+  consecutive CLEAN sweep at v0.11+ release-prep would justify
+  graduation-or-close); R-v0.9-NEW-13 GRADUATED at this
+  post-publish flip into `.claude/rules/workflow.md` as
+  "Post-publish flip commit pattern" — 3rd-instance threshold met
+  across v0.7 + v0.8 + v0.9 + v0.10 (4 consecutive). **✅
+  v0.10-M53 SHIPPED 2026-05-22** — see `docs/v0.10-plan.md` §3
+  "M53 — IMPL close" + §3 "release-prep — close" + §22 R-class
+  register for the full narrative (per the
+  `feedback_public_docs_clean` propagation forward, the
   per-milestone narrative belongs in the plan-docs, not here).
   Pre-flight `c48510f` + `b334899`; IMPL `feb8805`; close-docs
-  `<close-docs>`. Codex IMPL CONVERGED R1 (0 P1/P2/P3); R-class
+  `c9eceba`. Codex IMPL CONVERGED R1 (0 P1/P2/P3); R-class
   outcomes at M53 IMPL close: R-v0.8-NEW-22 + R-v0.10-NEW-1 +
   R-v0.10-NEW-2 all RESOLVED; R-v0.9-NEW-2 GRADUATED into
   `.claude/rules/workflow.md` ("Rejection-lift / pure-refactor
