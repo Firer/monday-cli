@@ -275,14 +275,32 @@ linked items. Two consequences:
   column metadata to opt-in to inclusion in queries. The CLI's
   `monday board describe` requests this capability so rollup values
   appear in the output.
-- **`hierarchy_type`** distinguishes parent boards from sub-items
-  boards in the multi-level model. SDK 14.0.0 does not type this field;
-  the CLI fetches it via raw GraphQL. (`is_leaf` was fetched alongside
-  it until Monday removed the field from the `Board` type at API
-  `2026-01` — the query no longer selects it. The `board describe`
-  output retains `is_leaf` as a legacy nullable key, always `null`, so
-  the projection stays non-breaking per §6.1; dropping the key is a
-  future-major change.)
+- **`hierarchy_type`** (`classic` | `multi_level`) distinguishes
+  classic boards from multi-level boards. SDK 14.0.0 does not type this
+  field; the CLI fetches it via raw GraphQL. Surfaced in **`board
+  describe`** (v0.3) and — from **v0.9-M51** — in **`board get`**,
+  **`board list`**, and every board-mutation result that shares the
+  §11.2 board projection (`create` / `update` / `archive` / `delete` /
+  `duplicate`), so one read tells an agent which subitem model a board
+  uses (see "Multi-level subitem nesting" below + §6.4 "Subitem
+  variant"). Typed `string | null`, not a closed enum — Monday also
+  returns internal forms (`top_level` / `parent`) the projection must
+  pass through unchanged. (`is_leaf` was fetched alongside it until
+  Monday removed the field from the `Board` type at API `2026-01` — the
+  query no longer selects it. The `board describe` output retains
+  `is_leaf` as a legacy nullable key, always `null`, so the projection
+  stays non-breaking per §6.1; dropping the key is a future-major
+  change.)
+- **Creating a multi-level board (v0.9-M51).** `create_board` has no
+  hierarchy argument — it always makes a `classic` board. The API path
+  to a multi-level board is to **duplicate an existing one**: `monday
+  board duplicate <multi-level-bid>` runs `duplicate_board_with_pulses`,
+  which preserves `hierarchy_type: multi_level` (verified at `2026-01`).
+  A multi-level *seed* board must first exist (created in Monday's UI or
+  saved as an account template); there is no from-scratch API path, so
+  this is a Monday-API limit, not a CLI gap. `board create --template
+  <account-template-id>` likewise preserves the template's hierarchy
+  when the template is a saved multi-level account template.
 - **Multi-level subitem nesting (v0.9-M50).** `item create --parent
   <iid>` creates nested subitems on multi-level boards: the subitems
   live on the parent's *host* board (not a separate, auto-generated
@@ -647,8 +665,20 @@ monday workspace remove-users <wid> --users <id|email>,... [--dry-run]       v0.
 
 # === BOARD ===
 monday board list [--workspace <wid>] [--state active|archived|all]          v0.1
+                                          # Each row carries `hierarchy_type`
+                                          # (classic|multi_level) from
+                                          # v0.9-M51. See §2.8.
 monday board get <bid>                                                       v0.1
+                                          # Lightweight single-board read;
+                                          # shares the §11.2 board projection
+                                          # with create/update/archive/delete/
+                                          # duplicate, so all six surface
+                                          # `hierarchy_type` (classic|
+                                          # multi_level) from v0.9-M51. §2.8.
 monday board find <name> [--workspace <wid>] [--first]                       v0.1
+                                          # Narrow projection (BoardFind doc
+                                          # selects fewer fields) — NO
+                                          # `hierarchy_type`.
 monday board describe <bid>               # full schema; see §11.2           v0.1
 monday board doctor <bid>                 # diagnostics; see §11.2           v0.1
 monday board subscribers <bid>                                               v0.1
@@ -855,6 +885,16 @@ monday board duplicate <bid> [--name <n>] [--workspace <wid>] [--with-updates] [
                                           # is deferred to a later v0.x surface;
                                           # agents needing it call the wire mutation
                                           # via M9's `dev mutate` escape hatch.
+                                          # **Multi-level creation path
+                                          # (v0.9-M51):** `duplicate_board_
+                                          # with_pulses` PRESERVES
+                                          # `hierarchy_type: multi_level`
+                                          # (verified 2026-01), so duplicating a
+                                          # multi-level board is how you create
+                                          # one from the API (`create_board` has
+                                          # no hierarchy arg → always classic).
+                                          # A multi-level seed must already
+                                          # exist. See §2.8.
                                           # `--workspace <wid>` is optional —
                                           # defaults to the source board's
                                           # workspace. `--name <n>` is optional;

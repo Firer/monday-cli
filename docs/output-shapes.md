@@ -484,21 +484,29 @@ arguments.
     "state": "active", "board_kind": "public",
     "board_folder_id": null, "workspace_id": "5",
     "url": "https://x.monday.com/boards/111",
+    "hierarchy_type": "classic",
     "items_count": 7, "updated_at": "2026-04-30T10:00:00Z" }
 ]
 ```
 
-`meta` adds `total_returned`, `has_more`.
+`meta` adds `total_returned`, `has_more`. From **v0.9-M51** each row
+carries `hierarchy_type` (`classic` | `multi_level`; `string | null`,
+fetched via raw GraphQL per cli-design §2.8).
 
 ### `board get <id>`
 
-Single resource. Includes `permissions`.
+Single resource. Includes `permissions` and — from **v0.9-M51** —
+`hierarchy_type` (`classic` | `multi_level`). `board get` shares
+`boardProjectionSchema` with the board-mutation cluster (`create` /
+`update` / `archive` / `delete` / `duplicate`), so all six carry the
+same field set — including `hierarchy_type`.
 
 ```json
 {
   "id": "111", "name": "Tasks", "description": null,
   "state": "active", "board_kind": "public", "board_folder_id": null,
   "workspace_id": "5", "url": "https://x.monday.com/boards/111",
+  "hierarchy_type": "classic",
   "items_count": 7, "permissions": "collaborators",
   "updated_at": "2026-04-30T10:00:00Z"
 }
@@ -626,10 +634,16 @@ re-mapped per cli-design §6.5).
   "id": "67890", "name": "Engineering", "description": "Eng team board",
   "state": "active", "board_kind": "public", "board_folder_id": null,
   "workspace_id": "5", "url": "https://x.monday.com/boards/67890",
+  "hierarchy_type": "classic",
   "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
   "permissions": "everyone"
 }
 ```
+
+`create_board` has no hierarchy argument, so a created board is always
+`hierarchy_type: "classic"` (v0.9-M51). To create a multi-level board,
+duplicate an existing one — see `board duplicate` below + cli-design
+§2.8.
 
 Dry-run shape per cli-design §6.4 board-create variant —
 `{operation: "create_board", name, workspace_id?, kind, description?,
@@ -703,6 +717,7 @@ so a missing token still surfaces `confirmation_required`, not
   "id": "12345", "name": "Engineering", "description": "Eng team",
   "state": "archived", "board_kind": "public", "board_folder_id": null,
   "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+  "hierarchy_type": "classic",
   "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
   "permissions": "everyone"
 }
@@ -724,6 +739,7 @@ the source snapshot via preflight `BoardMetadata` read (cache-able):
         "id": "12345", "name": "Engineering", "description": "Eng team",
         "state": "active", "board_kind": "public", "board_folder_id": null,
         "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+        "hierarchy_type": "classic",
         "items_count": null, "updated_at": "2026-05-07T11:00:00Z",
         "permissions": null
       }
@@ -765,6 +781,7 @@ Dry-run shape per cli-design §6.4 board-delete variant — minimal
   "id": "12345", "name": "Engineering", "description": "Eng team",
   "state": "deleted", "board_kind": "public", "board_folder_id": null,
   "workspace_id": "5", "url": "https://x.monday.com/boards/12345",
+  "hierarchy_type": "classic",
   "items_count": 0, "updated_at": "2026-05-07T11:00:00Z",
   "permissions": "everyone"
 }
@@ -792,6 +809,7 @@ wrapper is M15's documented example.
       "id": "67890", "name": "Engineering (Copy)", "description": "Eng team",
       "state": "active", "board_kind": "public", "board_folder_id": null,
       "workspace_id": "5", "url": "https://x.monday.com/boards/67890",
+      "hierarchy_type": "classic",
       "items_count": 7, "updated_at": "2026-05-07T11:00:00Z",
       "permissions": "everyone"
     },
@@ -808,6 +826,16 @@ time; agents needing to operate on the duplicated items / updates
 poll `boards(ids: [<new_id>]) { state }` until terminal state.
 When `is_async: false`, the duplication has fully landed and
 immediate follow-up reads are safe.
+
+**Multi-level board creation (v0.9-M51).** `duplicate_board_with_pulses`
+**preserves** `hierarchy_type` — duplicating a `multi_level` board
+yields a `multi_level` copy (the `data.board.hierarchy_type` in this
+envelope reflects it), verified at API `2026-01`. Since `create_board`
+has no hierarchy argument (always `classic`), `monday board duplicate
+<multi-level-bid>` is the API path to a new multi-level board. A
+multi-level *seed* must already exist (made in Monday's UI or saved as
+an account template) — there is no from-scratch API path, so this is a
+Monday-API limit, not a CLI gap. See cli-design §2.8.
 
 `--with-updates` flag mapping (cli-design §4.3): false →
 `duplicate_board_with_pulses` (items WITHOUT updates); true →

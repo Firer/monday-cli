@@ -361,7 +361,10 @@
   (`boardLookupResponseSchema` / `parentLookupResponseSchema`), plus
   three helpers: `lookupItemBoard({client, itemId, label?,
   detailKey?})` (M5b shape — id + board), `lookupItemBoardWithHierarchy`
-  (M9 shape — adds `hierarchy_type` for the multi-level gate),
+  (M9 shape — adds `hierarchy_type`; originally drove the M9 subitem
+  gate, now read-but-unused after M50's unified dispatch and retained
+  as a regression-guard affordance — M51 surfaces `hierarchy_type` via
+  the separate board projection, not this fetch),
   `resolveBoardId({client, itemId, explicit})` (the `--board` ??
   lookup wrapper). `set` / `clear` / `update` / `create.ts` each shed
   ~70 LOC of duplicated GraphQL + schema + resolver. Error labels
