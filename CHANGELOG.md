@@ -7,6 +7,226 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.9.0] - 2026-05-22 — Multi-level board cluster: subitem nesting fix, hierarchy surfacing, board views read
+
+The "agents understand multi-level boards" release. Three pieces:
+
+1. **Multi-level subitem nesting works.** `monday item create --parent
+   <iid>` now succeeds on `multi_level` boards — subitems nest depth-3+
+   on the host board via Monday's self-referencing `subtasks` column.
+   This corrects a SHIPPED-INCORRECT rejection in `0.8.0`: that release
+   refused multi-level `--parent` creates with a `usage_error` carrying
+   a now-false data-model claim ("Monday's `sub_items_board` carries no
+   `subtasks` column at `2026-01`") and a `details.deferred_to: "v0.9"`
+   slot — while shipping at v0.9. A 2026-05-22 dev-board probe sweep
+   proved the feature works at the CLI's `2026-01` API pin, so v0.9
+   deletes the gate. Classic boards continue to reject (no
+   self-referencing `subtasks` column there) with an accurate message.
+2. **Boards' hierarchy is now readable.** `Board.hierarchy_type` —
+   `"classic"` or `"multi_level"` — surfaces in `monday board get`,
+   `board list`, `board describe` (which already emitted it), and the
+   `create`/`update`/`archive`/`delete`/`duplicate` mutation
+   projections. Agents can now branch on board hierarchy without an
+   extra `describe` round-trip. Multi-level board CREATION is possible
+   today via `monday board duplicate` — `duplicate_board_with_pulses`
+   preserves the `multi_level` hierarchy of its source — but NOT from
+   scratch (Monday's `create_board` carries no hierarchy argument at
+   `2026-01`); `board create` / `board duplicate` help text now names
+   this gap.
+3. **Board views are now readable.** A new `monday board views <bid>`
+   verb projects the collection of views on a board — Kanban / Gantt /
+   Calendar / Table / Form / Chart / etc. — surfacing all 13 wire
+   fields per view 1:1. `monday board describe` gains the same view
+   collection under a `views[]` slot. Mirrors `board columns` /
+   `board groups` and shares their metadata cache (one fetch supports
+   four reads).
+
+**No SDK or API-version bump.** `@mondaydotcomorg/api` stays at
+`^14.0.0`; the API stays pinned at `2026-01`. The v0.7-deferred
+`item set-description` / `doc block-create-bulk` cluster (gated on SDK
+15.x, baking `2026-04` natively) and the v0.8-skeleton user-entity
+migration (SDK 16.x) stay deferred a fourth consecutive release — no
+new Monday SDK has published in the window.
+
+### Breaking changes vs `0.8.0`
+
+**None.** The `monday item create --parent` behavior flip on multi-level
+boards is the correction of a shipped bug, not a contract re-shape:
+`0.8.0`'s rejection was provably incorrect (Monday supports the
+operation at the CLI's API pin), so removing it surfaces a feature
+that was meant to work. Every command, error code, envelope key, and
+warning shape from `0.8.0` is preserved byte-for-byte.
+
+### Surface
+
+**118 commands shipped (was 117 at `0.8.0`).** One new verb:
+`monday board views <bid>`. The multi-level subitem fix is a deletion
+(a previously-emitting rejection no longer fires); the hierarchy
+field-add is a projection extension (no new verb).
+
+**`monday board views <bid>` — read-only view collection.** Projects
+all of a board's views (Kanban / Gantt / Calendar / Table / Form /
+Chart / Workdoc / Map / Files / Other). 13 fields per view 1:1 with
+Monday's `BoardView` wire shape: `id`, `name`, `type`,
+`source_view_id`, `settings_str`, `view_specific_data_str`, the three
+JSON-scalar fields (`settings` / `sort` / `filter`), `filter_user_id`,
+`filter_team_id`, `tags`, `access_level`. `type` is wire-nullable — a
+Kanban view's `type` is `null`; `name` is the reliable
+human-readable discriminator. Loads via the shared `loadBoardMetadata`
+cache.
+
+**`Board.hierarchy_type` on the canonical Board projection.** The
+shared `boardProjectionSchema` (consumed by `board get` + the
+create / update / archive / delete / duplicate cluster) and the
+separate `board list` schema both gain a `hierarchy_type` field —
+`"classic"` | `"multi_level"` | `null` (wire-nullable, raw GraphQL
+per the SDK-drift class). `board describe` already emitted the field.
+`board find` deliberately stays out (narrow projection by design).
+
+**`board describe` views slot.** `boardMetadataSchema` gains a
+`views: BoardView[] | null` slot — same projection as the new
+`board views` verb. Pre-`0.9.0` cache entries lacking the key
+auto-invalidate via strict-parse failure (the existing corrupt-cache
+→ live re-fetch contract).
+
+### Output contract additions
+
+**No new stable error codes — registry stays at 29.** The multi-level
+subitem fix is a deletion (one historical rejection literal is now
+RESERVED and regression-guarded absent from runtime); `board views` is
+a pure read that surfaces existing wire errors through the existing
+codes.
+
+**New `views[]` envelope shapes.** `monday board views <bid>` emits a
+single-resource collection (`data: { views: [...] }`) pinned by
+`boardViewSchema`. `monday board describe` gains the same collection
+under a `views[]` slot. A new `jsonScalarOrNull` zod helper backs the
+three JSON-scalar BoardView fields (`settings` / `sort` / `filter`),
+rejecting `undefined` so a fixture can't silently omit a wire-selected
+field.
+
+### Upgrade notes
+
+- **`monday item create --parent <iid>` now works on multi-level
+  boards.** The `0.8.0` rejection (`usage_error.details.deferred_to:
+  "v0.9"` with the false `sub_items_board carries no subtasks column`
+  claim) is GONE. Classic-board `--parent` creates are byte-identical.
+  Agents that branched on the rejection's literals (`deferred_to:
+  "v0.9"`, `details.hierarchy_type: "multi_level"`) will instead
+  receive a success envelope.
+- **`Board.hierarchy_type` is new on multiple read shapes.** Code
+  parsing `board get` / `board list` / `board create` (etc.) envelopes
+  through a schema that REJECTS unknown keys will need to accept the
+  new field; everything using the project's published
+  `boardProjectionSchema` already does.
+- **`board describe` envelopes gain a `views[]` slot.** Additive; no
+  removal or rename.
+- **`monday board duplicate` is the documented multi-level-board
+  creation path.** Help text now names this. Creating a multi-level
+  board from scratch via `monday board create` is not possible at
+  `2026-01` — `create_board` has no hierarchy argument; agents should
+  `duplicate` an existing multi-level template instead.
+- **Stable error-code registry stays at 29.** Existing codes' shapes
+  are unchanged across `0.8.0` → `0.9.0`.
+
+### Internals worth highlighting
+
+- **Deletion-led IMPL.** The 2026-05-22 dev-board probe sweep proved
+  `create_subitem(parent_item_id)` nests to depth-3+ on `multi_level`
+  boards at API `2026-01` — the case the runtime gate was rejecting.
+  The IMPL removed the inverted rejection block; classic + multi-level
+  boards now share one `create_subitem` + `deriveSubitemsBoardId`
+  dispatch (no `hierarchy_type` branch). A regression-guard
+  integration test pins the deleted literals (`deferred_to`, the false
+  `sub_items_board carries no subtasks column` claim) absent from any
+  emitted envelope on the multi-level create path.
+- **Raw-GraphQL field-selection-pin pattern graduated.** Three v0.9
+  fields belong to the SDK-drift class — fields the CLI selects via
+  `client.raw` because the typed SDK doesn't expose them
+  (`hierarchy_type`, `views`, alongside the existing `is_leaf`).
+  These need a two-layer guard: a cassette `match_query: /<field>/`
+  pin at CI (so a refactor dropping the selection from the production
+  document fails CI before reaching live) AND a
+  `RUN_LIVE_TESTS`-gated `toHaveProperty('<field>')` assertion against
+  live Monday (catching a server-side schema removal — the class of
+  bug that broke `is_leaf` silently). Graduated into
+  `.claude/rules/testing.md` as
+  "Wire selection-pin for raw-GraphQL SDK-drift fields" after this
+  release's two consumers (`hierarchy_type` + `views`) landed under
+  the pattern.
+- **Shared-vs-single-sourced schema scope discipline graduated.** When
+  a milestone plans to add an output field to a "single named
+  command", the pre-flight must verify whether that command's schema
+  is single-sourced or shared across N verbs through a projection
+  helper. v0.9 produced both valid choices: `hierarchy_type` went onto
+  the SHARED `boardProjectionSchema` (rippling to 6 verbs deliberately
+  — lightweight + agent-useful everywhere); `views` went onto the
+  HEAVY single-sourced `boardMetadataSchema` (so lightweight reads
+  stay lightweight). Graduated into `.claude/rules/workflow.md` as
+  "Read-side field-add — check whether the named command's schema
+  is SHARED" with both scope choices documented.
+- **`Item.description` read-side filed as a follow-on candidate.** The
+  description read pairs naturally with the `set-description` mutation
+  deferred to a future release (gated on SDK 15.x publishing).
+  Tracked alongside the SDK gate so both ship together when the
+  cluster re-opens.
+- **R-NEW-82 7th-consecutive ratification.** Release-prep cross-doc
+  grep caught one ToC drift (the board verb row in `output-shapes.md`
+  was missing the new `views` verb + the `describe.views[]` slot).
+  No stale `deferred_to: "v0.9"` slot to slip — the multi-level
+  subitem fix's deletion-led IMPL removed the runtime literal at
+  ship-time, so the cross-doc grep at release-prep finds zero stale
+  slots.
+- **R-NEW-84 graduated discipline applied.** The v0.9 release-prep
+  cluster ships zero production `src/**/*.ts` semantic changes; gates
+  carry verification (Codex review skipped per the carve-out).
+
+### Tests + quality gates
+
+- **4260 tests pass + 4 skipped** (was 4254 + 3 at `0.8.0`). The 4
+  skips: the 2 pre-existing + the multipart-upload live smoke (from
+  `0.8.0`) + the board-projection schema-drift live smoke (new this
+  release — a single gated `it` covers both `hierarchy_type` and
+  `views` raw-GraphQL field presence against live Monday). All green
+  on Node 22 + 24.
+- **Coverage at branches 95.89% / functions 98.97%** against the
+  floor 95 / 95.45 / 95 / 95 — comfortably above. Floor unchanged
+  across `0.8.0` → `0.9.0`.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.9
+  release-prep (zero diff vs the last feature-milestone close).
+  Folded into close-docs prose per the v0.5 / v0.6 / v0.7 / v0.8
+  precedent.
+- **Five test layers held**: unit, integration (`FixtureTransport` +
+  `MultipartFixtureTransport`), E2E (subprocess against fixture
+  server), envelope-shape snapshot suite, published-tarball E2E —
+  plus the `RUN_LIVE_TESTS`-gated live-wire smoke tests.
+- **`npm audit` reports `0 vulnerabilities`** — no audit-fix folded
+  this cycle.
+
+### Documentation
+
+- **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — the v0.9 plan
+  carries milestone closes, per-milestone decisions, the R-class
+  register (§22), and the release exit checklist (§7).
+- **[`.claude/rules/testing.md`](./.claude/rules/testing.md)** new
+  rule: "Wire selection-pin for raw-GraphQL SDK-drift fields" with
+  `hierarchy_type` + `views` as worked examples.
+- **[`.claude/rules/workflow.md`](./.claude/rules/workflow.md)** new
+  rule: "Read-side field-add — check whether the named command's
+  schema is SHARED" with both shared (`hierarchy_type`) and
+  heavy-single-sourced (`views`) scope choices documented.
+- **[`docs/cli-design.md`](./docs/cli-design.md)** — `board views`
+  surface; multi-level-board creation path via `board duplicate`;
+  `hierarchy_type` documented on the board reads.
+- **[`docs/output-shapes.md`](./docs/output-shapes.md)** — new
+  `board views <id>` section; `board describe`'s `views[]` slot;
+  `hierarchy_type` references; board verb-row in the ToC.
+- **README.md** — quickstart surfaces `monday board describe` +
+  `monday board views`; internal version / milestone refs already
+  stripped at the previous commit.
+
+[0.9.0]: https://github.com/Firer/monday-cli/releases/tag/v0.9.0
+
 ## [0.8.0] - 2026-05-22 — File-upload P1 fix + multi-file / stdin file `--set` + writable board_relation/dependency settings (M49 + M46 + M47 + M48)
 
 The release whose headline is a **fix**, not a feature: **M49 repairs
