@@ -189,7 +189,7 @@ humans are second-class. Built incrementally via Claude Code on top of
     Both correct per the runtime read; rule documents both valid
     choices.
 - **✅ v0.11-M54-G pre-flight CLOSED 2026-05-23**
-  (`<pre-flight-sha>` — single commit: new verb `monday item
+  (`f08bfef` — single commit: new verb `monday item
   get-description <iid>` + schema + tests + cli-design + output-
   shapes + plan-doc open). Picked at v0.11 candidate-selection
   2026-05-22 per R-NEW-75 over the C/D/E/G + R-v0.10-NEW-4
@@ -231,7 +231,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   (template at `.claude/templates/codex-pre-flight-review.md`
   applies; MEDIUM sensitivity; 0 P1 target); (b) §3 post-mortem
   + §22 R-class log updates in `docs/v0.11-plan.md`; (c)
-  `<pre-flight-sha>` backfill across plan-doc + CLAUDE.md; (d)
+  `f08bfef` backfill across plan-doc + CLAUDE.md; (d)
   fold R-v0.11-NEW-2 rule-widening into
   `.claude/rules/workflow.md` (R-v0.9-NEW-2 framing widens from
   "rejection-lift OR pure-refactor" to "any pre-flight with no
@@ -633,7 +633,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    v0.9-M52's `board views <bid>` carve-out from `board describe`.
    Closes R-v0.9-NEW-8 (filed at v0.9-M52 close-docs;
    user-directed). **M54-G pre-flight CLOSED 2026-05-23**
-   (`<pre-flight-sha>` — verb fully wired LIVE per R-v0.9-NEW-2:
+   (`f08bfef` — verb fully wired LIVE per R-v0.9-NEW-2:
    pure-additive new verb has no deferred wire leg → no stub
    needed). §22 R-class register populated at M54-G pre-flight
    (R-v0.11-NEW-1/2/3/4 + carried-forward v0.8 / v0.9 / v0.10
