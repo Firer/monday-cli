@@ -193,56 +193,57 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10-M53 IMPL** for the **`NOUN_DESCRIPTIONS`
-  single-source-of-truth lift** (R-v0.8-NEW-22 graduation; v0.8-plan
-  §22 → now PROMOTED to v0.10-plan §22). **M53 pre-flight CLOSED
-  2026-05-22** (`c48510f`; additive signature stub + map
-  skeleton, all ~120 existing `ensureSubcommand(...)` call sites
-  compile unchanged). Pre-flight shipped: new
-  `src/commands/noun-descriptions.ts` carrying the 18-entry
-  `NOUN_DESCRIPTIONS` map + `lookupNounDescription` helper (throws
-  `InternalError` / `details.reason: 'unknown_noun'` on missing
-  entry); `ensureSubcommand(program, name, summary?)` made `summary`
-  optional with map fallback; ~12 new
-  `tests/unit/commands/types.test.ts` tests pinning lookup happy path
-  + override-wins + find-or-create + strict-mode rejection + the map's
-  18-entry shape + `feedback_public_docs_clean` invariant; new
-  `docs/v0.10-plan.md` with §1/§2/§3 M53 D1-D5 + §7 release-prep
-  exit checklist skeleton + §9 preconditions + §22 R-class register
-  opening; `docs/architecture.md` `commands/types.ts` line extended
-  + new `commands/noun-descriptions.ts` line; `docs/cli-design.md`
-  §4.3 head one-line pointer to the architecture doc;
-  `docs/v0.8-plan.md` §22 R-v0.8-NEW-22 status OPEN → PROMOTED with
-  cross-link to v0.10-plan §22. **D1-D5 closed**: D1 flat noun-stem
-  keys (no collisions across 18 nouns today; future collisions would
-  NOT surface automatically — the lookup returns the same string for
-  both registrations and commander's separate parent scopes mask the
-  drift — so a collision when it appears requires revisiting the
-  keying, low migration cost since the map centralises the strings);
-  D2 additive signature (preserves
-  pre-flight contract diff discipline — IMPL flips runtime, not
-  pre-flight); D3 new module (SRP — `types.ts` stays pure interface,
-  the map is concrete data); D4 12-test contract drives real
-  `NOUN_DESCRIPTIONS` + real `Command`; D5 ERROR_CODES delta ZERO
-  (registry stays 29, the new `unknown_noun` is an `internal_error`
-  discriminator, not a new code). **2nd-instance R-v0.9-NEW-2
-  rule fired** — "rejection-lift / pure-refactor pre-flights need NO
-  stub literal"; the rule-graduation criterion (2 instances per
-  R-NEW-58) is MET — graduate into `.claude/rules/workflow.md` at
-  M53 IMPL close. **New R-class:** R-v0.10-NEW-1 (active `'update'`
-  drift in `update/upload.ts:110` carrying `'Update (comment)
-  commands (cli-design §4.3 UPDATE)'` — internal `cli-design §` ref
-  leaking into help; structurally fixed by M53 IMPL's mass migration,
-  no inline fix at pre-flight per handoff §7); R-v0.10-NEW-2 (the
-  rule-of-three demonstrated for the drift bug class: 1st `doc`
-  v0.5/v0.8; 2nd `update` v0.10 pre-flight; M53 closes the bug
-  class structurally). **IMPL scope (next session):** drop the 3rd
-  arg from every `ensureSubcommand(program, '<noun>', '<desc>')`
-  call site (~120 sites); the `update/upload.ts` drift drops in the
-  migration. Codex IMPL round estimate MED 3-4. Zero new wire
-  surface, zero new transport seam, zero new ERROR_CODE (29 stays),
-  zero command delta (118 stays). v0.10 candidate-selection
-  rationale + alternatives (C/E/G) stay as filed —
+- **Next session:** **v0.10-M53 release-prep** (version bump
+  0.9.0 → 0.10.0 + CHANGELOG + close-docs sweep). **✅ v0.10-M53
+  IMPL SHIPPED 2026-05-22** (`feb8805`, one refactor commit; Codex
+  IMPL CONVERGED R1 — 0 P1/P2/P3). The mechanical migration
+  dropped the 3rd `summary` argument from every
+  `ensureSubcommand(program, '<noun>', '<desc>')` call site — 87
+  single-line + 35 multi-line = **122 call sites across 110 verb
+  files** in `src/commands/**`. The map at
+  `src/commands/noun-descriptions.ts` is now the only path the
+  registered command surface uses; the override-on-create path
+  stays valid for ad-hoc / test injections (D2 retained,
+  exercised by the pre-flight's 12-test contract). The
+  `update/upload.ts:110` drift (R-v0.10-NEW-1 — `'Update (comment)
+  commands (cli-design §4.3 UPDATE)'`) dropped naturally with the
+  3rd arg; the migration-window framing in three doc surfaces
+  (`src/commands/types.ts` docstring, `src/commands/noun-descriptions.ts`
+  docstring, `docs/architecture.md` bullet) flipped to "single
+  source" framing. Pre-flight (`c48510f` + `b334899`) shipped the
+  `NOUN_DESCRIPTIONS` 18-entry map + the additive 2-arg/3-arg
+  overload signature + the 12-test contract pin + the runner-catch
+  fix (`buildProgram` moved INSIDE `cli/run.ts`'s `try` block so an
+  attach-time `InternalError` from `lookupNounDescription` routes
+  through the envelope machinery). **D1-D5 closed at pre-flight**:
+  D1 flat noun-stem keys (no collisions across 18 nouns); D2
+  additive signature; D3 new module (SRP); D4 12-test contract
+  drives real `NOUN_DESCRIPTIONS` + real `Command`; D5 ERROR_CODES
+  delta ZERO (the `unknown_noun` discriminator routes through the
+  existing `internal_error` code). **R-class outcomes at M53 IMPL
+  close:** R-v0.8-NEW-22 → **RESOLVED** (closes the demonstrated
+  bug class: v0.5/v0.8 `doc` "read-only at v0.4" + v0.10 pre-flight
+  `update` `cli-design §4.3 UPDATE` ref — both classes structurally
+  impossible post-IMPL); R-v0.10-NEW-1 → **RESOLVED** (the
+  `update/upload.ts` drift dropped in the migration); R-v0.10-NEW-2
+  → **RESOLVED** (rule-of-three demonstrated; M53 closes the drift
+  bug class structurally). **R-v0.9-NEW-2 GRADUATED into
+  `.claude/rules/workflow.md`** as "Rejection-lift / pure-refactor
+  pre-flights need NO stub literal" — 2nd instance landed (1st M50
+  multi-level subitem nesting deletion; 2nd M53 NOUN_DESCRIPTIONS
+  lift). **Net stats:** zero new wire surface, zero new transport
+  seam, zero new ERROR_CODE (29 stays), zero command delta (118
+  stays); **4270 tests pass + 4 skipped** (delta 0 vs pre-flight
+  baseline); branch coverage **95.89%** (≥ 95.45 floor); functions
+  98.97% (1354/1368); `npm audit` 0 vulns. **Release-prep scope
+  (next session):** version bump 0.9.0 → 0.10.0 + CHANGELOG
+  `[0.10.0]` (internal-cleanup framing per
+  `feedback_public_docs_clean`) + close-docs sweep + README Scope
+  refresh per the v0.9 release-prep precedent (R-v0.9-NEW-15
+  widened: quickstart + per-version Scope + `**v<next> (next):**`
+  block). R-NEW-82 ratification ticks up; R-NEW-84 likely applies
+  (mechanical/process-only). v0.10 candidate-selection rationale
+  + alternatives (C/E/G) stay as filed —
   `docs/v0.8-plan.md` §22 + `docs/v0.10-plan.md` kickoff blockquote.
   SDK probe at this session: still `@mondaydotcomorg/api@14.0.0` —
   **4th-consecutive SDK stall**, so M39/M40/M41 (SDK 15.x → API

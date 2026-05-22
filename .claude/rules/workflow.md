@@ -49,6 +49,38 @@ folds reserved `file_set_on_bulk_unsupported` /
 way). Graduated v0.8-M47 IMPL after four instances (`m42`/`m43`/`m46`/
 `m47_preflight_stub`).
 
+**Rejection-lift / pure-refactor pre-flights need NO stub literal.**
+When a pre-flight's IMPL session is a deletion (an existing rejection
+is removed because it was incorrect) or a pure refactor (no new
+deferred wire leg, no new rejection code) the stub-literal + PIN test
++ RESERVED-literal regression-guard scaffold from the preceding rule
+does NOT apply. The trigger is structural: no new deferred wire leg
+ships at pre-flight → no surface to pin → no stub needed. If the
+pre-flight introduces a new runtime rejection that fires
+unconditionally (not behind a c8-ignored stub), that rejection ships
+LIVE at pre-flight; the IMPL flips other code, not the rejection.
+Cross-refs the parseArgv-BEFORE-c8 ordering rule (R-NEW-76): when
+pre-flight is rejection-lift, c8-ignore typically has no anchor at
+all (the live runtime path is the entire implementation; the IMPL
+session deletes a sibling, not unwraps a stub). Graduated v0.10-M53
+IMPL close after 2 instances:
+
+- **1st: v0.9-M50** multi-level subitem nesting (`e89ddfc`). A pure
+  deletion — the inverted `parent.hierarchyType === 'multi_level'`
+  rejection block at `item/create.ts` (~735-752) was the IMPL
+  payload. No stub at pre-flight; no PIN test; no RESERVED-literal
+  guard. The new shape is the EXISTING `create_subitem` dispatch
+  shared between classic + multi-level boards.
+- **2nd: v0.10-M53** `NOUN_DESCRIPTIONS` single-source-of-truth lift
+  (`feb8805`). A pure refactor — IMPL drops the 3rd arg from 122
+  `ensureSubcommand(program, '<noun>', '<desc>')` call sites. The
+  `lookupNounDescription` rejection (`InternalError` with
+  `details.reason: 'unknown_noun'` on a missing map entry) is a
+  LIVE runtime invariant from pre-flight — it fires at registration
+  walk on typo, not on a deferred wire leg.
+
+R-v0.9-NEW-2 (graduated v0.10-M53 IMPL close, 2 instances M50 + M53).
+
 ## Pre-IMPL cross-doc grep for surface-extending milestones
 
 When an IMPL session extends an existing helper/surface with a new
