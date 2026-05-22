@@ -247,7 +247,17 @@ humans are second-class. Built incrementally via Claude Code on top of
   (nesting works depth-3+ on multi_level boards via the `subtasks`
   self-referencing column) and surfaced board-views + multi-level-
   board-creation gaps — all filed as R-class candidates in
-  `docs/v0.8-plan.md` §22; see [[project-multilevel-dev-board-capabilities]].
+  `docs/v0.8-plan.md` §22 (R-v0.8-NEW-23/24/25); see
+  [[project-multilevel-dev-board-capabilities]].
+  **⚠️ SHIPPED-BEHAVIOR IMPACT (R-v0.8-NEW-23, HIGH):** v0.8.0's `item
+  create --parent` REJECTS multi_level boards with an error asserting a
+  now-FALSE fact ("Monday's sub_items_board carries no subtasks column
+  at 2026-01") — and nesting was re-verified WORKING at API `2026-01`
+  (the CLI's pin, NOT just 2026-04), so this is a near-term correctness
+  fix, not SDK-gated. (M40 descriptions DO stay 2026-04/M39-gated —
+  the mutation doesn't exist at 2026-01.) Multi-level board CREATION is
+  possible today via `board duplicate` (preserves multi_level —
+  verified) but NOT from scratch (`create_board` has no hierarchy arg).
   The M39 override commits (`bb7c2cc..2e501b5`) + M40 uncommitted
   work are recoverable in `git reflog` for ~90 days; M40 findings
   preserved in user-memory at
