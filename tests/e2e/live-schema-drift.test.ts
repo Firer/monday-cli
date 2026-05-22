@@ -72,6 +72,19 @@ describe.skipIf(!LIVE)('live schema drift (RUN_LIVE_TESTS)', () => {
     // of regression. An empty `errors` means every selected field still
     // exists at the pinned API version.
     expect(result.errors, JSON.stringify(result.errors)).toBeUndefined();
+
+    // v0.9-M52: assert the `views` key is PRESENT (not array-only —
+    // `Board.views` is wire-nullable per the pre-flight probe, so the
+    // value can be `array | null`). The mocks supply views; this is
+    // the live equivalent that catches a Monday `views` removal —
+    // dropping the field would still parse as a valid GraphQL query
+    // but the response wouldn't carry the key. Codex pre-flight R2
+    // pinned the key-presence shape over array-only.
+    const board = (
+      result.data as { boards?: Record<string, unknown>[] } | undefined
+    )?.boards?.[0];
+    expect(board).toBeDefined();
+    expect(board).toHaveProperty('views');
   });
 
   it('BoardGet + BoardList production documents select only live fields (v0.9-M51 hierarchy_type)', async () => {

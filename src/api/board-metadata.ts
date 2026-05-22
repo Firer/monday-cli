@@ -54,6 +54,13 @@ import type { Complexity } from '../utils/output/envelope.js';
 // regression (Monday removed the field from `Board` at 2026-01) shipped
 // precisely because the test suite mocks the network boundary and never
 // exercised the real field selection. See tests/e2e/live-schema-drift.test.ts.
+//
+// v0.9-M52: the `views { ... }` block surfaces `Board.views` (the
+// SDK 14.0.0-untyped raw-GraphQL surface; same SDK-drift class as
+// `is_leaf` / `hierarchy_type`). All 13 BoardView wire fields
+// selected 1:1; agents fold them through `board describe` (which
+// gains a `views[]` slot) or the dedicated `monday board views <bid>`
+// verb. See `boardViewSchema` below + cli-design §11.2.
 export const BOARD_METADATA_QUERY = `
   query BoardMetadata($ids: [ID!]!) {
     boards(ids: $ids) {
@@ -86,6 +93,21 @@ export const BOARD_METADATA_QUERY = `
         settings_str
         width
       }
+      views {
+        id
+        name
+        type
+        source_view_id
+        settings_str
+        view_specific_data_str
+        settings
+        sort
+        filter
+        filter_user_id
+        filter_team_id
+        tags
+        access_level
+      }
     }
   }
 `;
@@ -110,6 +132,53 @@ const columnSchema = z
     archived: z.boolean().nullable(),
     settings_str: z.string().nullable(),
     width: z.number().nullable(),
+  })
+  .strict();
+
+// v0.9-M52 JSON-scalar helper. Plain `z.unknown().nullable()` accepts
+// `undefined`, which would let a fixture silently omit a wire-selected
+// JSON-scalar field without parse failure — defeating the back-compat-
+// via-strict-parse strategy that drives pre-M52 cache auto-invalidation.
+// Helper rejects `undefined` (key must be present) while accepting
+// `null`, primitives, objects, arrays — i.e. enforces "key present,
+// value JSON-shape". Codex pre-flight R2 P2-1 fix-up; cli-design §11.2.
+const jsonScalarOrNull = z
+  .unknown()
+  .refine((v) => v !== undefined, { message: 'expected JSON scalar' })
+  .nullable();
+
+// v0.9-M52. BoardView is SDK 14.0.0-untyped (the `is_leaf` /
+// `hierarchy_type` SDK-drift class); the 13-field projection mirrors
+// the wire shape 1:1 (no parsing). Required-nullable on every nullable
+// wire field means a future Monday field-removal surfaces as a parse
+// error (the `is_leaf` regression class), not a silent drop. See
+// cli-design §11.2 for the human-facing per-field semantics. Exported
+// so `board describe`'s output schema can reuse the same shape (one
+// canonical BoardView projection across describe + the `board views`
+// verb).
+export const boardViewSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    // Nullable on the wire — the Kanban view's `type` is `null` in
+    // practice; `name` is the reliable view-kind discriminator.
+    type: z.string().nullable(),
+    source_view_id: z.string().nullable(),
+    // Wire-required (String!). Raw JSON string; agents who want the
+    // parsed form call `JSON.parse(settings_str)`. Distinct from the
+    // typed `settings` JSON scalar below — both fields carry different
+    // data on the same view (probed at pre-flight 2026-05-22).
+    settings_str: z.string(),
+    view_specific_data_str: z.string(),
+    settings: jsonScalarOrNull,
+    sort: jsonScalarOrNull,
+    filter: jsonScalarOrNull,
+    filter_user_id: z.number().int().nullable(),
+    filter_team_id: z.number().int().nullable(),
+    tags: z.array(z.string()).nullable(),
+    // Wire ENUM, projected as plain string for forward-compat with
+    // schema additions (mirrors how `hierarchy_type` stays a string).
+    access_level: z.string(),
   })
   .strict();
 
@@ -144,12 +213,35 @@ export const boardMetadataSchema = z
     updated_at: z.string().nullable(),
     groups: z.array(groupSchema),
     columns: z.array(columnSchema),
+    // v0.9-M52: `Board.views` is wire-nullable (`LIST<BoardView>`, not
+    // `NON_NULL<LIST>`), so `null` is a valid live response; consumers
+    // normalize via `?? []`. **Required key, nullable value** (NOT
+    // `.optional()`) — a pre-M52 on-disk cache entry missing the
+    // `views` key fails strict-parse, the corrupt-cache → cache-miss
+    // contract in `loadBoardMetadata` triggers a live re-fetch, and
+    // the new shape repopulates the cache on first use. Mirrors M51's
+    // `hierarchy_type` required-nullable precedent. (Distinct from
+    // the M15 `items_count` / `permissions` add, which used
+    // `.optional()` to preserve old caches as-is — M52 explicitly
+    // doesn't, so the pre-M52 cache can't masquerade as "this board
+    // has zero views" via a `?? []` projection of an undefined slot.
+    // Codex pre-flight R1 P2-1 caught the aliasing risk.)
+    //
+    // Null ELEMENTS in the list are rejected deliberately (the wire
+    // types `views` as `LIST<BoardView>` where the inner is also
+    // nullable, but null elements would be an extraordinarily-rare
+    // Monday oddity; parse-failure surfaces a drift signal, vs
+    // silently filtering, which would hide it). Codex pre-flight R2
+    // P3-1 documented this as a deliberate conservative-strictness
+    // choice.
+    views: z.array(boardViewSchema).nullable(),
   })
   .strict();
 
 export type BoardMetadata = z.infer<typeof boardMetadataSchema>;
 export type BoardColumn = z.infer<typeof columnSchema>;
 export type BoardGroup = z.infer<typeof groupSchema>;
+export type BoardView = z.infer<typeof boardViewSchema>;
 
 interface BoardMetadataQueryResult {
   readonly boards: readonly unknown[] | null;

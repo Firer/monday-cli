@@ -56,6 +56,9 @@ import { boardDescribeCommand } from './board/describe.js';
 import { boardSubscribersCommand } from './board/subscribers.js';
 import { boardColumnsCommand } from './board/columns.js';
 import { boardGroupsCommand } from './board/groups.js';
+// v0.9-M52 (board views read): mirrors columns/groups — loads
+// BoardMetadata via the cache and projects the new `views[]` slot.
+import { boardViewsCommand } from './board/views.js';
 import { userListCommand } from './user/list.js';
 import { userGetCommand } from './user/get.js';
 import { userMeCommand } from './user/me.js';
@@ -372,6 +375,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     boardSubscribersCommand,
     boardColumnsCommand,
     boardGroupsCommand,
+    boardViewsCommand,
     boardFavoritesCommand,
     userListCommand,
     userGetCommand,

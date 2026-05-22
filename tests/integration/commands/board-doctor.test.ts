@@ -29,6 +29,8 @@ const baseBoard = {
   hierarchy_type: null,
   updated_at: null,
   groups: [],
+  // v0.9-M52: `views` is required-nullable on `boardMetadataSchema`.
+  views: [],
 };
 
 const boardWithColumns = (columns: readonly unknown[]): Interaction => ({

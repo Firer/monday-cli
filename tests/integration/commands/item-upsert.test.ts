@@ -809,6 +809,7 @@ describe('monday item upsert — me-token resolution in --match-by', () => {
           width: null,
         },
       ],
+      views: [],
     };
     const out = await drive(
       [
@@ -957,6 +958,7 @@ describe('monday item upsert — F4 column-archived remap', () => {
         width: null,
       },
     ],
+    views: [],
   };
   const archivedMetadata = {
     ...activeMetadata,
@@ -1129,6 +1131,7 @@ describe('monday item upsert — cache-miss refresh', () => {
           width: null,
         },
       ],
+      views: [],
     };
     const refreshedWithExternal = {
       ...cachedNoExternal,

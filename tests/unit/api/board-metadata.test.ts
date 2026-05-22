@@ -45,6 +45,7 @@ const sampleBoard = {
       width: null,
     },
   ],
+  views: [],
 };
 
 interface FakeClientStats {

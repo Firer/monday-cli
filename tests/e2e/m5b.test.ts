@@ -55,6 +55,7 @@ const sampleBoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 const sampleItem = {

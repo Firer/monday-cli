@@ -548,6 +548,7 @@ describe('runPartialSuccessBulkUpdate — foldAndRemap per-item remap (Codex rou
                 width: null,
               },
             ],
+            views: [],
           },
         ],
       },

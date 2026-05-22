@@ -25,6 +25,7 @@ import { resolveClient } from '../../api/resolve-client.js';
 import { BoardIdSchema } from '../../types/ids.js';
 import { parseArgv } from '../parse-argv.js';
 import {
+  boardViewSchema,
   loadBoardMetadata,
   type BoardColumn,
 } from '../../api/board-metadata.js';
@@ -197,6 +198,12 @@ export const boardDescribeOutputSchema = z
     updated_at: z.string().nullable(),
     columns: z.array(describeColumnSchema),
     groups: z.array(describeGroupSchema),
+    // v0.9-M52: same projection as the new `monday board views <bid>`
+    // verb. `Board.views` is wire-nullable, normalized to `[]` here so
+    // describe agents see a consistent array; the underlying schema
+    // preserves the `array | null` wire shape on `boardMetadataSchema`
+    // for back-compat parsing.
+    views: z.array(boardViewSchema),
   })
   .strict();
 
@@ -296,6 +303,9 @@ export const boardDescribeCommand: CommandModule<
             archived: g.archived,
             deleted: g.deleted,
           })),
+          // `views` is wire-nullable on `boardMetadataSchema`; the
+          // describe output normalizes to `[]` so agents see one shape.
+          views: result.metadata.views ?? [],
         };
 
         ctx.meta.setSource(result.source);

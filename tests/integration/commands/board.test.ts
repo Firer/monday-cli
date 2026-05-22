@@ -403,6 +403,7 @@ describe('monday board find', () => {
 const metadataResponse = (
   columns: readonly Readonly<Record<string, unknown>>[],
   groups: readonly Readonly<Record<string, unknown>>[] = [],
+  views: readonly Readonly<Record<string, unknown>>[] = [],
 ): Interaction => ({
   operation_name: 'BoardMetadata',
   match_variables: { ids: ['111'] },
@@ -422,6 +423,8 @@ const metadataResponse = (
           updated_at: '2026-04-30T10:00:00Z',
           groups,
           columns,
+          // v0.9-M52: required-nullable on `boardMetadataSchema`.
+          views,
         },
       ],
     },
@@ -841,6 +844,131 @@ describe('monday board columns + groups', () => {
   });
 });
 
+describe('monday board views (v0.9-M52)', () => {
+  const kanbanView = {
+    id: '50590968',
+    name: 'Kanban',
+    // type is nullable on the wire — the Kanban view's `type` is null
+    // in practice (per the M52 probe). `name` is the discriminator.
+    type: null,
+    source_view_id: null,
+    settings_str: '{}',
+    view_specific_data_str: '{}',
+    settings: {},
+    sort: [],
+    filter: null,
+    filter_user_id: null,
+    filter_team_id: null,
+    tags: null,
+    access_level: 'edit',
+  };
+
+  const tableView = {
+    id: '49951480',
+    name: 'Table',
+    type: 'FeatureBoardView',
+    source_view_id: '174157286',
+    settings_str: '{"view_subtype":null}',
+    view_specific_data_str:
+      '{"view_url":"https://example.monday.com/v/35849111","mobile_url":"https://example.monday.com/v/35849111?mode=mobile"}',
+    // The typed JSON scalar carries different data than parsed
+    // settings_str — both are surfaced 1:1 per pre-flight D2.
+    settings: { app_feature_id: 100739 },
+    sort: null,
+    filter: null,
+    filter_user_id: null,
+    filter_team_id: null,
+    tags: null,
+    access_level: 'edit',
+  };
+
+  it('emits the projected views collection', async () => {
+    const out = await drive(
+      ['board', 'views', '111', '--json'],
+      {
+        interactions: [
+          // metadataResponse 3rd arg threads views into the fixture.
+          metadataResponse([], [], [kanbanView, tableView]),
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: readonly Record<string, unknown>[];
+    };
+    expect(env.data.map((v) => v.id)).toEqual(['50590968', '49951480']);
+    // Surface BOTH `settings_str` (raw JSON string) and `settings`
+    // (typed JSON scalar) — the M52 probe pinned them as wire-distinct.
+    expect(env.data[0]?.settings_str).toBe('{}');
+    expect(env.data[1]?.settings_str).toBe('{"view_subtype":null}');
+    expect(env.data[1]?.settings).toEqual({ app_feature_id: 100739 });
+    // type=null Kanban + name="Kanban" — agents discriminate by name.
+    expect(env.data[0]?.type).toBeNull();
+    expect(env.data[0]?.name).toBe('Kanban');
+    // No `has_more` — single fetch.
+    expect(env.meta.has_more).toBe(false);
+  });
+
+  it('normalizes wire `views: null` to an empty array', async () => {
+    const out = await drive(
+      ['board', 'views', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardMetadata',
+            match_variables: { ids: ['111'] },
+            // Pin the production document SELECTS `views` — Codex
+            // pre-flight R2 P2-2 (the `match_query: /views/` selection
+            // pin is M52's 2nd consumer of the R-v0.9-NEW-6 pattern;
+            // a future refactor dropping the field from the document
+            // fails here).
+            match_query: /views \{/,
+            response: {
+              data: {
+                boards: [
+                  {
+                    id: '111',
+                    name: 'Tasks',
+                    description: null,
+                    state: 'active',
+                    board_kind: 'public',
+                    board_folder_id: null,
+                    workspace_id: '5',
+                    url: null,
+                    hierarchy_type: 'top_level',
+                    updated_at: '2026-04-30T10:00:00Z',
+                    groups: [],
+                    columns: [],
+                    // Wire-nullable Board.views: live API CAN return
+                    // null; projection normalizes to [].
+                    views: null,
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout);
+    expect(env.data).toEqual([]);
+  });
+
+  it('board describe surfaces the views[] slot', async () => {
+    const out = await drive(
+      ['board', 'describe', '111', '--json'],
+      { interactions: [metadataResponse([], [], [kanbanView])] },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { views: readonly Record<string, unknown>[] };
+    };
+    expect(env.data.views).toHaveLength(1);
+    expect(env.data.views[0]?.name).toBe('Kanban');
+  });
+});
+
 describe('monday board create (integration, M15)', () => {
   const createdBoard = {
     id: '67890',
@@ -1174,6 +1302,7 @@ describe('monday board update (integration, M15)', () => {
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
+            views: [],
           },
         ],
       },
@@ -1529,6 +1658,7 @@ describe('monday board update (integration, M15)', () => {
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
+      views: [],
     };
     // Seed cache via board describe.
     await drive(
@@ -1643,6 +1773,7 @@ describe('monday board update (integration, M15)', () => {
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
+      views: [],
     };
     // Seed cache with the original snapshot.
     await drive(
@@ -1744,6 +1875,7 @@ describe('monday board update (integration, M15)', () => {
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
+      views: [],
     };
     const postOut = await drive(
       ['board', 'describe', '111', '--json'],
@@ -1801,6 +1933,7 @@ describe('monday board archive (integration, M15)', () => {
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
+            views: [],
           },
         ],
       },
@@ -2005,6 +2138,7 @@ describe('monday board archive (integration, M15)', () => {
       updated_at: '2026-05-07T11:00:00Z',
       groups: [],
       columns: [],
+      views: [],
     };
     // Seed cache with the active state.
     await drive(
@@ -2322,6 +2456,7 @@ describe('monday board delete (integration, M15)', () => {
                     updated_at: '2026-05-07T11:00:00Z',
                     groups: [],
                     columns: [],
+                    views: [],
                   },
                 ],
               },
@@ -2416,6 +2551,7 @@ describe('monday board duplicate (integration, M15)', () => {
             updated_at: '2026-05-07T11:00:00Z',
             groups: [],
             columns: [],
+            views: [],
           },
         ],
       },
@@ -4330,6 +4466,7 @@ describe('monday board column-update (integration, M16)', () => {
                 width: 120,
               },
             ],
+            views: [],
           },
         ],
       },
@@ -5471,6 +5608,7 @@ describe('monday board group-update (integration, M17)', () => {
               },
             ],
             columns: [],
+            views: [],
           },
         ],
       },
@@ -5994,6 +6132,7 @@ describe('monday board group-archive (integration, M17)', () => {
               },
             ],
             columns: [],
+            views: [],
           },
         ],
       },

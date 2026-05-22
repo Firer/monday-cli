@@ -78,6 +78,7 @@ const sourceBoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 const targetBoardMetadata = {
@@ -104,6 +105,7 @@ const targetBoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 const movedItem = {

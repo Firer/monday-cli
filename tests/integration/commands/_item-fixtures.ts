@@ -85,6 +85,12 @@ export const sampleBoardMetadata = {
       width: null,
     },
   ],
+  // v0.9-M52: `views` is required-nullable on `boardMetadataSchema`
+  // (mirrors `Board.views` wire-nullable shape). Empty array here —
+  // these fixtures don't exercise the views projection; per-verb
+  // tests that do (board describe / board views) populate it
+  // explicitly.
+  views: [],
 };
 
 export const boardMetadataInteraction = {

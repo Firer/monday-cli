@@ -36,6 +36,7 @@ const board = (columns: readonly BoardColumn[]): BoardMetadata => ({
   updated_at: null,
   groups: [],
   columns: columns as BoardColumn[],
+  views: [],
 });
 
 describe('parseColumnTokenPrefix', () => {
@@ -273,6 +274,7 @@ const sampleBoardPayload = (columns: readonly BoardColumn[]): { boards: unknown[
       updated_at: null,
       groups: [],
       columns,
+      views: [],
     },
   ],
 });

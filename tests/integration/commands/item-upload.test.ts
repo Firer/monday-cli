@@ -132,6 +132,7 @@ const sampleBoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 const itemBoardLookupInteraction: Interaction = {

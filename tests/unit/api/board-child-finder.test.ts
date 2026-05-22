@@ -63,6 +63,7 @@ const baseMetadata: BoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 describe('findBoardChildOrThrow — kind: columns', () => {

@@ -546,6 +546,7 @@ describe('monday item clear --where (integration, M12 bulk path)', () => {
           width: null,
         },
       ],
+      views: [],
     };
     const refreshedWithStatus = {
       ...cachedNoStatus,

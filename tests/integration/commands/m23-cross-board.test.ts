@@ -152,6 +152,7 @@ const boardMetadataResponse = (
         settings_str: null,
         width: null,
       })),
+      views: [],
     },
   ],
 });

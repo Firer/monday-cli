@@ -120,6 +120,7 @@ describe('planCreate — tags translator dry-run echo (M19)', () => {
               width: null,
             },
           ],
+          views: [],
         },
       ],
     };
@@ -193,6 +194,7 @@ describe('planCreate — board_relation translator dry-run echo (M19 Commit 3)',
               width: null,
             },
           ],
+          views: [],
         },
       ],
     };

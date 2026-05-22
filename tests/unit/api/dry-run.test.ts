@@ -135,6 +135,7 @@ const board67890 = (): { boards: unknown[] } => ({
           width: null,
         },
       ],
+      views: [],
     },
   ],
 });

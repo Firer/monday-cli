@@ -481,6 +481,7 @@ exports[`envelope snapshot — board > board describe 1`] = `
     "state": "active",
     "updated_at": null,
     "url": null,
+    "views": [],
     "workspace_id": "5",
   },
   "meta": {
@@ -4515,7 +4516,7 @@ exports[`envelope snapshot — schema > schema --json full registry envelope sha
   "data": {
     "api_version": "2026-01",
     "cli_version": "0.0.0-test",
-    "command_count": 117,
+    "command_count": 118,
     "error_codes": [
       {
         "code": "usage_error",

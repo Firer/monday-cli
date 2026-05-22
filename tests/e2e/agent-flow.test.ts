@@ -87,6 +87,7 @@ const sampleBoardMetadata = {
       width: null,
     },
   ],
+  views: [],
 };
 
 const buildItem = (
