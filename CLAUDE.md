@@ -39,15 +39,17 @@ humans are second-class. Built incrementally via Claude Code on top of
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.8.0`.
-- **Live numbers:** **4256 tests pass + 3 skipped** (3 skips
-  unchanged: the 2 pre-existing + the RUN_LIVE_TESTS-gated
-  multipart-upload smoke test; the **v0.9-M50 IMPL** net +2 over the
-  v0.8 baseline of 4254 — the deleted `multi_level → usage_error` test
-  (−1) replaced by a `create_subitem` success flip + a deleted-literals
-  regression guard + a host-board self-reference `--set-raw` test
-  (+3)). **✅ CI `test:coverage`
-  PASSES:** global **branch coverage 95.91% vs the 95.45%
-  floor** (HOLDS across the M50 IMPL — deleting the rejection removed a
+- **Live numbers:** **4257 tests pass + 4 skipped** (the **v0.9-M51
+  IMPL** net +1 pass over the M50 baseline of 4256 — a `multi_level`
+  board-get assertion — plus +1 skip: a RUN_LIVE_TESTS-gated
+  schema-drift `it` running the exact `BoardGet` + `BoardList` documents
+  so a future `hierarchy_type` removal is caught live, the `is_leaf`
+  class. The 4 skips = the 2 pre-existing + the multipart-upload smoke
+  test + the new board-projection schema-drift smoke test). **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.91% vs the
+  95.45% floor** (HOLDS across M51 — adding a required `hierarchy_type`
+  projection field introduced no counted branch arm; the new test added
+  coverage. Earlier the M50 IMPL: deleting the rejection removed a
   tested branch arm, but the success flip + guard + self-reference test
   kept the margin; earlier v0.8-M48: the removed c8-ignored stub block
   contributed no counted branches, and the new `variables.defaults =
@@ -92,7 +94,9 @@ humans are second-class. Built incrementally via Claude Code on top of
   (29), zero command delta (117), zero new wire surface, no pre-flight
   stub** (R-v0.9-NEW-2 — no new deferred wire leg). `hierarchy_type` is
   still fetched (`lookupItemBoardWithHierarchy` retained) but now
-  read-but-unused — kept for M51's board-projection surfacing. The
+  read-but-unused — kept as a regression-guard affordance (M51 surfaced
+  `hierarchy_type` via a SEPARATE `boards(...)` query, NOT this fetch;
+  R-v0.9-NEW-4 → RESOLVED/KEEP). The
   existing `multi_level → usage_error` test FLIPPED to a
   `create_subitem` success assertion + a regression guard pins the
   deleted literals (`deferred_to`, the false "sub_items_board carries
@@ -105,15 +109,41 @@ humans are second-class. Built incrementally via Claude Code on top of
   coverage **95.91%** (≥ 95.45 floor). Full close at
   `docs/v0.9-plan.md` §3 M50 IMPL-close + §22 (R-v0.8-NEW-23 →
   RESOLVED).
-- **Next session:** **v0.9-M51** (multi-level board awareness:
-  `hierarchy_type` projection surfacing in `board get`/`describe`/
-  `list` + document `board duplicate` as the multi-level board
-  creation path — `duplicate_board_with_pulses` preserves
-  `multi_level`, `create_board` cannot). M50 retained the
-  `hierarchy_type` fetch (now read-but-unused), so M51 wires that same
-  field into the board projection (needs raw GraphQL per SDK drift,
-  like `is_leaf`). **SKELETON in `docs/v0.9-plan.md` §1 M51.** Then
-  **M52** board views read → release-prep (0.8.0 → 0.9.0). **v0.9
+- **✅ v0.9-M51 SHIPPED 2026-05-22** (`f63218d` feat + `4d39e4d` Codex
+  fix-up; Codex pre-flight R1 + IMPL R1 both CONVERGED — 0 P1/P2).
+  **Multi-level board awareness.** `Board.hierarchy_type`
+  (`classic` | `multi_level`, `string | null`, raw GraphQL per SDK
+  drift) added to the shared `BOARD_FIELDS_FRAGMENT` +
+  `boardProjectionSchema` — so `board get` AND the
+  create/update/archive/delete/duplicate cluster all surface it (the
+  M15 one-canonical-Board-shape invariant preserved) — plus the
+  separate `board list` query/schema. `board describe` already emitted
+  it (no change); `board find` stays out (narrow projection by design).
+  Half 2: `board duplicate` documented as the multi-level board creation
+  path (`duplicate_board_with_pulses` preserves `multi_level`;
+  `create_board` is always classic) via cli-design §2.8 + clean
+  `board duplicate`/`board create` `--help` nudges. The M50 item
+  parent-lookup `hierarchy_type` fetch is confirmed read-but-unused and
+  KEPT as a regression-guard affordance (R-v0.9-NEW-4 → RESOLVED/KEEP;
+  M51 surfaces the field via a SEPARATE `boards(...)` query, NOT that
+  fetch — the stale "M51 reuses the fetch" docstrings corrected). D7:
+  `BoardGet` + `BoardList` query strings exported + added to the
+  RUN_LIVE_TESTS schema-drift smoke test; `match_query: /hierarchy_type/`
+  on the cassettes pins the *selection* (Codex IMPL P3 — a mock can't
+  catch a fragment regression alone). **Zero ERROR_CODE delta (29), zero
+  command delta (117), zero new wire surface** (additive read field on
+  existing queries). Closes the R-v0.8-NEW-24 facets (a)+(b). Full close
+  at `docs/v0.9-plan.md` §3 M51 IMPL-close + §1 row + §22.
+- **Next session:** **v0.9-M52** (board views read: a read-only `views`
+  slot on the board projection and/or a `board views <bid>` verb —
+  `board.views { id name type settings_str view_specific_data_str
+  settings sort filter access_level }`. Kanban DATA ops already work via
+  existing verbs (status-label create = Kanban columns; `item set` /
+  `item move --to-group` = move card); M52 closes only the view-metadata
+  read gap. Needs raw GraphQL per SDK drift, like `hierarchy_type`).
+  **SKELETON in `docs/v0.9-plan.md` §1 M52.** Then release-prep
+  (0.8.0 → 0.9.0 + CHANGELOG + close-docs, per the R-NEW-82/84
+  baseline). **v0.9
   candidate-selection DONE 2026-05-22** — scope locked to the
   **multi-level board cluster** (`docs/v0.9-plan.md`): **M50**
   multi-level subitem nesting → **M51** surface `hierarchy_type` +
@@ -417,15 +447,18 @@ detail, and R-class refactor backlog, **read the plan docs** —
    rejection) + **M51** `hierarchy_type` surfacing / `board duplicate`
    multi-level path + **M52** board views read. **M50 ✅ SHIPPED
    2026-05-22** (`e89ddfc`, deletion-led IMPL, Codex CONVERGED R1;
-   pre-flight was `9675f6a..e41b467`); **M51 next** (SKELETON).
+   pre-flight `9675f6a..e41b467`); **M51 ✅ SHIPPED 2026-05-22**
+   (`f63218d` + `4d39e4d`, Codex pre-flight + IMPL both CONVERGED R1;
+   pre-flight `4eb3ca4..2958146`); **M52 next** (SKELETON).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
    stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
    the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
    v0.8 watch-items R-v0.8-NEW-19/20/21/22 + promoted R-v0.8-NEW-23/24/25
-   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50) + the M50 IMPL
-   refactor-audit (R-v0.9-NEW-3 contract-term-checklist doc-surface /
-   line-wrap miss, MEDIUM; R-v0.9-NEW-4 drop the read-but-unused
-   `hierarchy_type` fetch if M51 defers, LOW).
+   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50, **R-v0.8-NEW-24 RESOLVED
+   at M51**) + the M50 IMPL refactor-audit (R-v0.9-NEW-3
+   contract-term-checklist doc-surface / line-wrap miss, MEDIUM;
+   **R-v0.9-NEW-4 RESOLVED/KEEP at M51** — fetch retained as a
+   regression-guard affordance, M51 used a separate query).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
