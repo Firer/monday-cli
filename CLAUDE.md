@@ -11,34 +11,41 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.8.0` on npm (`latest` dist-tag,
-  2026-05-21T23:45:48Z). **v0.8.0 published — release complete.**
-  Annotated `v0.8.0` tag pushed pointing at `090fb76`; GitHub release
-  live at https://github.com/Firer/monday-cli/releases/tag/v0.8.0. The
-  🚨 P1 file-upload wire fix (v0.8-M49, `2ec67ad`) is now
-  **LIVE-RESOLVED in the published artifact**: `item upload` /
-  `update upload` / file `--set` — broken in published v0.7.0 across
-  M31/M38/M42/M43/M46 by the Apollo multipart spec that live Monday
-  rejects — now work live. `multipart-transport.ts` emits Monday's
-  native shape (`query` + sibling `variables` + string-`map` + named
-  part, POSTed to `/v2/file`); live-verified via a RUN_LIVE_TESTS-gated
-  smoke test (R-v0.8-NEW-9 RESOLVED + graduated into `testing.md`).
-  **v0.8 release-prep cluster** (`66d5142..090fb76`, 6 commits;
-  mirrors the v0.7 precedent + one extra user-requested commit):
-  deferral slip v0.8 → v0.9 + ToC M46/M47/M48 sync
-  (`66d5142`, `slip stale v0.8 deferral to v0.9`) / README v0.8
-  quickstart + scope refresh (`aef9d32`) / version bump 0.7.0 → 0.8.0
-  — no audit-fix folded, `npm audit` clean (`2152244`) / CHANGELOG
-  [0.8.0] headlining the M49 P1 fix (`c930d27`) / **user-facing
-  help-text cleanup** stripping internal §/version/M-number refs from
-  `monday help` + verb `--help` (`40a58d0`, user-requested — also fixed
-  a stale `doc` noun description still claiming "read-only at v0.4") /
-  close-docs sweep (`090fb76`). Envelope-snapshot refresh probe ran
-  clean (zero diff vs M48 IMPL close, 162 snapshots) — folded into this
-  close-docs prose per the v0.5/v0.6/v0.7 precedent. Previous:
+- **Status:** `monday-cli@0.9.0` **release-prep SHIPPED — ready for
+  publish, EXTERNALLY BLOCKED on user push + npm publish.** Currently
+  published: `monday-cli@0.8.0` on npm (`latest` dist-tag,
+  2026-05-21T23:45:48Z; annotated `v0.8.0` tag at `090fb76`; GitHub
+  release at https://github.com/Firer/monday-cli/releases/tag/v0.8.0).
+  Once `npm publish` lands, the M50 SHIPPED-CORRECTNESS fix (the
+  multi-level subitem `--parent` rejection removal — v0.8.0 falsely
+  rejected `monday item create --parent <iid>` on multi-level boards
+  with a now-disproven data-model claim) will be LIVE-RESOLVED in the
+  published artifact, and `Board.hierarchy_type` + `monday board views`
+  + `board describe.views[]` will all be live-readable.
+  **v0.9 release-prep cluster** (`0147883..<close-docs>`, 4 commits;
+  mirrors the v0.8 precedent minus 2 commits — README pre-cleaned at
+  `310e7a0` (prior session) + help-text hygiene grep landed CLEAN so
+  the conditional commit was skipped per "if clean, skip"):
+  ToC audit — added `views (v0.9-M52)` + `describe (+ views[] slot)`
+  to the board verb row in `output-shapes.md` (`0147883`,
+  `ToC audit — add views to board verb row`; **NO stale `deferred_to:
+  "v0.9"` slot to slip** — M50's deletion-led IMPL removed the runtime
+  literal at ship-time, so R-NEW-82's cross-doc grep finds zero stale
+  slots) / version bump 0.8.0 → 0.9.0 — no audit-fix folded,
+  `npm audit` clean (`31dc5a3`) / CHANGELOG [0.9.0] headlining the
+  three v0.9 pieces in user-impact order with reduced M-ref density
+  per `feedback_public_docs_clean` (`087935f`, multi-level subitem
+  nesting fix + hierarchy_type surfacing + board views read) /
+  close-docs sweep (`<close-docs>`). Envelope-snapshot refresh probe
+  ran clean (zero diff vs M52 IMPL close, 162 snapshots) — folded into
+  this close-docs prose per the v0.5/v0.6/v0.7/v0.8 precedent.
+  R-NEW-82 **7th-consecutive ratification**; R-NEW-84 graduated-
+  discipline applied (Codex skipped — mechanical/process-only cluster,
+  zero production `src/**/*.ts` semantic changes). Previous:
+  `monday-cli@0.8.0` (tag `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z);
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
-- **package.json version:** `0.8.0`.
+- **package.json version:** `0.9.0`.
 - **Live numbers:** **4260 tests pass + 4 skipped** (the **v0.9-M52
   IMPL** net +3 over the M51 baseline of 4257 — three new
   `monday board views` integration tests pinning happy path,
@@ -187,35 +194,35 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.9 release-prep** (0.8.0 → 0.9.0 + CHANGELOG
-  + close-docs, per the R-NEW-82/84 baseline). v0.9 feature-cluster
-  scope DONE (M50 nesting + M51 hierarchy_type + M52 views read).
-  Release-prep is the 6-commit baseline: envelope-snapshot refresh
-  probe + ToC audit + deferral slip v0.9 → v1.0 + README quickstart
-  refresh + version bump + CHANGELOG + close-docs sweep.
-  M39/M40/M41 (SDK 15.x — `2026-04`) + M44/M45 (SDK 16.x — `2026-07`)
-  stay DEFERRED; SDK still 14.0.0 at M52 close (no new release
-  between v0.8 release-prep and now). **v0.9
-  candidate-selection DONE 2026-05-22** — scope locked to the
-  **multi-level board cluster** (`docs/v0.9-plan.md`): **M50**
-  multi-level subitem nesting → **M51** surface `hierarchy_type` +
-  document `board duplicate` as the multi-level creation path →
-  **M52** board views read → release-prep. **v0.8.0 is
-  PUBLISHED + release-complete** (npm `latest` 2026-05-21T23:45:48Z;
-  tag `v0.8.0` at `090fb76`; release-prep `66d5142..090fb76`). SDK
-  still 14.0.0 at v0.9 candidate-selection, so M39/M40/M41 (SDK 15.x)
-  + M44/M45 (SDK 16.x) stay DEFERRED — third consecutive pivot. Process adoptions at the v0.8 close-docs:
-  **R-v0.8-NEW-7 ADOPTED** (commit-subject refs over bare SHAs in NEW
-  prose); **R-v0.8-NEW-8 + R-v0.8-NEW-4 stay deferred watch-items**
-  (M47/M48 added no new emit shape, so the `outputSchema` audit-point
-  stayed at 1 occurrence; the envelope-snapshot probe ran clean, so
-  R-v0.8-NEW-4's schema-parse-test trigger was not met).
-  **One extra release-prep commit beyond the baseline:** a
-  user-requested help-text cleanup (`40a58d0`) stripping internal
-  §/version/M-number refs from `monday help` + verb `--help` — pure
-  string edits across 31 command files, gate-verified
-  (typecheck + lint + 4254 tests), so the R-NEW-84 mechanical-skip
-  spirit held (no Codex).
+- **Next session:** **publish-coordination → v0.10 candidate-selection**
+  (per R-NEW-75 — ≥2 backlog candidates remain at v0.9 close: at minimum
+  R-v0.9-NEW-8 paired with the v0.7-M40 reopen, plus whatever the user
+  surfaces next + the SDK 15.x / SDK 16.x clusters that re-open when
+  Monday publishes the gating SDKs). v0.9.0 release-prep is SHIPPED
+  but UNPUBLISHED — the next session opens with `git push origin main`
+  (19+ unpushed commits including the v0.9 feature cluster + this
+  release-prep cluster) + `npm publish` (interactive login) +
+  annotated `v0.9.0` tag + the post-publish flip commit (mirror v0.8's
+  `3f30891`: CLAUDE.md "release complete" + §7 publish line ticked +
+  `<close-docs>` placeholders backfilled). Then v0.10 candidate-
+  selection: 4th-consecutive SDK-stall window, so a 4th-consecutive
+  pivot is the default expectation (M39/M40/M41 + M44/M45 stay deferred
+  if SDK 15.x / 16.x haven't published; otherwise re-open). v0.9
+  feature-cluster scope is fully shipped — **M50** nesting + **M51**
+  hierarchy_type + **M52** views read — and the release-prep cluster
+  landed in 4 commits (vs v0.8's 6 — README pre-cleaned + help-text
+  grep clean trimmed two commits). Process adoptions at the v0.9
+  close-docs: R-NEW-82 **7th-consecutive ratification** (and notable
+  inversion — M50's deletion-led IMPL preempted the historical
+  release-prep slip work entirely, finding ZERO stale `deferred_to:
+  "v0.9"` slots at the cross-doc grep); R-NEW-84 graduated-discipline
+  applied (Codex skipped on the mechanical/process-only cluster);
+  `feedback_public_docs_clean` propagated forward from v0.8's
+  `40a58d0` cleanup pass — M50/M51/M52 source applied the directive
+  from the start, so the v0.9 help-text hygiene grep landed clean and
+  the conditional commit was skipped. v0.9 R-class additions at
+  close-docs are watch-items only (R-v0.9-NEW-5/8/9/10/11/12 —
+  triggers don't fire on a mechanical release-prep cluster).
   **✅ v0.8-M48 SHIPPED 2026-05-21** (`4803cbf` IMPL feat + `f79bb16`
   R1 P3 prose fix-up; Codex IMPL CONVERGED R2, 0 P1/P2 across both
   rounds): the `m48_preflight_stub` c8-ignored stub swapped for the live
