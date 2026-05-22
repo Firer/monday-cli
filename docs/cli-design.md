@@ -5035,15 +5035,17 @@ mutation verbs produce different planned-change shapes; the
   **Subitem variant** (`--parent <iid>` set; `operation:
   "create_subitem"`). Identical shape to `create_item` with
   three deltas: `operation` flips to `"create_subitem"`,
-  `board_id` is **omitted** (Monday derives the subitems
-  board from the parent at server-side; the CLI doesn't echo
-  it because column resolution targets the subitems board's
-  own metadata and surfacing it as `board_id` would falsely
-  imply the agent's `--board` value), and a new
-  `parent_item_id: "<iid>"` slot carries the parent. `--group`
-  / `--position` are not valid with `--parent` (subitems live
-  on the auto-generated subitems board, not in groups; their
-  position is parent-scoped, not relative-to-arbitrary-item)
+  `board_id` is **omitted** (Monday derives the create target
+  from the parent server-side — the auto-generated
+  sub_items_board on classic boards, the parent's own host
+  board on multi-level boards; the CLI doesn't echo it because
+  column resolution targets that derived board's metadata and
+  surfacing it as `board_id` would falsely imply the agent's
+  `--board` value), and a new `parent_item_id: "<iid>"` slot
+  carries the parent. `--group` / `--position` are not valid
+  with `--parent` (subitems live under the parent, not in
+  groups; their position is parent-scoped, not
+  relative-to-arbitrary-item)
   — argv-parse rejects with `usage_error`, so neither slot
   appears in the subitem dry-run shape. `resolved_ids` and
   `diff` keep the same per-column shape. **Both hierarchy
