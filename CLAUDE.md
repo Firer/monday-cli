@@ -234,14 +234,20 @@ humans are second-class. Built incrementally via Claude Code on top of
   numbers in the v0.8 SKELETON's §3 sequencing but DEFER again
   pending SDK 16.x publication. The v0.7-deferred M39 / M40 / M41
   cluster (API `2026-04` pin + `set_item_description_content` +
-  `create_doc_blocks`) RE-OPENS only when `@mondaydotcomorg/api`
-  SDK 15.x publishes with `CURRENT_VERSION = '2026-04'` natively
-  AND the M40 `set_item_description_content` wire becomes reachable
-  (2026-05-22 re-probe on a new admin-scoped free-tier account: still
-  untyped `INTERNAL_SERVER_ERROR { service: 'docs-api' }` across all
-  variations, while workspace docs work on the SAME account → most
-  likely a Monday-side defect specific to item descriptions, NOT
-  paid-tier gating; v0.7-plan §3 M40 + user-memory).
+  `create_doc_blocks`) RE-OPENS when `@mondaydotcomorg/api` SDK 15.x
+  publishes with `CURRENT_VERSION = '2026-04'` natively. **2026-05-22
+  dev-board probe sweep RESOLVED the M40 mystery: `set_item_
+  description_content` WORKS on `multi_level` boards** (`success:true`
+  on top items + subitems, isolated to the hierarchy via a fresh
+  `duplicate_board` copy); it 500s `docs-api` only on CLASSIC boards
+  (what the earlier probes tested — so the "paid gating" / "Monday
+  bug" reads are SUPERSEDED). M40 is feature-real; only the M39 SDK
+  gate remains, and it must scope to `multi_level` boards. The SAME
+  sweep also **refuted the M28 multi-level-subitem deferral premise**
+  (nesting works depth-3+ on multi_level boards via the `subtasks`
+  self-referencing column) and surfaced board-views + multi-level-
+  board-creation gaps — all filed as R-class candidates in
+  `docs/v0.8-plan.md` §22; see [[project-multilevel-dev-board-capabilities]].
   The M39 override commits (`bb7c2cc..2e501b5`) + M40 uncommitted
   work are recoverable in `git reflog` for ~90 days; M40 findings
   preserved in user-memory at
