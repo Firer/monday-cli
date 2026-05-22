@@ -298,9 +298,11 @@ linked items. Two consequences:
   which preserves `hierarchy_type: multi_level` (verified at `2026-01`).
   A multi-level *seed* board must first exist (created in Monday's UI or
   saved as an account template); there is no from-scratch API path, so
-  this is a Monday-API limit, not a CLI gap. `board create --template
-  <account-template-id>` likewise preserves the template's hierarchy
-  when the template is a saved multi-level account template.
+  this is a Monday-API limit, not a CLI gap. (`board create --template`
+  *may* also yield a multi-level board if the template is a saved
+  multi-level account template, but that path is NOT verified at
+  `2026-01` — the duplicate path above is the documented, probe-verified
+  one.)
 - **Multi-level subitem nesting (v0.9-M50).** `item create --parent
   <iid>` creates nested subitems on multi-level boards: the subitems
   live on the parent's *host* board (not a separate, auto-generated
@@ -8116,7 +8118,14 @@ to largest scope:
 ### 11.2 Workspace discovery — `monday board …`
 
 - `monday board list` — every board the token can see, with workspace
-  and folder ancestry.
+  and folder ancestry. Each row carries `hierarchy_type`
+  (`classic` | `multi_level`) from v0.9-M51.
+- `monday board get <bid>` — the lightweight single-board read. Returns
+  the canonical Board projection (`boardProjectionSchema`) shared with
+  the board-mutation cluster (`create` / `update` / `archive` /
+  `delete` / `duplicate`), so all six carry the same fields — including
+  `hierarchy_type` (`classic` | `multi_level`) from v0.9-M51. Use
+  `board describe` for columns / groups / `example_set`.
 - `monday board describe <bid>` — the source of truth for what `--set`
   accepts on items in that board. Returns:
   - All columns with `id`, `type`, `title`, `archived`, `description`,
