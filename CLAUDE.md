@@ -458,7 +458,12 @@ detail, and R-class refactor backlog, **read the plan docs** —
    at M51**) + the M50 IMPL refactor-audit (R-v0.9-NEW-3
    contract-term-checklist doc-surface / line-wrap miss, MEDIUM;
    **R-v0.9-NEW-4 RESOLVED/KEEP at M51** — fetch retained as a
-   regression-guard affordance, M51 used a separate query).
+   regression-guard affordance, M51 used a separate query) + the **M51
+   refactor-audit** (R-v0.9-NEW-5 board-projection schema fragmentation
+   across 4 schemas, LOW; R-v0.9-NEW-6 `match_query` selection-pin for
+   raw-GraphQL SDK-drift fields, MEDIUM; R-v0.9-NEW-7 shared-projection
+   scope-check before a read-side field-add, MEDIUM — all triggered by
+   M52).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
