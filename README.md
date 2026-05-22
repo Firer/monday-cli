@@ -313,7 +313,50 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.8.0 (current — `monday-cli@0.8.0` on npm):**
+**v0.9.0 (current — `monday-cli@0.9.0` on npm):**
+the v0.8 surface PLUS the multi-level board cluster. Three pieces:
+**(1) Multi-level subitem nesting works** — `monday item create
+--parent <iid>` now succeeds on `multi_level` boards. This corrects
+a SHIPPED-INCORRECT rejection in v0.8.0 that asserted a now-false
+data-model claim ("Monday's `sub_items_board` carries no `subtasks`
+column at `2026-01`") and carried a `details.deferred_to: "v0.9"`
+slot — while shipping at v0.9. A 2026-05-22 dev-board probe sweep
+proved Monday supports the nesting at the CLI's `2026-01` pin via
+the host board's self-referencing `subtasks` column, so the gate is
+deleted. Closes the M28 deferral (slipped v0.4 → v0.9). Classic
+boards continue to reject (the `subtasks`-column self-reference
+doesn't exist there) with an accurate message. **(2) Board
+hierarchy is now readable** — `Board.hierarchy_type` (`"classic"` |
+`"multi_level"`) surfaces in `monday board get`, `board list`,
+`board describe`, and the create/update/archive/delete/duplicate
+mutation projections, so agents branch on hierarchy without an
+extra `describe` round-trip. **`monday board duplicate`** is
+documented as the multi-level-board creation path
+(`duplicate_board_with_pulses` preserves the source's hierarchy);
+`monday board create` is always classic at `2026-01`
+(`create_board` has no hierarchy argument). **(3) Board views are
+now readable** — a new `monday board views <bid>` verb projects the
+collection of views on a board (Kanban / Gantt / Calendar / Table /
+Form / Chart / etc.) with all 13 wire fields per view 1:1.
+`monday board describe` gains the same view collection under a
+`views[]` slot. Verb shares the metadata cache with describe /
+columns / groups (one fetch supports four reads). **No breaking
+changes vs v0.8.0** — the M50 rejection deletion is a bug-fix
+correction, not a contract re-shape (Monday supports the operation
+v0.8.0 claimed unsupported); the output envelope + 29 stable error
+codes are unchanged. **118 commands shipped** (+1 vs v0.8 —
+`board views`). Built incrementally as M50 + M51 + M52.
+
+**SDK-stall note.** v0.9 is the 4th consecutive release where
+`@mondaydotcomorg/api` has stayed pinned at `^14.0.0` (no SDK 15.x
+or 16.x publication in the window), so the v0.7-deferred M39 / M40
+/ M41 cluster (gated on SDK 15.x baking `2026-04` natively) and the
+v0.8-skeleton M44 / M45 user-entity migration (gated on SDK 16.x)
+stay deferred a 4th consecutive release. The API stays pinned at
+`2026-01`. See [CHANGELOG.md](./CHANGELOG.md) for the full
+per-milestone release notes.
+
+**v0.8.0 (the previous release):**
 the v0.7 surface PLUS — most importantly — the 🚨 P1 file-upload
 wire-format **FIX** (M49). Published v0.7.0 shipped the Apollo
 multipart spec, which live Monday rejects, so `monday item upload` /
@@ -334,17 +377,7 @@ v0.8 surface is additive (the output envelope + 29 stable error codes
 are unchanged); M49 is a fix that ships in the same minor. Built
 incrementally as M49 + the refactor cluster + M46 + M47 + M48.
 
-**Re-scope note 2026-05-21.** v0.8 re-scoped from its original
-SKELETON (Monday API `2026-07` pin + user-entity migration M44 +
-`user activity` M45) to **stay on API `2026-01`** and ship the
-v0.6/v0.7 carve-out folds above — mirroring the v0.7 pivot verbatim.
-`@mondaydotcomorg/api` is still pinned at 14.0.0 (baking `2026-01`);
-no SDK 15.x (`2026-04`) or 16.x (`2026-07`) has published, so M44 /
-M45 + the v0.7-deferred M39 / M40 / M41 cluster stay deferred to a
-future release. See [CHANGELOG.md](./CHANGELOG.md) for the full
-per-milestone release notes.
-
-**v0.7.0 (the previous release):**
+**v0.7.0 (the prior release):**
 the v0.6 surface PLUS the two file-`--set` carve-outs deferred at
 v0.6-M38 — bulk `monday item update --where ... --set <file-col>=
 <path>` (M42, per-item multipart fan-out under `--concurrency` /
@@ -368,7 +401,7 @@ config + per-profile credentials cache work fully against API
 tokens; OAuth registration revisits in v0.8.x / v0.9 contingent on
 user demand.
 
-**v0.6.0 (the prior release):**
+**v0.6.0 (the earlier release):**
 the v0.5 surface PLUS files-shaped friendly `--set <file-col>=<path>`
 writes on `monday item set` + `monday item update` (single-item
 paths), closing the v0.4 → v0.5 → v0.6 carry-over of the inline
@@ -380,7 +413,7 @@ v0.6 surface is additive (M38 only). Built as a single milestone
 (M38). The bulk + create-time carve-outs deferred at v0.6-M38
 (D5 / D6) carry forward to v0.7 (above).
 
-**v0.5.0 (the earlier release):**
+**v0.5.0 (an even-earlier release):**
 the v0.4 surface PLUS the full team-writer surface
 (`monday user team-list/get/create/delete/add-members/remove-members`),
 the full Monday workdocs CRUD mutation surface — doc-level
@@ -390,7 +423,7 @@ and doc-content import (`monday doc import-html/append-markdown`) —
 closing the v0.4-M32 workdocs-mutation deferral. **16 new CLI
 verbs across 9 wire mutations.** Built incrementally across M34–M37.
 
-**v0.4.0 (an even-earlier release):**
+**v0.4.0 (a yet-earlier release):**
 the v0.3 surface PLUS long-poll item activity streaming
 (`monday item watch <iid>` — NDJSON), parallel bulk dispatch
 (`monday item update --where ... --concurrency <N>`), asset uploads
@@ -400,7 +433,7 @@ workdocs CRUD mutation surface deferred to v0.5; shipped at v0.5),
 and shell completion (`monday completion bash|zsh|fish`). Built
 incrementally across M29–M33.
 
-**v0.3.0 (a yet-earlier release):**
+**v0.3.0 (an older release):**
 the v0.2 mutating core PLUS the Monday Dev convention layer
 (`monday dev` namespace — sprint / epic / release / task workflow
 shortcuts on top of standard board CRUD), multi-profile auth
@@ -793,23 +826,24 @@ row `tags`, `board_relation`, `dependency`.
   `unsupported_column_type` / `not_found` / `validation_failed`
   codes with `details.reason` discrimination).
 
-**v0.9 (next):** **Carry-forward backlog** (unpicked
+**v0.10 (next):** **Carry-forward backlog** (unpicked
 candidates remain in cli-design.md §13 slipped-candidates list
-pending future candidate-selection sessions). The v0.6-M38 D2
-multi-file `--set` + D7 stdin file-`--set` deferrals **SHIPPED**
-at v0.8-M46 / v0.8-M47, so they leave the backlog. Still
-deferred: the original v0.8 SKELETON's user-entity migration
-(M44) + `user activity` (M45) + the Monday API `2026-07` pin
-defer pending `@mondaydotcomorg/api` SDK 16.x; the v0.7-deferred
-M39 (API `2026-04` pin) + M40 (`item set-description`) + M41
-(`doc block-create-bulk`) re-open when SDK 15.x ships `2026-04`
-natively AND a paid-tier sandbox is available for the M40 wire
-probe (v0.8 stayed on `2026-01` — SDK still 14.0.0, no 15.x/16.x
-published). Multi-level subitems remain conditional on Monday's
-data model surfacing them (slipped from v0.4 → v0.5 → v0.6 →
-v0.7 → v0.8 → v0.9 across five consecutive release-preps —
-Monday's `sub_items_board` still carries no `subtasks` column at
-API `2026-01`); cross-board `item move` value-overrides (Monday's
+pending future candidate-selection sessions). The v0.3-M28
+multi-level subitem nesting deferral **SHIPPED** at v0.9-M50 —
+the 2026-05-22 dev-board probe refuted the "Monday's
+`sub_items_board` carries no `subtasks` column" premise (Monday
+supports the nesting on multi-level boards via the host board's
+self-referencing `subtasks` column at the CLI's `2026-01` pin),
+so it leaves the backlog. Still deferred: the original v0.8
+SKELETON's user-entity migration (M44) + `user activity` (M45) +
+the Monday API `2026-07` pin defer pending
+`@mondaydotcomorg/api` SDK 16.x; the v0.7-deferred M39 (API
+`2026-04` pin) + M40 (`item set-description`) + M41 (`doc
+block-create-bulk`) re-open when SDK 15.x ships `2026-04`
+natively (M40 is feature-confirmed on `multi_level` boards by
+the same 2026-05-22 probe — only the M39 SDK gate remains; v0.9
+stayed on `2026-01`, SDK still 14.0.0, 4th consecutive
+deferral); cross-board `item move` value-overrides (Monday's
 `ColumnMappingInput` still carries no value slot — slipped four
 times for the same reason); resumable cross-board cursor
 pagination (per-board cursor-lifetime under aggregation needs
@@ -819,7 +853,10 @@ cli/config.toml` with a `[profiles.<name>.defaults]` table
 carrying scoping args; requires a prerequisite §13 carve-out
 Decision at pre-flight distinguishing aliases-as-stored-
 command-strings (still non-goal) from defaults-as-stored-flag-
-values (carve-out)).
+values (carve-out)); `Item.description` read-side coverage
+(filed at v0.9-M52 close, paired with the v0.7-M40 reopen
+above — the read pairs naturally with the deferred mutation,
+so both should re-open together when SDK 15.x publishes).
 
 See [`docs/cli-design.md`](./docs/cli-design.md) §13 for the
 full roadmap, [`docs/v0.6-plan.md`](./docs/v0.6-plan.md) for the

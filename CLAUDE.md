@@ -217,7 +217,21 @@ humans are second-class. Built incrementally via Claude Code on top of
   hygiene grep landed clean and the conditional commit was skipped.
   v0.9 R-class additions at close-docs are watch-items only
   (R-v0.9-NEW-5/8/9/10/11/12 — triggers don't fire on a mechanical
-  release-prep cluster).
+  release-prep cluster). **Post-publish refactor-audit (2026-05-22)
+  appended 3 more watch-items** (`docs/v0.9-plan.md` §22):
+  R-v0.9-NEW-13 (post-publish flip pattern — 2nd consecutive instance,
+  graduates into workflow.md at 3rd); R-v0.9-NEW-14 (deletion-led
+  IMPLs preempt R-NEW-82's release-prep slip work — 1st instance,
+  M50's deletion-led IMPL produced a zero-stale-slot grep at v0.9
+  release-prep); R-v0.9-NEW-15 (README Scope-section drift at
+  release-prep — caught at this audit + fixed inline; release-prep
+  checklist's "README refresh" step needs to widen from quickstart
+  to also include the per-version Scope blocks + the
+  `**v<next> (next):**` backlog block, 2nd-instance trigger).
+  R-v0.8-NEW-21 status flipped OPEN → PARTIALLY-RESOLVED — the
+  v0.9 release-prep help-text hygiene grep ran + landed CLEAN
+  (rule-graduation criterion ["2nd release-prep surfaces fresh
+  leaks"] UNMET, watch-item stays filed).
   **✅ v0.8-M48 SHIPPED 2026-05-21** (`4803cbf` IMPL feat + `f79bb16`
   R1 P3 prose fix-up; Codex IMPL CONVERGED R2, 0 P1/P2 across both
   rounds): the `m48_preflight_stub` c8-ignored stub swapped for the live
