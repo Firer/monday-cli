@@ -193,19 +193,51 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10 candidate-selection** per R-NEW-75 (≥2
-  backlog candidates remain at v0.9 close: at minimum R-v0.9-NEW-8
-  paired with the v0.7-M40 reopen, plus whatever the user surfaces
-  next + the SDK 15.x / SDK 16.x clusters that re-open when Monday
-  publishes the gating SDKs). v0.9.0 is **PUBLISHED + release-complete**
-  (npm `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`;
-  release-prep `0147883..ee96681`). 4th-consecutive SDK-stall window
-  expected, so a 4th-consecutive pivot is the default expectation
-  (M39/M40/M41 + M44/M45 stay deferred if SDK 15.x / 16.x haven't
-  published; otherwise re-open). v0.9 feature-cluster scope is fully
-  shipped — **M50** nesting + **M51** hierarchy_type + **M52** views
-  read — and the release-prep cluster landed in 4 commits (vs v0.8's
-  6 — README pre-cleaned + help-text grep clean trimmed two commits).
+- **Next session:** **v0.10-M53 pre-flight contract diff** for the
+  **`NOUN_DESCRIPTIONS` single-source-of-truth lift** (R-v0.8-NEW-22
+  graduation; v0.8-plan §22). **v0.10 candidate-selection DONE
+  2026-05-22** — per R-NEW-75's 5-dimension scoping the user picked the
+  lift over C (cross-board `item move` value-overrides; 4 release-preps
+  slipped, 5th if not next), E (profile-scoped argument defaults; needs
+  §13 carve-out Decision distinguishing aliases-as-stored-command-strings
+  from defaults-as-stored-flag-values), and G (`Item.description`
+  read-side; paired-pending with v0.7-M40 per the 2026-05-22 user
+  binding). Rationale: M50 surfaced a demonstrated shipped bug (the
+  `doc` "read-only at v0.4" staleness — drifted sibling literal wins by
+  `ensureSubcommand` attach-order; find-or-create semantics make
+  divergence silent) that this lift closes structurally; MEDIUM-HIGH
+  priority per its filing. Scope: collapse ~100 duplicate
+  `ensureSubcommand(program, '<noun>', '<desc>')` literals across ~80
+  verb files (Board ×23, Item ×19, Workdoc ×12, User ×9, Update ×8,
+  Workspace ×8, Account ×5, dev ~×13 + webhook/auth/notification/
+  config/cache) plus the three-level group descriptions (dev sprint/
+  epic/release/task, time-track) into one `NOUN_DESCRIPTIONS` map;
+  `ensureSubcommand(program, name)` looks the description up, 3rd arg
+  becomes optional override or drops. Zero new wire surface, zero new
+  transport seam, zero new ERROR_CODE (29 stays), zero command delta
+  (118 stays). Codex round estimate MED 3-4 (mechanical surface —
+  bounded blast radius: description strings only, no behaviour change).
+  R-v0.8-NEW-22's trigger ("next session touching command registration
+  / a new noun") fires on the `ensureSubcommand` signature change
+  itself; the lift also makes R-v0.8-NEW-21's release-prep grep a
+  single-file scan (R-v0.8-NEW-21 status stays PARTIALLY-RESOLVED —
+  graduation criterion ["2nd release-prep surfaces fresh leaks"] still
+  UNMET). SDK probe at this session: still
+  `@mondaydotcomorg/api@14.0.0` — **4th-consecutive SDK stall**, so
+  M39/M40/M41 (SDK 15.x → API `2026-04`) + M44/M45 (SDK 16.x → API
+  `2026-07`) stay DEFERRED; v0.10 is the 4th-consecutive pivot in
+  sequence (v0.7/v0.8/v0.9/v0.10). Carried-forward alternatives stay
+  filed for v0.10.x / v0.11 candidate-selection (C/D/E/G above + D
+  resumable cross-board cursor — design-blocked on per-board
+  cursor-lifetime under aggregation; cli-design §13). **No
+  `docs/v0.10-plan.md` opened here** — per workflow convention the new
+  plan doc opens at the FIRST pre-flight contract diff commit of M53.
+  v0.9.0 is **PUBLISHED + release-complete** (npm `latest`
+  2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`; release-prep
+  `0147883..ee96681`). v0.9 feature-cluster scope is fully shipped —
+  **M50** nesting + **M51** hierarchy_type + **M52** views read —
+  and the release-prep cluster landed in 4 commits (vs v0.8's 6 —
+  README pre-cleaned + help-text grep clean trimmed two commits).
   Process adoptions at the v0.9 close-docs: R-NEW-82 **7th-consecutive
   ratification** (and notable inversion — M50's deletion-led IMPL
   preempted the historical release-prep slip work entirely, finding
