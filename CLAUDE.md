@@ -71,17 +71,35 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.9-M50 pre-flight contract diff** (multi-level
-  subitem nesting). **v0.9 candidate-selection DONE 2026-05-22** —
-  scope locked to the **multi-level board cluster** (`docs/v0.9-plan.md`):
-  **M50** multi-level subitem nesting (lift the shipped-incorrect `item
-  create --parent` rejection + same-board nested `create_subitem`;
-  folds in the false-message fix per the user's decision) → **M51**
-  surface `hierarchy_type` + document `board duplicate` as the
-  multi-level creation path → **M52** board views read → release-prep.
-  M50 is already empirically pre-probed (nesting verified depth-3+ at
-  API `2026-01`, the CLI pin — NOT SDK-gated), so its pre-flight
-  leverages the 2026-05-22 sweep findings directly. **v0.8.0 is
+- **Next session:** **v0.9-M50 IMPL** (multi-level subitem nesting).
+  **M50 pre-flight DONE 2026-05-22** (`9675f6a..e41b467`, docs-only
+  contract diff + D1–D5 closed in `docs/v0.9-plan.md` §3; Codex
+  pre-flight CONVERGED R1 — 0 P1, 1 P2, 2 P3, all doc-consistency).
+  **Decision: MINIMAL LIFT.** The headline pre-flight finding: the
+  current runtime gate is INVERTED — it rejects `multi_level` (which
+  the probe proved nests depth-3+ at API `2026-01`) while classic
+  depth-1 already creates subitems (M9). So the IMPL is a *deletion*
+  of the false-claim `parent.hierarchyType === 'multi_level'`
+  rejection block (`src/commands/item/create.ts:735-752`), NOT a
+  re-implementation. Classic + multi-level then share ONE
+  `create_subitem` + `deriveSubitemsBoardId` dispatch (the `subtasks`
+  column's `settings_str.boardIds[0]` yields the right column-
+  resolution target for both — a separate sub_items_board on classic,
+  the self-referenced host board on multi-level). No
+  `hierarchy_type`-keyed rejection survives, no `deferred_to` slot
+  (R-NEW-82), **zero new ERROR_CODE (registry stays 29), zero new wire
+  surface, no pre-flight stub** (no new deferred wire leg — R-NEW-76
+  doesn't apply). The IMPL flips the existing `multi_level →
+  usage_error` test (`item-create.test.ts:1121`) to a success
+  assertion + adds a regression guard that the false-claim phrase +
+  `deferred_to: 'v0.9'` never reappear, and reframes the enumerated
+  "subitems board" docstrings target-neutral — full contract-term
+  checklist (R-v0.7-NEW-4) in `docs/v0.9-plan.md` §3. **v0.9
+  candidate-selection DONE 2026-05-22** — scope locked to the
+  **multi-level board cluster** (`docs/v0.9-plan.md`): **M50**
+  multi-level subitem nesting → **M51** surface `hierarchy_type` +
+  document `board duplicate` as the multi-level creation path →
+  **M52** board views read → release-prep. **v0.8.0 is
   PUBLISHED + release-complete** (npm `latest` 2026-05-21T23:45:48Z;
   tag `v0.8.0` at `090fb76`; release-prep `66d5142..090fb76`). SDK
   still 14.0.0 at v0.9 candidate-selection, so M39/M40/M41 (SDK 15.x)
