@@ -1797,6 +1797,33 @@ monday board group-delete <bid> <gid> --yes [--dry-run]                      v0.
 # See §5.3 for board_id resolution and §5.5 for --where filter rules.
 monday item list --board <bid> [--group <gid>] [--where <expr>]... [--filter-json <json>] [--state active|archived|all] [--all] [--limit <N>]   v0.1
 monday item get <iid>                     # single item with column values   v0.1
+monday item get-description <iid>         # description (doc-block list)     v0.11
+                                          # narrow companion read. Mirrors
+                                          # `board views` carve-out from
+                                          # `board describe`: the heavy/
+                                          # nested doc-block tree stays
+                                          # opt-in rather than bloating
+                                          # every universal item read.
+                                          # Surfaces ItemDescription
+                                          # `{id, blocks[]}` with each
+                                          # block carrying 4 of
+                                          # DocumentBlock's 9 wire fields
+                                          # (id, type, content, position).
+                                          # Wire-null description (item
+                                          # never had one) normalises to
+                                          # `{id: null, blocks: []}` so
+                                          # the single-resource envelope's
+                                          # `data` slot stays an iterable
+                                          # object. Raw GraphQL — the
+                                          # ItemDescription type is SDK
+                                          # 14.0.0-untyped, the `is_leaf` /
+                                          # `hierarchy_type` / `views`
+                                          # SDK-drift class. Paired-but-
+                                          # independent of v0.7-M40
+                                          # `item set-description`
+                                          # (write-side, SDK-15.x-gated);
+                                          # the read-side ships standalone
+                                          # at API 2026-01.
 monday item find <name> --board <bid> [--first]                              v0.1
 monday item search [--board <bid>] [--workspace <wid>] [--favorites] [--max-boards <n>] --where <col>=<val>...   v0.1 (--board, --where); v0.3 (cross-board)
                                           # single-board (v0.1, --board <bid>):

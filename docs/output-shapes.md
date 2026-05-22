@@ -1809,6 +1809,46 @@ inline `title` per cell:
 }
 ```
 
+### `item get-description <id>` (v0.11-M54-G)
+
+Single resource. Returns `Item.description` — Monday's
+`ItemDescription { id, blocks[] }` shape with each block carrying 4
+of `DocumentBlock`'s 9 wire fields (`id`, `type`, `content`,
+`position`). Wire-null `description` (item never had one)
+normalises to the sentinel `{id: null, blocks: []}` so the
+envelope's `data` slot stays an iterable object — agents
+distinguish "absent" via `data.id === null` from "present" via
+`data.id !== null` (`data.blocks` may still be `[]` if every block
+was deleted).
+
+Raw GraphQL — `ItemDescription` is not exposed by
+`@mondaydotcomorg/api` 14.0.0's typed surface (same SDK-drift class
+as `Board.hierarchy_type` / `Board.views`); the two-layer
+selection-pin guard (cassette `match_query: /description \{/` +
+`RUN_LIVE_TESTS` `toHaveProperty('description')`) applies per
+`.claude/rules/testing.md` "Wire selection-pin for raw-GraphQL
+SDK-drift fields".
+
+```json
+{
+  "id": "8781640",
+  "blocks": [
+    { "id": "b1", "type": "normal text",
+      "content": { "deltaFormat": [{ "insert": "Refactor login flow" }] },
+      "position": 1024 },
+    { "id": "b2", "type": "bulleted list",
+      "content": { "deltaFormat": [{ "insert": "extract auth helper" }] },
+      "position": 2048 }
+  ]
+}
+```
+
+Wire-null case (no description set on the item):
+
+```json
+{ "id": null, "blocks": [] }
+```
+
 ### `item find <name> --board <bid>`
 
 Single resource on unique match. NFC + case-fold matching like

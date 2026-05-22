@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 import { BOARD_METADATA_QUERY } from '../../src/api/board-metadata.js';
 import { BOARD_GET_QUERY } from '../../src/commands/board/get.js';
 import { BOARD_LIST_QUERY } from '../../src/commands/board/list.js';
+import { ITEM_DESCRIPTION_QUERY } from '../../src/api/item-description.js';
 import { PINNED_API_VERSION } from '../../src/api/client.js';
 
 const TOKEN = process.env.MONDAY_API_TOKEN;
@@ -117,5 +118,49 @@ describe.skipIf(!LIVE)('live schema drift (RUN_LIVE_TESTS)', () => {
     const listBoard = (list.data as { boards?: Record<string, unknown>[] } | undefined)
       ?.boards?.[0];
     expect(listBoard).toHaveProperty('hierarchy_type');
+  });
+
+  it('ITEM_DESCRIPTION_QUERY production document selects only live fields (v0.11-M54-G Item.description)', async () => {
+    // v0.11-M54-G added `Item.description { id, blocks { id type
+    // content position } }` via raw GraphQL — the same SDK-drift
+    // class as `is_leaf` / `hierarchy_type` / `views`
+    // (`@mondaydotcomorg/api` 14.0.0 doesn't expose `ItemDescription`
+    // on the typed surface). Run the EXACT production document
+    // against the live API so a future Monday removal of `description`
+    // (or any selected DocumentBlock field) surfaces here rather than
+    // silently breaking `monday item get-description` live while
+    // mocked tests stay green.
+    //
+    // 3rd consumer of R-v0.9-NEW-6 (graduated v0.9-M52 into
+    // .claude/rules/testing.md): the two-layer guard pattern
+    // (cassette match_query + this live-smoke toHaveProperty).
+    const discover = await post(
+      'query { boards(limit: 25) { id items_page(limit: 1) { items { id } } } }',
+    );
+    expect(discover.errors, JSON.stringify(discover.errors)).toBeUndefined();
+    const boards = (discover.data as {
+      boards?: { items_page?: { items?: { id: string }[] } }[];
+    } | undefined)?.boards ?? [];
+    const itemId = boards
+      .flatMap((b) => b.items_page?.items ?? [])
+      .map((i) => i.id)
+      .find((id) => typeof id === 'string');
+    expect(itemId, 'no items reachable to this token for the description-smoke probe').toBeDefined();
+
+    const result = await post(ITEM_DESCRIPTION_QUERY, { ids: [itemId] });
+    // Removed/renamed field would surface here as "Cannot query
+    // field X on type Y" — the `is_leaf` regression class.
+    expect(result.errors, JSON.stringify(result.errors)).toBeUndefined();
+
+    // Key-presence check (Item.description is wire-nullable per the
+    // 2026-01 probe — value can be `null` for items with no
+    // description set). A future Monday removal of `description`
+    // would drop the key from the response without erroring on the
+    // query, so the toHaveProperty assertion catches that drift.
+    const item = (
+      result.data as { items?: Record<string, unknown>[] } | undefined
+    )?.items?.[0];
+    expect(item).toBeDefined();
+    expect(item).toHaveProperty('description');
   });
 });

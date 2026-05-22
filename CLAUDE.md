@@ -188,18 +188,60 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.11-G pre-flight contract diff.** v0.11
-  candidate-selection ran 2026-05-22 per R-NEW-75 over the
-  C/D/E/G + R-v0.10-NEW-4 backlog. SDK probe:
-  `@mondaydotcomorg/api@14.0.0` — **5th-consecutive stall**
-  (v0.6 → v0.10), so M39/M40/M41 (SDK 15.x → API `2026-04`) +
-  M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED. User picked
-  **G — `Item.description` read-side, ships standalone** (the
-  2026-05-22-at-M52-close pair-with-M40 user binding BROKEN at
-  this candidate-selection per the 2-question round-trip);
+- **✅ v0.11-M54-G pre-flight CLOSED 2026-05-23**
+  (`<pre-flight-sha>` — single commit: new verb `monday item
+  get-description <iid>` + schema + tests + cli-design + output-
+  shapes + plan-doc open). Picked at v0.11 candidate-selection
+  2026-05-22 per R-NEW-75 over the C/D/E/G + R-v0.10-NEW-4
+  backlog. **Empirical probe ran 2026-05-23** at pre-flight
+  kickoff (`scripts/probe/v0.11-item-description-2026-01.report.txt`)
+  — confirms `Item.description` is OBJECT `ItemDescription{id,
+  blocks[DocumentBlock]}` at API `2026-01` (the CLI pin); NOT
+  SDK-gated; ships standalone. **D1 closed via AskUserQuestion
+  2026-05-23 single round-trip** in favour of shape (b) narrow
+  verb (mirrors v0.9-M52's `board views` carve-out per the
+  graduated "Read-side field-add" rule — heavy/nested fields
+  carve out, lightweight/universal extend). **D2 selection-pin
+  guard both layers landed** per v0.9-M52-graduated rule
+  (cassette `match_query: /description \{/` + RUN_LIVE_TESTS
+  `toHaveProperty('description')`; 3rd consumer of R-v0.9-NEW-6
+  graduated guard). Per R-v0.9-NEW-2 the pure-additive new
+  verb's wire leg IS the runtime payload at pre-flight — no
+  stub literal, no PIN test, no RESERVED-literal guard (3rd
+  structurally distinct instance: M50 deletion + M53 pure refactor
+  + M54-G pure additive — rule body widens at IMPL close, filed
+  R-v0.11-NEW-2). 0 fixture ripples, 0 existing call sites
+  touched. **R-v0.9-NEW-8 RESOLVED** at pre-flight (the canonical
+  filing's open empirical probe + binding decisions both closed
+  inline). **R-v0.9-NEW-10** advanced to 2-consumer (jsonScalarOrNull
+  pattern re-used in `item-description.ts`; lift at 3rd consumer
+  per R-NEW-58). 4 new R-class watch-items filed
+  (R-v0.11-NEW-1/2/3/4 in `docs/v0.11-plan.md` §22 — multi_level
+  probe gap, R-v0.9-NEW-2 3rd-class rule-widening candidate,
+  `runByIdLookup` pluck-sub-field abstraction watch, `_lib.ts`
+  DX-improvement). v0.10.0 stays PUBLISHED + release-complete
+  (npm `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`).
   **E (profile-scoped argument defaults) queued for v0.12**; C
   stays-filed (4 slips on Monday's `ColumnMappingInput` no-value-
   slot at API `2026-01`); D stays design-blocked.
+- **Next session:** **v0.11-M54-G IMPL close-docs + Codex IMPL
+  review.** Per R-v0.9-NEW-2 the IMPL is unusually thin — no
+  stubs to flip (the verb shipped LIVE at pre-flight). IMPL
+  session work: (a) Codex IMPL review on the pre-flight diff
+  (template at `.claude/templates/codex-pre-flight-review.md`
+  applies; MEDIUM sensitivity; 0 P1 target); (b) §3 post-mortem
+  + §22 R-class log updates in `docs/v0.11-plan.md`; (c)
+  `<pre-flight-sha>` backfill across plan-doc + CLAUDE.md; (d)
+  fold R-v0.11-NEW-2 rule-widening into
+  `.claude/rules/workflow.md` (R-v0.9-NEW-2 framing widens from
+  "rejection-lift OR pure-refactor" to "any pre-flight with no
+  deferred wire leg"); (e) cli-design SHA backfills if needed.
+  After IMPL close-docs: **v0.11 release-prep** (version bump
+  0.10.0 → 0.11.0 + CHANGELOG + README Scope flip per
+  R-v0.9-NEW-15 widened checklist + close-docs sweep per
+  R-NEW-82/84 baseline). E (profile-scoped argument defaults)
+  opens for v0.12 candidate-selection after v0.11 ships.
+- **Historical context for v0.10 (previously the active milestone):**
   **R-v0.10-NEW-4 RESOLVED inline at `085e999`** —
   `--maxWorkers=2` folded into the `test:coverage` script
   (work-of-opportunity per the v0.10 post-publish refactor-audit
@@ -584,7 +626,27 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — **ACTIVE plan**
+2. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — **ACTIVE plan**
+   (kickoff 2026-05-23). v0.11 = the **`Item.description`
+   read-side carve-out** (`monday item get-description <iid>`) on
+   the `2026-01` pin: **M54-G** ships a new narrow verb mirroring
+   v0.9-M52's `board views <bid>` carve-out from `board describe`.
+   Closes R-v0.9-NEW-8 (filed at v0.9-M52 close-docs;
+   user-directed). **M54-G pre-flight CLOSED 2026-05-23**
+   (`<pre-flight-sha>` — verb fully wired LIVE per R-v0.9-NEW-2:
+   pure-additive new verb has no deferred wire leg → no stub
+   needed). §22 R-class register populated at M54-G pre-flight
+   (R-v0.11-NEW-1/2/3/4 + carried-forward v0.8 / v0.9 / v0.10
+   open watch-items + promoted R-v0.9-NEW-8 → M54-G RESOLVED).
+   **Next is M54-G IMPL close-docs + Codex IMPL review** (per
+   R-v0.9-NEW-2 the IMPL is unusually thin — no stubs to flip;
+   work is Codex review + post-mortem + R-class log + SHA
+   backfills + R-v0.11-NEW-2 rule-widening fold into
+   workflow.md) + release-prep (0.10.0 → 0.11.0 + CHANGELOG +
+   close-docs, per R-NEW-82/84 baseline). M39/M40/M41 (SDK 15.x)
+   + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
+   (**5th-consecutive stall**).
+3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped
    (kickoff 2026-05-22). v0.10 = the **`NOUN_DESCRIPTIONS` single-
    source-of-truth lift** on the `2026-01` pin: **M53** collapses
    ~100 duplicate `ensureSubcommand(program, '<noun>', '<desc>')`
@@ -605,7 +667,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    CHANGELOG + close-docs, per R-NEW-82/84 baseline).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay DEFERRED —
    SDK still 14.0.0 (**4th-consecutive stall**).
-3. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
+4. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
    `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`). v0.9
    = the **multi-level board cluster** on the `2026-01` pin: **M50**
    multi-level subitem nesting (closes the M28 deferral + fixes the
@@ -645,14 +707,14 @@ detail, and R-class refactor backlog, **read the plan docs** —
    fixture-leftover-detection at close-docs after the M3 e2e M51
    leftover catch, MEDIUM; R-v0.9-NEW-12 Codex pre-flight
    findings-first behavior under `-xhigh` reasoning, LOW-MEDIUM).
-4. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
+5. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
    cluster; re-scoped off the original 2026-07 SKELETON (M44/M45)
    per the v0.7-pivot precedent. §22 R-class log (R-v0.8-NEW-*) —
    **R-v0.8-NEW-22 PROMOTED to v0.10-M53 at this session**
    (status flipped OPEN → PROMOTED 2026-05-22).
-5. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
+6. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
    M43 (the v0.6.x bulk + create file `--set` carve-out folds);
    M39 (API `2026-04` pin bump) + M40 (`item set-description`) +
    M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** pending
@@ -664,18 +726,18 @@ detail, and R-class refactor backlog, **read the plan docs** —
    `.claude/rules/workflow.md` at M42 IMPL R7 + refined at R8;
    R-NEW-76 graduated from stub-anchored to wire-dispatch-anchored
    invariant at M43 IMPL).
-6. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
+7. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
    (files-shaped friendly `--set`) with §22 R-class log
    (R-v0.6-NEW-*).
-7. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
+8. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
-8. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
+9. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
    with §22 R-class log (R-NEW-72 through R-NEW-84 graduated).
-9. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
+10. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
    with §22 R-class log (R-NEW-1 through R-NEW-43).
-10. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
+11. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
     (R20–R53).
-11. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
+12. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
     foundations.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)

@@ -66,6 +66,13 @@ import { updateListCommand } from './update/list.js';
 import { updateGetCommand } from './update/get.js';
 // M4 commands — item reads + filter DSL + cursor pagination.
 import { itemGetCommand } from './item/get.js';
+// v0.11-M54-G (Item.description read-side carve-out): narrow companion
+// to `item get` — surfaces `Item.description { id, blocks }` via raw
+// GraphQL (SDK 14.0.0-untyped, same drift class as `hierarchy_type` /
+// `views`). Mirrors v0.9-M52's `board views <bid>` carve-out from
+// `board describe`. See cli-design §4.3 + §6.4 item-description sub-
+// section.
+import { itemGetDescriptionCommand } from './item/get-description.js';
 import { itemListCommand } from './item/list.js';
 import { itemFindCommand } from './item/find.js';
 import { itemSearchCommand } from './item/search.js';
@@ -389,6 +396,7 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
     updateListCommand,
     updateGetCommand,
     itemGetCommand,
+    itemGetDescriptionCommand,
     itemListCommand,
     itemFindCommand,
     itemSearchCommand,
