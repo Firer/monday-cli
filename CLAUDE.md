@@ -501,21 +501,37 @@ detail, and R-class refactor backlog, **read the plan docs** —
    2026-05-22** (`e89ddfc`, deletion-led IMPL, Codex CONVERGED R1;
    pre-flight `9675f6a..e41b467`); **M51 ✅ SHIPPED 2026-05-22**
    (`f63218d` + `4d39e4d`, Codex pre-flight + IMPL both CONVERGED R1;
-   pre-flight `4eb3ca4..2958146`); **M52 next** (SKELETON).
+   pre-flight `4eb3ca4..2958146`); **M52 ✅ SHIPPED 2026-05-22**
+   (`a184156`, Codex pre-flight CONVERGED R3 + IMPL CONVERGED R1;
+   pre-flight `d842251..bbde3d5`). **All v0.9 feature scope SHIPPED;
+   next is release-prep** (0.8.0 → 0.9.0 + CHANGELOG + close-docs,
+   per R-NEW-82/84 baseline).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
    stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
    the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
    v0.8 watch-items R-v0.8-NEW-19/20/21/22 + promoted R-v0.8-NEW-23/24/25
-   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50, **R-v0.8-NEW-24 RESOLVED
-   at M51**) + the M50 IMPL refactor-audit (R-v0.9-NEW-3
+   → M50/M51/M52; **R-v0.8-NEW-23/24/25 all RESOLVED at M50/M51/M52**)
+   + the M50 IMPL refactor-audit (R-v0.9-NEW-3
    contract-term-checklist doc-surface / line-wrap miss, MEDIUM;
    **R-v0.9-NEW-4 RESOLVED/KEEP at M51** — fetch retained as a
    regression-guard affordance, M51 used a separate query) + the **M51
    refactor-audit** (R-v0.9-NEW-5 board-projection schema fragmentation
-   across 4 schemas, LOW; R-v0.9-NEW-6 `match_query` selection-pin for
-   raw-GraphQL SDK-drift fields, MEDIUM; R-v0.9-NEW-7 shared-projection
-   scope-check before a read-side field-add, MEDIUM — all triggered by
-   M52).
+   across 4 schemas, LOW, **stays OPEN at M52 close** — touched 1/4
+   schemas, ≥2 lift trigger UNMET; **R-v0.9-NEW-6 GRADUATED into
+   testing.md at M52 close** — `match_query` selection-pin for
+   raw-GraphQL SDK-drift fields, 2nd consumer `views` landed;
+   **R-v0.9-NEW-7 GRADUATED into workflow.md at M52 close** —
+   shared-vs-single-sourced field-add scope-check, 2nd instance
+   landed with the heavy-single-sourced choice) + the **M52
+   close-docs refactor-audit** (R-v0.9-NEW-8 `Item.description`
+   read-side coverage paired with v0.7-M40 reopen, MEDIUM,
+   user-directed at M52 close; R-v0.9-NEW-9 shared
+   `BoardMetadata` fixture factory after the ~33-fixture M52
+   mass-update, MEDIUM watch-item; R-v0.9-NEW-10 `jsonScalarOrNull`
+   helper lift candidate, LOW watch-item; R-v0.9-NEW-11
+   fixture-leftover-detection at close-docs after the M3 e2e M51
+   leftover catch, MEDIUM; R-v0.9-NEW-12 Codex pre-flight
+   findings-first behavior under `-xhigh` reasoning, LOW-MEDIUM).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
