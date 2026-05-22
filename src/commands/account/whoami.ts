@@ -58,7 +58,7 @@ export const accountWhoamiCommand: CommandModule<
   inputSchema,
   outputSchema: whoamiOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'account', 'Account commands');
+    const noun = ensureSubcommand(program, 'account');
     noun
       .command('whoami')
       .description(accountWhoamiCommand.summary)

@@ -80,11 +80,7 @@ export const devConfigureCommand: CommandModule<
   inputSchema,
   outputSchema: devConfigureOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
+    const noun = ensureSubcommand(program, 'dev');
     noun
       .command('configure')
       .description(devConfigureCommand.summary)

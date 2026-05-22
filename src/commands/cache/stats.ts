@@ -36,7 +36,7 @@ export const cacheStatsCommand: CommandModule<
   inputSchema,
   outputSchema: cacheStatsOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'cache', 'Cache management commands');
+    const noun = ensureSubcommand(program, 'cache');
     noun
       .command('stats')
       .description(cacheStatsCommand.summary)

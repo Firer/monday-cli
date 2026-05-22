@@ -99,7 +99,7 @@ export const docBlockUpdateCommand: CommandModule<
   inputSchema,
   outputSchema: docBlockUpdateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('block-update <blockId>')
       .description(docBlockUpdateCommand.summary)

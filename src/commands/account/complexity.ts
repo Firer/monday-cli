@@ -47,7 +47,7 @@ export const accountComplexityCommand: CommandModule<
   inputSchema,
   outputSchema: accountComplexityOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'account', 'Account commands');
+    const noun = ensureSubcommand(program, 'account');
     noun
       .command('complexity')
       .description(accountComplexityCommand.summary)

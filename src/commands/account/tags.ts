@@ -60,7 +60,7 @@ export const accountTagsCommand: CommandModule<
   inputSchema,
   outputSchema: accountTagsOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'account', 'Account commands');
+    const noun = ensureSubcommand(program, 'account');
     noun
       .command('tags')
       .description(accountTagsCommand.summary)

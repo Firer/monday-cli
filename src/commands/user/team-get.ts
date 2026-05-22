@@ -58,7 +58,7 @@ export const teamGetCommand: CommandModule<
   inputSchema,
   outputSchema: teamGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('team-get <teamId>')
       .description(teamGetCommand.summary)

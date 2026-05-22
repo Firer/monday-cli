@@ -51,7 +51,7 @@ export const boardViewsCommand: CommandModule<
   inputSchema,
   outputSchema: boardViewsOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('views <boardId>')
       .description(boardViewsCommand.summary)

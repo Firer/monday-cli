@@ -80,7 +80,7 @@ export const teamDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: teamDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('team-delete <teamId>')
       .description(teamDeleteCommand.summary)

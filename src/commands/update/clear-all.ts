@@ -208,7 +208,7 @@ export const updateClearAllCommand: CommandModule<
   inputSchema,
   outputSchema: updateClearAllOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('clear-all <itemId>')
       .description(updateClearAllCommand.summary)

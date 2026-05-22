@@ -72,7 +72,7 @@ export const updateEditCommand: CommandModule<
   inputSchema,
   outputSchema: updateEditOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('edit <updateId>')
       .description(updateEditCommand.summary)

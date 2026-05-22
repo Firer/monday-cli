@@ -123,7 +123,7 @@ export const boardGroupArchiveCommand: CommandModule<
   inputSchema,
   outputSchema: boardGroupArchiveOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('group-archive <boardId> <groupId>')
       .description(boardGroupArchiveCommand.summary)

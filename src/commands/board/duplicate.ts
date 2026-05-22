@@ -147,7 +147,7 @@ export const boardDuplicateCommand: CommandModule<
   inputSchema,
   outputSchema: boardDuplicateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('duplicate <boardId>')
       .description(boardDuplicateCommand.summary)

@@ -130,7 +130,7 @@ export const boardGroupCreateCommand: CommandModule<
   inputSchema,
   outputSchema: boardGroupCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('group-create <boardId>')
       .description(boardGroupCreateCommand.summary)

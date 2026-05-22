@@ -66,12 +66,10 @@ export interface CommandModule<I = unknown, O = unknown> {
  * registered exactly once regardless of registration order.
  *
  * `summary` is optional — when omitted, the description is looked
- * up in `NOUN_DESCRIPTIONS` (the single source of truth). Passing
- * an explicit `summary` overrides the map; this override path is
- * preserved across the v0.10-M53 → IMPL migration window so the
- * existing ~120 call sites compile unchanged, and `M53 IMPL` drops
- * the explicit summary from each site (see `docs/v0.10-plan.md`
- * §3 M53 D2 for the migration story).
+ * up in `NOUN_DESCRIPTIONS` (the single source of truth). The map
+ * is the only path the registered command surface uses; the explicit
+ * `summary` override is retained for ad-hoc / test injections (the
+ * unit suite exercises both arms — see `tests/unit/commands/types.test.ts`).
  *
  * The 2-arg + 3-arg overloads are deliberate: TypeScript's
  * `exactOptionalPropertyTypes` does not apply to function parameters,

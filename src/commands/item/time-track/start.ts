@@ -93,12 +93,8 @@ export const itemTimeTrackStartCommand: CommandModule<
   inputSchema,
   outputSchema: startResultSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
-    const subnoun = ensureSubcommand(
-      noun,
-      'time-track',
-      'Time-tracking column verbs',
-    );
+    const noun = ensureSubcommand(program, 'item');
+    const subnoun = ensureSubcommand(noun, 'time-track');
     subnoun
       .command('start <itemId>')
       .description(itemTimeTrackStartCommand.summary)

@@ -64,11 +64,7 @@ export const devDiscoverCommand: CommandModule<
   inputSchema,
   outputSchema: devDiscoverOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
+    const noun = ensureSubcommand(program, 'dev');
     noun
       .command('discover')
       .description(devDiscoverCommand.summary)

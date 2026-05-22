@@ -121,11 +121,7 @@ export const docListCommand: CommandModule<
   inputSchema,
   outputSchema: docListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'doc',
-      'Workdoc commands',
-    );
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('list')
       .description(docListCommand.summary)

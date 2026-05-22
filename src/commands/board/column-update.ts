@@ -186,7 +186,7 @@ export const boardColumnUpdateCommand: CommandModule<
   inputSchema,
   outputSchema: boardColumnUpdateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('column-update <boardId> <columnId>')
       .description(boardColumnUpdateCommand.summary)

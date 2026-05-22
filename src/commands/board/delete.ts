@@ -90,7 +90,7 @@ export const boardDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: boardDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('delete <boardId>')
       .description(boardDeleteCommand.summary)

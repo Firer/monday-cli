@@ -40,11 +40,7 @@ export const webhookListCommand: CommandModule<
   inputSchema,
   outputSchema: webhookListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'webhook',
-      'Manage board webhooks (register, list, delete)',
-    );
+    const noun = ensureSubcommand(program, 'webhook');
     noun
       .command('list <boardId>')
       .description(webhookListCommand.summary)

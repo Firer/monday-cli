@@ -55,16 +55,8 @@ export const devEpicItemsCommand: CommandModule<
   inputSchema,
   outputSchema,
   attach: (program, ctx) => {
-    const dev = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
-    const epic = ensureSubcommand(
-      dev,
-      'epic',
-      'Epic workflow verbs',
-    );
+    const dev = ensureSubcommand(program, 'dev');
+    const epic = ensureSubcommand(dev, 'epic');
     epic
       .command('items <epicId>')
       .description(devEpicItemsCommand.summary)

@@ -51,7 +51,7 @@ export const itemGetCommand: CommandModule<
   inputSchema,
   outputSchema: itemGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('get <itemId>')
       .description(itemGetCommand.summary)

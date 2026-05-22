@@ -127,7 +127,7 @@ export const workspaceUpdateCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceUpdateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('update <workspaceId>')
       .description(workspaceUpdateCommand.summary)

@@ -98,7 +98,7 @@ export const itemArchiveCommand: CommandModule<
   inputSchema,
   outputSchema: itemArchiveOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('archive <itemId>')
       .description(itemArchiveCommand.summary)

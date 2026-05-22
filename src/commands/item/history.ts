@@ -190,7 +190,7 @@ export const itemHistoryCommand: CommandModule<
   inputSchema,
   outputSchema: historyEventOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('history <iid>')
       .description(itemHistoryCommand.summary)

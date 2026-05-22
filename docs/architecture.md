@@ -78,10 +78,10 @@
 - `commands/types.ts` — `CommandModule<I, O>` interface + the
   `ensureSubcommand` idempotent noun-creator. `ensureSubcommand(program,
   name, summary?)` looks the description up in `NOUN_DESCRIPTIONS`
-  (see `commands/noun-descriptions.ts`) when `summary` is omitted;
-  passing an explicit `summary` overrides the map (preserved as a
-  transition window for the v0.10-M53 IMPL migration that drops the
-  3rd arg from every call site).
+  (see `commands/noun-descriptions.ts`) — the single source of truth
+  across the registered command surface. The explicit `summary`
+  override is retained for ad-hoc / test injections (exercised by
+  `tests/unit/commands/types.test.ts`).
 - `commands/noun-descriptions.ts` (v0.10-M53) — single source of
   truth for noun-level command descriptions. One entry per registered
   top-level noun + group-tier noun (~18 entries total). Replaces ~100

@@ -58,7 +58,7 @@ export const accountInfoCommand: CommandModule<
   inputSchema,
   outputSchema: accountInfoOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'account', 'Account commands');
+    const noun = ensureSubcommand(program, 'account');
     noun
       .command('info')
       .description(accountInfoCommand.summary)

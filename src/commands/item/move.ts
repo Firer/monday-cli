@@ -394,7 +394,7 @@ export const itemMoveCommand: CommandModule<
   inputSchema,
   outputSchema: itemMoveOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('move <itemId>')
       .description(itemMoveCommand.summary)

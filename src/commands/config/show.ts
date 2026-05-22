@@ -163,7 +163,7 @@ export const configShowCommand: CommandModule<
   inputSchema,
   outputSchema: configShowOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'config', 'Configuration commands');
+    const noun = ensureSubcommand(program, 'config');
     noun
       .command('show')
       .description(configShowCommand.summary)

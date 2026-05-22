@@ -83,7 +83,7 @@ export const updateDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: updateDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('delete <updateId>')
       .description(updateDeleteCommand.summary)

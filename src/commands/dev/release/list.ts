@@ -45,16 +45,8 @@ export const devReleaseListCommand: CommandModule<
   inputSchema,
   outputSchema,
   attach: (program, ctx) => {
-    const dev = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
-    const release = ensureSubcommand(
-      dev,
-      'release',
-      'Release workflow verbs',
-    );
+    const dev = ensureSubcommand(program, 'dev');
+    const release = ensureSubcommand(dev, 'release');
     release
       .command('list')
       .description(devReleaseListCommand.summary)

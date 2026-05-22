@@ -204,7 +204,7 @@ export const docImportHtmlCommand: CommandModule<
   inputSchema,
   outputSchema: docImportHtmlOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('import-html')
       .description(docImportHtmlCommand.summary)

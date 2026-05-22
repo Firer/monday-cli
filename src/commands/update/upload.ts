@@ -104,11 +104,7 @@ export const updateUploadCommand: CommandModule<
   inputSchema,
   outputSchema: updateUploadOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'update',
-      'Update (comment) commands (cli-design §4.3 UPDATE)',
-    );
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('upload <updateId> <file>')
       .description(updateUploadCommand.summary)

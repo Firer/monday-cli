@@ -67,11 +67,7 @@ export const authLogoutCommand: CommandModule<
   inputSchema,
   outputSchema: logoutOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'auth',
-      'Manage stored authentication credentials',
-    );
+    const noun = ensureSubcommand(program, 'auth');
     noun
       .command('logout')
       .description(authLogoutCommand.summary)

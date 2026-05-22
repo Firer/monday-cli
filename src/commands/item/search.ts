@@ -617,7 +617,7 @@ export const itemSearchCommand: CommandModule<
   // `monday schema item.search` accurate across both branches.
   outputSchema: itemSearchCommandOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('search')
       .description(itemSearchCommand.summary)

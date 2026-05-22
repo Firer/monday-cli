@@ -779,7 +779,7 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
   inputSchema,
   outputSchema: itemUpsertOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('upsert')
       .description(itemUpsertCommand.summary)

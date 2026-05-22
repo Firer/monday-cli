@@ -95,7 +95,7 @@ export const docCreateOnColumnCommand: CommandModule<
   inputSchema,
   outputSchema: docCreateOnColumnOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('create-on-column')
       .description(docCreateOnColumnCommand.summary)

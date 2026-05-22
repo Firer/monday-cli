@@ -94,7 +94,7 @@ export const boardArchiveCommand: CommandModule<
   inputSchema,
   outputSchema: boardArchiveOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('archive <boardId>')
       .description(boardArchiveCommand.summary)

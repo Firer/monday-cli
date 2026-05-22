@@ -101,7 +101,7 @@ export const itemDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: itemDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('delete <itemId>')
       .description(itemDeleteCommand.summary)

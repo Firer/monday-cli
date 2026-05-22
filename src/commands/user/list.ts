@@ -109,7 +109,7 @@ export const userListCommand: CommandModule<
   inputSchema,
   outputSchema: userListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('list')
       .description(userListCommand.summary)

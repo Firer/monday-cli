@@ -84,7 +84,7 @@ export const updateReplyCommand: CommandModule<
   inputSchema,
   outputSchema: updateReplyOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('reply <parentId>')
       .description(updateReplyCommand.summary)

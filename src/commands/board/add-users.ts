@@ -103,7 +103,7 @@ export const boardAddUsersCommand: CommandModule<
   inputSchema,
   outputSchema: boardAddUsersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('add-users <boardId>')
       .description(boardAddUsersCommand.summary)

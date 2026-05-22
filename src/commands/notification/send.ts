@@ -91,11 +91,7 @@ export const notificationSendCommand: CommandModule<
   inputSchema,
   outputSchema: notificationSendOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'notification',
-      'Send notifications to Monday users',
-    );
+    const noun = ensureSubcommand(program, 'notification');
     noun
       .command('send')
       .description(notificationSendCommand.summary)

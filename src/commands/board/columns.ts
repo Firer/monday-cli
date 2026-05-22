@@ -64,7 +64,7 @@ export const boardColumnsCommand: CommandModule<
   inputSchema,
   outputSchema: boardColumnsOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('columns <boardId>')
       .description(boardColumnsCommand.summary)

@@ -125,7 +125,7 @@ export const docBlockCreateCommand: CommandModule<
   inputSchema,
   outputSchema: docBlockCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('block-create <docId>')
       .description(docBlockCreateCommand.summary)

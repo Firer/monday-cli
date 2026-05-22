@@ -118,7 +118,7 @@ export const boardGroupDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: boardGroupDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('group-delete <boardId> <groupId>')
       .description(boardGroupDeleteCommand.summary)

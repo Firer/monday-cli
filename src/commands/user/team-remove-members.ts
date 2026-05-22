@@ -98,7 +98,7 @@ export const teamRemoveMembersCommand: CommandModule<
   inputSchema,
   outputSchema: teamRemoveMembersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('team-remove-members <teamId>')
       .description(teamRemoveMembersCommand.summary)

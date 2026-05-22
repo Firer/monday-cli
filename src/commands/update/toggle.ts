@@ -94,7 +94,7 @@ export const buildUpdateToggleCommand = (
   inputSchema: toggleInputSchema,
   outputSchema: toggleOutputSchema,
   attach: (program: Command, ctx: RunContext) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command(`${config.verb} <updateId>`)
       .description(config.summary)

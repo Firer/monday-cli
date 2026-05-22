@@ -57,7 +57,7 @@ export const teamListCommand: CommandModule<
   inputSchema,
   outputSchema: teamListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('team-list')
       .description(teamListCommand.summary)

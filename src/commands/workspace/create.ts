@@ -92,7 +92,7 @@ export const workspaceCreateCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('create')
       .description(workspaceCreateCommand.summary)

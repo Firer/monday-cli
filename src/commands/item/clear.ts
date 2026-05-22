@@ -289,7 +289,7 @@ export const itemClearCommand: CommandModule<ParsedInput, ItemClearOutput> = {
   inputSchema,
   outputSchema: itemClearOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       // Two-positional declaration with the second optional. When
       // both are present, the first is the itemId and the second is

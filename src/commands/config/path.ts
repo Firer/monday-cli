@@ -71,7 +71,7 @@ export const configPathCommand: CommandModule<
   inputSchema,
   outputSchema: configPathOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'config', 'Configuration commands');
+    const noun = ensureSubcommand(program, 'config');
     noun
       .command('path')
       .description(configPathCommand.summary)

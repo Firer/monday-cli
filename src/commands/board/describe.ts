@@ -230,7 +230,7 @@ export const boardDescribeCommand: CommandModule<
   inputSchema,
   outputSchema: boardDescribeOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('describe <boardId>')
       .description(boardDescribeCommand.summary)

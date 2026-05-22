@@ -69,11 +69,7 @@ export const webhookDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: webhookDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'webhook',
-      'Manage board webhooks (register, list, delete)',
-    );
+    const noun = ensureSubcommand(program, 'webhook');
     noun
       .command('delete <webhookId>')
       .description(webhookDeleteCommand.summary)

@@ -124,7 +124,7 @@ export const workspaceAddUsersCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceAddUsersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('add-users <workspaceId>')
       .description(workspaceAddUsersCommand.summary)

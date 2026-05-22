@@ -54,16 +54,8 @@ export const devTaskStartCommand: CommandModule<
   inputSchema,
   outputSchema: projectedItemSchema,
   attach: (program, ctx) => {
-    const dev = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
-    const task = ensureSubcommand(
-      dev,
-      'task',
-      'Task workflow verbs',
-    );
+    const dev = ensureSubcommand(program, 'dev');
+    const task = ensureSubcommand(dev, 'task');
     task
       .command('start <itemId>')
       .description(devTaskStartCommand.summary)

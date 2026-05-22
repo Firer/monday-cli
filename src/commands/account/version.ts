@@ -69,7 +69,7 @@ export const accountVersionCommand: CommandModule<
   inputSchema,
   outputSchema: accountVersionOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'account', 'Account commands');
+    const noun = ensureSubcommand(program, 'account');
     noun
       .command('version')
       .description(accountVersionCommand.summary)

@@ -148,11 +148,7 @@ export const itemUploadCommand: CommandModule<
   inputSchema,
   outputSchema: itemUploadOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'item',
-      'Item commands',
-    );
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('upload <itemId> <file>')
       .description(itemUploadCommand.summary)

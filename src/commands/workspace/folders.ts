@@ -94,7 +94,7 @@ export const workspaceFoldersCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceFoldersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('folders <workspaceId>')
       .description(workspaceFoldersCommand.summary)

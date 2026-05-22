@@ -68,7 +68,7 @@ export const cacheClearCommand: CommandModule<
   inputSchema,
   outputSchema: cacheClearOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'cache', 'Cache management commands');
+    const noun = ensureSubcommand(program, 'cache');
     noun
       .command('clear')
       .description(cacheClearCommand.summary)

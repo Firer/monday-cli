@@ -177,7 +177,7 @@ export const itemListCommand: CommandModule<
   inputSchema,
   outputSchema: itemListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('list')
       .description(itemListCommand.summary)

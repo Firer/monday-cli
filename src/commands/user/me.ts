@@ -29,7 +29,7 @@ export const userMeCommand: CommandModule<
   inputSchema,
   outputSchema: whoamiOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('me')
       .description(userMeCommand.summary)

@@ -125,7 +125,7 @@ export const docDuplicateCommand: CommandModule<
   inputSchema,
   outputSchema: docDuplicateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('duplicate <docId>')
       .description(docDuplicateCommand.summary)

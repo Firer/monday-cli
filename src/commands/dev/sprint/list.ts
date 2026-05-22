@@ -70,16 +70,8 @@ export const devSprintListCommand: CommandModule<
   inputSchema,
   outputSchema,
   attach: (program, ctx) => {
-    const dev = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
-    const sprint = ensureSubcommand(
-      dev,
-      'sprint',
-      'Sprint workflow verbs',
-    );
+    const dev = ensureSubcommand(program, 'dev');
+    const sprint = ensureSubcommand(dev, 'sprint');
     sprint
       .command('list')
       .description(devSprintListCommand.summary)

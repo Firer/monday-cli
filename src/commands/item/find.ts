@@ -172,7 +172,7 @@ export const itemFindCommand: CommandModule<
   inputSchema,
   outputSchema: itemFindOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('find <name>')
       .description(itemFindCommand.summary)

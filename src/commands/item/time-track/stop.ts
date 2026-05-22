@@ -63,12 +63,8 @@ export const itemTimeTrackStopCommand: CommandModule<
   inputSchema,
   outputSchema: stopResultSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
-    const subnoun = ensureSubcommand(
-      noun,
-      'time-track',
-      'Time-tracking column verbs',
-    );
+    const noun = ensureSubcommand(program, 'item');
+    const subnoun = ensureSubcommand(noun, 'time-track');
     subnoun
       .command('stop <itemId>')
       .description(itemTimeTrackStopCommand.summary)

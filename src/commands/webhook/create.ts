@@ -75,11 +75,7 @@ export const webhookCreateCommand: CommandModule<
   inputSchema,
   outputSchema: webhookCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'webhook',
-      'Manage board webhooks (register, list, delete)',
-    );
+    const noun = ensureSubcommand(program, 'webhook');
     noun
       .command('create <boardId>')
       .description(webhookCreateCommand.summary)

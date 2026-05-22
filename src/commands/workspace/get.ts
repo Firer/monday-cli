@@ -51,7 +51,7 @@ export const workspaceGetCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('get <workspaceId>')
       .description(workspaceGetCommand.summary)

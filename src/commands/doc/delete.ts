@@ -92,7 +92,7 @@ export const docDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: docDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('delete <docId>')
       .description(docDeleteCommand.summary)

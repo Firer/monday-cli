@@ -193,7 +193,7 @@ export const docAppendMarkdownCommand: CommandModule<
   inputSchema,
   outputSchema: docAppendMarkdownOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('append-markdown <docId>')
       .description(docAppendMarkdownCommand.summary)

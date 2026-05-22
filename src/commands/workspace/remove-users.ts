@@ -94,7 +94,7 @@ export const workspaceRemoveUsersCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceRemoveUsersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('remove-users <workspaceId>')
       .description(workspaceRemoveUsersCommand.summary)

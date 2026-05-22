@@ -79,7 +79,7 @@ export const updateGetCommand: CommandModule<
   inputSchema,
   outputSchema: updateGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('get <updateId>')
       .description(updateGetCommand.summary)

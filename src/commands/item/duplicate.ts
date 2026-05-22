@@ -148,7 +148,7 @@ export const itemDuplicateCommand: CommandModule<
   inputSchema,
   outputSchema: itemDuplicateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('duplicate <itemId>')
       .description(itemDuplicateCommand.summary)

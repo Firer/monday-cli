@@ -99,7 +99,7 @@ export const workspaceDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('delete <workspaceId>')
       .description(workspaceDeleteCommand.summary)

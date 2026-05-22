@@ -96,7 +96,7 @@ export const docBlockDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: docBlockDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'doc', 'Workdoc commands');
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('block-delete <blockId>')
       .description(docBlockDeleteCommand.summary)

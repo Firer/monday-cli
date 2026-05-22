@@ -194,7 +194,7 @@ export const boardGroupUpdateCommand: CommandModule<
   inputSchema,
   outputSchema: boardGroupUpdateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('group-update <boardId> <groupId>')
       .description(boardGroupUpdateCommand.summary)

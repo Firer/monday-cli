@@ -690,7 +690,7 @@ export const boardColumnCreateCommand: CommandModule<
   inputSchema,
   outputSchema: boardColumnCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('column-create <boardId>')
       .description(boardColumnCreateCommand.summary)

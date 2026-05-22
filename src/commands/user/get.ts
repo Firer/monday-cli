@@ -66,7 +66,7 @@ export const userGetCommand: CommandModule<
   inputSchema,
   outputSchema: userGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('get <userId>')
       .description(userGetCommand.summary)

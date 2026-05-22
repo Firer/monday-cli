@@ -60,7 +60,7 @@ export const boardGetCommand: CommandModule<
   inputSchema,
   outputSchema: boardGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('get <boardId>')
       .description(boardGetCommand.summary)

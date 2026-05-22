@@ -51,7 +51,7 @@ export const boardFavoritesCommand: CommandModule<
   inputSchema,
   outputSchema: boardFavoritesOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('favorites')
       .description(boardFavoritesCommand.summary)

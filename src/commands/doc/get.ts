@@ -63,11 +63,7 @@ export const docGetCommand: CommandModule<
   inputSchema,
   outputSchema: docGetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(
-      program,
-      'doc',
-      'Workdoc commands',
-    );
+    const noun = ensureSubcommand(program, 'doc');
     noun
       .command('get <docId>')
       .description(docGetCommand.summary)

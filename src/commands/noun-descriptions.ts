@@ -7,8 +7,8 @@ import { InternalError } from '../utils/errors.js';
  * (`monday dev <group>`, `monday item time-track`) the CLI registers
  * has exactly one entry here. `ensureSubcommand(program, name)` looks
  * the description up; passing an explicit `summary` overrides the
- * map (kept for the v0.10-M53 → IMPL migration window — see
- * `docs/v0.10-plan.md` §3 M53 D2).
+ * map (retained for ad-hoc / test injections — the unit suite at
+ * `tests/unit/commands/types.test.ts` exercises both arms).
  *
  * Why a map instead of per-file literals: every verb file under
  * `src/commands/<noun>/` used to call

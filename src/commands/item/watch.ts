@@ -239,7 +239,7 @@ export const itemWatchCommand: CommandModule<
   // uses.
   outputSchema: historyEventSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       .command('watch <iid>')
       .description(itemWatchCommand.summary)

@@ -50,16 +50,8 @@ export const devSprintCurrentCommand: CommandModule<
   inputSchema,
   outputSchema: projectedItemSchema,
   attach: (program, ctx) => {
-    const dev = ensureSubcommand(
-      program,
-      'dev',
-      'Monday Dev workflow shortcuts (sprint, epic, release, task)',
-    );
-    const sprint = ensureSubcommand(
-      dev,
-      'sprint',
-      'Sprint workflow verbs',
-    );
+    const dev = ensureSubcommand(program, 'dev');
+    const sprint = ensureSubcommand(dev, 'sprint');
     sprint
       .command('current')
       .description(devSprintCurrentCommand.summary)

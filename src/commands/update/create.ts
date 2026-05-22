@@ -99,7 +99,7 @@ export const updateCreateCommand: CommandModule<
   inputSchema,
   outputSchema: updateCreateOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'update', 'Update (comment) commands');
+    const noun = ensureSubcommand(program, 'update');
     noun
       .command('create <itemId>')
       .description(updateCreateCommand.summary)

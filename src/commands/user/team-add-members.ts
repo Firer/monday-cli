@@ -108,7 +108,7 @@ export const teamAddMembersCommand: CommandModule<
   inputSchema,
   outputSchema: teamAddMembersOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'user', 'User commands');
+    const noun = ensureSubcommand(program, 'user');
     noun
       .command('team-add-members <teamId>')
       .description(teamAddMembersCommand.summary)

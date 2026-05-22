@@ -99,7 +99,7 @@ export const boardFindCommand: CommandModule<
   inputSchema,
   outputSchema: boardFindOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('find <name>')
       .description(boardFindCommand.summary)

@@ -92,7 +92,7 @@ export const workspaceListCommand: CommandModule<
   inputSchema,
   outputSchema: workspaceListOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'workspace', 'Workspace commands');
+    const noun = ensureSubcommand(program, 'workspace');
     noun
       .command('list')
       .description(workspaceListCommand.summary)

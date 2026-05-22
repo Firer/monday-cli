@@ -206,7 +206,7 @@ export const itemSetCommand: CommandModule<
   inputSchema,
   outputSchema: itemSetOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'item', 'Item commands');
+    const noun = ensureSubcommand(program, 'item');
     noun
       // Positional `[setExpr]` optional so the parser accepts the
       // `--set-raw`-only invocation per cli-design §4.3 line 492-494.

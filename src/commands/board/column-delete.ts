@@ -118,7 +118,7 @@ export const boardColumnDeleteCommand: CommandModule<
   inputSchema,
   outputSchema: boardColumnDeleteOutputSchema,
   attach: (program, ctx) => {
-    const noun = ensureSubcommand(program, 'board', 'Board commands');
+    const noun = ensureSubcommand(program, 'board');
     noun
       .command('column-delete <boardId> <columnId>')
       .description(boardColumnDeleteCommand.summary)
