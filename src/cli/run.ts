@@ -188,9 +188,12 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     runtimeSecrets: [],
   };
 
-  const program = buildProgram(options, ctx);
-
   try {
+    // `buildProgram` runs every CommandModule's `attach()`; if any
+    // throws (e.g. v0.10-M53's `lookupNounDescription` strict-mode
+    // rejection for an unmapped noun), the catch arm converts it to
+    // the envelope instead of letting it escape as a raw stack trace.
+    const program = buildProgram(options, ctx);
     await program.parseAsync(options.argv);
     if (combinedSignal.aborted && isSigintReason(combinedSignal.reason)) {
       return { exitCode: 130 };

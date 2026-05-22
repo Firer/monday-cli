@@ -193,45 +193,65 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10-M53 pre-flight contract diff** for the
-  **`NOUN_DESCRIPTIONS` single-source-of-truth lift** (R-v0.8-NEW-22
-  graduation; v0.8-plan §22). **v0.10 candidate-selection DONE
-  2026-05-22** — per R-NEW-75's 5-dimension scoping the user picked the
-  lift over C (cross-board `item move` value-overrides; 4 release-preps
-  slipped, 5th if not next), E (profile-scoped argument defaults; needs
-  §13 carve-out Decision distinguishing aliases-as-stored-command-strings
-  from defaults-as-stored-flag-values), and G (`Item.description`
-  read-side; paired-pending with v0.7-M40 per the 2026-05-22 user
-  binding). Rationale: M50 surfaced a demonstrated shipped bug (the
-  `doc` "read-only at v0.4" staleness — drifted sibling literal wins by
-  `ensureSubcommand` attach-order; find-or-create semantics make
-  divergence silent) that this lift closes structurally; MEDIUM-HIGH
-  priority per its filing. Scope: collapse ~100 duplicate
-  `ensureSubcommand(program, '<noun>', '<desc>')` literals across ~80
-  verb files (Board ×23, Item ×19, Workdoc ×12, User ×9, Update ×8,
-  Workspace ×8, Account ×5, dev ~×13 + webhook/auth/notification/
-  config/cache) plus the three-level group descriptions (dev sprint/
-  epic/release/task, time-track) into one `NOUN_DESCRIPTIONS` map;
-  `ensureSubcommand(program, name)` looks the description up, 3rd arg
-  becomes optional override or drops. Zero new wire surface, zero new
-  transport seam, zero new ERROR_CODE (29 stays), zero command delta
-  (118 stays). Codex round estimate MED 3-4 (mechanical surface —
-  bounded blast radius: description strings only, no behaviour change).
-  R-v0.8-NEW-22's trigger ("next session touching command registration
-  / a new noun") fires on the `ensureSubcommand` signature change
-  itself; the lift also makes R-v0.8-NEW-21's release-prep grep a
-  single-file scan (R-v0.8-NEW-21 status stays PARTIALLY-RESOLVED —
-  graduation criterion ["2nd release-prep surfaces fresh leaks"] still
-  UNMET). SDK probe at this session: still
-  `@mondaydotcomorg/api@14.0.0` — **4th-consecutive SDK stall**, so
-  M39/M40/M41 (SDK 15.x → API `2026-04`) + M44/M45 (SDK 16.x → API
-  `2026-07`) stay DEFERRED; v0.10 is the 4th-consecutive pivot in
-  sequence (v0.7/v0.8/v0.9/v0.10). Carried-forward alternatives stay
-  filed for v0.10.x / v0.11 candidate-selection (C/D/E/G above + D
+- **Next session:** **v0.10-M53 IMPL** for the **`NOUN_DESCRIPTIONS`
+  single-source-of-truth lift** (R-v0.8-NEW-22 graduation; v0.8-plan
+  §22 → now PROMOTED to v0.10-plan §22). **M53 pre-flight CLOSED
+  2026-05-22** (`<pre-flight-sha>`; additive signature stub + map
+  skeleton, all ~120 existing `ensureSubcommand(...)` call sites
+  compile unchanged). Pre-flight shipped: new
+  `src/commands/noun-descriptions.ts` carrying the 18-entry
+  `NOUN_DESCRIPTIONS` map + `lookupNounDescription` helper (throws
+  `InternalError` / `details.reason: 'unknown_noun'` on missing
+  entry); `ensureSubcommand(program, name, summary?)` made `summary`
+  optional with map fallback; ~12 new
+  `tests/unit/commands/types.test.ts` tests pinning lookup happy path
+  + override-wins + find-or-create + strict-mode rejection + the map's
+  18-entry shape + `feedback_public_docs_clean` invariant; new
+  `docs/v0.10-plan.md` with §1/§2/§3 M53 D1-D5 + §7 release-prep
+  exit checklist skeleton + §9 preconditions + §22 R-class register
+  opening; `docs/architecture.md` `commands/types.ts` line extended
+  + new `commands/noun-descriptions.ts` line; `docs/cli-design.md`
+  §4.3 head one-line pointer to the architecture doc;
+  `docs/v0.8-plan.md` §22 R-v0.8-NEW-22 status OPEN → PROMOTED with
+  cross-link to v0.10-plan §22. **D1-D5 closed**: D1 flat noun-stem
+  keys (no collisions across 18 nouns today; future collisions would
+  NOT surface automatically — the lookup returns the same string for
+  both registrations and commander's separate parent scopes mask the
+  drift — so a collision when it appears requires revisiting the
+  keying, low migration cost since the map centralises the strings);
+  D2 additive signature (preserves
+  pre-flight contract diff discipline — IMPL flips runtime, not
+  pre-flight); D3 new module (SRP — `types.ts` stays pure interface,
+  the map is concrete data); D4 12-test contract drives real
+  `NOUN_DESCRIPTIONS` + real `Command`; D5 ERROR_CODES delta ZERO
+  (registry stays 29, the new `unknown_noun` is an `internal_error`
+  discriminator, not a new code). **2nd-instance R-v0.9-NEW-2
+  rule fired** — "rejection-lift / pure-refactor pre-flights need NO
+  stub literal"; the rule-graduation criterion (2 instances per
+  R-NEW-58) is MET — graduate into `.claude/rules/workflow.md` at
+  M53 IMPL close. **New R-class:** R-v0.10-NEW-1 (active `'update'`
+  drift in `update/upload.ts:110` carrying `'Update (comment)
+  commands (cli-design §4.3 UPDATE)'` — internal `cli-design §` ref
+  leaking into help; structurally fixed by M53 IMPL's mass migration,
+  no inline fix at pre-flight per handoff §7); R-v0.10-NEW-2 (the
+  rule-of-three demonstrated for the drift bug class: 1st `doc`
+  v0.5/v0.8; 2nd `update` v0.10 pre-flight; M53 closes the bug
+  class structurally). **IMPL scope (next session):** drop the 3rd
+  arg from every `ensureSubcommand(program, '<noun>', '<desc>')`
+  call site (~120 sites); the `update/upload.ts` drift drops in the
+  migration. Codex IMPL round estimate MED 3-4. Zero new wire
+  surface, zero new transport seam, zero new ERROR_CODE (29 stays),
+  zero command delta (118 stays). v0.10 candidate-selection
+  rationale + alternatives (C/E/G) stay as filed —
+  `docs/v0.8-plan.md` §22 + `docs/v0.10-plan.md` kickoff blockquote.
+  SDK probe at this session: still `@mondaydotcomorg/api@14.0.0` —
+  **4th-consecutive SDK stall**, so M39/M40/M41 (SDK 15.x → API
+  `2026-04`) + M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED;
+  v0.10 is the 4th-consecutive pivot in sequence
+  (v0.7/v0.8/v0.9/v0.10). Carried-forward alternatives stay filed
+  for v0.10.x / v0.11 candidate-selection (C/D/E/G above + D
   resumable cross-board cursor — design-blocked on per-board
-  cursor-lifetime under aggregation; cli-design §13). **No
-  `docs/v0.10-plan.md` opened here** — per workflow convention the new
-  plan doc opens at the FIRST pre-flight contract diff commit of M53.
+  cursor-lifetime under aggregation; cli-design §13).
   v0.9.0 is **PUBLISHED + release-complete** (npm `latest`
   2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`; release-prep
   `0147883..ee96681`). v0.9 feature-cluster scope is fully shipped —
@@ -540,20 +560,41 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — **ACTIVE plan**
-   (kickoff 2026-05-22). v0.9 = the **multi-level board cluster** on
-   the `2026-01` pin: **M50** multi-level subitem nesting (closes the
-   M28 deferral + fixes the shipped-incorrect `item create --parent`
-   rejection) + **M51** `hierarchy_type` surfacing / `board duplicate`
-   multi-level path + **M52** board views read. **M50 ✅ SHIPPED
-   2026-05-22** (`e89ddfc`, deletion-led IMPL, Codex CONVERGED R1;
-   pre-flight `9675f6a..e41b467`); **M51 ✅ SHIPPED 2026-05-22**
-   (`f63218d` + `4d39e4d`, Codex pre-flight + IMPL both CONVERGED R1;
-   pre-flight `4eb3ca4..2958146`); **M52 ✅ SHIPPED 2026-05-22**
-   (`a184156`, Codex pre-flight CONVERGED R3 + IMPL CONVERGED R1;
-   pre-flight `d842251..bbde3d5`). **All v0.9 feature scope SHIPPED;
-   next is release-prep** (0.8.0 → 0.9.0 + CHANGELOG + close-docs,
-   per R-NEW-82/84 baseline).
+2. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — **ACTIVE plan**
+   (kickoff 2026-05-22). v0.10 = the **`NOUN_DESCRIPTIONS` single-
+   source-of-truth lift** on the `2026-01` pin: **M53** collapses
+   ~100 duplicate `ensureSubcommand(program, '<noun>', '<desc>')`
+   literals across ~80 verb files into one 18-entry map; closes the
+   R-v0.8-NEW-22 candidate (filed at v0.8 post-publish; demonstrated
+   shipped bug: `doc` "read-only at v0.4" + `update`
+   `'cli-design §4.3 UPDATE'` ref leaking into help). **M53
+   pre-flight CLOSED 2026-05-22** (`<pre-flight-sha>` — additive
+   signature stub + new `src/commands/noun-descriptions.ts` module +
+   12 new `tests/unit/commands/types.test.ts` tests; all ~120
+   existing call sites compile unchanged). §22 R-class register
+   populated at M53 pre-flight (R-v0.10-NEW-1/2 + carried-forward
+   v0.8 watch-items R-v0.8-NEW-19/20/21 + carried-forward v0.9
+   watch-items R-v0.9-NEW-3/5/8/9/10/11/12/13/14/15/16 + promoted
+   R-v0.8-NEW-22 → M53). **Next is M53 IMPL** (drop the 3rd arg
+   from each of the ~120 call sites; structurally drops the
+   `update/upload.ts` drift) + release-prep (0.9.0 → 0.10.0 +
+   CHANGELOG + close-docs, per R-NEW-82/84 baseline).
+   M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay DEFERRED —
+   SDK still 14.0.0 (**4th-consecutive stall**).
+3. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
+   `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`). v0.9
+   = the **multi-level board cluster** on the `2026-01` pin: **M50**
+   multi-level subitem nesting (closes the M28 deferral + fixes the
+   shipped-incorrect `item create --parent` rejection) + **M51**
+   `hierarchy_type` surfacing / `board duplicate` multi-level path
+   + **M52** board views read. **M50 ✅ SHIPPED 2026-05-22**
+   (`e89ddfc`, deletion-led IMPL, Codex CONVERGED R1; pre-flight
+   `9675f6a..e41b467`); **M51 ✅ SHIPPED 2026-05-22** (`f63218d` +
+   `4d39e4d`, Codex pre-flight + IMPL both CONVERGED R1; pre-flight
+   `4eb3ca4..2958146`); **M52 ✅ SHIPPED 2026-05-22** (`a184156`,
+   Codex pre-flight CONVERGED R3 + IMPL CONVERGED R1; pre-flight
+   `d842251..bbde3d5`). Release-prep at `0147883..ee96681` (4
+   commits).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
    stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
    the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
@@ -580,12 +621,14 @@ detail, and R-class refactor backlog, **read the plan docs** —
    fixture-leftover-detection at close-docs after the M3 e2e M51
    leftover catch, MEDIUM; R-v0.9-NEW-12 Codex pre-flight
    findings-first behavior under `-xhigh` reasoning, LOW-MEDIUM).
-3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
+4. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
    cluster; re-scoped off the original 2026-07 SKELETON (M44/M45)
-   per the v0.7-pivot precedent. §22 R-class log (R-v0.8-NEW-*).
-4. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
+   per the v0.7-pivot precedent. §22 R-class log (R-v0.8-NEW-*) —
+   **R-v0.8-NEW-22 PROMOTED to v0.10-M53 at this session**
+   (status flipped OPEN → PROMOTED 2026-05-22).
+5. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
    M43 (the v0.6.x bulk + create file `--set` carve-out folds);
    M39 (API `2026-04` pin bump) + M40 (`item set-description`) +
    M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** pending
@@ -597,19 +640,19 @@ detail, and R-class refactor backlog, **read the plan docs** —
    `.claude/rules/workflow.md` at M42 IMPL R7 + refined at R8;
    R-NEW-76 graduated from stub-anchored to wire-dispatch-anchored
    invariant at M43 IMPL).
-5. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
+6. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
    (files-shaped friendly `--set`) with §22 R-class log
    (R-v0.6-NEW-*).
-6. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
+7. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
-7. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
+8. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
    with §22 R-class log (R-NEW-72 through R-NEW-84 graduated).
-8. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
+9. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
    with §22 R-class log (R-NEW-1 through R-NEW-43).
-9. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
-   (R20–R53).
-10. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
-   foundations.
+10. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
+    (R20–R53).
+11. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
+    foundations.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)
 (snapshot-backed per-command `data` reference);

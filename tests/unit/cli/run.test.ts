@@ -8,6 +8,7 @@ import { loadConfig } from '../../../src/config/load.js';
 import {
   ApiError,
   ConfigError,
+  InternalError,
   UsageError,
 } from '../../../src/utils/errors.js';
 import { fixedRequestIdGenerator } from '../../../src/utils/request-id.js';
@@ -326,6 +327,41 @@ describe('run — error envelope from command actions', () => {
       error: { code: string };
     };
     expect(envelope.error.code).toBe('internal_error');
+  });
+
+  it('a throw from buildProgram / attach() (e.g. v0.10-M53 lookupNounDescription strict-mode) surfaces as internal_error / exit 2, not a raw stack trace', async () => {
+    // M53 advertises `lookupNounDescription` as a registration-time
+    // invariant: if a `attach()` calls `ensureSubcommand(program,
+    // '<typo-noun>')` (omitted summary) and the noun has no map
+    // entry, the throw must land in the runner's envelope machinery
+    // — not escape as an uncaught stack trace. The runner's
+    // `buildProgram` invocation moved inside the try-catch boundary
+    // to guarantee this.
+    const { options, captured } = baseOptions({
+      argv: ['node', 'monday', 'whatever'],
+      env: {},
+      registerCommands: () => {
+        throw new InternalError(
+          'simulated attach-time failure (M53 lookupNounDescription)',
+          { details: { reason: 'unknown_noun', noun: 'typo-noun' } },
+        );
+      },
+    });
+
+    const result = await run(options);
+    expect(result.exitCode).toBe(2);
+
+    const envelope = JSON.parse(captured.stderr()) as {
+      ok: boolean;
+      error: { code: string; message: string; details?: Record<string, unknown> };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.code).toBe('internal_error');
+    expect(envelope.error.message).toContain('simulated attach-time failure');
+    expect(envelope.error.details).toMatchObject({
+      reason: 'unknown_noun',
+      noun: 'typo-noun',
+    });
   });
 });
 

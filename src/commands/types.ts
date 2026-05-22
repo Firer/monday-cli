@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import type { z } from 'zod';
 import type { RunContext } from '../cli/run.js';
+import { lookupNounDescription } from './noun-descriptions.js';
 
 /**
  * A registered CLI command (`v0.1-plan.md` §4 DoD #2).
@@ -63,16 +64,51 @@ export interface CommandModule<I = unknown, O = unknown> {
  * Multiple verb commands share the same parent (`monday config show`,
  * `monday config path`); each `attach` calls this so the parent is
  * registered exactly once regardless of registration order.
+ *
+ * `summary` is optional — when omitted, the description is looked
+ * up in `NOUN_DESCRIPTIONS` (the single source of truth). Passing
+ * an explicit `summary` overrides the map; this override path is
+ * preserved across the v0.10-M53 → IMPL migration window so the
+ * existing ~120 call sites compile unchanged, and `M53 IMPL` drops
+ * the explicit summary from each site (see `docs/v0.10-plan.md`
+ * §3 M53 D2 for the migration story).
+ *
+ * The 2-arg + 3-arg overloads are deliberate: TypeScript's
+ * `exactOptionalPropertyTypes` does not apply to function parameters,
+ * so a single `summary?: string` parameter would silently accept
+ * `ensureSubcommand(program, name, undefined)` (and fall through to
+ * the map lookup). Overloads force callers to either omit the third
+ * argument entirely or pass a concrete string.
  */
-export const ensureSubcommand = (
+// Overloads are deliberate: the 2-arg + 3-arg public signatures
+// force callers to either omit the third argument entirely or pass
+// a concrete string. A single `summary?: string` parameter would
+// silently accept `ensureSubcommand(program, name, undefined)` (the
+// implementation `summary ?? lookupNounDescription(name)` falls
+// through to the map either way, so the runtime is equivalent — but
+// the type-level check makes "maybe-undefined override" impossible
+// from typed call sites, which prevents the typo class where a
+// caller meant to pass a real summary but threaded a maybe-undefined
+// variable). `@typescript-eslint/unified-signatures` would prefer
+// the collapsed form; the type-safety guarantee is worth the waiver.
+/* eslint-disable @typescript-eslint/unified-signatures */
+export function ensureSubcommand(program: Command, name: string): Command;
+export function ensureSubcommand(
   program: Command,
   name: string,
   summary: string,
-): Command => {
+): Command;
+/* eslint-enable @typescript-eslint/unified-signatures */
+export function ensureSubcommand(
+  program: Command,
+  name: string,
+  summary?: string,
+): Command {
   const existing = program.commands.find((c) => c.name() === name);
   if (existing !== undefined) {
     return existing;
   }
-  const child = program.command(name).description(summary);
+  const description = summary ?? lookupNounDescription(name);
+  const child = program.command(name).description(description);
   return child;
-};
+}

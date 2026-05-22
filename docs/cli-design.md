@@ -501,6 +501,13 @@ required positionals. **Phase markers** in the right column show
 which release each command lands in. Agents reading this tree as
 ground truth should ignore commands beyond the active version.
 
+> *Implementation note (v0.10-M53):* the noun-level description
+> string each `monday <noun> --help` renders ("Item commands",
+> "Board commands", etc.) is single-sourced in
+> `src/commands/noun-descriptions.ts`; see
+> [`docs/architecture.md`](./architecture.md#commands-one-commandmodule-per-verb)
+> for the registration mechanism.
+
 ```
 COMMAND                                                                      PHASE
 

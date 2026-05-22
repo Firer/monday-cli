@@ -76,7 +76,19 @@
 ### `commands/` (one CommandModule per verb)
 
 - `commands/types.ts` — `CommandModule<I, O>` interface + the
-  `ensureSubcommand` idempotent noun-creator.
+  `ensureSubcommand` idempotent noun-creator. `ensureSubcommand(program,
+  name, summary?)` looks the description up in `NOUN_DESCRIPTIONS`
+  (see `commands/noun-descriptions.ts`) when `summary` is omitted;
+  passing an explicit `summary` overrides the map (preserved as a
+  transition window for the v0.10-M53 IMPL migration that drops the
+  3rd arg from every call site).
+- `commands/noun-descriptions.ts` (v0.10-M53) — single source of
+  truth for noun-level command descriptions. One entry per registered
+  top-level noun + group-tier noun (~18 entries total). Replaces ~100
+  duplicate `'<noun>', '<desc>'` literals that previously lived in
+  every verb file's `attach()`. `lookupNounDescription(name)` throws
+  `InternalError` with `details.reason: 'unknown_noun'` on a missing
+  entry — caught at registration walk, not silently at first `--help`.
 - `commands/index.ts` — static registry. `cli/program.ts` walks it to
   attach commands; `commands/schema/index.ts` walks the same registry
   to emit JSON Schema 2020-12.
