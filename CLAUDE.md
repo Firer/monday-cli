@@ -11,18 +11,17 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Status:** `monday-cli@0.9.0` **release-prep SHIPPED — ready for
-  publish, EXTERNALLY BLOCKED on user push + npm publish.** Currently
-  published: `monday-cli@0.8.0` on npm (`latest` dist-tag,
-  2026-05-21T23:45:48Z; annotated `v0.8.0` tag at `090fb76`; GitHub
-  release at https://github.com/Firer/monday-cli/releases/tag/v0.8.0).
-  Once `npm publish` lands, the M50 SHIPPED-CORRECTNESS fix (the
-  multi-level subitem `--parent` rejection removal — v0.8.0 falsely
-  rejected `monday item create --parent <iid>` on multi-level boards
-  with a now-disproven data-model claim) will be LIVE-RESOLVED in the
-  published artifact, and `Board.hierarchy_type` + `monday board views`
-  + `board describe.views[]` will all be live-readable.
-  **v0.9 release-prep cluster** (`0147883..<close-docs>`, 4 commits;
+- **Published:** `monday-cli@0.9.0` on npm (`latest` dist-tag,
+  2026-05-22T16:38:40Z). **v0.9.0 published — release complete.**
+  Annotated `v0.9.0` tag pushed pointing at `ee96681`; GitHub release
+  live at https://github.com/Firer/monday-cli/releases/tag/v0.9.0. The
+  M50 SHIPPED-CORRECTNESS fix (the multi-level subitem `--parent`
+  rejection removal — v0.8.0 falsely rejected `monday item create
+  --parent <iid>` on multi-level boards with a now-disproven
+  data-model claim) is **LIVE-RESOLVED in the published artifact**;
+  `Board.hierarchy_type` + `monday board views` +
+  `board describe.views[]` are all now live-readable.
+  **v0.9 release-prep cluster** (`0147883..ee96681`, 4 commits;
   mirrors the v0.8 precedent minus 2 commits — README pre-cleaned at
   `310e7a0` (prior session) + help-text hygiene grep landed CLEAN so
   the conditional commit was skipped per "if clean, skip"):
@@ -36,7 +35,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   three v0.9 pieces in user-impact order with reduced M-ref density
   per `feedback_public_docs_clean` (`087935f`, multi-level subitem
   nesting fix + hierarchy_type surfacing + board views read) /
-  close-docs sweep (`<close-docs>`). Envelope-snapshot refresh probe
+  close-docs sweep (`ee96681`). Envelope-snapshot refresh probe
   ran clean (zero diff vs M52 IMPL close, 162 snapshots) — folded into
   this close-docs prose per the v0.5/v0.6/v0.7/v0.8 precedent.
   R-NEW-82 **7th-consecutive ratification**; R-NEW-84 graduated-
@@ -194,35 +193,31 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **publish-coordination → v0.10 candidate-selection**
-  (per R-NEW-75 — ≥2 backlog candidates remain at v0.9 close: at minimum
-  R-v0.9-NEW-8 paired with the v0.7-M40 reopen, plus whatever the user
-  surfaces next + the SDK 15.x / SDK 16.x clusters that re-open when
-  Monday publishes the gating SDKs). v0.9.0 release-prep is SHIPPED
-  but UNPUBLISHED — the next session opens with `git push origin main`
-  (19+ unpushed commits including the v0.9 feature cluster + this
-  release-prep cluster) + `npm publish` (interactive login) +
-  annotated `v0.9.0` tag + the post-publish flip commit (mirror v0.8's
-  `3f30891`: CLAUDE.md "release complete" + §7 publish line ticked +
-  `<close-docs>` placeholders backfilled). Then v0.10 candidate-
-  selection: 4th-consecutive SDK-stall window, so a 4th-consecutive
-  pivot is the default expectation (M39/M40/M41 + M44/M45 stay deferred
-  if SDK 15.x / 16.x haven't published; otherwise re-open). v0.9
-  feature-cluster scope is fully shipped — **M50** nesting + **M51**
-  hierarchy_type + **M52** views read — and the release-prep cluster
-  landed in 4 commits (vs v0.8's 6 — README pre-cleaned + help-text
-  grep clean trimmed two commits). Process adoptions at the v0.9
-  close-docs: R-NEW-82 **7th-consecutive ratification** (and notable
-  inversion — M50's deletion-led IMPL preempted the historical
-  release-prep slip work entirely, finding ZERO stale `deferred_to:
-  "v0.9"` slots at the cross-doc grep); R-NEW-84 graduated-discipline
-  applied (Codex skipped on the mechanical/process-only cluster);
-  `feedback_public_docs_clean` propagated forward from v0.8's
-  `40a58d0` cleanup pass — M50/M51/M52 source applied the directive
-  from the start, so the v0.9 help-text hygiene grep landed clean and
-  the conditional commit was skipped. v0.9 R-class additions at
-  close-docs are watch-items only (R-v0.9-NEW-5/8/9/10/11/12 —
-  triggers don't fire on a mechanical release-prep cluster).
+- **Next session:** **v0.10 candidate-selection** per R-NEW-75 (≥2
+  backlog candidates remain at v0.9 close: at minimum R-v0.9-NEW-8
+  paired with the v0.7-M40 reopen, plus whatever the user surfaces
+  next + the SDK 15.x / SDK 16.x clusters that re-open when Monday
+  publishes the gating SDKs). v0.9.0 is **PUBLISHED + release-complete**
+  (npm `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`;
+  release-prep `0147883..ee96681`). 4th-consecutive SDK-stall window
+  expected, so a 4th-consecutive pivot is the default expectation
+  (M39/M40/M41 + M44/M45 stay deferred if SDK 15.x / 16.x haven't
+  published; otherwise re-open). v0.9 feature-cluster scope is fully
+  shipped — **M50** nesting + **M51** hierarchy_type + **M52** views
+  read — and the release-prep cluster landed in 4 commits (vs v0.8's
+  6 — README pre-cleaned + help-text grep clean trimmed two commits).
+  Process adoptions at the v0.9 close-docs: R-NEW-82 **7th-consecutive
+  ratification** (and notable inversion — M50's deletion-led IMPL
+  preempted the historical release-prep slip work entirely, finding
+  ZERO stale `deferred_to: "v0.9"` slots at the cross-doc grep);
+  R-NEW-84 graduated-discipline applied (Codex skipped on the
+  mechanical/process-only cluster); `feedback_public_docs_clean`
+  propagated forward from v0.8's `40a58d0` cleanup pass — M50/M51/M52
+  source applied the directive from the start, so the v0.9 help-text
+  hygiene grep landed clean and the conditional commit was skipped.
+  v0.9 R-class additions at close-docs are watch-items only
+  (R-v0.9-NEW-5/8/9/10/11/12 — triggers don't fire on a mechanical
+  release-prep cluster).
   **✅ v0.8-M48 SHIPPED 2026-05-21** (`4803cbf` IMPL feat + `f79bb16`
   R1 P3 prose fix-up; Codex IMPL CONVERGED R2, 0 P1/P2 across both
   rounds): the `m48_preflight_stub` c8-ignored stub swapped for the live
