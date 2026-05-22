@@ -7,6 +7,58 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.10.0] - 2026-05-22 — Internal cleanup: noun-description single source of truth
+
+**No behaviour change.** The per-noun description strings shown under
+`monday <noun> --help` (the one-line summaries above each verb list
+— "Item commands", "Board commands", etc.) collapse from ~120
+duplicate literals scattered across the command tree into a single
+source of truth, so help text can no longer silently drift from the
+canonical phrasing.
+
+### Breaking changes vs `0.9.0`
+
+**None.** No new commands, no removed commands, no envelope shape
+changes, no error-code changes. **118 commands** shipped (unchanged
+from `0.9.0`); **29 stable error codes** (unchanged); output envelope
+preserved byte-for-byte across `0.9.0` → `0.10.0`.
+
+### What changed for users
+
+- An internal-doc reference that had been leaking into `monday update
+  --help` ("Update (comment) commands (cli-design §4.3 UPDATE)") is
+  fixed — `--help` now shows the canonical "Update (comment)
+  commands" with no internal cross-reference. The previous `0.9.0`
+  release fixed a similar "read-only at v0.4" qualifier in
+  `monday doc --help`; this release closes the broader bug class
+  structurally by routing every parent description through the
+  single map.
+- All other noun summaries are byte-identical to `0.9.0`.
+
+### Tests + quality gates
+
+- **4270 tests pass + 4 skipped** (was 4260 + 4 at `0.9.0`). All
+  green on Node 22 + 24.
+- **Coverage at branches 95.89% / functions 98.97%** against the
+  floor 95 / 95.45 / 95 / 95 — unchanged from `0.9.0`.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.10
+  release-prep (zero diff vs the last feature close, 162 snapshots).
+- **`npm audit` reports `0 vulnerabilities`** — no audit-fix folded
+  this cycle.
+
+### Documentation
+
+- **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — v0.10 plan with
+  the milestone close, per-milestone decisions, the R-class register
+  (§22), and the release exit checklist (§7).
+- **[`.claude/rules/workflow.md`](./.claude/rules/workflow.md)** new
+  rule: "Rejection-lift / pure-refactor pre-flights need NO stub
+  literal" — when an IMPL session is a deletion or a pure refactor
+  with no new deferred wire leg, the stub-literal scaffold from
+  earlier rules does not apply.
+
+[0.10.0]: https://github.com/Firer/monday-cli/releases/tag/v0.10.0
+
 ## [0.9.0] - 2026-05-22 — Multi-level board cluster: subitem nesting fix, hierarchy surfacing, board views read
 
 The "agents understand multi-level boards" release. Three pieces:
