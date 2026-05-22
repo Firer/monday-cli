@@ -39,15 +39,17 @@ humans are second-class. Built incrementally via Claude Code on top of
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.8.0`.
-- **Live numbers:** **4254 tests pass + 3 skipped** (3 skips
+- **Live numbers:** **4256 tests pass + 3 skipped** (3 skips
   unchanged: the 2 pre-existing + the RUN_LIVE_TESTS-gated
-  multipart-upload smoke test; the +16 pre-flight block plus the
-  **v0.8-M48 IMPL** net +1 — the 2 `m48_preflight_stub` PIN tests
-  converted to 2 live wire-shape assertions (`match_variables:
-  {defaults: {settings: {…}}}`, whole-`defaults` JSON.stringify-pinned)
-  + a RESERVED-literal regression guard). **✅ CI `test:coverage`
-  PASSES:** global **branch coverage 95.91% (4484/4675) vs the 95.45%
-  floor** (HOLDS across the M48 IMPL — the removed c8-ignored stub block
+  multipart-upload smoke test; the **v0.9-M50 IMPL** net +2 over the
+  v0.8 baseline of 4254 — the deleted `multi_level → usage_error` test
+  (−1) replaced by a `create_subitem` success flip + a deleted-literals
+  regression guard + a host-board self-reference `--set-raw` test
+  (+3)). **✅ CI `test:coverage`
+  PASSES:** global **branch coverage 95.91% vs the 95.45%
+  floor** (HOLDS across the M50 IMPL — deleting the rejection removed a
+  tested branch arm, but the success flip + guard + self-reference test
+  kept the margin; earlier v0.8-M48: the removed c8-ignored stub block
   contributed no counted branches, and the new `variables.defaults =
   CREATE_TIME_SETTINGS_WRAP_TYPES.has(type) ? {settings} : settings`
   ternary's two arms are both covered: board_relation/dependency hit the
@@ -71,30 +73,47 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.9-M50 IMPL** (multi-level subitem nesting).
-  **M50 pre-flight DONE 2026-05-22** (`9675f6a..e41b467`, docs-only
-  contract diff + D1–D5 closed in `docs/v0.9-plan.md` §3; Codex
-  pre-flight CONVERGED R1 — 0 P1, 1 P2, 2 P3, all doc-consistency).
-  **Decision: MINIMAL LIFT.** The headline pre-flight finding: the
-  current runtime gate is INVERTED — it rejects `multi_level` (which
-  the probe proved nests depth-3+ at API `2026-01`) while classic
-  depth-1 already creates subitems (M9). So the IMPL is a *deletion*
-  of the false-claim `parent.hierarchyType === 'multi_level'`
-  rejection block (`src/commands/item/create.ts:735-752`), NOT a
-  re-implementation. Classic + multi-level then share ONE
-  `create_subitem` + `deriveSubitemsBoardId` dispatch (the `subtasks`
-  column's `settings_str.boardIds[0]` yields the right column-
-  resolution target for both — a separate sub_items_board on classic,
-  the self-referenced host board on multi-level). No
-  `hierarchy_type`-keyed rejection survives, no `deferred_to` slot
-  (R-NEW-82), **zero new ERROR_CODE (registry stays 29), zero new wire
-  surface, no pre-flight stub** (no new deferred wire leg — R-NEW-76
-  doesn't apply). The IMPL flips the existing `multi_level →
-  usage_error` test (`item-create.test.ts:1121`) to a success
-  assertion + adds a regression guard that the false-claim phrase +
-  `deferred_to: 'v0.9'` never reappear, and reframes the enumerated
-  "subitems board" docstrings target-neutral — full contract-term
-  checklist (R-v0.7-NEW-4) in `docs/v0.9-plan.md` §3. **v0.9
+- **✅ v0.9-M50 SHIPPED 2026-05-22** (`e89ddfc`, one feat commit;
+  Codex IMPL CONVERGED R1 — 0 P1/P2, 3 P3 all doc-drift/test-gap,
+  folded in). **Multi-level subitem nesting** — a *deletion*, as the
+  pre-flight scoped: the inverted `parent.hierarchyType ===
+  'multi_level'` rejection block (`create.ts`, was ~735-752) is GONE,
+  and classic + multi-level boards now share the one existing
+  `create_subitem` + `deriveSubitemsBoardId` dispatch (no
+  `hierarchy_type` branch). The `subtasks` column's
+  `settings_str.boardIds[0]` yields the right column-resolution target
+  for both — a separate sub_items_board on classic, the self-referenced
+  host board on multi-level (so a multi-level `--set` subitem create
+  issues ONE `BoardMetadata` round-trip vs classic's two). Fixes
+  v0.8.0's shipped-incorrect rejection (it asserted a now-false
+  data-model claim + `deferred_to: 'v0.9'` while shipping AT v0.9 —
+  R-NEW-82 anti-pattern). **Closes the M28 deferral.** Verified at API
+  `2026-01` (the CLI's pin — NOT SDK-gated). **Zero ERROR_CODE delta
+  (29), zero command delta (117), zero new wire surface, no pre-flight
+  stub** (R-v0.9-NEW-2 — no new deferred wire leg). `hierarchy_type` is
+  still fetched (`lookupItemBoardWithHierarchy` retained) but now
+  read-but-unused — kept for M51's board-projection surfacing. The
+  existing `multi_level → usage_error` test FLIPPED to a
+  `create_subitem` success assertion + a regression guard pins the
+  deleted literals (`deferred_to`, the false "sub_items_board carries
+  no subtasks column" claim, "M28 Decision 11 closure") absent; a new
+  live `--set-raw` multi-level test pins the host-board self-reference
+  dispatch. The kickoff cross-doc grep + Codex P3 caught two
+  contract-surface doc-drift sites the pre-flight §3 source-enumeration
+  missed (`api-reference.md`, `architecture.md`) — the R-NEW-56 /
+  R-v0.9-NEW-1 catch. Test delta 4254 → **4256 + 3 skipped**; branch
+  coverage **95.91%** (≥ 95.45 floor). Full close at
+  `docs/v0.9-plan.md` §3 M50 IMPL-close + §22 (R-v0.8-NEW-23 →
+  RESOLVED).
+- **Next session:** **v0.9-M51** (multi-level board awareness:
+  `hierarchy_type` projection surfacing in `board get`/`describe`/
+  `list` + document `board duplicate` as the multi-level board
+  creation path — `duplicate_board_with_pulses` preserves
+  `multi_level`, `create_board` cannot). M50 retained the
+  `hierarchy_type` fetch (now read-but-unused), so M51 wires that same
+  field into the board projection (needs raw GraphQL per SDK drift,
+  like `is_leaf`). **SKELETON in `docs/v0.9-plan.md` §1 M51.** Then
+  **M52** board views read → release-prep (0.8.0 → 0.9.0). **v0.9
   candidate-selection DONE 2026-05-22** — scope locked to the
   **multi-level board cluster** (`docs/v0.9-plan.md`): **M50**
   multi-level subitem nesting → **M51** surface `hierarchy_type` +
@@ -396,13 +415,14 @@ detail, and R-class refactor backlog, **read the plan docs** —
    the `2026-01` pin: **M50** multi-level subitem nesting (closes the
    M28 deferral + fixes the shipped-incorrect `item create --parent`
    rejection) + **M51** `hierarchy_type` surfacing / `board duplicate`
-   multi-level path + **M52** board views read. M50 empirically
-   pre-probed (nesting works at `2026-01`); **M50 pre-flight DONE**
-   (`9675f6a..e41b467`). M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
+   multi-level path + **M52** board views read. **M50 ✅ SHIPPED
+   2026-05-22** (`e89ddfc`, deletion-led IMPL, Codex CONVERGED R1;
+   pre-flight was `9675f6a..e41b467`); **M51 next** (SKELETON).
+   M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
    stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
    the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
    v0.8 watch-items R-v0.8-NEW-19/20/21/22 + promoted R-v0.8-NEW-23/24/25
-   → M50/M51/M52).
+   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
