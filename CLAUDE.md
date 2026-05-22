@@ -203,12 +203,22 @@ humans are second-class. Built incrementally via Claude Code on top of
   feature-confirmed on multi_level boards via the 2026-05-22
   probe sweep — only the M39 SDK gate remains). If still 14.0.0
   (6th-consecutive stall), 5th-consecutive pivot is the default
-  expectation across the C/E/G/D backlog. Also consider a v0.10
-  post-publish refactor-audit (optional, user-driven) over the
-  recency window `36d705d..<post-publish-flip>` — the v0.9
-  precedent at `253233f` filed 3 candidates + caught a README
-  drift, but only fire if surveying the cluster surfaces real
-  candidates. v0.10.0 is **PUBLISHED + release-complete** (npm
+  expectation across the C/E/G/D backlog. **Post-publish
+  refactor-audit ran 2026-05-22** over `36d705d..177b40c`
+  (recency window: release-prep cluster + post-publish flip) —
+  process-only cluster (matching v0.9's precedent at `253233f`),
+  no code-lift candidates surfaced. Filed
+  3 new R-class watch-items (R-v0.10-NEW-5/6/7 in
+  `docs/v0.10-plan.md` §22 — `<post-publish-sha>` placeholder
+  convention meta-pattern; "if clean, skip" sub-rule of R-NEW-82
+  contradicting the stated 6-commit baseline after 2 consecutive
+  4-commit clusters; Post-publish flip rule cross-ref gap with
+  R-NEW-82's placeholder convention from the close-docs side) +
+  flipped R-v0.9-NEW-14 status (2nd-consecutive instance reached
+  at M53 — release-prep grep found zero stale slots for the 2nd
+  consecutive cycle because the IMPL was a pure refactor with no
+  deferred wire leg; trigger at 3rd-consecutive instance for
+  graduation). v0.10.0 is **PUBLISHED + release-complete** (npm
   `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`;
   release-prep `36d705d..c9eceba`). v0.10 feature-cluster scope
   is fully shipped — **M53** NOUN_DESCRIPTIONS lift — and the
