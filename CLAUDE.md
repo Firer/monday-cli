@@ -39,15 +39,19 @@ humans are second-class. Built incrementally via Claude Code on top of
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
   `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
 - **package.json version:** `0.8.0`.
-- **Live numbers:** **4257 tests pass + 4 skipped** (the **v0.9-M51
-  IMPL** net +1 pass over the M50 baseline of 4256 — a `multi_level`
-  board-get assertion — plus +1 skip: a RUN_LIVE_TESTS-gated
-  schema-drift `it` running the exact `BoardGet` + `BoardList` documents
-  so a future `hierarchy_type` removal is caught live, the `is_leaf`
-  class. The 4 skips = the 2 pre-existing + the multipart-upload smoke
-  test + the new board-projection schema-drift smoke test). **✅ CI
-  `test:coverage` PASSES:** global **branch coverage 95.91% vs the
-  95.45% floor** (HOLDS across M51 — adding a required `hierarchy_type`
+- **Live numbers:** **4260 tests pass + 4 skipped** (the **v0.9-M52
+  IMPL** net +3 over the M51 baseline of 4257 — three new
+  `monday board views` integration tests pinning happy path,
+  wire-null normalization, and the describe-views-slot. The 4
+  skips are unchanged: the 2 pre-existing + the multipart-upload
+  smoke test + the board-projection schema-drift smoke test
+  — M52's additions to the live-schema-drift smoke fold into the
+  existing skipped `it` for the metadata document). **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.89% vs the
+  95.45% floor** (HOLDS across M52 — adding 13 required-nullable
+  BoardView fields + the `jsonScalarOrNull` helper introduced no
+  counted branch arm; the new tests added coverage on the verb's
+  projection path. Previous M51 IMPL: adding a required `hierarchy_type`
   projection field introduced no counted branch arm; the new test added
   coverage. Earlier the M50 IMPL: deleting the rejection removed a
   tested branch arm, but the success flip + guard + self-reference test
@@ -56,12 +60,14 @@ humans are second-class. Built incrementally via Claude Code on top of
   CREATE_TIME_SETTINGS_WRAP_TYPES.has(type) ? {settings} : settings`
   ternary's two arms are both covered: board_relation/dependency hit the
   `{settings}` arm, status/dropdown/numbers hit the bare arm). **29
-  ERROR_CODES**; **117 commands** (M48 added neither — `--settings` is
-  an existing flag; the `m48_preflight_stub` `details.reason` literal
-  has DISAPPEARED from runtime at IMPL and stays RESERVED, regression-
-  guarded; the dependency board-target rejection is an existing
-  `usage_error` with a `details.rejected_keys` shape); **functions
-  98.97% (1349/1363)**; `npm audit` **0 vulnerabilities**. Earlier
+  ERROR_CODES**; **118 commands** (M52 added `board views` — the new
+  v0.9 verb mirroring `board columns` / `board groups`; no
+  ERROR_CODE delta since views is a pure read on an existing wire
+  surface, the `m48_preflight_stub` `details.reason` literal stays
+  RESERVED + DISAPPEARED from runtime, regression-guarded; the
+  dependency board-target rejection is an existing `usage_error` with
+  a `details.rejected_keys` shape); **functions 98.97% (1353/1367)**;
+  `npm audit` **0 vulnerabilities**. Earlier
   coverage contributors still hold: the **v0.8 refactor cluster**
   (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11** transport-helper
   lift, the M46 dispatch-arm tests (`item/create.ts` 82.31% → 86.58%).
@@ -134,16 +140,62 @@ humans are second-class. Built incrementally via Claude Code on top of
   command delta (117), zero new wire surface** (additive read field on
   existing queries). Closes the R-v0.8-NEW-24 facets (a)+(b). Full close
   at `docs/v0.9-plan.md` §3 M51 IMPL-close + §1 row + §22.
-- **Next session:** **v0.9-M52** (board views read: a read-only `views`
-  slot on the board projection and/or a `board views <bid>` verb —
-  `board.views { id name type settings_str view_specific_data_str
-  settings sort filter access_level }`. Kanban DATA ops already work via
-  existing verbs (status-label create = Kanban columns; `item set` /
-  `item move --to-group` = move card); M52 closes only the view-metadata
-  read gap. Needs raw GraphQL per SDK drift, like `hierarchy_type`).
-  **SKELETON in `docs/v0.9-plan.md` §1 M52.** Then release-prep
-  (0.8.0 → 0.9.0 + CHANGELOG + close-docs, per the R-NEW-82/84
-  baseline). **v0.9
+- **✅ v0.9-M52 SHIPPED 2026-05-22** (`a184156` feat; Codex pre-flight
+  CONVERGED R3 — 0 P1 across R1/R2/R3, 2+2+0 P2/P3 folded; Codex IMPL
+  CONVERGED R1 — 0 P1/P2/P3). **Board views read.** `Board.views`
+  (Kanban/Gantt/Calendar/Table/…) now reachable via two routes: (a)
+  `boardMetadataSchema` gains a `views: z.array(boardViewSchema)
+  .nullable()` slot — `board describe` surfaces it alongside columns +
+  groups — and (b) a new `monday board views <bid>` verb mirrors
+  `board columns` / `board groups` (cache-aware via `loadBoardMetadata`,
+  so a follow-up describe/columns/groups/views pays one fetch). All 13
+  `BoardView` wire fields surfaced 1:1 (raw GraphQL — the
+  `is_leaf`/`hierarchy_type` SDK-drift class). Required-nullable on
+  `views` (M51 precedent — pre-M52 cache entries lacking the key
+  auto-invalidate via strict-parse failure, the corrupt-cache → live
+  re-fetch contract). `jsonScalarOrNull` helper for the 3 JSON-scalar
+  BoardView fields (`settings` / `sort` / `filter`) rejects `undefined`
+  so fixtures can't silently omit a wire-selected field (Codex R2 P2-1
+  catch). The live-schema-drift smoke gained a `toHaveProperty('views')`
+  key-presence assertion (R2 P2-2 — wire-nullable `Board.views` means
+  `array | null`, not array-only). Cassette `match_query: /views \{/`
+  pin on the new verb's integration test — M52's 2nd consumer of the
+  raw-GraphQL selection-pin pattern (M51 was 1st). **Zero ERROR_CODE
+  delta (29); +1 command (117 → 118).** Touched 1 of 4 board schemas
+  (`boardMetadataSchema` only — `boardProjectionSchema` /
+  `boardListSchema` / `boardFindSchema` stay untouched, R-v0.9-NEW-5
+  trigger UNMET, stays filed). Closes the R-v0.8-NEW-25 view-metadata
+  read gap from the 2026-05-22 dev-board sweep. Folded in: a
+  pre-existing M51 leftover (the m3 e2e `BoardList` fixture was
+  missing `hierarchy_type`; fixed here because the m3 fixture also
+  needed `views` updates). Full close at `docs/v0.9-plan.md` §3 M52
+  IMPL-close + §1 row + §22.
+- **Two R-class graduations at M52 close** (2nd-instance triggers
+  both fired):
+  - **R-v0.9-NEW-6** → `.claude/rules/testing.md` as "Wire selection-
+    pin for raw-GraphQL SDK-drift fields" — two-layer guard
+    (cassette `match_query` + live-smoke `toHaveProperty`) for any
+    raw-GraphQL field on the `is_leaf` / `hierarchy_type` / `views`
+    class. M51 (`hierarchy_type`) + M52 (`views`) — both consumers
+    landed.
+  - **R-v0.9-NEW-7** → `.claude/rules/workflow.md` as "Read-side
+    field-add — check whether the named command's schema is SHARED"
+    — pre-flight discipline to verify single-sourced vs shared
+    schemas before scoping; binding decisions escalate via
+    `AskUserQuestion`. M51 chose the SHARED projection
+    (`boardProjectionSchema` + `hierarchy_type`); M52 chose the
+    HEAVY single-sourced one (`boardMetadataSchema` + `views`).
+    Both correct per the runtime read; rule documents both valid
+    choices.
+- **Next session:** **v0.9 release-prep** (0.8.0 → 0.9.0 + CHANGELOG
+  + close-docs, per the R-NEW-82/84 baseline). v0.9 feature-cluster
+  scope DONE (M50 nesting + M51 hierarchy_type + M52 views read).
+  Release-prep is the 6-commit baseline: envelope-snapshot refresh
+  probe + ToC audit + deferral slip v0.9 → v1.0 + README quickstart
+  refresh + version bump + CHANGELOG + close-docs sweep.
+  M39/M40/M41 (SDK 15.x — `2026-04`) + M44/M45 (SDK 16.x — `2026-07`)
+  stay DEFERRED; SDK still 14.0.0 at M52 close (no new release
+  between v0.8 release-prep and now). **v0.9
   candidate-selection DONE 2026-05-22** — scope locked to the
   **multi-level board cluster** (`docs/v0.9-plan.md`): **M50**
   multi-level subitem nesting → **M51** surface `hierarchy_type` +

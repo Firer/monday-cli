@@ -143,6 +143,47 @@ explanation comments go on separate lines from the directive markers.
 - **Fixtures live in `tests/fixtures/`** as `.json` files keyed by the
   query they record. Loaders go in `tests/fixtures/load.ts`.
 
+## Wire selection-pin for raw-GraphQL SDK-drift fields
+
+When a milestone adds a raw-GraphQL field to a CLI projection (the
+`hierarchy_type` / `is_leaf` / `views` class — SDK-untyped fields the
+CLI selects via `client.raw`), pin the SELECTION in **two layers**.
+A test that proves the field round-trips through the projection is
+NOT sufficient: a mock that supplies the field can't fail when a
+refactor drops it from the production document, and a
+`RUN_LIVE_TESTS` `errors`-only check passes on a still-valid query
+that quietly stopped selecting it.
+
+1. **CI-level: cassette `match_query`.** Add at least one cassette
+   test where `match_query: /<field-name>/` (or
+   `/<field-name> \{/` for nested selections) is asserted against
+   the request's GraphQL document body. The mock fixture-server
+   refuses to serve the canned response if the query stops selecting
+   the field, so a future refactor dropping it from the production
+   document fails CI before reaching live.
+
+2. **Live-level: `RUN_LIVE_TESTS`-gated smoke** at
+   `tests/e2e/live-schema-drift.test.ts`. Assert the live response
+   carries the key via `toHaveProperty('<field-name>')` (key-presence
+   check — not array-only / not value-shape, since the wire may
+   return `null` for wire-nullable fields). The smoke catches a
+   live removal; the cassette catches a CI-side selection drop.
+
+Skipping either layer reproduces the `is_leaf` regression class
+(Monday removed `is_leaf` from `Board` at API `2026-01`; the canned
+query still selected it; 4124 mocked tests stayed green while every
+live board-metadata-backed command 500'd).
+
+**Graduated v0.9-M52** (`a184156`) after the 2nd consumer:
+- M51 (`4d39e4d`) added the pattern for `hierarchy_type`
+  (BoardGet + BoardList cassettes + the live smoke).
+- M52 (`a184156`) added it for `views` (the new `board views`
+  integration test + the live smoke extension).
+
+Both fields are raw-GraphQL SDK-drift fields (`Board` type members
+not exposed by SDK 14.0.0's typed surface); both ship under the same
+selection-pin guard.
+
 ## Assertions
 
 - Prefer `toMatchObject` over `toEqual` when you only care about a subset

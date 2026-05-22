@@ -160,6 +160,53 @@ R-v0.7-NEW-4 (graduated v0.7-M42 IMPL — surfaced across 7 Codex
 rounds of escalating W9 prose drift; each round's sweep widened
 to catch what the prior round's narrower regex missed).
 
+## Read-side field-add — check whether the named command's schema is SHARED
+
+When a milestone plans to add an output field to a "single named
+command" (e.g. "add `X` to `board get`", "add `Y` to `item list`"),
+the pre-flight MUST verify whether that command's output schema is
+**single-sourced** (only that one verb uses it) or **shared** (the
+same schema feeds N other verbs through a projection helper). The
+plan's command list can under-state the true surface.
+
+**Why the check is binding:** the M15 board-cluster's canonical-shape
+invariant single-sources `boardProjectionSchema` across `board get` +
+the create/update/archive/delete/duplicate cluster (6 verbs). A
+field-add scoped to "just `board get`" actually ripples to all 6;
+choosing not to ripple breaks the invariant. The runtime read pins
+the right scope; the plan prose doesn't.
+
+**How to apply.** At every pre-flight that adds an output-schema
+field to a named verb:
+
+1. `grep -rn '<schema-name>' src/api/ src/commands/` to count
+   consumers (the `outputSchema` aliases + any direct `parse`
+   callsites).
+2. If `count > 1`, escalate the scope decision to the user via
+   `AskUserQuestion` — DO NOT silently scope to the named verb. The
+   choice is binding (a new shape on a shared schema is a contract-
+   surface change across N verbs; a private copy fragments the
+   invariant).
+3. Document the chosen scope in the §3 D-list, citing the schema-
+   sharing fact + the runtime-read that established it.
+
+**Two valid scope choices** (the second M52 instance proved both
+exist):
+
+- **Extend the shared schema** (M51, `hierarchy_type` →
+  `boardProjectionSchema`): widens the canonical Board shape across
+  the 6 verbs deliberately. Use when the new field is lightweight
+  + agent-useful on every verb's output.
+- **Add to a heavy single-sourced schema** (M52, `views` →
+  `boardMetadataSchema`): the lightweight shared schema stays
+  untouched; the new field lives on the heavy read (`board describe`)
+  + a dedicated lightweight verb (`board views`). Use when the
+  new field is heavy/nested + would bloat verbs that don't need it.
+
+R-v0.9-NEW-7 (graduated v0.9-M52 close-docs after 2 instances —
+M51 chose the shared schema; M52 chose the heavy single-sourced
+one; both correct per the runtime read).
+
 ## Skip Codex review on mechanical / process-only clusters
 
 Clusters with zero production `src/**/*.ts` changes (R-class lifts
