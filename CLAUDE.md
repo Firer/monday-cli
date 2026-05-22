@@ -71,17 +71,21 @@ humans are second-class. Built incrementally via Claude Code on top of
   makes the resolved colour decision authoritative; the
   `test:coverage` branch-floor gap is closed (R-v0.8-NEW-10 RESOLVED,
   R-v0.8-NEW-11 SHIPPED — `docs/v0.8-plan.md` §22).
-- **Next session:** **v0.9 candidate-selection** (R-NEW-75 dedicated
-  session). **v0.8.0 is PUBLISHED + release-complete** — push + `npm
-  publish` + annotated `v0.8.0` tag (`090fb76`) + GitHub release all
-  done (npm 2026-05-21T23:45:48Z); v0.8 release-prep SHIPPED at
-  `66d5142..090fb76`, and this post-publish flip commit completes the
-  release (status + LIVE-RESOLVED + SHA-backfill; needs a push). The
-  v0.9 backlog is M44 / M45 (user-entity migration + `user activity`) +
-  the v0.7-deferred M39 / M40 / M41 cluster — all gated on
-  `@mondaydotcomorg/api` SDK 15.x (`2026-04`) / 16.x (`2026-07`)
-  publishing, which had not happened at the v0.8 candidate-selection
-  commit (SDK still 14.0.0). Process adoptions at the v0.8 close-docs:
+- **Next session:** **v0.9-M50 pre-flight contract diff** (multi-level
+  subitem nesting). **v0.9 candidate-selection DONE 2026-05-22** —
+  scope locked to the **multi-level board cluster** (`docs/v0.9-plan.md`):
+  **M50** multi-level subitem nesting (lift the shipped-incorrect `item
+  create --parent` rejection + same-board nested `create_subitem`;
+  folds in the false-message fix per the user's decision) → **M51**
+  surface `hierarchy_type` + document `board duplicate` as the
+  multi-level creation path → **M52** board views read → release-prep.
+  M50 is already empirically pre-probed (nesting verified depth-3+ at
+  API `2026-01`, the CLI pin — NOT SDK-gated), so its pre-flight
+  leverages the 2026-05-22 sweep findings directly. **v0.8.0 is
+  PUBLISHED + release-complete** (npm `latest` 2026-05-21T23:45:48Z;
+  tag `v0.8.0` at `090fb76`; release-prep `66d5142..090fb76`). SDK
+  still 14.0.0 at v0.9 candidate-selection, so M39/M40/M41 (SDK 15.x)
+  + M44/M45 (SDK 16.x) stay DEFERRED — third consecutive pivot. Process adoptions at the v0.8 close-docs:
   **R-v0.8-NEW-7 ADOPTED** (commit-subject refs over bare SHAs in NEW
   prose); **R-v0.8-NEW-8 + R-v0.8-NEW-4 stay deferred watch-items**
   (M47/M48 added no new emit shape, so the `outputSchema` audit-point
@@ -369,40 +373,43 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — **SKELETON**
-   (filed forward 2026-05-18). v0.8 = Monday API 2026-07 pin +
-   user-entity migration (M44) + `user activity` (M45) PLUS the
-   v0.7-deferred M39 / M40 / M41 re-open candidates (API
-   `2026-04` pin + item set-description + doc block-create-bulk)
-   pending SDK 15.x publication. Ratified at v0.8 kickoff
-   candidate-selection AFTER v0.7.0 ships AND v0.7.x
-   candidate-selection runs.
-3. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
+2. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — **ACTIVE plan**
+   (kickoff 2026-05-22). v0.9 = the **multi-level board cluster** on
+   the `2026-01` pin: **M50** multi-level subitem nesting (closes the
+   M28 deferral + fixes the shipped-incorrect `item create --parent`
+   rejection) + **M51** `hierarchy_type` surfacing / `board duplicate`
+   multi-level path + **M52** board views read. M50 empirically
+   pre-probed (nesting works at `2026-01`). M39/M40/M41 (SDK 15.x) +
+   M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0.
+3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
+   file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
+   `--set`) + M48 (board_relation/dependency settings) + the refactor
+   cluster; re-scoped off the original 2026-07 SKELETON (M44/M45)
+   per the v0.7-pivot precedent. §22 R-class log (R-v0.8-NEW-*).
+4. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
    M43 (the v0.6.x bulk + create file `--set` carve-out folds);
    M39 (API `2026-04` pin bump) + M40 (`item set-description`) +
-   M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** to a
-   future release pending `@mondaydotcomorg/api` SDK 15.x with
-   `CURRENT_VERSION = '2026-04'` natively + a paid-tier sandbox
-   for the M40 wire probe. §22 R-class log
-   (R-v0.7-NEW-1 through R-v0.7-NEW-5 — R-v0.6-NEW-1 graduated
-   at the 5-consumer threshold; R-v0.6-NEW-2 graduated at the
-   5-discriminator threshold; R-NEW-82 ratified at the 5th
-   consecutive release-prep consumer; R-v0.7-NEW-4 graduated
-   into `.claude/rules/workflow.md` at M42 IMPL R7 + refined
-   at R8; R-NEW-76 graduated from stub-anchored to wire-
-   dispatch-anchored invariant at M43 IMPL).
-4. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
+   M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** pending
+   `@mondaydotcomorg/api` SDK 15.x with `CURRENT_VERSION = '2026-04'`
+   natively. §22 R-class log (R-v0.7-NEW-1 through R-v0.7-NEW-5 —
+   R-v0.6-NEW-1 graduated at the 5-consumer threshold; R-v0.6-NEW-2
+   at the 5-discriminator threshold; R-NEW-82 ratified at the 5th
+   consecutive release-prep consumer; R-v0.7-NEW-4 graduated into
+   `.claude/rules/workflow.md` at M42 IMPL R7 + refined at R8;
+   R-NEW-76 graduated from stub-anchored to wire-dispatch-anchored
+   invariant at M43 IMPL).
+5. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
    (files-shaped friendly `--set`) with §22 R-class log
    (R-v0.6-NEW-*).
-5. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
+6. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
-6. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
+7. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
    with §22 R-class log (R-NEW-72 through R-NEW-84 graduated).
-7. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
+8. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
    with §22 R-class log (R-NEW-1 through R-NEW-43).
-8. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
+9. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
    (R20–R53).
-9. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
+10. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
    foundations.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)
