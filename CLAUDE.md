@@ -11,75 +11,68 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.9.0` on npm (`latest` dist-tag,
-  2026-05-22T16:38:40Z). **v0.9.0 published — release complete.**
-  Annotated `v0.9.0` tag pushed pointing at `ee96681`; GitHub release
-  live at https://github.com/Firer/monday-cli/releases/tag/v0.9.0. The
-  M50 SHIPPED-CORRECTNESS fix (the multi-level subitem `--parent`
-  rejection removal — v0.8.0 falsely rejected `monday item create
-  --parent <iid>` on multi-level boards with a now-disproven
-  data-model claim) is **LIVE-RESOLVED in the published artifact**;
-  `Board.hierarchy_type` + `monday board views` +
-  `board describe.views[]` are all now live-readable.
-  **v0.9 release-prep cluster** (`0147883..ee96681`, 4 commits;
-  mirrors the v0.8 precedent minus 2 commits — README pre-cleaned at
-  `310e7a0` (prior session) + help-text hygiene grep landed CLEAN so
-  the conditional commit was skipped per "if clean, skip"):
-  ToC audit — added `views (v0.9-M52)` + `describe (+ views[] slot)`
-  to the board verb row in `output-shapes.md` (`0147883`,
-  `ToC audit — add views to board verb row`; **NO stale `deferred_to:
-  "v0.9"` slot to slip** — M50's deletion-led IMPL removed the runtime
-  literal at ship-time, so R-NEW-82's cross-doc grep finds zero stale
-  slots) / version bump 0.8.0 → 0.9.0 — no audit-fix folded,
-  `npm audit` clean (`31dc5a3`) / CHANGELOG [0.9.0] headlining the
-  three v0.9 pieces in user-impact order with reduced M-ref density
-  per `feedback_public_docs_clean` (`087935f`, multi-level subitem
-  nesting fix + hierarchy_type surfacing + board views read) /
-  close-docs sweep (`ee96681`). Envelope-snapshot refresh probe
-  ran clean (zero diff vs M52 IMPL close, 162 snapshots) — folded into
-  this close-docs prose per the v0.5/v0.6/v0.7/v0.8 precedent.
-  R-NEW-82 **7th-consecutive ratification**; R-NEW-84 graduated-
-  discipline applied (Codex skipped — mechanical/process-only cluster,
-  zero production `src/**/*.ts` semantic changes). Previous:
+- **Status:** `monday-cli@0.10.0` **release-prep SHIPPED — ready
+  for publish, EXTERNALLY BLOCKED on user push + npm publish.**
+  Currently published: `monday-cli@0.9.0` on npm (`latest` dist-tag,
+  2026-05-22T16:38:40Z; annotated `v0.9.0` tag at `ee96681`; GitHub
+  release at https://github.com/Firer/monday-cli/releases/tag/v0.9.0).
+  Once `npm publish` lands, the v0.10-M53 `NOUN_DESCRIPTIONS` single-
+  source-of-truth lift will be LIVE: ~120 duplicate
+  `ensureSubcommand` literals collapsed into one 18-entry map at
+  `src/commands/noun-descriptions.ts`, with the `update/upload.ts`
+  `'cli-design §4.3 UPDATE'` internal-ref leak structurally fixed in
+  the same migration. **v0.10 release-prep cluster**
+  (`36d705d..<close-docs>`, 4 commits; mirrors the v0.9 precedent
+  minus the ToC-audit commit — audit ran CLEAN so the conditional
+  commit was skipped per the v0.9 help-text-grep-clean precedent):
+  README Scope flip — flipped current to v0.10.0 with internal-
+  cleanup framing (`36d705d`; R-v0.9-NEW-15 widened-checklist's
+  three surfaces all addressed — Scope block flipped, quickstart
+  held, `**v<next> (next):**` block confirmed absent post-`317ae04`
+  collapse) / version bump 0.9.0 → 0.10.0 — no audit-fix folded,
+  `npm audit` clean (`50c0b9b`) / CHANGELOG [0.10.0] one-line user-
+  impact framing per `feedback_public_docs_clean` ("internal cleanup;
+  no behaviour change", `579a36d`) / close-docs sweep
+  (`<close-docs>`). Envelope-snapshot refresh probe ran clean (zero
+  diff vs M53 IMPL close, 162 snapshots) — folded into this close-
+  docs prose per the v0.5/v0.6/v0.7/v0.8/v0.9 precedent.
+  R-NEW-82 **8th-consecutive ratification** (zero stale
+  `deferred_to: "v0.10"` slots, by construction — pure-refactor IMPL
+  shipped no deferred wire leg); R-NEW-84 graduated-discipline
+  applied (Codex skipped — mechanical/process-only cluster, zero
+  production `src/**/*.ts` semantic changes); R-v0.9-NEW-15 RESOLVED
+  at v0.10 release-prep (first dedicated consumer of the widened
+  checklist); R-v0.8-NEW-21 STAYS-FILED after 3rd-consecutive CLEAN
+  hygiene grep (rule-graduation criterion still UNMET). Previous:
+  `monday-cli@0.9.0` (tag `v0.9.0` at `ee96681`, 2026-05-22T16:38:40Z);
   `monday-cli@0.8.0` (tag `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z);
-  `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z);
-  `monday-cli@0.6.0` (2026-05-18T16:30:21Z).
-- **package.json version:** `0.9.0`.
-- **Live numbers:** **4260 tests pass + 4 skipped** (the **v0.9-M52
-  IMPL** net +3 over the M51 baseline of 4257 — three new
-  `monday board views` integration tests pinning happy path,
-  wire-null normalization, and the describe-views-slot. The 4
-  skips are unchanged: the 2 pre-existing + the multipart-upload
-  smoke test + the board-projection schema-drift smoke test
-  — M52's additions to the live-schema-drift smoke fold into the
-  existing skipped `it` for the metadata document). **✅ CI
+  `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z).
+- **package.json version:** `0.10.0`.
+- **Live numbers:** **4270 tests pass + 4 skipped** (the **v0.10-M53
+  IMPL** net +10 over the M52 baseline of 4260 — 12 new
+  `tests/unit/commands/types.test.ts` cases pinning the
+  `NOUN_DESCRIPTIONS` map contract + `ensureSubcommand` 2-arg/3-arg
+  overload + `lookupNounDescription`'s `unknown_noun` strict-mode
+  invariant, less two replaced tests subsumed by the new contract.
+  The 4 skips are unchanged: the 2 pre-existing + the multipart-upload
+  smoke test + the board-projection schema-drift smoke test). **✅ CI
   `test:coverage` PASSES:** global **branch coverage 95.89% vs the
-  95.45% floor** (HOLDS across M52 — adding 13 required-nullable
-  BoardView fields + the `jsonScalarOrNull` helper introduced no
-  counted branch arm; the new tests added coverage on the verb's
-  projection path. Previous M51 IMPL: adding a required `hierarchy_type`
-  projection field introduced no counted branch arm; the new test added
-  coverage. Earlier the M50 IMPL: deleting the rejection removed a
-  tested branch arm, but the success flip + guard + self-reference test
-  kept the margin; earlier v0.8-M48: the removed c8-ignored stub block
-  contributed no counted branches, and the new `variables.defaults =
-  CREATE_TIME_SETTINGS_WRAP_TYPES.has(type) ? {settings} : settings`
-  ternary's two arms are both covered: board_relation/dependency hit the
-  `{settings}` arm, status/dropdown/numbers hit the bare arm). **29
-  ERROR_CODES**; **118 commands** (M52 added `board views` — the new
-  v0.9 verb mirroring `board columns` / `board groups`; no
-  ERROR_CODE delta since views is a pure read on an existing wire
-  surface, the `m48_preflight_stub` `details.reason` literal stays
-  RESERVED + DISAPPEARED from runtime, regression-guarded; the
-  dependency board-target rejection is an existing `usage_error` with
-  a `details.rejected_keys` shape); **functions 98.97% (1353/1367)**;
-  `npm audit` **0 vulnerabilities**. Earlier
-  coverage contributors still hold: the **v0.8 refactor cluster**
-  (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11** transport-helper
-  lift, the M46 dispatch-arm tests (`item/create.ts` 82.31% → 86.58%).
-  **Release-prep held all numbers** — the deferral slip changed test
-  names/assertions only, and the help-text cleanup is string-only (no
-  new tests/branches); re-verified green at the close-docs gate.
+  95.45% floor** (HOLDS across M53 — the pure-refactor lift removed
+  87 single-line + 35 multi-line literal 3rd-args + added one
+  `lookupNounDescription` strict-mode branch, all covered by the new
+  contract tests). **29 ERROR_CODES** (unchanged across M53 — the
+  `lookupNounDescription` `unknown_noun` discriminator routes through
+  the existing `internal_error` code); **118 commands** (unchanged
+  across M53 — pure-refactor lift, no command delta);
+  **functions 98.97% (1354/1368)** — net +1 generated overload-witness
+  function the migration exercises, no coverage regression;
+  `npm audit` **0 vulnerabilities**. Earlier coverage contributors
+  still hold: the **v0.8 refactor cluster** (`item/update.ts` 79.42% →
+  87.27%), **R-v0.8-NEW-11** transport-helper lift, the M46 dispatch-
+  arm tests (`item/create.ts` 82.31% → 86.58%). **Release-prep held
+  all numbers** — every release-prep edit is docs-only (README, CHANGELOG,
+  plan-doc, CLAUDE.md) plus `package.json`/`package-lock.json` version
+  bumps; re-verified green at the close-docs gate.
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -193,66 +186,45 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.10-M53 release-prep** (version bump
-  0.9.0 → 0.10.0 + CHANGELOG + close-docs sweep). **✅ v0.10-M53
-  IMPL SHIPPED 2026-05-22** (`feb8805`, one refactor commit; Codex
-  IMPL CONVERGED R1 — 0 P1/P2/P3). The mechanical migration
-  dropped the 3rd `summary` argument from every
-  `ensureSubcommand(program, '<noun>', '<desc>')` call site — 87
-  single-line + 35 multi-line = **122 call sites across 110 verb
-  files** in `src/commands/**`. The map at
-  `src/commands/noun-descriptions.ts` is now the only path the
-  registered command surface uses; the override-on-create path
-  stays valid for ad-hoc / test injections (D2 retained,
-  exercised by the pre-flight's 12-test contract). The
-  `update/upload.ts:110` drift (R-v0.10-NEW-1 — `'Update (comment)
-  commands (cli-design §4.3 UPDATE)'`) dropped naturally with the
-  3rd arg; the migration-window framing in three doc surfaces
-  (`src/commands/types.ts` docstring, `src/commands/noun-descriptions.ts`
-  docstring, `docs/architecture.md` bullet) flipped to "single
-  source" framing. Pre-flight (`c48510f` + `b334899`) shipped the
-  `NOUN_DESCRIPTIONS` 18-entry map + the additive 2-arg/3-arg
-  overload signature + the 12-test contract pin + the runner-catch
-  fix (`buildProgram` moved INSIDE `cli/run.ts`'s `try` block so an
-  attach-time `InternalError` from `lookupNounDescription` routes
-  through the envelope machinery). **D1-D5 closed at pre-flight**:
-  D1 flat noun-stem keys (no collisions across 18 nouns); D2
-  additive signature; D3 new module (SRP); D4 12-test contract
-  drives real `NOUN_DESCRIPTIONS` + real `Command`; D5 ERROR_CODES
-  delta ZERO (the `unknown_noun` discriminator routes through the
-  existing `internal_error` code). **R-class outcomes at M53 IMPL
-  close:** R-v0.8-NEW-22 → **RESOLVED** (closes the demonstrated
-  bug class: v0.5/v0.8 `doc` "read-only at v0.4" + v0.10 pre-flight
-  `update` `cli-design §4.3 UPDATE` ref — both classes structurally
-  impossible post-IMPL); R-v0.10-NEW-1 → **RESOLVED** (the
-  `update/upload.ts` drift dropped in the migration); R-v0.10-NEW-2
-  → **RESOLVED** (rule-of-three demonstrated; M53 closes the drift
-  bug class structurally). **R-v0.9-NEW-2 GRADUATED into
-  `.claude/rules/workflow.md`** as "Rejection-lift / pure-refactor
-  pre-flights need NO stub literal" — 2nd instance landed (1st M50
-  multi-level subitem nesting deletion; 2nd M53 NOUN_DESCRIPTIONS
-  lift). **Net stats:** zero new wire surface, zero new transport
+- **Next session:** **v0.10 post-publish flip → v0.10.x / v0.11
+  candidate-selection** per R-NEW-75. (1) After the user pushes +
+  tags + `npm publish` lands `monday-cli@0.10.0`, write a small
+  post-publish flip commit: CLAUDE.md "Status:" sentence flips to
+  "Published: `monday-cli@0.10.0` on npm (`latest` dist-tag,
+  <date>). **v0.10.0 published — release complete.**" + backfill
+  `<close-docs>` SHA placeholders to the close-docs commit SHA +
+  the npm publish timestamp + tag SHA. Mirrors v0.9's
+  `ea8f34e..253233f` post-publish cluster. **R-v0.9-NEW-13**
+  (post-publish flip pattern) hits 3rd-instance and graduates into
+  `.claude/rules/workflow.md` at this commit — cite v0.7 + v0.8 +
+  v0.9 + v0.10 as the four consecutive instances. (2) Then run a
+  dedicated v0.10.x / v0.11 candidate-selection session per
+  R-NEW-75 5-dimension scoping over the remaining backlog (C
+  cross-board `item move` value-overrides; E profile-scoped
+  argument defaults; G `Item.description` read-side paired with
+  v0.7-M40 reopen; D resumable cross-board cursor — design-blocked
+  on per-board cursor-lifetime under aggregation, cli-design §13).
+  Re-probe `@mondaydotcomorg/api` at candidate-selection — if SDK
+  15.x publishes (baking `2026-04`), M39/M40/M41 reopen and
+  preempts the C/E/G backlog. **✅ v0.10-M53 SHIPPED 2026-05-22**
+  — see `docs/v0.10-plan.md` §3 "M53 — IMPL close" + §3 "release-
+  prep — close" + §22 R-class register for the full narrative
+  (per the `feedback_public_docs_clean` propagation forward, the
+  per-milestone narrative belongs in the plan-docs, not here).
+  Pre-flight `c48510f` + `b334899`; IMPL `feb8805`; close-docs
+  `<close-docs>`. Codex IMPL CONVERGED R1 (0 P1/P2/P3); R-class
+  outcomes at M53 IMPL close: R-v0.8-NEW-22 + R-v0.10-NEW-1 +
+  R-v0.10-NEW-2 all RESOLVED; R-v0.9-NEW-2 GRADUATED into
+  `.claude/rules/workflow.md` ("Rejection-lift / pure-refactor
+  pre-flights need NO stub literal", 2nd instance: M50 deletion +
+  M53 lift). Net stats: zero new wire surface, zero new transport
   seam, zero new ERROR_CODE (29 stays), zero command delta (118
-  stays); **4270 tests pass + 4 skipped** (delta 0 vs pre-flight
-  baseline); branch coverage **95.89%** (≥ 95.45 floor); functions
-  98.97% (1354/1368); `npm audit` 0 vulns. **Release-prep scope
-  (next session):** version bump 0.9.0 → 0.10.0 + CHANGELOG
-  `[0.10.0]` (internal-cleanup framing per
-  `feedback_public_docs_clean`) + close-docs sweep + README Scope
-  refresh per the v0.9 release-prep precedent (R-v0.9-NEW-15
-  widened: quickstart + per-version Scope + `**v<next> (next):**`
-  block). R-NEW-82 ratification ticks up; R-NEW-84 likely applies
-  (mechanical/process-only). v0.10 candidate-selection rationale
-  + alternatives (C/E/G) stay as filed —
-  `docs/v0.8-plan.md` §22 + `docs/v0.10-plan.md` kickoff blockquote.
-  SDK probe at this session: still `@mondaydotcomorg/api@14.0.0` —
-  **4th-consecutive SDK stall**, so M39/M40/M41 (SDK 15.x → API
-  `2026-04`) + M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED;
-  v0.10 is the 4th-consecutive pivot in sequence
-  (v0.7/v0.8/v0.9/v0.10). Carried-forward alternatives stay filed
-  for v0.10.x / v0.11 candidate-selection (C/D/E/G above + D
-  resumable cross-board cursor — design-blocked on per-board
-  cursor-lifetime under aggregation; cli-design §13).
+  stays); 4270 tests + 4 skipped; branches 95.89%; `npm audit` 0.
+  SDK probe at the M53 pre-flight + this release-prep:
+  `@mondaydotcomorg/api@14.0.0` — **5th-consecutive SDK stall**
+  (v0.6 → v0.10), so M39/M40/M41 (SDK 15.x → API `2026-04`) +
+  M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED; v0.10 is the
+  4th-consecutive pivot in sequence (v0.7/v0.8/v0.9/v0.10).
   v0.9.0 is **PUBLISHED + release-complete** (npm `latest`
   2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`; release-prep
   `0147883..ee96681`). v0.9 feature-cluster scope is fully shipped —
