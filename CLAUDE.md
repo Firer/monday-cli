@@ -422,7 +422,10 @@ detail, and R-class refactor backlog, **read the plan docs** —
    stay DEFERRED — SDK still 14.0.0. §22 R-class register populated at
    the M50 pre-flight refactor-audit (R-v0.9-NEW-1/2 + carried-forward
    v0.8 watch-items R-v0.8-NEW-19/20/21/22 + promoted R-v0.8-NEW-23/24/25
-   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50).
+   → M50/M51/M52; R-v0.8-NEW-23 RESOLVED at M50) + the M50 IMPL
+   refactor-audit (R-v0.9-NEW-3 contract-term-checklist doc-surface /
+   line-wrap miss, MEDIUM; R-v0.9-NEW-4 drop the read-but-unused
+   `hierarchy_type` fetch if M51 defers, LOW).
 3. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
