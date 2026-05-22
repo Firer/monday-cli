@@ -1,8 +1,9 @@
 /**
  * Integration tests for `monday item create` (M9 §5.8
  * JSON-only-path single-round-trip + v0.7-M43 file `--set`
- * two-leg carve-out fold + §6.4 item-create shape + classic-only
- * subitem gate).
+ * two-leg carve-out fold + §6.4 item-create shape + v0.9-M50
+ * unified subitem dispatch — both classic and multi-level boards,
+ * no `hierarchy_type`-keyed rejection).
  *
  * Coverage map (per `v0.2-plan.md` §3 M9 + v0.7-plan §3 M43 +
  * cli-design §5.8 / §6.4):
@@ -16,12 +17,13 @@
  *     bundled `column_values`).
  *   - Position path: `before` + `after` (PositionRelative wire-enum
  *     mapping) + `--relative-to` same-board verification.
- *   - Subitem path: parent lookup, hierarchy_type gate (classic vs
- *     multi_level), subitems-board derivation from
- *     `subtasks.settings_str.boardIds[0]`, subitem mutation envelope
- *     with `parent_id`.
+ *   - Subitem path: parent lookup, unified dispatch across classic +
+ *     multi-level boards (no `hierarchy_type` rejection — v0.9-M50),
+ *     target-board derivation from `subtasks.settings_str.boardIds[0]`
+ *     (classic sub_items_board or multi-level host board), subitem
+ *     mutation envelope with `parent_id`.
  *   - Error paths: parent `not_found`, relative-to `not_found`,
- *     wrong-board `--relative-to`, multi-level rejection,
+ *     wrong-board `--relative-to`,
  *     `validation_failed` from Monday on the create wire.
  *   - Dry-run: top-level `create_item` AND subitem `create_subitem`
  *     planned-change shapes pinned (per Codex round-4 P2 — both
@@ -120,6 +122,48 @@ const newSubitem = {
   name: 'Subtask 1',
   board: { id: '333' },
   group: { id: 'subitems_topic' },
+  parent_item: { id: '12345' },
+};
+
+// Multi-level board (v0.9-M50). The host board's `subtasks` column
+// self-references the board itself (`boardIds: ["111"]` === the parent
+// board id), so subitem column resolution targets board 111 — NOT a
+// separate sub_items_board (the classic model). The host board carries
+// both the self-referencing `subtasks` column AND a status column the
+// `--set` token resolves against.
+const parentBoardMultiLevel = {
+  ...sampleBoardMetadata,
+  id: '111',
+  name: 'Multi-level host board',
+  columns: [
+    {
+      id: 'ml_status',
+      title: 'Status',
+      type: 'status',
+      description: null,
+      archived: null,
+      settings_str: '{}',
+      width: null,
+    },
+    {
+      id: 'subtasks_self',
+      title: 'Subitems',
+      type: 'subtasks',
+      description: null,
+      archived: null,
+      settings_str: '{"boardIds":["111"]}',
+      width: null,
+    },
+  ],
+};
+
+// Subitem nested on a multi-level host board — board is 111 (the host),
+// not a separate sub_items_board.
+const newSubitemMultiLevel = {
+  id: '99200',
+  name: 'Nested subtask',
+  board: { id: '111' },
+  group: { id: 'topics' },
   parent_item: { id: '12345' },
 };
 
@@ -1118,9 +1162,17 @@ describe('monday item create — subitem (live)', () => {
     expect(env.resolved_ids).toEqual({});
   });
 
-  it('multi_level board → usage_error with details.hierarchy_type + deferred_to: v0.9 (M28 Decision 11 closure; slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 → v0.9 across five consecutive release-preps — Monday\'s data model still doesn\'t surface subtasks at API 2026-01; v0.8 also pivoted, staying on API 2026-01 (SDK still 14.0.0; no 15.x/16.x published) so the data-model probe gate moves forward to v0.9)', async () => {
+  it('multi_level board → create_subitem succeeds (v0.9-M50 unified dispatch; closes M28). Nesting was verified depth-3+ at API 2026-01 (the CLI pin); the prior multi_level → usage_error gate asserted a now-false data-model claim and is DELETED. No --set → no metadata leg; the subitem lands on the host board (111), not a separate sub_items_board.', async () => {
     const out = await drive(
-      ['item', 'create', '--parent', '12345', '--name', 'Subtask', '--json'],
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Nested subtask',
+        '--json',
+      ],
       {
         interactions: [
           {
@@ -1136,19 +1188,182 @@ describe('monday item create — subitem (live)', () => {
               },
             },
           },
+          {
+            operation_name: 'ItemCreateSubitem',
+            // No --set → columnValues null (same shape as the classic
+            // plain-subtask path above). Multi-level subitems live on
+            // the parent's host board (111).
+            match_variables: {
+              parentItemId: '12345',
+              itemName: 'Nested subtask',
+              columnValues: null,
+            },
+            response: {
+              data: {
+                create_subitem: {
+                  id: '99200',
+                  name: 'Nested subtask',
+                  board: { id: '111' },
+                  group: { id: 'subitems_topic' },
+                  parent_item: { id: '12345' },
+                },
+              },
+            },
+          },
         ],
       },
     );
-    expect(out.exitCode).toBe(1);
-    const env = parseEnvelope(out.stderr);
-    expect(env.error?.code).toBe('usage_error');
-    const details = (env.error as Readonly<Record<string, unknown>>)
-      .details as Readonly<Record<string, unknown>>;
-    expect(details).toMatchObject({
-      parent_item_id: '12345',
-      hierarchy_type: 'multi_level',
-      deferred_to: 'v0.9',
+    expect(out.exitCode).toBe(0);
+    expect(out.remaining).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: {
+        id: string;
+        name: string;
+        board_id?: string;
+        parent_id?: string;
+      };
+    };
+    expect(env.data).toMatchObject({
+      id: '99200',
+      name: 'Nested subtask',
+      board_id: '111',
+      parent_id: '12345',
     });
+  });
+
+  it("v0.9-M50 regression guard: the deleted multi_level rejection's literals stay GONE — no `deferred_to`, no false 'sub_items_board carries no subtasks column' claim, no 'M28 Decision 11 closure' tag in any emitted envelope. A half-applied revert that re-introduced the `hierarchy_type === 'multi_level'` throw would fail here (exit 1 + the literals on stderr).", async () => {
+    // The deleted gate (create.ts, pre-M50) asserted a now-FALSE fact
+    // ("Monday's sub_items_board carries no subtasks column at API
+    // 2026-01, so depth-2 subitems have no data-model home") and
+    // carried `details.deferred_to: 'v0.9'` while shipping AT v0.9 —
+    // the R-NEW-82 "wait for the version you're already running"
+    // anti-pattern. This guard pins both literals absent on the exact
+    // surface that used to emit them (the multi-level create path).
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Nested subtask',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: { id: '111', hierarchy_type: 'multi_level' },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'ItemCreateSubitem',
+            response: {
+              data: {
+                create_subitem: {
+                  id: '99200',
+                  name: 'Nested subtask',
+                  board: { id: '111' },
+                  group: { id: 'subitems_topic' },
+                  parent_item: { id: '12345' },
+                },
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    for (const literal of [
+      'deferred_to',
+      'sub_items_board carries no subtasks',
+      'multi-level subitem creation is deferred',
+      'M28 Decision 11 closure',
+    ]) {
+      expect(out.stdout, `${literal}: stdout`).not.toContain(literal);
+      expect(out.stderr, `${literal}: stderr`).not.toContain(literal);
+    }
+  });
+
+  it('live: --parent + --set-raw on a multi_level board → resolves against the self-referenced host board (subtasks.settings_str.boardIds[0] === parent board 111), fires create_subitem with bundled column_values (v0.9-M50 — pins the host-board self-reference dispatch, not just classic sub_items_board)', async () => {
+    // The host board's `subtasks` column self-references board 111
+    // (boardIds: ["111"]), so column resolution targets the host board
+    // itself — distinct from the classic model where it points at a
+    // separate sub_items_board. The self-reference means a SINGLE
+    // `BoardMetadata` round-trip: leg-1 derives the target via the
+    // subtasks column AND warms board 111's metadata cache, so the
+    // column-resolution leg reads board 111 from cache (no second wire
+    // call). Classic boards fetch two distinct boards (parent +
+    // sub_items_board) and so issue two `BoardMetadata` calls.
+    const out = await drive(
+      [
+        'item',
+        'create',
+        '--parent',
+        '12345',
+        '--name',
+        'Nested subtask',
+        '--set-raw',
+        'ml_status={"label":"Working"}',
+        '--json',
+      ],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemParentLookup',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    board: { id: '111', hierarchy_type: 'multi_level' },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            operation_name: 'BoardMetadata',
+            response: { data: { boards: [parentBoardMultiLevel] } },
+          },
+          {
+            operation_name: 'ItemCreateSubitem',
+            // The bundled column_values must reach create_subitem keyed
+            // by the host board's column id (ml_status), and parentItemId
+            // must be the parent (12345), not the host board.
+            match_variables: {
+              parentItemId: '12345',
+              itemName: 'Nested subtask',
+              columnValues: {
+                ml_status: { label: 'Working' },
+              },
+              createLabelsIfMissing: false,
+            },
+            response: { data: { create_subitem: newSubitemMultiLevel } },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(out.remaining).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { id: string; board_id?: string; parent_id?: string };
+      resolved_ids?: Readonly<Record<string, string>>;
+    };
+    expect(env.data).toMatchObject({
+      id: '99200',
+      board_id: '111',
+      parent_id: '12345',
+    });
+    expect(env.resolved_ids).toEqual({ ml_status: 'ml_status' });
   });
 
   it('parent not_found → not_found error envelope', async () => {
@@ -2847,10 +3062,11 @@ describe('monday item create — v0.7-M43 file-column carve-out fold (v0.6-M38 �
       parent_item_id: '12345',
       name: 'Subtask 1',
     });
-    // Subitem entry-1 must NOT carry `board_id` — subitems-board
-    // derivation is server-side; surfacing the agent's --board would
-    // falsely imply ownership of the subitems board (per output-
-    // shapes §6.4 subitem dry-run shape).
+    // Subitem entry-1 must NOT carry `board_id` — the target board
+    // (classic sub_items_board or multi-level host board) is derived
+    // server-side; surfacing the agent's --board would falsely imply
+    // ownership of that board (per output-shapes §6.4 subitem dry-run
+    // shape).
     expect(entry1).not.toHaveProperty('board_id');
     expect(entry2).toMatchObject({
       operation: 'add_file_to_column',

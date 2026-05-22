@@ -56,12 +56,14 @@ Items are the primary object an agent will create / read / update.
   cli-design §5.8).
 - **Create subitem:** `create_subitem(parent_item_id, item_name,
   column_values?, create_labels_if_missing?)`. Surfaced as
-  `monday item create --parent <iid> --name <n>` (M9, classic
-  boards only — `hierarchy_type: "multi_level"` rejected
-  pre-mutation; deferred to v0.3). The auto-generated subitems
-  board's ID is derived server-side from the parent; the CLI
-  also derives it client-side (parent's `subtasks` column's
-  `settings_str.boardIds[0]`) for column-token resolution.
+  `monday item create --parent <iid> --name <n>` (v0.9-M50 unified
+  dispatch — both classic and multi-level boards, no
+  `hierarchy_type`-keyed rejection). The column-resolution target
+  board's ID is derived server-side from the parent; the CLI also
+  derives it client-side (parent's `subtasks` column's
+  `settings_str.boardIds[0]`) for column-token resolution — a
+  separate auto-generated sub_items_board on classic boards, the
+  self-referenced host board on multi-level boards.
 - **Update column value:** `change_column_value` (single column, typed
   per column kind) or `change_multiple_column_values` (bulk).
 - **Move:** `move_item_to_group(item_id, group_id)`,

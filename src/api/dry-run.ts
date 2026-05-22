@@ -566,15 +566,16 @@ export const planClear = async (
  *     `boardId`. `groupId` / `position` ride into the planned shape's
  *     hoisted slots (`group_id`, `position`).
  *   - `subitem` — `create_subitem`. Resolves columns against
- *     `subitemsBoardId` (the auto-generated subitems board the
- *     command layer derived from the parent's `subtasks` column,
- *     classic-board-only). The planned shape omits `board_id` and
- *     hoists `parent_item_id` instead. `--group` / `--position` are
- *     argv-rejected before reaching here.
+ *     `subitemsBoardId` (the target board the command layer derived
+ *     from the parent's `subtasks` column — a classic sub_items_board
+ *     or a multi-level host board). The planned shape omits `board_id`
+ *     and hoists `parent_item_id` instead. `--group` / `--position`
+ *     are argv-rejected before reaching here.
  *
- * The hierarchy_type gate (`multi_level` rejection) and the
- * `--relative-to` same-board verification both live in the command
- * layer — `planCreate` runs after those checks pass.
+ * Subitem creation is unified across hierarchy types (v0.9-M50 — no
+ * `multi_level` rejection); the `--relative-to` same-board
+ * verification lives in the command layer — `planCreate` runs after
+ * that check passes.
  */
 export type CreateMode =
   | {
@@ -590,10 +591,11 @@ export type CreateMode =
       readonly kind: 'subitem';
       readonly parentItemId: string;
       /**
-       * The subitems-board ID the column resolver targets. The
+       * The target board ID the column resolver targets. The
        * command layer derives this from the parent's `subtasks`
-       * column's `settings_str.boardIds[0]` (classic-only); when
-       * that derivation isn't possible (e.g. parent's board has no
+       * column's `settings_str.boardIds[0]` — a classic
+       * sub_items_board or a multi-level host board; when that
+       * derivation isn't possible (e.g. parent's board has no
        * `subtasks` column yet, or the settings_str is empty), the
        * command rejects with `usage_error` before reaching
        * planCreate.
@@ -635,9 +637,10 @@ export interface PlanCreateInputs {
  *   - `position` — only when both `--position` and `--relative-to`
  *     were supplied. Subitem variant always omits.
  *   - `board_id` — present on `create_item` only; the subitem
- *     variant omits it (the subitems board is derived server-side
- *     from the parent and surfacing it as `board_id` would falsely
- *     imply the agent's `--board` value).
+ *     variant omits it (the target board — classic sub_items_board or
+ *     multi-level host board — is derived server-side from the parent,
+ *     and surfacing it as `board_id` would falsely imply the agent's
+ *     `--board` value).
  */
 export interface CreatePlannedChange {
   readonly operation: 'create_item' | 'create_subitem';

@@ -15,8 +15,10 @@
  *     Used by `set` / `clear` / `update` / `create`'s
  *     `--relative-to` verification.
  *   - `ITEM_PARENT_LOOKUP_QUERY` — adds `board.hierarchy_type` (M9).
- *     Used by `create`'s `--parent` lookup so the multi-level
- *     classic-only gate fires pre-mutation per cli-design §5.8.
+ *     Used by `create`'s `--parent` lookup. The v0.9-M50 unified
+ *     subitem dispatch no longer branches on `hierarchy_type` (both
+ *     classic and multi-level boards create subitems), but the field
+ *     is retained for M51's board-projection surfacing.
  *
  * Error labels are caller-supplied so the disambiguation between
  * "Item N", "Parent item N", and "--relative-to item N" stays in
@@ -136,10 +138,12 @@ export const lookupItemBoard = async (
 };
 
 /**
- * Variant of `lookupItemBoard` that also returns `hierarchy_type`,
- * driving M9's classic-only subitem gate. SDK 14.0.0 doesn't type
- * `hierarchy_type` on `Board` (cli-design §2.8), so the raw escape
- * hatch is the M9 work-around.
+ * Variant of `lookupItemBoard` that also returns `hierarchy_type`.
+ * Originally drove M9's subitem gate; the v0.9-M50 unified dispatch
+ * removed that branch, so `hierarchy_type` is now informational
+ * (retained for M51's board-projection surfacing). SDK 14.0.0 doesn't
+ * type `hierarchy_type` on `Board` (cli-design §2.8), so the raw
+ * escape hatch is the work-around.
  */
 export const lookupItemBoardWithHierarchy = async (
   inputs: LookupInputs,

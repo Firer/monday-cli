@@ -13,15 +13,16 @@
  *   2. **Subitem** — `--parent <iid> --name <n>` mandatory; `--set` /
  *      `--set-raw` optional. `--board`, `--group`, and
  *      `--position` / `--relative-to` are **rejected** here — subitems
- *      live on Monday's auto-generated subitems board (not in groups,
- *      not relative to arbitrary items, not on a caller-named board).
- *      Calls `create_subitem`. Resolves columns against the
- *      subitems-board's metadata (derived from the parent's
- *      `subtasks` column's `settings_str.boardIds[0]`). Multi-level
- *      boards (`hierarchy_type: "multi_level"`) are rejected with
- *      `usage_error` — multi-level subitem support is deferred to
- *      v0.3 because the column-resolution path here assumes the
- *      classic auto-generated-subitems-board model.
+ *      live under the parent (not in groups, not relative to arbitrary
+ *      items, not on a caller-named board). Calls `create_subitem`.
+ *      Resolves columns against the metadata of the board the parent's
+ *      `subtasks` column's `settings_str.boardIds[0]` points at — a
+ *      separate sub_items_board on classic boards, the self-referenced
+ *      host board on multi-level boards. **Unified dispatch (v0.9-M50):
+ *      subitem creation works on both hierarchy types** — multi-level
+ *      subitem nesting reaches depth-3+ at API `2026-01` (the host
+ *      board's self-referencing `subtasks` column is the nesting home),
+ *      so there is no `hierarchy_type`-keyed rejection (closes M28).
  *
  * **Single round-trip on the JSON-only path** (cli-design §5.8 —
  * hard exit gate). Every translated non-file `--set` / `--set-raw`
@@ -514,10 +515,13 @@ const checkDuplicateTokens = (
 // ============================================================
 
 /**
- * Looks up the parent item's board id + `hierarchy_type` so the
- * multi-level gate can fire pre-mutation. Wraps the shared
- * `lookupItemBoardWithHierarchy` helper with the parent-item label
- * + detail key.
+ * Looks up the parent item's board id (+ `hierarchy_type`). The
+ * unified subitem dispatch (v0.9-M50) no longer branches on
+ * `hierarchy_type` — both classic and multi-level boards create
+ * subitems through one path — but the field is still fetched: it's
+ * the same query cost and M51 surfaces it in board projections. Wraps
+ * the shared `lookupItemBoardWithHierarchy` helper with the
+ * parent-item label + detail key.
  */
 const lookupParent = async (
   client: MondayClient,
@@ -536,12 +540,14 @@ const lookupParent = async (
 };
 
 /**
- * Derives the auto-generated subitems board ID from the parent
- * board's `subtasks` column. Monday's classic-board model exposes
- * the subitems board through the `subtasks` column's
- * `settings_str.boardIds[0]`. When the column is missing or the
- * settings are empty / malformed, the CLI surfaces `usage_error` —
- * the parent's board doesn't have a subitems lane provisioned, so
+ * Derives the column-resolution target board ID from the parent
+ * board's `subtasks` column's `settings_str.boardIds[0]`. The same
+ * key serves both hierarchy models (v0.9-M50): on classic boards it
+ * points at the separate auto-generated sub_items_board; on
+ * multi-level boards it self-references the host board (where the
+ * nested subitems live). When the column is missing or the settings
+ * are empty / malformed, the CLI surfaces `usage_error` — the
+ * parent's board doesn't have a subitems lane provisioned, so
  * Monday's server-side `create_subitem` would either fail or auto-
  * provision in a way the CLI can't predict for column resolution.
  *
@@ -709,14 +715,16 @@ interface ResolveCreateModeResult {
 
 /**
  * Builds the `CreateMode` (dry-run engine + live path consume the
- * same shape) from the dispatch result. Three orchestration steps
- * for the subitem path:
+ * same shape) from the dispatch result. Unified subitem dispatch
+ * (v0.9-M50) — classic AND multi-level boards flow through one path,
+ * no `hierarchy_type` branch:
  *
- *   1. Look up parent item → get parent's board id + `hierarchy_type`.
- *   2. Reject `multi_level` boards (M9 supports classic only).
- *   3. If `--set` / `--set-raw` is present, load parent's BoardMetadata
- *      → find `subtasks` column → derive subitems-board id from
- *      `settings_str.boardIds[0]`.
+ *   1. Look up parent item → get parent's board id.
+ *   2. If `--set` / `--set-raw` is present, load parent's BoardMetadata
+ *      → find `subtasks` column → derive the column-resolution target
+ *      board from `settings_str.boardIds[0]`: a separate sub_items_board
+ *      on classic boards, the self-referenced host board on multi-level
+ *      boards (the same key transparently yields the right target).
  *
  * For top-level: verifies the `--relative-to` item lives on `--board`
  * when `--position` is set (mirrors M5b's wrong-board check).
@@ -732,25 +740,6 @@ const resolveCreateMode = async (
   if (dispatch.kind === 'subitem') {
     // Parent lookup is always live (no item-level cache in v0.2).
     const parent = await lookupParent(client, dispatch.parentItemId);
-    if (parent.hierarchyType === 'multi_level') {
-      throw new UsageError(
-        `Parent item ${dispatch.parentItemId} lives on a multi-level ` +
-          `board (hierarchy_type "multi_level"); multi-level subitem ` +
-          `creation is deferred. Use a classic board ` +
-          `(hierarchy_type null/"classic"). v0.3 M28 Decision 11 closure: ` +
-          `Monday's sub_items_board carries no subtasks column at API ` +
-          `2026-01, so depth-2 subitems have no data-model home — v0.9 ` +
-          `picks the feature up if Monday surfaces the capability.`,
-        {
-          details: {
-            parent_item_id: dispatch.parentItemId,
-            parent_board_id: parent.boardId,
-            hierarchy_type: parent.hierarchyType,
-            deferred_to: 'v0.9',
-          },
-        },
-      );
-    }
     if (setEntries.length > 0 || rawEntries.length > 0) {
       const parentMetadata = await loadBoardMetadata({
         client,

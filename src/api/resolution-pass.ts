@@ -114,7 +114,8 @@ export interface ResolveAndTranslateInputs {
    * The board column tokens resolve against. For `item set` /
    * `item update` (single + bulk), this is the item's home board.
    * For `item create` top-level, the explicit `--board <bid>`. For
-   * `item create --parent`, the auto-derived subitems board.
+   * `item create --parent`, the auto-derived target board: a classic
+   * sub_items_board or a multi-level host board.
    */
   readonly boardId: string;
   readonly setEntries: readonly SetEntry[];

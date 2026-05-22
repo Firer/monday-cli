@@ -2613,10 +2613,14 @@ wrong-board check).
 
 ### `item create --parent <iid> --name <n> [--set ...] [--set-raw ...]`
 
-Subitem create (M9, classic boards only). The CLI looks up the parent
-item to verify `hierarchy_type` and (when `--set` / `--set-raw` is
-present) derive the auto-generated subitems board from the parent's
-`subtasks` column's `settings_str.boardIds[0]`.
+Subitem create. Works on both hierarchy types (v0.9-M50 unified
+dispatch): classic boards (subitems on the auto-generated
+sub_items_board) and multi-level boards (nested subitems on the host
+board, depth-3+). The CLI looks up the parent item and (when `--set` /
+`--set-raw` is present) derives the column-resolution target board from
+the parent's `subtasks` column's `settings_str.boardIds[0]` — a
+separate sub_items_board on classic boards, the self-referenced host
+board on multi-level boards.
 
 ```json
 {
@@ -2634,19 +2638,15 @@ present) derive the auto-generated subitems board from the parent's
 }
 ```
 
-Multi-level boards (`hierarchy_type: "multi_level"`) are rejected
-pre-mutation with `usage_error` carrying `details.hierarchy_type` +
-`details.deferred_to: "v0.9"` (M28 Decision 11 closure — Monday's
-`sub_items_board` carries no `subtasks` column at API `2026-01`;
-slipped from v0.4 → v0.5 → v0.6 → v0.7 → v0.8 → v0.9 across five
-consecutive release-preps because none of v0.4 / v0.5 / v0.6 / v0.7 /
-v0.8 picked the feature up — v0.8 also pivoted (staying on API
-`2026-01`, SDK still 14.0.0, no 15.x/16.x published) so the
-data-model probe gate moves forward to v0.9).
-`--parent` is mutually exclusive with
-`--board`, `--group`, and `--position` / `--relative-to`. `--set` /
-`--set-raw` columns resolve against the **subitems board**, not the
-parent's board.
+There is no `hierarchy_type`-keyed rejection (v0.9-M50 closed M28 — the
+nesting was verified depth-3+ at API `2026-01`, the CLI's pin). The
+only board-capability gate is the data-model `usage_error` that fires
+when `--set` / `--set-raw` targets a board with no subitems lane (no
+`subtasks` column / no settings / no linked board). `--parent` is
+mutually exclusive with `--board`, `--group`, and `--position` /
+`--relative-to`. `--set` / `--set-raw` columns resolve against the
+**target board** (classic sub_items_board or multi-level host board),
+not the parent's board.
 
 `--dry-run` for both branches per cli-design §6.4 "Item-create shape".
 Top-level emits `operation: "create_item"` with hoisted `board_id` /

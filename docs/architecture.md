@@ -602,9 +602,8 @@
   --relative-to <iid>] [--dry-run]`. Two argv shapes the
   dispatch picks between: top-level (calls `create_item`
   against `--board`) and subitem (`--parent` triggers
-  `create_subitem`; classic boards only —
-  `hierarchy_type: "multi_level"` rejected pre-mutation
-  with `usage_error` + `details.deferred_to: "v0.3"`).
+  `create_subitem`; v0.9-M50 unified dispatch — both classic
+  and multi-level boards, no `hierarchy_type`-keyed rejection).
   **Single round-trip is the hard exit gate** (cli-design
   §5.8): every translated `--set` / `--set-raw` value
   bundles into the single `create_item.column_values`
