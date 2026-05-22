@@ -518,10 +518,14 @@ const checkDuplicateTokens = (
  * Looks up the parent item's board id (+ `hierarchy_type`). The
  * unified subitem dispatch (v0.9-M50) no longer branches on
  * `hierarchy_type` — both classic and multi-level boards create
- * subitems through one path — but the field is still fetched: it's
- * the same query cost and M51 surfaces it in board projections. Wraps
- * the shared `lookupItemBoardWithHierarchy` helper with the
- * parent-item label + detail key.
+ * subitems through one path — so the returned `hierarchyType` is
+ * read-but-unused here, kept as a regression-guard affordance (a
+ * future `hierarchy_type`-keyed branch would be caught by the M50
+ * multi_level success test). v0.9-M51 surfaces `hierarchy_type` via
+ * the separate `boards(...)` board projection, NOT this parent-lookup
+ * fetch (v0.9-plan R-v0.9-NEW-4). Wraps the shared
+ * `lookupItemBoardWithHierarchy` helper with the parent-item label +
+ * detail key.
  */
 const lookupParent = async (
   client: MondayClient,

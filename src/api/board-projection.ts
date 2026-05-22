@@ -53,6 +53,7 @@ export const BOARD_FIELDS_FRAGMENT = `id
       board_folder_id
       workspace_id
       url
+      hierarchy_type
       items_count
       updated_at
       permissions`;
@@ -74,6 +75,15 @@ export const boardProjectionSchema = z
     board_folder_id: z.string().nullable(),
     workspace_id: z.string().nullable(),
     url: z.string().nullable(),
+    // v0.9-M51: surfaced across the whole board projection (get + the
+    // mutation cluster) so one read tells an agent which subitem model
+    // a board uses. SDK 14.0.0 doesn't type it — selected via raw
+    // GraphQL in BOARD_FIELDS_FRAGMENT. `string | null` (not an enum):
+    // Monday returns `classic` / `multi_level` plus internal forms
+    // (`top_level` / `parent`) the projection passes through. Matches
+    // `boardMetadataSchema.hierarchy_type` (the describe path). See
+    // cli-design §2.8.
+    hierarchy_type: z.string().nullable(),
     items_count: z.number().int().nullable(),
     updated_at: z.string().nullable(),
     permissions: z.string().nullable(),

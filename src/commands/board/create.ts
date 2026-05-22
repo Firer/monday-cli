@@ -135,7 +135,15 @@ export const boardCreateCommand: CommandModule<
       .option('--description <d>', 'board description')
       .addHelpText(
         'after',
-        ['', 'Examples:', ...boardCreateCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
+        [
+          '',
+          'Examples:',
+          ...boardCreateCommand.examples.map((e) => `  ${e}`),
+          '',
+          'Creates a classic board. To create a multi-level board, duplicate',
+          'an existing one: monday board duplicate <bid>.',
+          '',
+        ].join('\n'),
       )
       .action(async (opts: unknown) => {
         const parsed = parseArgv(boardCreateCommand.inputSchema, opts);

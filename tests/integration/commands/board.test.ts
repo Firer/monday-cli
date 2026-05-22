@@ -38,6 +38,7 @@ const sampleBoard = {
   board_folder_id: null,
   workspace_id: '5',
   url: 'https://x.monday.com/boards/111',
+  hierarchy_type: 'classic',
   items_count: 7,
   updated_at: '2026-04-30T10:00:00Z',
 };
@@ -112,7 +113,41 @@ describe('monday board get', () => {
     );
     expect(out.exitCode).toBe(0);
     const env = parseEnvelope(out.stdout);
-    expect(env.data).toMatchObject({ id: '111', permissions: 'collaborators' });
+    expect(env.data).toMatchObject({
+      id: '111',
+      permissions: 'collaborators',
+      // v0.9-M51: the shared board projection surfaces hierarchy_type.
+      hierarchy_type: 'classic',
+    });
+  });
+
+  it('v0.9-M51: surfaces hierarchy_type: multi_level for a multi-level board', async () => {
+    // The whole point of M51 — one `board get` tells an agent which
+    // subitem model a board uses. The shared boardProjectionSchema
+    // passes Monday's raw `hierarchy_type` through unchanged.
+    const out = await drive(
+      ['board', 'get', '111', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'BoardGet',
+            match_variables: { ids: ['111'] },
+            response: {
+              data: {
+                boards: [
+                  { ...sampleBoard, permissions: 'collaborators', hierarchy_type: 'multi_level' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    const env = parseEnvelope(out.stdout) as EnvelopeShape & {
+      data: { hierarchy_type: string | null };
+    };
+    expect(env.data.hierarchy_type).toBe('multi_level');
   });
 
   it('not_found when boards is empty', async () => {
@@ -808,6 +843,7 @@ describe('monday board create (integration, M15)', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/67890',
+    hierarchy_type: 'classic',
     items_count: 0,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',
@@ -1103,6 +1139,7 @@ describe('monday board update (integration, M15)', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/12345',
+    hierarchy_type: 'classic',
     items_count: 7,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',
@@ -1514,6 +1551,7 @@ describe('monday board update (integration, M15)', () => {
                     board_folder_id: null,
                     workspace_id: '5',
                     url: null,
+                    hierarchy_type: 'classic',
                     items_count: 0,
                     updated_at: '2026-05-07T11:00:00Z',
                     permissions: 'everyone',
@@ -1729,6 +1767,7 @@ describe('monday board archive (integration, M15)', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/12345',
+    hierarchy_type: 'classic',
     items_count: 0,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',
@@ -1982,6 +2021,7 @@ describe('monday board archive (integration, M15)', () => {
                   board_folder_id: null,
                   workspace_id: '5',
                   url: null,
+                  hierarchy_type: 'classic',
                   items_count: 0,
                   updated_at: '2026-05-07T11:00:00Z',
                   permissions: 'everyone',
@@ -2060,6 +2100,7 @@ describe('monday board delete (integration, M15)', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/12345',
+    hierarchy_type: 'classic',
     items_count: 0,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',
@@ -2230,6 +2271,7 @@ describe('monday board delete (integration, M15)', () => {
                   board_folder_id: null,
                   workspace_id: '5',
                   url: null,
+                  hierarchy_type: 'classic',
                   items_count: 0,
                   updated_at: '2026-05-07T11:00:00Z',
                   permissions: 'everyone',
@@ -2341,6 +2383,7 @@ describe('monday board duplicate (integration, M15)', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/67890',
+    hierarchy_type: 'classic',
     items_count: 7,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',

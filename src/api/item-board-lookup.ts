@@ -17,8 +17,13 @@
  *   - `ITEM_PARENT_LOOKUP_QUERY` — adds `board.hierarchy_type` (M9).
  *     Used by `create`'s `--parent` lookup. The v0.9-M50 unified
  *     subitem dispatch no longer branches on `hierarchy_type` (both
- *     classic and multi-level boards create subitems), but the field
- *     is retained for M51's board-projection surfacing.
+ *     classic and multi-level boards create subitems), so the field is
+ *     now read-but-unused here. It is retained as a regression-guard
+ *     affordance — a future `hierarchy_type`-keyed branch is caught by
+ *     the M50 multi_level success test. (v0.9-M51 surfaces
+ *     `hierarchy_type` via the SEPARATE `boards(...)` board projection,
+ *     NOT this `items(...){board{...}}` fetch — see v0.9-plan
+ *     R-v0.9-NEW-4.)
  *
  * Error labels are caller-supplied so the disambiguation between
  * "Item N", "Parent item N", and "--relative-to item N" stays in
@@ -140,10 +145,13 @@ export const lookupItemBoard = async (
 /**
  * Variant of `lookupItemBoard` that also returns `hierarchy_type`.
  * Originally drove M9's subitem gate; the v0.9-M50 unified dispatch
- * removed that branch, so `hierarchy_type` is now informational
- * (retained for M51's board-projection surfacing). SDK 14.0.0 doesn't
- * type `hierarchy_type` on `Board` (cli-design §2.8), so the raw
- * escape hatch is the work-around.
+ * removed that branch, so `hierarchy_type` is now read-but-unused —
+ * retained as a regression-guard affordance (the typed return keeps a
+ * future `hierarchy_type`-keyed branch cheap to add and caught by the
+ * M50 multi_level success test). v0.9-M51 surfaces `hierarchy_type`
+ * through the separate `boards(...)` board projection, not this fetch.
+ * SDK 14.0.0 doesn't type `hierarchy_type` on `Board` (cli-design
+ * §2.8), so the raw escape hatch is the work-around.
  */
 export const lookupItemBoardWithHierarchy = async (
   inputs: LookupInputs,

@@ -20,7 +20,11 @@ import {
 } from '../../api/walk-pages.js';
 import type { Warning } from '../../utils/output/envelope.js';
 
-const BOARD_LIST_QUERY = `
+// Exported so the RUN_LIVE_TESTS schema-drift smoke test can run the
+// exact production document against the live API (the `hierarchy_type`
+// selection is a raw-GraphQL SDK-drift field — the `is_leaf` regression
+// class; see tests/e2e/live-schema-drift.test.ts).
+export const BOARD_LIST_QUERY = `
   query BoardList(
     $limit: Int
     $page: Int
@@ -41,6 +45,7 @@ const BOARD_LIST_QUERY = `
       board_folder_id
       workspace_id
       url
+      hierarchy_type
       items_count
       updated_at
     }
@@ -57,6 +62,10 @@ const boardSchema = z
     board_folder_id: z.string().nullable(),
     workspace_id: z.string().nullable(),
     url: z.string().nullable(),
+    // v0.9-M51: `classic` | `multi_level` (string | null — Monday also
+    // returns internal forms). Raw-GraphQL SDK-drift field; cli-design
+    // §2.8. Mirrors the shared `boardProjectionSchema`.
+    hierarchy_type: z.string().nullable(),
     items_count: z.number().int().nullable(),
     updated_at: z.string().nullable(),
   })

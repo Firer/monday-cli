@@ -20,6 +20,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { BOARD_METADATA_QUERY } from '../../src/api/board-metadata.js';
+import { BOARD_GET_QUERY } from '../../src/commands/board/get.js';
+import { BOARD_LIST_QUERY } from '../../src/commands/board/list.js';
 import { PINNED_API_VERSION } from '../../src/api/client.js';
 
 const TOKEN = process.env.MONDAY_API_TOKEN;
@@ -70,5 +72,27 @@ describe.skipIf(!LIVE)('live schema drift (RUN_LIVE_TESTS)', () => {
     // of regression. An empty `errors` means every selected field still
     // exists at the pinned API version.
     expect(result.errors, JSON.stringify(result.errors)).toBeUndefined();
+  });
+
+  it('BoardGet + BoardList production documents select only live fields (v0.9-M51 hierarchy_type)', async () => {
+    // M51 added `hierarchy_type` to the shared board projection
+    // (BOARD_GET_QUERY, the mutation cluster) and BOARD_LIST_QUERY via
+    // raw GraphQL — the same SDK-drift class as `is_leaf`. Run the EXACT
+    // production documents so a future Monday removal of `hierarchy_type`
+    // (or any other selected field) surfaces here rather than silently
+    // breaking board get/list/mutations live while mocked tests stay
+    // green.
+    const discover = await post('query { boards(limit: 1) { id } }');
+    expect(discover.errors, JSON.stringify(discover.errors)).toBeUndefined();
+    const boardId = (
+      discover.data as { boards?: { id: string }[] } | undefined
+    )?.boards?.[0]?.id;
+    expect(boardId).toBeDefined();
+
+    const get = await post(BOARD_GET_QUERY, { ids: [boardId] });
+    expect(get.errors, JSON.stringify(get.errors)).toBeUndefined();
+
+    const list = await post(BOARD_LIST_QUERY, { limit: 1, page: 1 });
+    expect(list.errors, JSON.stringify(list.errors)).toBeUndefined();
   });
 });

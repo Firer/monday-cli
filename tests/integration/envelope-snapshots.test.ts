@@ -430,6 +430,7 @@ describe('envelope snapshot — board', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/111',
+    hierarchy_type: 'classic',
     items_count: 7,
     updated_at: '2026-04-30T10:00:00Z',
   };
@@ -604,6 +605,7 @@ describe('envelope snapshot — board', () => {
     board_folder_id: null,
     workspace_id: '5',
     url: 'https://x.monday.com/boards/12345',
+    hierarchy_type: 'classic',
     items_count: 0,
     updated_at: '2026-05-07T11:00:00Z',
     permissions: 'everyone',

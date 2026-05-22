@@ -156,6 +156,10 @@ export const boardArchiveCommand: CommandModule<
             board_folder_id: current.board_folder_id,
             workspace_id: current.workspace_id,
             url: current.url,
+            // v0.9-M51: BoardMetadata already fetches hierarchy_type
+            // (required+nullable), so the snapshot carries the live
+            // value rather than a forced null.
+            hierarchy_type: current.hierarchy_type,
             items_count: current.items_count ?? null,
             updated_at: current.updated_at,
             permissions: current.permissions ?? null,

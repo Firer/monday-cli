@@ -162,7 +162,17 @@ export const boardDuplicateCommand: CommandModule<
       )
       .addHelpText(
         'after',
-        ['', 'Examples:', ...boardDuplicateCommand.examples.map((e) => `  ${e}`), ''].join('\n'),
+        [
+          '',
+          'Examples:',
+          ...boardDuplicateCommand.examples.map((e) => `  ${e}`),
+          '',
+          'Duplicating a multi-level board preserves its hierarchy, so this',
+          'is the way to create a new multi-level board (board create always',
+          'makes a classic board). The hierarchy_type field in the result',
+          'confirms which kind you got.',
+          '',
+        ].join('\n'),
       )
       .action(async (boardId: unknown, opts: unknown) => {
         const parsed = parseArgv(boardDuplicateCommand.inputSchema, {
@@ -206,6 +216,11 @@ export const boardDuplicateCommand: CommandModule<
             board_folder_id: current.board_folder_id,
             workspace_id: current.workspace_id,
             url: current.url,
+            // v0.9-M51: BoardMetadata already fetches hierarchy_type
+            // (required+nullable), so the snapshot carries the live
+            // value. Duplicating a multi_level board surfaces
+            // `multi_level` here, previewing the preserved hierarchy.
+            hierarchy_type: current.hierarchy_type,
             items_count: current.items_count ?? null,
             updated_at: current.updated_at,
             permissions: current.permissions ?? null,

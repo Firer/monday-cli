@@ -27,7 +27,12 @@ import {
   type BoardProjection,
 } from '../../api/board-projection.js';
 
-const BOARD_GET_QUERY = `
+// Exported so the RUN_LIVE_TESTS schema-drift smoke test can run the
+// exact production document (the shared BOARD_FIELDS_FRAGMENT) against
+// the live API — the `hierarchy_type` selection (v0.9-M51) is a
+// raw-GraphQL SDK-drift field, the `is_leaf` regression class. See
+// tests/e2e/live-schema-drift.test.ts.
+export const BOARD_GET_QUERY = `
   query BoardGet($ids: [ID!]) {
     boards(ids: $ids) {
       ${BOARD_FIELDS_FRAGMENT}
