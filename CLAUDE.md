@@ -50,31 +50,38 @@ humans are second-class. Built incrementally via Claude Code on top of
   `monday-cli@0.8.0` (tag `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z);
   `monday-cli@0.7.0` (tag `3e46f59`, 2026-05-20T15:48:07Z).
 - **package.json version:** `0.10.0`.
-- **Live numbers:** **4270 tests pass + 4 skipped** (the **v0.10-M53
-  IMPL** net +10 over the M52 baseline of 4260 — 12 new
-  `tests/unit/commands/types.test.ts` cases pinning the
-  `NOUN_DESCRIPTIONS` map contract + `ensureSubcommand` 2-arg/3-arg
-  overload + `lookupNounDescription`'s `unknown_noun` strict-mode
-  invariant, less two replaced tests subsumed by the new contract.
-  The 4 skips are unchanged: the 2 pre-existing + the multipart-upload
-  smoke test + the board-projection schema-drift smoke test). **✅ CI
-  `test:coverage` PASSES:** global **branch coverage 95.89% vs the
-  95.45% floor** (HOLDS across M53 — the pure-refactor lift removed
-  87 single-line + 35 multi-line literal 3rd-args + added one
-  `lookupNounDescription` strict-mode branch, all covered by the new
-  contract tests). **29 ERROR_CODES** (unchanged across M53 — the
-  `lookupNounDescription` `unknown_noun` discriminator routes through
-  the existing `internal_error` code); **118 commands** (unchanged
-  across M53 — pure-refactor lift, no command delta);
-  **functions 98.97% (1354/1368)** — net +1 generated overload-witness
-  function the migration exercises, no coverage regression;
-  `npm audit` **0 vulnerabilities**. Earlier coverage contributors
-  still hold: the **v0.8 refactor cluster** (`item/update.ts` 79.42% →
-  87.27%), **R-v0.8-NEW-11** transport-helper lift, the M46 dispatch-
-  arm tests (`item/create.ts` 82.31% → 86.58%). **Release-prep held
-  all numbers** — every release-prep edit is docs-only (README, CHANGELOG,
-  plan-doc, CLAUDE.md) plus `package.json`/`package-lock.json` version
-  bumps; re-verified green at the close-docs gate.
+- **Live numbers:** **4295 tests pass + 5 skipped** (the **v0.11-M54-G
+  IMPL** net +25 over the v0.10.0 baseline of 4270 + 4 — 13 unit
+  `tests/unit/api/item-description.test.ts` cases pinning the
+  `ITEM_DESCRIPTION_QUERY` selection, the `documentBlockSchema` /
+  `itemDescriptionSchema` shapes, and `parseItemDescription` parse-
+  boundary surfaces; 8 integration
+  `tests/integration/commands/item-get-description.test.ts` cases
+  (happy + wire-null + emptied-blocks + not-found + usage-error +
+  401 + malformed-row guard + missing-description-key guard); 1 new
+  `RUN_LIVE_TESTS`-gated skip in `live-schema-drift.test.ts` for the
+  `ITEM_DESCRIPTION_QUERY` smoke; 1 envelope-snapshot test + the
+  pre-existing snapshot count delta; less 1 flipped unit test for
+  `parseItemDescription(undefined)`. The 5 skips: the 2 pre-existing +
+  the multipart-upload smoke + the board-projection schema-drift smoke
+  + the new item-description schema-drift smoke). **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.86% vs the
+  95.45% floor** (HOLDS across M54-G — the absent-key guard + tightened
+  `parseItemDescription` early-return added new branches all covered
+  by the new tests; net 95.89% → 95.86% reflects the M54-G IMPL
+  adding `client.raw` + new schema branches the test surface didn't
+  exhaust at every defensive arm). **29 ERROR_CODES** (unchanged
+  across M54-G — the `missing_description_key` discriminator routes
+  through the existing `internal_error` code); **119 commands** (+1
+  for `monday item get-description`); **functions 98.98% (1359/1373)**
+  — net +5 functions from the new schema + helper + projector + verb
+  body, no coverage regression; `npm audit` **0 vulnerabilities**.
+  Earlier coverage contributors still hold: the **v0.8 refactor
+  cluster** (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11**
+  transport-helper lift, the M46 dispatch-arm tests (`item/create.ts`
+  82.31% → 86.58%), the **v0.10-M53** `NOUN_DESCRIPTIONS` single-
+  source-of-truth lift (collapsed 122 duplicate `ensureSubcommand`
+  literals, no coverage regression).
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -239,8 +246,14 @@ humans are second-class. Built incrementally via Claude Code on top of
   (jsonScalarOrNull pattern re-used in `item-description.ts`;
   lift at 3rd consumer per R-NEW-58). 4 R-class watch-items
   filed at pre-flight (R-v0.11-NEW-1/2/3/4); R-v0.11-NEW-2
-  GRADUATED at IMPL close; R-v0.11-NEW-1/3/4 stay WATCH. Net
-  stats: **4295 tests pass + 5 skipped** (+25 vs v0.10.0 baseline
+  GRADUATED at IMPL close; R-v0.11-NEW-1/3/4 stay WATCH;
+  **2 more watch-items filed at post-IMPL refactor-audit**
+  (R-v0.11-NEW-5 sentinel-normalisation anti-pattern, 1 known
+  instance fixed at M54-G IMPL R1 P2-1, watch for 2nd; R-v0.11-NEW-6
+  Codex pre-flight W3 wire-shape audit could exhaustively
+  enumerate (a)-(e) failure surfaces, watch for 2nd reproducible
+  miss before folding into template). Net stats: **4295 tests pass
+  + 5 skipped** (+25 vs v0.10.0 baseline
   of 4270 + 4); branches **95.86%** (≥ 95.45 floor); functions
   1359/1373; **29 ERROR_CODES** unchanged; **119 commands** (+1
   vs v0.10.0); `npm audit` 0 vulns. v0.10.0 stays PUBLISHED +
