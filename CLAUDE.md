@@ -190,7 +190,7 @@ humans are second-class. Built incrementally via Claude Code on top of
     choices.
 - **✅ v0.11-M54-G SHIPPED 2026-05-23** (pre-flight `f08bfef`
   + SHA-backfill `d1753ae` + IMPL close-docs
-  `<impl-close-sha>`). New verb `monday item get-description
+  `5738b64`). New verb `monday item get-description
   <iid>` — narrow companion read surfacing Monday's
   `Item.description { id, blocks: [DocumentBlock] }` via raw
   GraphQL at API `2026-01` (4 of `DocumentBlock`'s 9 wire fields
@@ -659,7 +659,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    v0.9-M52's `board views <bid>` carve-out from `board describe`.
    Closes R-v0.9-NEW-8 (filed at v0.9-M52 close-docs;
    user-directed). **M54-G ✅ SHIPPED 2026-05-23** (pre-flight
-   `f08bfef`, IMPL close-docs `<impl-close-sha>`; Codex pre-flight
+   `f08bfef`, IMPL close-docs `5738b64`; Codex pre-flight
    R1 CONVERGED 0 P1 / Codex IMPL R2 CONVERGED 0 P1/P2/P3 — R1
    surfaced an absent-key shape-drift gap folded inline before R2,
    adding the `missing_description_key` `details.reason`
