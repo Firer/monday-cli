@@ -11,19 +11,18 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Status:** `monday-cli@0.11.0` **release-prep SHIPPED — ready
-  for publish, EXTERNALLY BLOCKED on user push + npm publish.**
-  Currently published: `monday-cli@0.10.0` on npm (`latest` dist-tag,
-  2026-05-22T21:24:43Z; annotated `v0.10.0` tag at `c9eceba`; GitHub
-  release at https://github.com/Firer/monday-cli/releases/tag/v0.10.0).
-  Once `npm publish` lands, the **v0.11-M54-G `monday item
-  get-description` narrow read verb** will be LIVE — surfaces
-  Monday's `Item.description { id, blocks: [DocumentBlock] }` via
-  raw GraphQL at API `2026-01` (4 of `DocumentBlock`'s 9 wire fields
-  projected — `id` / `type` / `content` / `position`); mirrors
-  v0.9-M52's `board views <bid>` carve-out shape so heavy/nested
-  doc-block content stays opt-in. **v0.11 release-prep cluster**
-  (`413d0f8..<close-docs-sha>`, 4 commits; mirrors the v0.9 + v0.10
+- **Published:** `monday-cli@0.11.0` on npm (`latest` dist-tag,
+  2026-05-23T11:50:52Z). **v0.11.0 published — release complete.**
+  Annotated `v0.11.0` tag pushed pointing at `195d238`; GitHub
+  release live at https://github.com/Firer/monday-cli/releases/tag/v0.11.0.
+  The **v0.11-M54-G `monday item get-description` narrow read verb**
+  is **LIVE in the published artifact** — surfaces Monday's
+  `Item.description { id, blocks: [DocumentBlock] }` via raw GraphQL
+  at API `2026-01` (4 of `DocumentBlock`'s 9 wire fields projected
+  — `id` / `type` / `content` / `position`); mirrors v0.9-M52's
+  `board views <bid>` carve-out shape so heavy/nested doc-block
+  content stays opt-in. **v0.11 release-prep cluster**
+  (`413d0f8..195d238`, 4 commits; mirrors the v0.9 + v0.10
   4-commit precedent verbatim — 3rd-consecutive ≤4-commit cluster):
   README Scope flip — flipped current to v0.11.0 with the
   `item get-description` framing (`413d0f8`; R-v0.9-NEW-15 widened-
@@ -36,7 +35,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   (`664260d`) / CHANGELOG [0.11.0] one-line user-impact framing per
   `feedback_public_docs_clean` ("Adds `monday item get-description`
   for reading item description doc-block content", `11a3e24`) /
-  close-docs sweep (`<close-docs>`). Envelope-snapshot refresh
+  close-docs sweep (`195d238`). Envelope-snapshot refresh
   probe ran clean (zero diff vs M54-G IMPL close, **163 snapshots**
   — M54-G's Codex IMPL R1 P3-1 fix-up added the new verb's
   happy-path snapshot taking 162 → 163; release-prep added none) —
@@ -217,61 +216,71 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.11 post-publish flip → v0.11.x / v0.12
-  candidate-selection** per R-NEW-75. (1) After the user pushes +
-  tags + `npm publish` lands `monday-cli@0.11.0`, write a small
-  post-publish flip commit per the GRADUATED R-v0.9-NEW-13 rule
-  ("Post-publish flip commit pattern" in workflow.md): CLAUDE.md
-  "Status:" sentence flips to "Published: `monday-cli@0.11.0` on
-  npm (`latest` dist-tag, <date>). **v0.11.0 published — release
-  complete.**" + backfill `<close-docs>` / `<close-docs-sha>`
-  placeholders to the close-docs commit SHA (`rg '<close-docs'
-  CLAUDE.md docs/v0.11-plan.md` must return 0 hits after the
-  edits) + tick §7's pending-publish checklist line with the npm
-  timestamp + tag SHA + drop the publish-coordination prefix from
-  this "Next session" pointer. Mirrors v0.10's `177b40c` single-
-  commit shape. (2) Then run a dedicated v0.11.x / v0.12
-  candidate-selection session per R-NEW-75 5-dimension scoping —
-  **E (profile-scoped argument defaults) is the queued
-  standalone candidate** per the 2026-05-22 user binding (filed
-  at v0.6 kickoff; extends `~/.monday-cli/config.toml` with
-  `[profiles.<name>.defaults]`; carries the §13 carve-out
-  Decision prerequisite distinguishing aliases-as-stored-command-
-  strings from defaults-as-stored-flag-values). Carry-forward
-  alternatives stay filed: C (cross-board `item move` value-
-  overrides — Monday's `ColumnMappingInput` still carries no
-  value slot at API `2026-01`, 4 slips); D (resumable cross-board
-  cursor — design-blocked on per-board cursor-lifetime under
-  aggregation). Re-probe `@mondaydotcomorg/api` at candidate-
-  selection — if SDK 15.x publishes (baking `2026-04`),
-  M39/M40/M41 reopen and preempts the E/C/D backlog. **✅
-  v0.11-M54-G SHIPPED 2026-05-23** — see `docs/v0.11-plan.md` §3
-  "M54-G — IMPL close" + §3 "release-prep — close" + §22 R-class
-  register for the full narrative (per the
-  `feedback_public_docs_clean` propagation forward, the
-  per-milestone narrative belongs in the plan-docs, not here).
-  Pre-flight `f08bfef`; SHA-backfill `d1753ae`; IMPL close-docs
-  `5738b64`; post-IMPL refactor-audit `1f662af`; release-prep
-  `413d0f8..<close-docs>`. Codex pre-flight R1 CONVERGED 0 P1;
-  Codex IMPL R2 CONVERGED 0 P1/P2/P3 (R1 P2-1 absent-key shape-
-  drift gap folded inline before R2 adding the
+- **Next session:** **v0.11.x / v0.12 candidate-selection** per
+  R-NEW-75. ≥2 backlog candidates remain at v0.11 close: **E
+  profile-scoped argument defaults** (queued standalone per the
+  2026-05-22 user binding — filed at v0.6 kickoff; extends
+  `~/.monday-cli/config.toml` with `[profiles.<name>.defaults]`;
+  carries the §13 carve-out Decision prerequisite distinguishing
+  aliases-as-stored-command-strings from defaults-as-stored-flag-
+  values); **C cross-board `item move` value-overrides** (Monday's
+  `ColumnMappingInput` still carries no value slot at API
+  `2026-01`, 4 slips); **D resumable cross-board cursor** (design-
+  blocked on per-board cursor-lifetime under aggregation,
+  cli-design §13). **Re-probe `@mondaydotcomorg/api`** at
+  candidate-selection: if SDK 15.x publishes (baking `2026-04`),
+  M39/M40/M41 reopen and preempts the E/C/D backlog (M40 already
+  feature-confirmed on multi_level boards via the 2026-05-22
+  probe sweep — only the M39 SDK gate remains). If still 14.0.0
+  (6th-consecutive stall), 5th-consecutive pivot is the default
+  expectation across the E/C/D backlog. Also consider a v0.11
+  post-publish refactor-audit (optional, user-driven) over the
+  recency window `413d0f8..<post-publish-flip>` — the v0.10
+  precedent at `5a63a4d` filed 3 candidates (`R-v0.10-NEW-5/6/7`,
+  with R-v0.10-NEW-6/7 just GRADUATED/RESOLVED at v0.11 release-
+  prep close); only fire if surveying the cluster surfaces real
+  candidates. v0.11.0 is **PUBLISHED + release-complete** (npm
+  `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`;
+  release-prep `413d0f8..195d238`). v0.11 feature-cluster scope
+  is fully shipped — **M54-G** `item get-description` narrow read
+  verb — and the release-prep cluster landed in 4 commits
+  (matching v0.9 + v0.10 4-commit shape; ToC audit + deferral-
+  slip + help-text-hygiene all skipped after CLEAN gates per
+  R-NEW-82's widened "if clean, skip" sub-rule). Process
+  adoptions at the v0.11 close-docs: R-NEW-82 **9th-consecutive
+  ratification** (zero stale `deferred_to: "v0.11"` slots, by
+  construction — pure-additive new verb shipped no deferred wire
+  leg) + body widened at this same close (folds R-v0.10-NEW-6 +
+  R-v0.9-NEW-14 + R-v0.10-NEW-7 graduations); R-NEW-84
+  graduated-discipline applied (Codex skipped on the mechanical/
+  process-only cluster); R-v0.9-NEW-15 RE-RATIFIED at v0.11
+  (2nd dedicated consumer of the widened README checklist);
+  R-v0.8-NEW-21 CLOSED-RESOLVED at 4th-consecutive CLEAN hygiene
+  sweep (closed rather than graduated — structural fix at v0.10-
+  M53 + `feedback_public_docs_clean` + R-NEW-82's widened
+  sub-rule cover the discipline). **✅ v0.11-M54-G SHIPPED
+  2026-05-23** — see `docs/v0.11-plan.md` §3 "M54-G — IMPL close"
+  + §3 "release-prep — close" + §22 R-class register for the
+  full narrative (per the `feedback_public_docs_clean`
+  propagation forward, the per-milestone narrative belongs in
+  the plan-docs, not here). Pre-flight `f08bfef`; SHA-backfill
+  `d1753ae`; IMPL close-docs `5738b64`; post-IMPL refactor-audit
+  `1f662af`; release-prep `413d0f8..195d238`. Codex pre-flight
+  R1 CONVERGED 0 P1; Codex IMPL R2 CONVERGED 0 P1/P2/P3 (R1 P2-1
+  absent-key shape-drift gap folded inline before R2 adding the
   `missing_description_key` discriminator); R-class outcomes at
   M54-G IMPL close: R-v0.9-NEW-8 RESOLVED; R-v0.11-NEW-2
   GRADUATED into workflow.md as "Pre-flights with no deferred
   wire leg need NO stub literal" (rule body widened to 3
   structural classes — M50 deletion + M53 pure refactor + M54-G
-  pure-additive new verb). Release-prep close-docs R-class
-  outcomes: R-v0.10-NEW-6 GRADUATED + R-v0.9-NEW-14 GRADUATED +
-  R-v0.10-NEW-7 RESOLVED (all three folded inline at the
-  workflow.md R-NEW-82 body widening); R-v0.8-NEW-21 CLOSED-
-  RESOLVED at 4th-consecutive CLEAN hygiene sweep. Net stats at
-  the v0.11 release: zero new transport seam, zero new ERROR_CODE
-  (29 stays), +1 command (119); **4295 tests + 5 skipped**;
-  branches **95.86%**; `npm audit` 0. SDK probe at the M54-G
-  pre-flight + this release-prep: `@mondaydotcomorg/api@14.0.0`
-  — **5th-consecutive SDK stall** (v0.7 → v0.11), so M39/M40/M41
-  (SDK 15.x → API `2026-04`) + M44/M45 (SDK 16.x → API `2026-07`)
-  stay DEFERRED; v0.11 is the 5th-consecutive pivot in sequence
+  pure-additive new verb). Net stats at the v0.11 release: zero
+  new transport seam, zero new ERROR_CODE (29 stays), +1 command
+  (119); **4295 tests + 5 skipped**; branches **95.86%**; `npm
+  audit` 0. SDK probe at the M54-G pre-flight + this release-
+  prep: `@mondaydotcomorg/api@14.0.0` — **5th-consecutive SDK
+  stall** (v0.7 → v0.11), so M39/M40/M41 (SDK 15.x → API
+  `2026-04`) + M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED;
+  v0.11 is the 5th-consecutive pivot in sequence
   (v0.7/v0.8/v0.9/v0.10/v0.11). v0.10.0 stays PUBLISHED +
   release-complete (npm `latest` 2026-05-22T21:24:43Z; tag
   `v0.10.0` at `c9eceba`; release-prep `36d705d..c9eceba`).
@@ -660,8 +669,9 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — **ACTIVE plan**
-   (kickoff 2026-05-23). v0.11 = the **`Item.description`
+2. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
+   `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`).
+   v0.11 = the **`Item.description`
    read-side carve-out** (`monday item get-description <iid>`) on
    the `2026-01` pin: **M54-G** ships a new narrow verb mirroring
    v0.9-M52's `board views <bid>` carve-out from `board describe`.
@@ -680,17 +690,18 @@ detail, and R-class refactor backlog, **read the plan docs** —
    with no deferred wire leg need NO stub literal"); R-v0.9-NEW-6
    3rd-consumer ratification; R-v0.11-NEW-1/3/4 stay WATCH;
    R-v0.9-NEW-10 advanced to 2-consumer. **Release-prep SHIPPED
-   2026-05-23** at `413d0f8..<close-docs>` (4 commits — README Scope
+   2026-05-23** at `413d0f8..195d238` (4 commits — README Scope
    flip + version bump + CHANGELOG + close-docs; mirrors v0.9 +
    v0.10 4-commit shape). Release-prep R-class outcomes:
    R-v0.10-NEW-6 GRADUATED + R-v0.9-NEW-14 GRADUATED + R-v0.10-NEW-7
    RESOLVED (all three folded inline at the workflow.md R-NEW-82
    body widening); R-v0.8-NEW-21 CLOSED-RESOLVED at 4th-consecutive
    CLEAN hygiene sweep; R-v0.9-NEW-15 re-ratified (2nd dedicated
-   consumer of the widened checklist). **Next is v0.11 publish +
-   post-publish flip** per the GRADUATED R-v0.9-NEW-13 rule (mirrors
-   v0.10's `177b40c`). M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x)
-   stay DEFERRED — SDK still 14.0.0 (**5th-consecutive stall**).
+   consumer of the widened checklist). **Published 2026-05-23T11:50:52Z**
+   on npm `latest`; annotated tag `v0.11.0` at `195d238`; GitHub
+   release live; post-publish flip applied. M39/M40/M41 (SDK 15.x)
+   + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
+   (**5th-consecutive stall**).
 3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped
    (kickoff 2026-05-22). v0.10 = the **`NOUN_DESCRIPTIONS` single-
    source-of-truth lift** on the `2026-01` pin: **M53** collapses
