@@ -233,13 +233,19 @@ humans are second-class. Built incrementally via Claude Code on top of
   feature-confirmed on multi_level boards via the 2026-05-22
   probe sweep — only the M39 SDK gate remains). If still 14.0.0
   (6th-consecutive stall), 5th-consecutive pivot is the default
-  expectation across the E/C/D backlog. Also consider a v0.11
-  post-publish refactor-audit (optional, user-driven) over the
-  recency window `413d0f8..<post-publish-flip>` — the v0.10
-  precedent at `5a63a4d` filed 3 candidates (`R-v0.10-NEW-5/6/7`,
-  with R-v0.10-NEW-6/7 just GRADUATED/RESOLVED at v0.11 release-
-  prep close); only fire if surveying the cluster surfaces real
-  candidates. v0.11.0 is **PUBLISHED + release-complete** (npm
+  expectation across the E/C/D backlog. **Post-publish
+  refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
+  (release-prep cluster + post-publish flip) — process-only
+  cluster, no code-lift candidates surfaced (consistent with v0.9
+  + v0.10 post-publish audits on the same shape of recency
+  window). Filed 1 new R-class watch-item (R-v0.11-NEW-7 — stale
+  "Next is..." forward-pointers accrete in CLAUDE.md §3 plan-doc-
+  list rows across cycles; demonstrated drift fixed inline at
+  this audit on the v0.10-plan row, 1st-instance); GRADUATED
+  R-v0.10-NEW-5 (`<post-publish-sha>` placeholder convention
+  parallels `<close-docs>`) at the 2nd-instance refactor-audit
+  trigger fold into `.claude/rules/workflow.md` R-v0.9-NEW-13
+  body. v0.11.0 is **PUBLISHED + release-complete** (npm
   `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`;
   release-prep `413d0f8..195d238`). v0.11 feature-cluster scope
   is fully shipped — **M54-G** `item get-description` narrow read
@@ -702,27 +708,22 @@ detail, and R-class refactor backlog, **read the plan docs** —
    release live; post-publish flip applied. M39/M40/M41 (SDK 15.x)
    + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
    (**5th-consecutive stall**).
-3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped
-   (kickoff 2026-05-22). v0.10 = the **`NOUN_DESCRIPTIONS` single-
-   source-of-truth lift** on the `2026-01` pin: **M53** collapses
-   ~100 duplicate `ensureSubcommand(program, '<noun>', '<desc>')`
-   literals across ~80 verb files into one 18-entry map; closes the
-   R-v0.8-NEW-22 candidate (filed at v0.8 post-publish; demonstrated
-   shipped bug: `doc` "read-only at v0.4" + `update`
-   `'cli-design §4.3 UPDATE'` ref leaking into help). **M53
-   pre-flight CLOSED 2026-05-22** (`c48510f` — additive
-   signature stub + new `src/commands/noun-descriptions.ts` module +
-   12 new `tests/unit/commands/types.test.ts` tests; all ~120
-   existing call sites compile unchanged). §22 R-class register
-   populated at M53 pre-flight (R-v0.10-NEW-1/2 + carried-forward
-   v0.8 watch-items R-v0.8-NEW-19/20/21 + carried-forward v0.9
-   watch-items R-v0.9-NEW-3/5/8/9/10/11/12/13/14/15/16 + promoted
-   R-v0.8-NEW-22 → M53). **Next is M53 IMPL** (drop the 3rd arg
-   from each of the ~120 call sites; structurally drops the
-   `update/upload.ts` drift) + release-prep (0.9.0 → 0.10.0 +
-   CHANGELOG + close-docs, per R-NEW-82/84 baseline).
+3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped (npm
+   `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`). v0.10
+   = the **`NOUN_DESCRIPTIONS` single-source-of-truth lift** on the
+   `2026-01` pin: **M53** collapses ~120 duplicate
+   `ensureSubcommand(program, '<noun>', '<desc>')` literals across
+   ~80 verb files into one 18-entry map; closed the R-v0.8-NEW-22
+   candidate (filed at v0.8 post-publish; demonstrated shipped bug:
+   `doc` "read-only at v0.4" + `update` `'cli-design §4.3 UPDATE'`
+   ref leaking into help). Pre-flight `c48510f` + `b334899`; IMPL
+   `feb8805`; release-prep `36d705d..c9eceba` (4 commits);
+   post-publish flip `177b40c`; post-publish refactor-audit
+   `5a63a4d` (filed R-v0.10-NEW-5/6/7 — NEW-6 + NEW-7 since
+   GRADUATED/RESOLVED at v0.11 release-prep close; NEW-5 GRADUATED
+   at v0.11 post-publish refactor-audit).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay DEFERRED —
-   SDK still 14.0.0 (**4th-consecutive stall**).
+   SDK still 14.0.0 (**5th-consecutive stall** as of v0.11).
 4. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
    `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`). v0.9
    = the **multi-level board cluster** on the `2026-01` pin: **M50**

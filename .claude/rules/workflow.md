@@ -349,14 +349,33 @@ verification. Commit subject mirrors prior cycles:
 `docs(v<version>-post-publish): flip status → release complete +
 backfill SHAs`.
 
+**The post-publish flip commit itself can't reference its own SHA
+either** — same chicken-and-egg as the close-docs commit. If the
+flip introduces forward-looking references to its own commit (a
+"Post-publish flip applied at `<post-publish-sha>`" subsection, a
+"Next session" pointer to a `413d0f8..<post-publish-flip>`
+recency window for an optional post-publish refactor-audit), leave
+those as `<post-publish-sha>` / `<post-publish-flip>` placeholders
+that the next commit in the chain backfills. The typical backfill
+opportunity is the OPTIONAL post-publish refactor-audit commit
+(mirrors v0.10's `5a63a4d` shape: backfills the placeholders +
+reframes the "Next session" pointer from "Also consider…
+(optional, user-driven)" → "Post-publish refactor-audit ran
+<date> over <range>"). If no refactor-audit runs that cycle, the
+placeholders stay as permanent meta-pattern references (not
+literal current-state pointers — readers understand from context).
+
 R-v0.9-NEW-13 (graduated v0.10 post-publish — 3rd consecutive
 clean-shape instance formalising the pattern: v0.8 `3f30891`
 established the shape; v0.9 `ea8f34e` confirmed stability; v0.10's
 post-publish flip met the graduation threshold. v0.7 `d4ca55e`
 was a combined audit + flip, not the clean 4-step shape this rule
-formalises). Cross-refs R-NEW-82 (the parent release-prep
-discipline) + R-NEW-84 (the mechanical/process-only Codex-skip
-carve-out that applies here too).
+formalises. Body widened v0.11 post-publish refactor-audit at the
+2nd-instance R-v0.10-NEW-5 trigger with the `<post-publish-sha>`
+placeholder recursion paragraph — v0.10 was 1st instance, v0.11
+was 2nd). Cross-refs R-NEW-82 (the parent release-prep discipline)
++ R-NEW-84 (the mechanical/process-only Codex-skip carve-out that
+applies here too).
 
 ## Candidate-selection session when ≥2 backlog candidates remain
 
