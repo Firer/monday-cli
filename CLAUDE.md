@@ -188,59 +188,85 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **✅ v0.11-M54-G pre-flight CLOSED 2026-05-23**
-  (`f08bfef` — single commit: new verb `monday item
-  get-description <iid>` + schema + tests + cli-design + output-
-  shapes + plan-doc open). Picked at v0.11 candidate-selection
-  2026-05-22 per R-NEW-75 over the C/D/E/G + R-v0.10-NEW-4
-  backlog. **Empirical probe ran 2026-05-23** at pre-flight
-  kickoff (`scripts/probe/v0.11-item-description-2026-01.report.txt`)
-  — confirms `Item.description` is OBJECT `ItemDescription{id,
-  blocks[DocumentBlock]}` at API `2026-01` (the CLI pin); NOT
-  SDK-gated; ships standalone. **D1 closed via AskUserQuestion
-  2026-05-23 single round-trip** in favour of shape (b) narrow
-  verb (mirrors v0.9-M52's `board views` carve-out per the
-  graduated "Read-side field-add" rule — heavy/nested fields
-  carve out, lightweight/universal extend). **D2 selection-pin
-  guard both layers landed** per v0.9-M52-graduated rule
-  (cassette `match_query: /description \{/` + RUN_LIVE_TESTS
-  `toHaveProperty('description')`; 3rd consumer of R-v0.9-NEW-6
-  graduated guard). Per R-v0.9-NEW-2 the pure-additive new
-  verb's wire leg IS the runtime payload at pre-flight — no
-  stub literal, no PIN test, no RESERVED-literal guard (3rd
-  structurally distinct instance: M50 deletion + M53 pure refactor
-  + M54-G pure additive — rule body widens at IMPL close, filed
-  R-v0.11-NEW-2). 0 fixture ripples, 0 existing call sites
-  touched. **R-v0.9-NEW-8 RESOLVED** at pre-flight (the canonical
-  filing's open empirical probe + binding decisions both closed
-  inline). **R-v0.9-NEW-10** advanced to 2-consumer (jsonScalarOrNull
-  pattern re-used in `item-description.ts`; lift at 3rd consumer
-  per R-NEW-58). 4 new R-class watch-items filed
-  (R-v0.11-NEW-1/2/3/4 in `docs/v0.11-plan.md` §22 — multi_level
-  probe gap, R-v0.9-NEW-2 3rd-class rule-widening candidate,
-  `runByIdLookup` pluck-sub-field abstraction watch, `_lib.ts`
-  DX-improvement). v0.10.0 stays PUBLISHED + release-complete
-  (npm `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`).
-  **E (profile-scoped argument defaults) queued for v0.12**; C
-  stays-filed (4 slips on Monday's `ColumnMappingInput` no-value-
-  slot at API `2026-01`); D stays design-blocked.
-- **Next session:** **v0.11-M54-G IMPL close-docs + Codex IMPL
-  review.** Per R-v0.9-NEW-2 the IMPL is unusually thin — no
-  stubs to flip (the verb shipped LIVE at pre-flight). IMPL
-  session work: (a) Codex IMPL review on the pre-flight diff
-  (template at `.claude/templates/codex-pre-flight-review.md`
-  applies; MEDIUM sensitivity; 0 P1 target); (b) §3 post-mortem
-  + §22 R-class log updates in `docs/v0.11-plan.md`; (c)
-  `f08bfef` backfill across plan-doc + CLAUDE.md; (d)
-  fold R-v0.11-NEW-2 rule-widening into
-  `.claude/rules/workflow.md` (R-v0.9-NEW-2 framing widens from
-  "rejection-lift OR pure-refactor" to "any pre-flight with no
-  deferred wire leg"); (e) cli-design SHA backfills if needed.
-  After IMPL close-docs: **v0.11 release-prep** (version bump
-  0.10.0 → 0.11.0 + CHANGELOG + README Scope flip per
-  R-v0.9-NEW-15 widened checklist + close-docs sweep per
-  R-NEW-82/84 baseline). E (profile-scoped argument defaults)
-  opens for v0.12 candidate-selection after v0.11 ships.
+- **✅ v0.11-M54-G SHIPPED 2026-05-23** (pre-flight `f08bfef`
+  + SHA-backfill `d1753ae` + IMPL close-docs
+  `<impl-close-sha>`). New verb `monday item get-description
+  <iid>` — narrow companion read surfacing Monday's
+  `Item.description { id, blocks: [DocumentBlock] }` via raw
+  GraphQL at API `2026-01` (4 of `DocumentBlock`'s 9 wire fields
+  projected — `id` / `type` / `content` / `position`). Mirrors
+  v0.9-M52's `board views <bid>` carve-out from `board describe`:
+  heavy/nested doc-block content stays opt-in rather than bloating
+  `ITEM_FIELDS_FRAGMENT`'s ~16 universal consumers. Wire-null
+  `description` (item never had one) normalises to the sentinel
+  `{id: null, blocks: []}` at the `parseItemDescription` boundary;
+  agents distinguish absent (`data.id === null`) from present
+  (`data.id !== null`). Closes R-v0.9-NEW-8 (filed at v0.9-M52
+  close-docs; user-directed at v0.11 candidate-selection
+  2026-05-22). Picked at v0.11 candidate-selection per R-NEW-75
+  over the C/D/E + R-v0.10-NEW-4 backlog; E (profile-scoped
+  argument defaults) queued for v0.12. Per the GRADUATED
+  R-v0.9-NEW-2 (widened at this IMPL close — see R-v0.11-NEW-2),
+  the pure-additive new verb's wire leg IS the runtime payload at
+  pre-flight — no stub literal, no PIN test, no RESERVED-literal
+  guard (3rd structurally distinct instance after M50 deletion +
+  M53 pure refactor). **Empirical probe ran 2026-05-23** at
+  pre-flight kickoff
+  (`scripts/probe/v0.11-item-description-2026-01.report.txt`) —
+  confirms OBJECT shape at API `2026-01`, NOT SDK-gated, ships
+  standalone, wire-nullable, selection-set required. **D1 closed
+  via AskUserQuestion 2026-05-23 single round-trip** in favour of
+  shape (b) narrow verb per the v0.9-M52-graduated "Read-side
+  field-add" rule (heavy/nested → carve out). **D2 selection-pin
+  guard both layers landed** per the v0.9-M52-graduated rule —
+  cassette `match_query: /description \{/` + RUN_LIVE_TESTS
+  `toHaveProperty('description')` (3rd consumer of R-v0.9-NEW-6
+  after `hierarchy_type` + `views`). 0 fixture ripples; 0 existing
+  call sites touched. **Codex IMPL R2 CONVERGED** (R1 0 P1 + 1 P2
+  + 2 P3 all folded inline before R2; R1 P2-1 caught an
+  absent-description-own-key shape-drift gap the pre-flight Codex
+  R1 missed — fixed via a verb-body `hasOwnProperty` guard with
+  new `details.reason: 'missing_description_key'` literal + a
+  tightened `parseItemDescription` early-return that only
+  normalises literal `null` not `undefined`; R1 P3-1 added the
+  envelope snapshot; R1 P3-2 added the output-shapes ToC row;
+  R2 verdict "all audit-points nothing flagged"). **R-v0.11-NEW-2
+  GRADUATED** into `.claude/rules/workflow.md` at IMPL close —
+  rule heading renamed "Pre-flights with no deferred wire leg
+  need NO stub literal", body widened to 3 bullets (M50 / M53 /
+  M54-G). **R-v0.9-NEW-8 RESOLVED** at pre-flight (canonical
+  filing closed inline). **R-v0.9-NEW-10** advanced to 2-consumer
+  (jsonScalarOrNull pattern re-used in `item-description.ts`;
+  lift at 3rd consumer per R-NEW-58). 4 R-class watch-items
+  filed at pre-flight (R-v0.11-NEW-1/2/3/4); R-v0.11-NEW-2
+  GRADUATED at IMPL close; R-v0.11-NEW-1/3/4 stay WATCH. Net
+  stats: **4295 tests pass + 5 skipped** (+25 vs v0.10.0 baseline
+  of 4270 + 4); branches **95.86%** (≥ 95.45 floor); functions
+  1359/1373; **29 ERROR_CODES** unchanged; **119 commands** (+1
+  vs v0.10.0); `npm audit` 0 vulns. v0.10.0 stays PUBLISHED +
+  release-complete (npm `latest` 2026-05-22T21:24:43Z; tag
+  `v0.10.0` at `c9eceba`).
+- **Next session:** **v0.11 release-prep cluster.** Per R-NEW-82
+  + the v0.9/v0.10 4-commit precedent: version bump 0.10.0 →
+  0.11.0 + CHANGELOG `[0.11.0]` entry (one user-impact line per
+  `feedback_public_docs_clean` — something like "Adds `monday
+  item get-description` for reading item description doc-block
+  content") + README Scope flip per R-v0.9-NEW-15 widened
+  checklist (3 surfaces: quickstart, per-version Scope block,
+  `**v<next> (next):**` block — likely absent post-`317ae04`
+  collapse) + close-docs sweep. Codex skipped per R-NEW-84 if
+  zero production `src/**/*.ts` changes outside the M54-G IMPL
+  close. **Two graduation tipping points fire at release-prep
+  close**: R-v0.10-NEW-6 (≤4-commit "if clean, skip" sub-rule
+  — 3rd consecutive instance graduates into R-NEW-82 body) and
+  R-v0.9-NEW-14 (R-NEW-82 grep CLEAN by construction — 3rd
+  consecutive instance graduates the "deletion-led OR
+  pure-refactor with no deferred wire leg" framing). Then
+  publish + post-publish flip per the v0.10 `177b40c` precedent.
+  After v0.11 publishes: **E (profile-scoped argument defaults)
+  opens for v0.12 candidate-selection**; C stays-filed (4 slips
+  on Monday's `ColumnMappingInput` no-value-slot at API
+  `2026-01`); D stays design-blocked.
 - **Historical context for v0.10 (previously the active milestone):**
   **R-v0.10-NEW-4 RESOLVED inline at `085e999`** —
   `--maxWorkers=2` folded into the `test:coverage` script
@@ -632,20 +658,27 @@ detail, and R-class refactor backlog, **read the plan docs** —
    the `2026-01` pin: **M54-G** ships a new narrow verb mirroring
    v0.9-M52's `board views <bid>` carve-out from `board describe`.
    Closes R-v0.9-NEW-8 (filed at v0.9-M52 close-docs;
-   user-directed). **M54-G pre-flight CLOSED 2026-05-23**
-   (`f08bfef` — verb fully wired LIVE per R-v0.9-NEW-2:
-   pure-additive new verb has no deferred wire leg → no stub
-   needed). §22 R-class register populated at M54-G pre-flight
-   (R-v0.11-NEW-1/2/3/4 + carried-forward v0.8 / v0.9 / v0.10
-   open watch-items + promoted R-v0.9-NEW-8 → M54-G RESOLVED).
-   **Next is M54-G IMPL close-docs + Codex IMPL review** (per
-   R-v0.9-NEW-2 the IMPL is unusually thin — no stubs to flip;
-   work is Codex review + post-mortem + R-class log + SHA
-   backfills + R-v0.11-NEW-2 rule-widening fold into
-   workflow.md) + release-prep (0.10.0 → 0.11.0 + CHANGELOG +
-   close-docs, per R-NEW-82/84 baseline). M39/M40/M41 (SDK 15.x)
-   + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
-   (**5th-consecutive stall**).
+   user-directed). **M54-G ✅ SHIPPED 2026-05-23** (pre-flight
+   `f08bfef`, IMPL close-docs `<impl-close-sha>`; Codex pre-flight
+   R1 CONVERGED 0 P1 / Codex IMPL R2 CONVERGED 0 P1/P2/P3 — R1
+   surfaced an absent-key shape-drift gap folded inline before R2,
+   adding the `missing_description_key` `details.reason`
+   discriminator). Per the GRADUATED R-v0.9-NEW-2 (widened at this
+   IMPL close — see R-v0.11-NEW-2), the pure-additive new verb
+   shipped LIVE at pre-flight with no deferred wire leg / no stub.
+   §22 R-class register: R-v0.9-NEW-8 RESOLVED at pre-flight;
+   R-v0.11-NEW-2 GRADUATED at IMPL close (rule body widened from
+   2 to 3 instances in workflow.md + heading renamed to "Pre-flights
+   with no deferred wire leg need NO stub literal"); R-v0.9-NEW-6
+   3rd-consumer ratification; R-v0.11-NEW-1/3/4 stay WATCH;
+   R-v0.9-NEW-10 advanced to 2-consumer. **Next is v0.11
+   release-prep** (0.10.0 → 0.11.0 + CHANGELOG + README Scope flip
+   per R-v0.9-NEW-15 widened checklist + close-docs sweep per
+   R-NEW-82/84 baseline; **two graduation tipping points fire**:
+   R-v0.10-NEW-6 ≤4-commit "if clean, skip" + R-v0.9-NEW-14
+   R-NEW-82-grep-clean-by-construction, both at 3rd-consecutive
+   instance). M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay
+   DEFERRED — SDK still 14.0.0 (**5th-consecutive stall**).
 3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped
    (kickoff 2026-05-22). v0.10 = the **`NOUN_DESCRIPTIONS` single-
    source-of-truth lift** on the `2026-01` pin: **M53** collapses

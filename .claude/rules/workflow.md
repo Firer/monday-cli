@@ -49,37 +49,53 @@ folds reserved `file_set_on_bulk_unsupported` /
 way). Graduated v0.8-M47 IMPL after four instances (`m42`/`m43`/`m46`/
 `m47_preflight_stub`).
 
-**Rejection-lift / pure-refactor pre-flights need NO stub literal.**
-When a pre-flight's IMPL session is a deletion (an existing rejection
-is removed because it was incorrect) or a pure refactor (no new
-deferred wire leg, no new rejection code) the stub-literal + PIN test
-+ RESERVED-literal regression-guard scaffold from the preceding rule
-does NOT apply. The trigger is structural: no new deferred wire leg
-ships at pre-flight → no surface to pin → no stub needed. If the
-pre-flight introduces a new runtime rejection that fires
-unconditionally (not behind a c8-ignored stub), that rejection ships
-LIVE at pre-flight; the IMPL flips other code, not the rejection.
-Cross-refs the parseArgv-BEFORE-c8 ordering rule (R-NEW-76): when
-pre-flight is rejection-lift, c8-ignore typically has no anchor at
-all (the live runtime path is the entire implementation; the IMPL
-session deletes a sibling, not unwraps a stub). Graduated v0.10-M53
-IMPL close after 2 instances:
+**Pre-flights with no deferred wire leg need NO stub literal.**
+When a pre-flight ships its IMPL payload LIVE at the pre-flight
+commit itself — leaving the IMPL session with no runtime flip
+behind a c8-ignored stub — the stub-literal + PIN test +
+RESERVED-literal regression-guard scaffold from the preceding rule
+does NOT apply. The trigger is structural: **no new deferred wire
+leg ships at pre-flight → no surface to pin → no stub needed**.
+Three structurally distinct classes share this property; each
+graduated the rule one instance at a time:
 
-- **1st: v0.9-M50** multi-level subitem nesting (`e89ddfc`). A pure
-  deletion — the inverted `parent.hierarchyType === 'multi_level'`
-  rejection block at `item/create.ts` (~735-752) was the IMPL
-  payload. No stub at pre-flight; no PIN test; no RESERVED-literal
-  guard. The new shape is the EXISTING `create_subitem` dispatch
-  shared between classic + multi-level boards.
-- **2nd: v0.10-M53** `NOUN_DESCRIPTIONS` single-source-of-truth lift
-  (`feb8805`). A pure refactor — IMPL drops the 3rd arg from 122
+- **1st: deletion / rejection-lift** (v0.9-M50 multi-level subitem
+  nesting, `e89ddfc`). A pure deletion — the inverted
+  `parent.hierarchyType === 'multi_level'` rejection block at
+  `item/create.ts` (~735-752) was the IMPL payload. No stub at
+  pre-flight; no PIN test; no RESERVED-literal guard. The new shape
+  is the EXISTING `create_subitem` dispatch shared between classic
+  + multi-level boards.
+- **2nd: pure refactor** (v0.10-M53 `NOUN_DESCRIPTIONS` single-
+  source-of-truth lift, `feb8805`). IMPL drops the 3rd arg from 122
   `ensureSubcommand(program, '<noun>', '<desc>')` call sites. The
   `lookupNounDescription` rejection (`InternalError` with
   `details.reason: 'unknown_noun'` on a missing map entry) is a
   LIVE runtime invariant from pre-flight — it fires at registration
   walk on typo, not on a deferred wire leg.
+- **3rd: pure-additive new verb / new read projection** (v0.11-M54-G
+  `monday item get-description <iid>`, `f08bfef`). The verb's wire
+  leg (`client.raw<unknown>(ITEM_DESCRIPTION_QUERY, ...)` against the
+  raw-GraphQL `Item.description` projection) ships LIVE at the
+  pre-flight commit itself. IMPL session has no stub to flip — the
+  runtime payload IS the pre-flight diff. Mirrors the v0.9-M52
+  `board views` carve-out shape per the graduated "Read-side
+  field-add" rule.
 
-R-v0.9-NEW-2 (graduated v0.10-M53 IMPL close, 2 instances M50 + M53).
+If the pre-flight introduces a new runtime rejection that fires
+unconditionally (not behind a c8-ignored stub), that rejection ships
+LIVE at pre-flight; the IMPL flips other code, not the rejection.
+Cross-refs the parseArgv-BEFORE-c8 ordering rule (R-NEW-76): when
+pre-flight has no deferred wire leg, c8-ignore typically has no
+anchor at all (the live runtime path is the entire implementation;
+the IMPL session deletes a sibling, refactors call sites, or has
+nothing more to do).
+
+R-v0.9-NEW-2 (graduated v0.10-M53 IMPL close at 2 instances M50 +
+M53; widened v0.11-M54-G IMPL close at 3rd instance to a fully
+general "no deferred wire leg → no stub" framing — replaces the
+narrower "rejection-lift OR pure-refactor" wording with the
+underlying structural property all three concrete classes share).
 
 ## Pre-IMPL cross-doc grep for surface-extending milestones
 

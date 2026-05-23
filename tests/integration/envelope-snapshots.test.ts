@@ -1314,6 +1314,52 @@ describe('envelope snapshot — item reads', () => {
     expect(parseEnvelope(out.stdout)).toMatchSnapshot();
   });
 
+  it('item get-description', async () => {
+    // v0.11-M54-G — narrow companion read pinning the projected
+    // `ItemDescription { id, blocks[] }` envelope (4 of DocumentBlock's
+    // 9 wire fields surfaced). Added per Codex IMPL R1 P3-1 catch:
+    // the "one snapshot per shipped command" contract requires a
+    // happy-path snapshot for every new verb.
+    const out = await cachedDrive(
+      ['item', 'get-description', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemGetDescription',
+            response: {
+              data: {
+                items: [
+                  {
+                    id: '12345',
+                    description: {
+                      id: '8781640',
+                      blocks: [
+                        {
+                          id: 'b1',
+                          type: 'normal text',
+                          content: { deltaFormat: [{ insert: 'Refactor login flow' }] },
+                          position: 1024,
+                        },
+                        {
+                          id: 'b2',
+                          type: 'bulleted list',
+                          content: { deltaFormat: [{ insert: 'extract auth helper' }] },
+                          position: 2048,
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(0);
+    expect(parseEnvelope(out.stdout)).toMatchSnapshot();
+  });
+
   it('item find', async () => {
     const out = await cachedDrive(
       ['item', 'find', 'Refactor login', '--board', '111', '--json'],

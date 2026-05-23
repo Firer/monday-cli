@@ -218,6 +218,37 @@ describe('monday item get-description (v0.11-M54-G)', () => {
     });
   });
 
+  it('surfaces an item row missing the description own-key as internal_error (Codex IMPL R1 P2-1 W3 guard — distinct from wire-null `description: null`)', async () => {
+    // The query SELECTS `description`, so an items[0] row that arrives
+    // WITHOUT a `description` own-key is response-shape drift (a missing
+    // selected field) — NOT "no description set" (that surface is
+    // `description: null`, which IS the key present with a null value).
+    // Without this guard, `first.description` reads `undefined`, the
+    // parseItemDescription helper's permissive `null | undefined`
+    // early-return collapsed both cases into the sentinel — making
+    // shape-drift indistinguishable from absent.
+    const out = await drive(
+      ['item', 'get-description', '12345', '--json'],
+      {
+        interactions: [
+          {
+            operation_name: 'ItemGetDescription',
+            response: {
+              data: { items: [{ id: '12345' }] },
+            },
+          },
+        ],
+      },
+    );
+    expect(out.exitCode).toBe(2);
+    const env = parseEnvelope(out.stderr);
+    expect(env.error?.code).toBe('internal_error');
+    expect(env.error?.details).toMatchObject({
+      item_id: '12345',
+      reason: 'missing_description_key',
+    });
+  });
+
   it('wraps a malformed description payload as internal_error with details.item_id + details.issues (R18 parse-boundary)', async () => {
     const out = await drive(
       ['item', 'get-description', '12345', '--json'],

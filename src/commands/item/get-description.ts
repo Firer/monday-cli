@@ -140,6 +140,27 @@ export const itemGetDescriptionCommand: CommandModule<
             },
           );
         }
+        // Codex IMPL R1 P2-1 (W3): the query SELECTS `description` so an
+        // absent own-key is response-shape drift, NOT "no description
+        // set" (that surface is `description: null`, which IS the key
+        // present with a null value). Without this guard, `first.description`
+        // reads `undefined`, parseItemDescription's permissive
+        // `null | undefined` early-return collapsed both cases into the
+        // sentinel — making shape-drift indistinguishable from absent.
+        // Surface drift explicitly so agents key on `internal_error`
+        // instead of silently emitting an empty doc-block list.
+        if (!Object.prototype.hasOwnProperty.call(first, 'description')) {
+          throw new ApiError(
+            'internal_error',
+            `Monday returned an item row missing the description key for id ${parsed.itemId}`,
+            {
+              details: {
+                item_id: parsed.itemId,
+                reason: 'missing_description_key',
+              },
+            },
+          );
+        }
         const descriptionRaw = first.description;
         const projected = parseItemDescription(descriptionRaw, {
           item_id: parsed.itemId,

@@ -3393,6 +3393,52 @@ exports[`envelope snapshot — item reads > item get 1`] = `
 }
 `;
 
+exports[`envelope snapshot — item reads > item get-description 1`] = `
+{
+  "data": {
+    "blocks": [
+      {
+        "content": {
+          "deltaFormat": [
+            {
+              "insert": "Refactor login flow",
+            },
+          ],
+        },
+        "id": "b1",
+        "position": 1024,
+        "type": "normal text",
+      },
+      {
+        "content": {
+          "deltaFormat": [
+            {
+              "insert": "extract auth helper",
+            },
+          ],
+        },
+        "id": "b2",
+        "position": 2048,
+        "type": "bulleted list",
+      },
+    ],
+    "id": "8781640",
+  },
+  "meta": {
+    "api_version": "2026-01",
+    "cache_age_seconds": null,
+    "cli_version": "0.0.0-test",
+    "complexity": null,
+    "request_id": "fixed-req-id",
+    "retrieved_at": "2026-04-30T10:00:00.000Z",
+    "schema_version": "1",
+    "source": "live",
+  },
+  "ok": true,
+  "warnings": [],
+}
+`;
+
 exports[`envelope snapshot — item reads > item list 1`] = `
 {
   "data": [

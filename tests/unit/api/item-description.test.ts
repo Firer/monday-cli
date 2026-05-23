@@ -116,11 +116,22 @@ describe('parseItemDescription', () => {
     });
   });
 
-  it('normalises undefined the same way (defensive — Monday occasionally omits a wire-nullable key)', () => {
-    expect(parseItemDescription(undefined, { item_id: '99' })).toEqual({
-      id: null,
-      blocks: [],
-    });
+  it('treats undefined as shape drift (NOT a wire-null sentinel) — Codex IMPL R1 P2-1 tightening', () => {
+    // The wire CAN return literal `description: null` (the wire-null
+    // sentinel case); it CANNOT transmit `undefined` (JS-only). An
+    // absent JS property reaching this helper means an upstream
+    // document drift. The verb body's `'description' in first` guard
+    // catches the missing-key case with a crisper `details.reason:
+    // 'missing_description_key'`; this assertion pins that the helper
+    // itself no longer collapses undefined → sentinel, so a drift
+    // path slipping past the verb-body guard still surfaces as
+    // shape-drift rather than silently emitting empty blocks.
+    expect(() =>
+      parseItemDescription(undefined, { item_id: '99' }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseItemDescription(undefined, { item_id: '99' }),
+    ).toThrow(/malformed item-description/);
   });
 
   it('round-trips a populated description verbatim', () => {

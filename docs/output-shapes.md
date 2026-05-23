@@ -57,7 +57,7 @@ no `data`); see the **Errors** section at the bottom.
 | [board](#board) | list, get, find, describe (+ `views[]` slot v0.9-M52), columns, groups, views (v0.9-M52), subscribers, doctor, create (M15), update (M15), archive (M15), delete (M15), duplicate (M15), add-users (M15), column-create (M16 + board_relation/dependency `--settings` v0.8-M48), column-update (M16), column-delete (M16), group-create (M17), group-update (M17), group-archive (M17), group-duplicate (M17), group-delete (M17) |
 | [user](#user) | list, get, me, team-list (v0.5-M34), team-get (v0.5-M34), team-create (v0.5-M34), team-delete (v0.5-M34), team-add-members (v0.5-M34), team-remove-members (v0.5-M34) |
 | [update](#update) | list, get, create, reply (M13), edit (M13), delete (M13), like / unlike / pin / unpin (M13), clear-all (M13), upload (v0.4-M31) |
-| [item (reads)](#item-reads) | list, get, find, search, subitems, history (M24), watch (v0.4-M29) |
+| [item (reads)](#item-reads) | list, get, get-description (v0.11-M54-G), find, search, subitems, history (M24), watch (v0.4-M29) |
 | [item (mutations)](#item-mutations) | set (friendly file `--set` v0.6-M38 + stdin `<file-col>=-` v0.8-M47), clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30 + friendly file `--set` v0.6-M38 single + v0.7-M42 bulk + multi-file v0.8-M46 + stdin v0.8-M47), create (friendly file `--set` v0.7-M43 + multi-file v0.8-M46 + stdin v0.8-M47), archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20), upload (v0.4-M31) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |

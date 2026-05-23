@@ -156,12 +156,20 @@ export const ITEM_DESCRIPTION_QUERY = `
  * distinction). R18 parse-boundary wrap per `validation.md`: a
  * non-sentinel shape regression surfaces with `details.issues`
  * rather than a bare ZodError losing the failing field path.
+ *
+ * **Only literal `null` normalises** — `undefined` is response-shape
+ * drift, not a wire value (the wire can't transmit `undefined`; an
+ * absent JS property means the upstream document didn't select the
+ * field, which the verb body's absent-key guard catches with a
+ * crisper `missing_description_key` reason). Passing `undefined` to
+ * this helper therefore routes through `unwrapOrThrow`'s shape-drift
+ * path. (Codex IMPL R1 P2-1 tightening.)
  */
 export const parseItemDescription = (
   raw: unknown,
   details: Readonly<Record<string, unknown>>,
 ): ItemDescription => {
-  if (raw === null || raw === undefined) {
+  if (raw === null) {
     return { id: null, blocks: [] };
   }
   return unwrapOrThrow(itemDescriptionSchema.safeParse(raw), {
