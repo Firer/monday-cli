@@ -277,19 +277,50 @@ slot** (feature shipped), or **drop the rejection** (no longer
 planned). Matching test pins + doc prose + module docstrings update
 in lockstep.
 
-Release-prep is a 6-commit baseline: envelope-snapshot refresh probe
-+ ToC audit + deferral slip + README quickstart refresh + version
-bump + CHANGELOG + close-docs sweep.
+**Release-prep is a 6-commit baseline** (envelope-snapshot refresh
+probe + ToC audit + deferral slip + README refresh + version bump +
+CHANGELOG + close-docs sweep), but **conditional commits skip when
+the corresponding gate runs CLEAN**: the deferral-slip commit skips
+when the grep returns zero hits; the help-text-hygiene commit skips
+when the `.description()` / `.summary()` / `addHelpText()` sweep
+across `src/commands/**` surfaces no internal refs; the ToC-audit
+commit skips when `output-shapes.md` + `cli-design.md` already
+carry the milestone's surfaces. Three consecutive 4-commit clusters
+at v0.9 / v0.10 / v0.11 ratified the "if clean, skip" sub-rule
+into the baseline.
 
-R-NEW-82 (graduated v0.5 release-prep).
+**When the IMPL ships with no deferred wire leg** (the three
+structural classes named in the "Pre-flights with no deferred wire
+leg need NO stub literal" rule above — deletion, pure refactor,
+pure-additive new verb), the deferral-slip grep runs CLEAN BY
+CONSTRUCTION rather than as an empirically-empty result — no
+deferred leg ever shipped, so no slot can be stale. v0.9 M50
+(deletion) was the 1st instance, v0.10 M53 (pure refactor) the
+2nd, v0.11 M54-G (pure-additive new verb) the 3rd.
+
+The **close-docs commit leaves `<close-docs>` / `<close-docs-sha>`
+placeholders** that the post-publish flip backfills — the close-
+docs commit can't reference its own SHA. The placeholder convention
+is the close-docs SIDE of R-v0.9-NEW-13's "Post-publish flip commit
+pattern" (below); both rules cover the same placeholder lifecycle
+from opposite ends of the cycle.
+
+R-NEW-82 (graduated v0.5 release-prep; widened v0.11 release-prep
+close at the 3rd-consecutive 4-commit cluster threshold to fold in
+R-v0.10-NEW-6's "if clean, skip" sub-rule, R-v0.9-NEW-14's "clean
+by construction when no deferred wire leg ships" framing, and
+R-v0.10-NEW-7's cross-reference to R-v0.9-NEW-13 for the post-
+publish placeholder backfill).
 
 ## Post-publish flip commit pattern
 
 After `npm publish` lands the release, write ONE small commit that
 flips status forward + retires the placeholders the close-docs
 commit couldn't fill itself. The close-docs commit can't reference
-its own SHA, so it leaves `<close-docs>` placeholders that the
-post-publish commit backfills once `git rev-parse HEAD` is stable.
+its own SHA, so it leaves `<close-docs>` placeholders (the
+convention is defined in R-NEW-82's release-prep close-docs shape
+above) that the post-publish commit backfills once `git rev-parse
+HEAD` is stable.
 
 The shape (4 steps, single commit):
 
