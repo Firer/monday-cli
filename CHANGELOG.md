@@ -7,6 +7,57 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.11.0] - 2026-05-23 — Item descriptions: read item description doc-block content
+
+Adds `monday item get-description` for reading the doc-block content
+of an item's description. A narrow new verb that surfaces Monday's
+`Item.description` payload (a list of doc blocks) without bloating
+every item read with heavy/nested content — mirrors the existing
+`board views` carve-out from `board describe`.
+
+### Breaking changes vs `0.10.0`
+
+**None.** **119 commands** shipped (was 118 at `0.10.0`); **29
+stable error codes** (unchanged); output envelope preserved
+byte-for-byte across `0.10.0` → `0.11.0` for every pre-existing
+verb.
+
+### What changed for users
+
+- **`monday item get-description <item-id>`** reads an item's
+  description as a list of doc blocks. Each block carries `id`,
+  `type`, `content` (the JSON body payload), and `position`.
+  Items with no description set return the sentinel
+  `{id: null, blocks: []}` — distinguishable from an item that
+  was created with a description and then emptied
+  (`{id: <non-null>, blocks: []}`).
+
+### Tests + quality gates
+
+- **4295 tests pass + 5 skipped** (was 4270 + 4 at `0.10.0`). All
+  green on Node 22 + 24.
+- **Coverage at branches 95.86% / functions 98.98%** against the
+  floor 95 / 95.45 / 95 / 95 — unchanged from `0.10.0` within
+  rounding.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.11
+  release-prep (one new snapshot for `item get-description`).
+- **`npm audit` reports `0 vulnerabilities`** — no audit-fix folded
+  this cycle.
+
+### Documentation
+
+- **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — v0.11 plan with
+  the milestone close, per-milestone decisions, the R-class register
+  (§22), and the release exit checklist (§7).
+- **[`.claude/rules/workflow.md`](./.claude/rules/workflow.md)**
+  widened rule: "Pre-flights with no deferred wire leg need NO stub
+  literal" now generalises across three structural classes
+  (deletion, pure refactor, pure-additive new verb) rather than
+  enumerating the two surface shapes that triggered the original
+  graduation.
+
+[0.11.0]: https://github.com/Firer/monday-cli/releases/tag/v0.11.0
+
 ## [0.10.0] - 2026-05-22 — Internal cleanup: noun-description single source of truth
 
 **No behaviour change.** The per-noun description strings shown under
