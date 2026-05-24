@@ -216,24 +216,56 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.11.x / v0.12 candidate-selection** per
-  R-NEW-75. ≥2 backlog candidates remain at v0.11 close: **E
-  profile-scoped argument defaults** (queued standalone per the
-  2026-05-22 user binding — filed at v0.6 kickoff; extends
-  `~/.monday-cli/config.toml` with `[profiles.<name>.defaults]`;
-  carries the §13 carve-out Decision prerequisite distinguishing
-  aliases-as-stored-command-strings from defaults-as-stored-flag-
-  values); **C cross-board `item move` value-overrides** (Monday's
-  `ColumnMappingInput` still carries no value slot at API
-  `2026-01`, 4 slips); **D resumable cross-board cursor** (design-
-  blocked on per-board cursor-lifetime under aggregation,
-  cli-design §13). **Re-probe `@mondaydotcomorg/api`** at
-  candidate-selection: if SDK 15.x publishes (baking `2026-04`),
-  M39/M40/M41 reopen and preempts the E/C/D backlog (M40 already
-  feature-confirmed on multi_level boards via the 2026-05-22
-  probe sweep — only the M39 SDK gate remains). If still 14.0.0
-  (6th-consecutive stall), 5th-consecutive pivot is the default
-  expectation across the E/C/D backlog. **Post-publish
+- **Next session:** **v0.12-E pre-flight contract diff.** v0.12
+  candidate-selection ran 2026-05-24 per R-NEW-75 over the
+  C/D/E backlog. SDK probe: `@mondaydotcomorg/api@14.0.0` —
+  **6th-consecutive stall** (v0.7 → v0.12 candidate-selection),
+  so M39/M40/M41 (SDK 15.x → API `2026-04`) + M44/M45 (SDK 16.x
+  → API `2026-07`) stay DEFERRED; SDK-reopen does NOT preempt the
+  pick at this session. User picked **E — profile-scoped
+  argument defaults, ships standalone** (the
+  2026-05-22-at-v0.11-candidate-selection user binding honored —
+  E was already queued standalone for v0.12). **C stays-filed**
+  per the Q2 binding (4 slips on Monday's `ColumnMappingInput`
+  no-value-slot at API `2026-01`, not closed permanently —
+  Monday could surface the value slot in a future API version);
+  **D stays design-blocked** on per-board cursor-lifetime under
+  aggregation. **v0.12-E scope:** extend `~/.monday-cli/
+  config.toml` (M19/M21) with `[profiles.<name>.defaults]`
+  table carrying scoping args (initial scope: `board`,
+  `workspace`, `output`, `concurrency`; per-noun extension to
+  other flags defers to v0.12.x). Standard CLI precedence —
+  CLI flag > env var > profile default > unset. Optional
+  companion `monday config set/get/unset <key> <value>` helper
+  to edit the profile file from the CLI rather than hand-editing
+  TOML (avoids fixture-coverage gaps + adds 3 verbs but no new
+  wire surface). Coexists with M26's `[profiles.<name>.dev]`
+  table (the dev namespace continues to carry named-noun board
+  slots; the generic `[defaults]` table carries scoping args
+  shared across noun namespaces). Zero new Monday wire surface,
+  zero new transport seam, zero new ERROR_CODE expected; 3–4
+  IMPL rounds estimated. Agent-facing docs MUST pin the
+  discipline: agents should set no defaults and pass every
+  scoping arg in argv for reproducibility-across-machines;
+  defaults are a human-ergonomics feature.
+  **Prerequisite §13 carve-out Decision FIRST at pre-flight
+  kickoff:** the current "Saved queries / aliases" non-goal copy
+  (cli-design.md §13) reads as forbidding stateful command-shape
+  mutation across machines; profile-scoped defaults are adjacent
+  enough that the non-goal needs amending to distinguish
+  aliases-as-stored-command-strings (still non-goal) from
+  defaults-as-stored-flag-values (carve-out). Without that
+  Decision, the milestone can't ship cleanly. **No
+  `docs/v0.12-plan.md` opens this session** per the v0.10
+  precedent (`5d89754`) + v0.11 precedent (`5d5eca1`) — plan-doc
+  opens at the first pre-flight contract diff commit of the
+  milestone. v0.12 will be the **6th-consecutive pivot** in
+  sequence (v0.7/v0.8/v0.9/v0.10/v0.11/v0.12) if SDK stays at
+  14.0.0 through E pre-flight; if SDK 15.x publishes before E
+  pre-flight opens, M39/M40/M41 reopen and preempt E (M40
+  already feature-confirmed on multi_level boards via the
+  2026-05-22 probe sweep — only the M39 SDK gate remains).
+  **Post-publish
   refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
   (release-prep cluster + post-publish flip) — process-only
   cluster, no code-lift candidates surfaced (consistent with v0.9
