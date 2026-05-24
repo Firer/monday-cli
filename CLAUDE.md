@@ -217,7 +217,7 @@ humans are second-class. Built incrementally via Claude Code on top of
     Both correct per the runtime read; rule documents both valid
     choices.
 - **Next session:** **v0.12-M55-E IMPL.** v0.12-E pre-flight
-  contract diff SHIPPED 2026-05-24 (`<pre-flight-sha>`) — pure-docs
+  contract diff SHIPPED 2026-05-24 (`c2c39b5`) — pure-docs
   pre-flight per R-v0.12-NEW-1 (filed as a candidate 4th structural
   class for R-v0.9-NEW-2-graduated's "no deferred wire leg → no
   stub needed" rule; M55-E is the 1st instance, GRADUATES at 2nd-
@@ -731,7 +731,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    filed at v0.6 kickoff (slipped v0.6 → v0.7 → v0.8 → v0.9 →
    v0.10 → v0.11, picked at v0.12 candidate-selection `76ddf98`
    per the user binding). **🟡 PRE-FLIGHT OPEN 2026-05-24** at
-   `<pre-flight-sha>` — pure-docs pre-flight per R-v0.12-NEW-1
+   `c2c39b5` — pure-docs pre-flight per R-v0.12-NEW-1
    (1st instance of a candidate 4th structural class for R-v0.9-
    NEW-2-graduated's "no deferred wire leg → no stub needed"
    rule); §13 carve-out Decision LANDED inline (distinguishes
