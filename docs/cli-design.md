@@ -7345,7 +7345,7 @@ to other flags defers to v0.12.x candidate-selection (see §13).
 |-----|------|---------------|------------|
 | `board` | string (numeric) | `--board <bid>` everywhere it's accepted | `^\d+$` BoardId-shape |
 | `workspace` | string (numeric) | `--workspace <wid>` everywhere it's accepted | `^\d+$` WorkspaceId-shape |
-| `output` | enum (`"json"` \| `"table"`) | `--output <fmt>` global flag | enum (see §3.1) |
+| `output` | enum (`"json"` \| `"table"` \| `"text"` \| `"ndjson"`) | `--output <fmt>` global flag | enum (matches `src/utils/output/select.ts:14`'s `OUTPUT_FORMATS` exactly — narrowing this would silently reject `MONDAY_OUTPUT=text` / `MONDAY_OUTPUT=ndjson` that the env-var path accepts today) |
 | `concurrency` | integer (positive) | `--concurrency <n>` on bulk verbs | `int().positive()` |
 
 Empty table (`[profiles.work.defaults]` with no keys, or table absent
@@ -7410,13 +7410,26 @@ than requiring TOML hand-edits. They write the active profile per
 §7.2 selection order; an explicit `--profile <name>` flag scopes
 the write to a non-active profile. All three verbs are SAFE writes
 (no destructive gate per §3.1; `unset` on an absent key is
-idempotent no-op `ok: true`). Token-storage rule per `.claude/
-rules/security.md` is preserved — `monday config set
-api_token_env MONDAY_API_TOKEN_WORK` writes the env-var NAME but
-`monday config set api_token <literal>` rejects at the parse
-boundary (`config_error` with `details.reason:
-'token_in_config_rejected'`; the existing `profileEntrySchema`
-key-list discipline carries forward unchanged).
+idempotent no-op `ok: true`).
+
+**Scope: defaults-only.** The 3 companion verbs operate
+**exclusively** on the `[profiles.<active>.defaults]` table —
+they cannot read or write the top-level `[profiles.<active>]`
+slots (`api_token_env`, `api_version`, `default_workspace`,
+`timezone`) or the sibling `[profiles.<active>.dev]` table.
+Any `<key>` not in the 4-key allowlist (`board` / `workspace`
+/ `output` / `concurrency`) rejects with `config_error
+details.reason: 'unknown_defaults_key'` — including `api_token`
+/ `api_token_env` / `api_version` / any other top-level key.
+The top-level slots stay editable via TOML hand-edits or
+(for `api_token_env` indirectly) via the credentials cache
+written by `monday auth login`. Token-shaped values on an
+allowed key (e.g., `monday config set board <jwt-shaped>`)
+reject as `config_error details.reason:
+'wrong_defaults_type'` per the `board` key's `^\d+$` BoardId
+shape. Token-storage rule per `.claude/rules/security.md`
+preserved by construction — the verbs have no path to the
+token-name slot at all.
 
 ### 7.3 v3 — `monday auth login`
 
@@ -9489,9 +9502,11 @@ scoped idempotent changes, and post comments narrating its work.**
 
   **Bounded blast radius.** Zero new Monday wire surface, zero new
   transport seam, zero new ERROR_CODE expected (registry stays at
-  29; `config_error` covers token-in-config rejection + unknown-key
-  reject + wrong-type reject; `usage_error` covers explicit empty-
-  flag reject + bulk-precedence-conflict surfaces). +3 commands
+  29; `config_error` covers unknown-defaults-key reject + wrong-
+  defaults-type reject — both via existing framings, no new
+  discriminator post Codex pre-flight R1 fold; `usage_error`
+  covers explicit empty-flag reject on the invocation side).
+  +3 commands
   (119 → 122 at IMPL close). Cross-cutting precedence-resolver
   integration is the genuine risk surface — affects how
   `--board`/`--workspace`/`--output`/`--concurrency` resolve at

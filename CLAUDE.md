@@ -243,9 +243,18 @@ humans are second-class. Built incrementally via Claude Code on top of
   NEW-* candidates). NO source files / NO tests touched at pre-
   flight — IMPL session lands ALL runtime (resolver runtime body +
   3 verb files + cross-cutting precedence-resolver integration +
-  full test surface). Codex pre-flight review status: pending / R1
-  / CONVERGED (TBD at session close — backfill this line at the
-  Codex pass). **IMPL scope (next session):** runtime body for the
+  full test surface). **Codex pre-flight R1: CONVERGED 0 P1 + 2 P2
+  + 1 P3** folded inline at `<r1-fold-sha>` — P2-1 (W11)
+  removed misleading `monday config set api_token_env` example
+  from §7.2.1 + added explicit "Scope: defaults-only" sub-
+  paragraph + collapsed D3 to existing `config_error` framings
+  (`unknown_defaults_key` + `wrong_defaults_type`), R-v0.12-NEW-3
+  RESOLVED at this fold (no new `token_in_defaults_rejected`
+  discriminator); P2-2 (W5) widened `[defaults].output` enum from
+  2 to 4 values matching `OUTPUT_FORMATS` exactly (was silently
+  narrowing the existing `MONDAY_OUTPUT` env-var contract); P3-1
+  (out-of-band) deleted the stale `bulk-precedence-conflict
+  surfaces` phrase from the §13 v0.12 entry. **IMPL scope (next session):** runtime body for the
   precedence resolver; 3 verb files at `src/commands/config/
   {set,get,unset}.ts` (joining the existing `config show` / `config
   path` from v0.1 — the `config` noun is already registered in
@@ -258,9 +267,11 @@ humans are second-class. Built incrementally via Claude Code on top of
   interaction probe at IMPL kickoff to pick among the three, with
   `AskUserQuestion` escalation if the probe doesn't unambiguously
   pick (R-v0.12-NEW-2). **D3 rejection-discriminator Decision
-  DEFERRED** (R-v0.12-NEW-3 — whether to introduce a new
-  `token_in_defaults_rejected` `details.reason` literal or reuse
-  existing `config_error` framings). ~3–4 Codex IMPL rounds
+  RESOLVED at Codex R1 fold** — no new `token_in_defaults_rejected`
+  literal; uses existing `unknown_defaults_key` +
+  `wrong_defaults_type` framings; R-v0.12-NEW-3 closed at
+  pre-flight rather than pending at IMPL kickoff. ~3–4 Codex IMPL
+  rounds
   estimated per v0.12-plan §1 build order. **SDK probe at IMPL
   kickoff:** re-check `@mondaydotcomorg/api` dist-tags — if 15.x
   has published (baking API `2026-04`), M39/M40/M41 reopen and
@@ -739,12 +750,14 @@ detail, and R-class refactor backlog, **read the plan docs** —
    flag-values per the cli-design.md §13 amendment); cli-
    design.md §7.2.1 + §4.3 CONFIG section + §13 v0.12 Scope
    additions; this plan-doc OPENED. Codex pre-flight review
-   status: pending / R1 / CONVERGED (TBD at session close).
+   status: **R1 CONVERGED 0 P1 + 2 P2 + 1 P3** folded inline at
+   `<r1-fold-sha>` (P2-1 + P2-2 + P3-1).
    §22 R-class register: carries forward open watch-items from
    v0.8/v0.9/v0.10/v0.11 + files R-v0.12-NEW-1 (pure-docs pre-
-   flight class) + R-v0.12-NEW-2 (D1 integration-shape Decision
-   pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
-   discriminator scope pending IMPL kickoff). M39/M40/M41 (SDK
+   flight class, WATCH) + R-v0.12-NEW-2 (D1 integration-shape
+   Decision pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
+   discriminator — RESOLVED at Codex R1 fold; no new
+   discriminator). M39/M40/M41 (SDK
    15.x) + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
    (**6th-consecutive stall**, v0.7 → v0.12).
 3. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
