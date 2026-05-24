@@ -757,7 +757,11 @@ detail, and R-class refactor backlog, **read the plan docs** —
    flight class, WATCH) + R-v0.12-NEW-2 (D1 integration-shape
    Decision pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
    discriminator — RESOLVED at Codex R1 fold; no new
-   discriminator). M39/M40/M41 (SDK
+   discriminator) + R-v0.12-NEW-4 / NEW-5 / NEW-6 (filed at
+   post-pre-flight refactor-audit `<audit-sha>` — §3 numbered
+   plan-doc list renumbering pain; §13 non-goal supporting prose
+   drift; Codex pre-flight template missing pure-docs variant
+   guidance; all WATCH). M39/M40/M41 (SDK
    15.x) + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
    (**6th-consecutive stall**, v0.7 → v0.12).
 3. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
