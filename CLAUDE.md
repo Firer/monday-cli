@@ -758,7 +758,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    Decision pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
    discriminator — RESOLVED at Codex R1 fold; no new
    discriminator) + R-v0.12-NEW-4 / NEW-5 / NEW-6 (filed at
-   post-pre-flight refactor-audit `<audit-sha>` — §3 numbered
+   post-pre-flight refactor-audit `f84aaf0` — §3 numbered
    plan-doc list renumbering pain; §13 non-goal supporting prose
    drift; Codex pre-flight template missing pure-docs variant
    guidance; all WATCH). M39/M40/M41 (SDK
