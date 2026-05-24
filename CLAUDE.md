@@ -761,7 +761,11 @@ detail, and R-class refactor backlog, **read the plan docs** —
    post-pre-flight refactor-audit `f84aaf0` — §3 numbered
    plan-doc list renumbering pain; §13 non-goal supporting prose
    drift; Codex pre-flight template missing pure-docs variant
-   guidance; all WATCH). M39/M40/M41 (SDK
+   guidance; all WATCH) + R-v0.12-NEW-7 (filed at meta-audit
+   2026-05-24 — pre-flight cluster size grew 2→6 commits at
+   v0.12 vs v0.10/v0.11 due to SHA-backfill follow-ups per
+   content commit; mitigation candidates a/b/c enumerated; WATCH).
+   M39/M40/M41 (SDK
    15.x) + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
    (**6th-consecutive stall**, v0.7 → v0.12).
 3. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
