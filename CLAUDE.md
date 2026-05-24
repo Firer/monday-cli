@@ -67,42 +67,28 @@ humans are second-class. Built incrementally via Claude Code on top of
   `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z); `monday-cli@0.7.0`
   (tag `3e46f59`, 2026-05-20T15:48:07Z).
 - **package.json version:** `0.11.0`.
-- **Live numbers:** **4295 tests pass + 5 skipped** (the **v0.11-M54-G
-  IMPL** net +25 over the v0.10.0 baseline of 4270 + 4 — 13 unit
-  `tests/unit/api/item-description.test.ts` cases pinning the
-  `ITEM_DESCRIPTION_QUERY` selection, the `documentBlockSchema` /
-  `itemDescriptionSchema` shapes, and `parseItemDescription` parse-
-  boundary surfaces; 8 integration
-  `tests/integration/commands/item-get-description.test.ts` cases
-  (happy + wire-null + emptied-blocks + not-found + usage-error +
-  401 + malformed-row guard + missing-description-key guard); 1 new
-  `RUN_LIVE_TESTS`-gated skip in `live-schema-drift.test.ts` for the
-  `ITEM_DESCRIPTION_QUERY` smoke; 1 envelope-snapshot test + the
-  pre-existing snapshot count delta; less 1 flipped unit test for
-  `parseItemDescription(undefined)`. The 5 skips: the 2 pre-existing +
-  the multipart-upload smoke + the board-projection schema-drift smoke
-  + the new item-description schema-drift smoke). **✅ CI
-  `test:coverage` PASSES:** global **branch coverage 95.86% vs the
-  95.45% floor** (HOLDS across M54-G — the absent-key guard + tightened
-  `parseItemDescription` early-return added new branches all covered
-  by the new tests; net 95.89% → 95.86% reflects the M54-G IMPL
-  adding `client.raw` + new schema branches the test surface didn't
-  exhaust at every defensive arm). **29 ERROR_CODES** (unchanged
-  across M54-G — the `missing_description_key` discriminator routes
-  through the existing `internal_error` code); **119 commands** (+1
-  for `monday item get-description`); **functions 98.98% (1359/1373)**
-  — net +5 functions from the new schema + helper + projector + verb
-  body, no coverage regression; `npm audit` **0 vulnerabilities**.
-  Earlier coverage contributors still hold: the **v0.8 refactor
-  cluster** (`item/update.ts` 79.42% → 87.27%), **R-v0.8-NEW-11**
-  transport-helper lift, the M46 dispatch-arm tests (`item/create.ts`
-  82.31% → 86.58%), the **v0.10-M53** `NOUN_DESCRIPTIONS` single-
-  source-of-truth lift (collapsed 122 duplicate `ensureSubcommand`
-  literals, no coverage regression). **Release-prep held all
-  numbers** — every release-prep edit is docs-only (README, CHANGELOG,
-  plan-doc, CLAUDE.md, workflow.md) plus `package.json` /
-  `package-lock.json` version bumps; re-verified green at the
-  close-docs gate.
+- **Live numbers:** **4388 tests pass + 5 skipped** (the **v0.12-M55-E
+  IMPL** net +93 over the v0.11.0 baseline of 4295 + 5 — full
+  inventory at `docs/v0.12-plan.md` §3 M55-E IMPL close per
+  `feedback_public_docs_clean`; headline: 21 unit on
+  `profileDefaultsBlockSchema` / `mutateProfileDefaultsInPlace` /
+  `writeProfilesConfig`; 17 unit on the precedence resolver
+  (per-key env validation + lazy resolution scope-pin); 26 unit on
+  the Commander application layer (applicability registry + 4 P1
+  regression guards + 7 widened P2 entries); 10 unit on the parse-
+  boundary helpers; 15 integration on the 3 new verbs end-to-end
+  (incl. 2 scope-pins for the lazy-resolver vs MONDAY_OUTPUT
+  contracts); 4 integration on the (c′) injection at runtime
+  against `item list`). The 5 skips unchanged from v0.11. **✅ CI
+  `test:coverage` PASSES:** global **branch coverage 95.93% vs
+  the 95.45% floor** (net 95.86% → 95.93% — the lazy-resolution
+  refactor + widened-registry preconditions added new branches
+  all exercised by the per-entry tests). **29 ERROR_CODES**
+  (unchanged across M55-E — the 2 new `details.reason`
+  discriminators `unknown_defaults_key` + `wrong_defaults_type`
+  route through the existing `config_error` code); **122 commands**
+  (+3 for `monday config set/get/unset`); `npm audit` **0
+  vulnerabilities**.
 - **CI status:** **fully green.** The v0.7.0 table-colour test flake
   (root cause: cli-table3's `@colors/colors` caches its enabled-state
   from ambient TTY detection, so `color: true` emitted no ANSI in a
@@ -216,78 +202,39 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.12-M55-E IMPL.** v0.12-E pre-flight
-  contract diff SHIPPED 2026-05-24 (`c2c39b5`) — pure-docs
-  pre-flight per R-v0.12-NEW-1 (filed as a candidate 4th structural
-  class for R-v0.9-NEW-2-graduated's "no deferred wire leg → no
-  stub needed" rule; M55-E is the 1st instance, GRADUATES at 2nd-
-  instance threshold). **Pre-flight scope (this commit):** (a)
-  **§13 carve-out Decision LANDED inline** — amends the "Saved
-  queries / aliases" non-goal at `docs/cli-design.md` §13 to
-  distinguish aliases-as-stored-command-strings (still non-goal —
-  silently mutate command shape across machines) from defaults-as-
-  stored-flag-values (carve-out — affect flag VALUES only via the
-  standard precedence chain CLI flag > env var > profile default
-  > unset, cannot change WHICH subcommand runs); (b)
-  `docs/cli-design.md` extensions: §7.2.1 `[profiles.<name>.
-  defaults]` table shape (4 keys: `board`, `workspace`, `output`,
-  `concurrency`; per-noun extension to other flags defers to
-  v0.12.x candidate-selection) + precedence chain + agent
-  discipline; §4.3 CONFIG section (3 new verbs `monday config
-  set/get/unset <key> [value]` under the existing `config`
-  namespace) + a new §13 "v0.12 (next)" entry + the v0.5/v0.6
-  carry-forward bullet updates marking E "picked at v0.12-M55-E";
-  (c) `docs/v0.12-plan.md` OPENED with §1/§3/§7/§9/§22 (mirrors
-  v0.11-plan template; §22 R-class register carries forward open
-  watch-items from v0.8/v0.9/v0.10/v0.11 + files 3 new R-v0.12-
-  NEW-* candidates). NO source files / NO tests touched at pre-
-  flight — IMPL session lands ALL runtime (resolver runtime body +
-  3 verb files + cross-cutting precedence-resolver integration +
-  full test surface). **Codex pre-flight R1: CONVERGED 0 P1 + 2 P2
-  + 1 P3** folded inline at `c3fcb6d` — P2-1 (W11)
-  removed misleading `monday config set api_token_env` example
-  from §7.2.1 + added explicit "Scope: defaults-only" sub-
-  paragraph + collapsed D3 to existing `config_error` framings
-  (`unknown_defaults_key` + `wrong_defaults_type`), R-v0.12-NEW-3
-  RESOLVED at this fold (no new `token_in_defaults_rejected`
-  discriminator); P2-2 (W5) widened `[defaults].output` enum from
-  2 to 4 values matching `OUTPUT_FORMATS` exactly (was silently
-  narrowing the existing `MONDAY_OUTPUT` env-var contract); P3-1
-  (out-of-band) deleted the stale `bulk-precedence-conflict
-  surfaces` phrase from the §13 v0.12 entry. **IMPL scope (next session):** runtime body for the
-  precedence resolver; 3 verb files at `src/commands/config/
-  {set,get,unset}.ts` (joining the existing `config show` / `config
-  path` from v0.1 — the `config` noun is already registered in
-  `NOUN_DESCRIPTIONS`); cross-cutting integration of the resolver
-  into every command that accepts `--board`/`--workspace`/`--output`/
-  `--concurrency`; full test surface (~50–100 new tests
-  estimated). **D1 integration-shape Decision DEFERRED to IMPL
-  kickoff** per v0.12-plan §3 — 3 candidate shapes (per-call-site
-  vs runner-pre-parse vs runner-post-parse); needs a Commander-
-  interaction probe at IMPL kickoff to pick among the three, with
-  `AskUserQuestion` escalation if the probe doesn't unambiguously
-  pick (R-v0.12-NEW-2). **D3 rejection-discriminator Decision
-  RESOLVED at Codex R1 fold** — no new `token_in_defaults_rejected`
-  literal; uses existing `unknown_defaults_key` +
-  `wrong_defaults_type` framings; R-v0.12-NEW-3 closed at
-  pre-flight rather than pending at IMPL kickoff. ~3–4 Codex IMPL
-  rounds
-  estimated per v0.12-plan §1 build order. **SDK probe at IMPL
-  kickoff:** re-check `@mondaydotcomorg/api` dist-tags — if 15.x
-  has published (baking API `2026-04`), M39/M40/M41 reopen and
-  preempt M55-E IMPL per the same logic as prior cycles. SDK at
-  this pre-flight was still 14.0.0 (**6th-consecutive stall**,
-  v0.7 → v0.12); v0.12 is the 6th-consecutive pivot in sequence
-  (v0.7/v0.8/v0.9/v0.10/v0.11/v0.12). **Agent-facing discipline**
-  pinned in cli-design.md §7.2.1 + §13 carve-out: agents SHOULD
-  set no defaults and pass every scoping arg in argv for
-  reproducibility-across-machines; defaults are a human-ergonomics
-  feature, not an agent-ergonomics one. **Carries forward open
-  watch-items:** R-v0.11-NEW-7 (CLAUDE.md §3 "Next is..." forward-
-  pointers — the new v0.12-plan row in §3 below MUST NOT carry
-  such a pointer per the handoff-binding); R-v0.9-NEW-12 (Codex
-  pre-flight findings-first under `-xhigh` — observation slot at
-  this pre-flight's Codex review).
+- **Next session:** **v0.12 release-prep cluster.** v0.12-M55-E
+  IMPL SHIPPED 2026-05-25 at `<close-docs>` — the full runtime
+  (resolver + Commander application layer + 3 new
+  `monday config set/get/unset` verbs + 5 `.requiredOption` →
+  `.option` conversions) on the `2026-01` pin. Codex IMPL
+  CONVERGED R2; D1 RESOLVED at IMPL kickoff via Codex
+  consultation → option (c′) applicability-aware preAction
+  injection (Codex's recommended 5th shape over the 4 pre-flight-
+  enumerated candidates). Per-milestone narrative + R-class
+  outcomes + the full D-list closures live in `docs/v0.12-
+  plan.md` §3 M55-E IMPL close subsection + §22 R-class register
+  per `feedback_public_docs_clean`. **Release-prep scope:**
+  version bump 0.11.0 → 0.12.0, CHANGELOG `[0.12.0]` (one user-
+  impact line per `feedback_public_docs_clean`: "Adds `monday
+  config set/get/unset` and `[profiles.<name>.defaults]` for
+  profile-scoped argument defaults — board, workspace, output,
+  concurrency."), ToC audit, deferral-slot grep (R-NEW-82;
+  expected clean by construction — v0.12-M55-E shipped no
+  deferred wire leg per R-v0.9-NEW-2-graduated's "no deferred
+  wire leg → no stub needed" rule's 4th structural class), README
+  refresh per R-v0.9-NEW-15 across the 3 surfaces, help-text
+  hygiene grep (R-v0.8-NEW-21 CLOSED-RESOLVED at v0.11; structural-
+  checklist gate), envelope-snapshot refresh probe, close-docs
+  sweep. Mirrors v0.9 / v0.10 / v0.11 4-commit shape (3rd-
+  consecutive ≤4-commit cluster precedent; R-NEW-82's "if clean,
+  skip" sub-rule applies to deferral-slip + ToC-audit when
+  CLEAN). **SDK probe at release-prep:** re-check
+  `@mondaydotcomorg/api` dist-tags — if 15.x has published
+  (baking API `2026-04`), M39/M40/M41 reopen and preempt v0.13+
+  candidate-selection. SDK at this IMPL close was still 14.0.0
+  (**6th-consecutive stall**, v0.7 → v0.12). v0.12 is the
+  6th-consecutive pivot in sequence (v0.7/v0.8/v0.9/v0.10/v0.11/
+  v0.12).
   **Post-publish
   refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
   (release-prep cluster + post-publish flip) — process-only
