@@ -216,55 +216,67 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.12-E pre-flight contract diff.** v0.12
-  candidate-selection ran 2026-05-24 per R-NEW-75 over the
-  C/D/E backlog. SDK probe: `@mondaydotcomorg/api@14.0.0` —
-  **6th-consecutive stall** (v0.7 → v0.12 candidate-selection),
-  so M39/M40/M41 (SDK 15.x → API `2026-04`) + M44/M45 (SDK 16.x
-  → API `2026-07`) stay DEFERRED; SDK-reopen does NOT preempt the
-  pick at this session. User picked **E — profile-scoped
-  argument defaults, ships standalone** (the
-  2026-05-22-at-v0.11-candidate-selection user binding honored —
-  E was already queued standalone for v0.12). **C stays-filed**
-  per the Q2 binding (4 slips on Monday's `ColumnMappingInput`
-  no-value-slot at API `2026-01`, not closed permanently —
-  Monday could surface the value slot in a future API version);
-  **D stays design-blocked** on per-board cursor-lifetime under
-  aggregation. **v0.12-E scope:** extend `~/.monday-cli/
-  config.toml` (M19/M21) with `[profiles.<name>.defaults]`
-  table carrying scoping args (initial scope: `board`,
-  `workspace`, `output`, `concurrency`; per-noun extension to
-  other flags defers to v0.12.x). Standard CLI precedence —
-  CLI flag > env var > profile default > unset. Optional
-  companion `monday config set/get/unset <key> <value>` helper
-  to edit the profile file from the CLI rather than hand-editing
-  TOML (avoids fixture-coverage gaps + adds 3 verbs but no new
-  wire surface). Coexists with M26's `[profiles.<name>.dev]`
-  table (the dev namespace continues to carry named-noun board
-  slots; the generic `[defaults]` table carries scoping args
-  shared across noun namespaces). Zero new Monday wire surface,
-  zero new transport seam, zero new ERROR_CODE expected; 3–4
-  IMPL rounds estimated. Agent-facing docs MUST pin the
-  discipline: agents should set no defaults and pass every
-  scoping arg in argv for reproducibility-across-machines;
-  defaults are a human-ergonomics feature.
-  **Prerequisite §13 carve-out Decision FIRST at pre-flight
-  kickoff:** the current "Saved queries / aliases" non-goal copy
-  (cli-design.md §13) reads as forbidding stateful command-shape
-  mutation across machines; profile-scoped defaults are adjacent
-  enough that the non-goal needs amending to distinguish
-  aliases-as-stored-command-strings (still non-goal) from
-  defaults-as-stored-flag-values (carve-out). Without that
-  Decision, the milestone can't ship cleanly. **No
-  `docs/v0.12-plan.md` opens this session** per the v0.10
-  precedent (`5d89754`) + v0.11 precedent (`5d5eca1`) — plan-doc
-  opens at the first pre-flight contract diff commit of the
-  milestone. v0.12 will be the **6th-consecutive pivot** in
-  sequence (v0.7/v0.8/v0.9/v0.10/v0.11/v0.12) if SDK stays at
-  14.0.0 through E pre-flight; if SDK 15.x publishes before E
-  pre-flight opens, M39/M40/M41 reopen and preempt E (M40
-  already feature-confirmed on multi_level boards via the
-  2026-05-22 probe sweep — only the M39 SDK gate remains).
+- **Next session:** **v0.12-M55-E IMPL.** v0.12-E pre-flight
+  contract diff SHIPPED 2026-05-24 (`<pre-flight-sha>`) — pure-docs
+  pre-flight per R-v0.12-NEW-1 (filed as a candidate 4th structural
+  class for R-v0.9-NEW-2-graduated's "no deferred wire leg → no
+  stub needed" rule; M55-E is the 1st instance, GRADUATES at 2nd-
+  instance threshold). **Pre-flight scope (this commit):** (a)
+  **§13 carve-out Decision LANDED inline** — amends the "Saved
+  queries / aliases" non-goal at `docs/cli-design.md` §13 to
+  distinguish aliases-as-stored-command-strings (still non-goal —
+  silently mutate command shape across machines) from defaults-as-
+  stored-flag-values (carve-out — affect flag VALUES only via the
+  standard precedence chain CLI flag > env var > profile default
+  > unset, cannot change WHICH subcommand runs); (b)
+  `docs/cli-design.md` extensions: §7.2.1 `[profiles.<name>.
+  defaults]` table shape (4 keys: `board`, `workspace`, `output`,
+  `concurrency`; per-noun extension to other flags defers to
+  v0.12.x candidate-selection) + precedence chain + agent
+  discipline; §4.3 CONFIG section (3 new verbs `monday config
+  set/get/unset <key> [value]` under the existing `config`
+  namespace) + a new §13 "v0.12 (next)" entry + the v0.5/v0.6
+  carry-forward bullet updates marking E "picked at v0.12-M55-E";
+  (c) `docs/v0.12-plan.md` OPENED with §1/§3/§7/§9/§22 (mirrors
+  v0.11-plan template; §22 R-class register carries forward open
+  watch-items from v0.8/v0.9/v0.10/v0.11 + files 3 new R-v0.12-
+  NEW-* candidates). NO source files / NO tests touched at pre-
+  flight — IMPL session lands ALL runtime (resolver runtime body +
+  3 verb files + cross-cutting precedence-resolver integration +
+  full test surface). Codex pre-flight review status: pending / R1
+  / CONVERGED (TBD at session close — backfill this line at the
+  Codex pass). **IMPL scope (next session):** runtime body for the
+  precedence resolver; 3 verb files at `src/commands/config/
+  {set,get,unset}.ts` (joining the existing `config show` / `config
+  path` from v0.1 — the `config` noun is already registered in
+  `NOUN_DESCRIPTIONS`); cross-cutting integration of the resolver
+  into every command that accepts `--board`/`--workspace`/`--output`/
+  `--concurrency`; full test surface (~50–100 new tests
+  estimated). **D1 integration-shape Decision DEFERRED to IMPL
+  kickoff** per v0.12-plan §3 — 3 candidate shapes (per-call-site
+  vs runner-pre-parse vs runner-post-parse); needs a Commander-
+  interaction probe at IMPL kickoff to pick among the three, with
+  `AskUserQuestion` escalation if the probe doesn't unambiguously
+  pick (R-v0.12-NEW-2). **D3 rejection-discriminator Decision
+  DEFERRED** (R-v0.12-NEW-3 — whether to introduce a new
+  `token_in_defaults_rejected` `details.reason` literal or reuse
+  existing `config_error` framings). ~3–4 Codex IMPL rounds
+  estimated per v0.12-plan §1 build order. **SDK probe at IMPL
+  kickoff:** re-check `@mondaydotcomorg/api` dist-tags — if 15.x
+  has published (baking API `2026-04`), M39/M40/M41 reopen and
+  preempt M55-E IMPL per the same logic as prior cycles. SDK at
+  this pre-flight was still 14.0.0 (**6th-consecutive stall**,
+  v0.7 → v0.12); v0.12 is the 6th-consecutive pivot in sequence
+  (v0.7/v0.8/v0.9/v0.10/v0.11/v0.12). **Agent-facing discipline**
+  pinned in cli-design.md §7.2.1 + §13 carve-out: agents SHOULD
+  set no defaults and pass every scoping arg in argv for
+  reproducibility-across-machines; defaults are a human-ergonomics
+  feature, not an agent-ergonomics one. **Carries forward open
+  watch-items:** R-v0.11-NEW-7 (CLAUDE.md §3 "Next is..." forward-
+  pointers — the new v0.12-plan row in §3 below MUST NOT carry
+  such a pointer per the handoff-binding); R-v0.9-NEW-12 (Codex
+  pre-flight findings-first under `-xhigh` — observation slot at
+  this pre-flight's Codex review).
   **Post-publish
   refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
   (release-prep cluster + post-publish flip) — process-only
@@ -707,7 +719,35 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
+2. **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — ACTIVE plan.
+   v0.12 = **profile-scoped argument defaults** on the `2026-01`
+   pin: `[profiles.<name>.defaults]` table + `monday config
+   set/get/unset` companion verbs (joining the existing `config
+   show` / `config path` under the already-registered `config`
+   noun) + cross-cutting precedence resolver projecting 4 keys
+   (`board`, `workspace`, `output`, `concurrency`) onto matching
+   CLI flags via the standard chain (CLI flag > env var > profile
+   default > unset). **M55-E** is the carry-forward E candidate
+   filed at v0.6 kickoff (slipped v0.6 → v0.7 → v0.8 → v0.9 →
+   v0.10 → v0.11, picked at v0.12 candidate-selection `76ddf98`
+   per the user binding). **🟡 PRE-FLIGHT OPEN 2026-05-24** at
+   `<pre-flight-sha>` — pure-docs pre-flight per R-v0.12-NEW-1
+   (1st instance of a candidate 4th structural class for R-v0.9-
+   NEW-2-graduated's "no deferred wire leg → no stub needed"
+   rule); §13 carve-out Decision LANDED inline (distinguishes
+   aliases-as-stored-command-strings from defaults-as-stored-
+   flag-values per the cli-design.md §13 amendment); cli-
+   design.md §7.2.1 + §4.3 CONFIG section + §13 v0.12 Scope
+   additions; this plan-doc OPENED. Codex pre-flight review
+   status: pending / R1 / CONVERGED (TBD at session close).
+   §22 R-class register: carries forward open watch-items from
+   v0.8/v0.9/v0.10/v0.11 + files R-v0.12-NEW-1 (pure-docs pre-
+   flight class) + R-v0.12-NEW-2 (D1 integration-shape Decision
+   pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
+   discriminator scope pending IMPL kickoff). M39/M40/M41 (SDK
+   15.x) + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
+   (**6th-consecutive stall**, v0.7 → v0.12).
+3. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
    `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`).
    v0.11 = the **`Item.description`
    read-side carve-out** (`monday item get-description <iid>`) on
@@ -740,7 +780,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    release live; post-publish flip applied. M39/M40/M41 (SDK 15.x)
    + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
    (**5th-consecutive stall**).
-3. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped (npm
+4. **[`docs/v0.10-plan.md`](./docs/v0.10-plan.md)** — shipped (npm
    `latest` 2026-05-22T21:24:43Z; tag `v0.10.0` at `c9eceba`). v0.10
    = the **`NOUN_DESCRIPTIONS` single-source-of-truth lift** on the
    `2026-01` pin: **M53** collapses ~120 duplicate
@@ -756,7 +796,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    at v0.11 post-publish refactor-audit).
    M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay DEFERRED —
    SDK still 14.0.0 (**5th-consecutive stall** as of v0.11).
-4. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
+5. **[`docs/v0.9-plan.md`](./docs/v0.9-plan.md)** — shipped (npm
    `latest` 2026-05-22T16:38:40Z; tag `v0.9.0` at `ee96681`). v0.9
    = the **multi-level board cluster** on the `2026-01` pin: **M50**
    multi-level subitem nesting (closes the M28 deferral + fixes the
@@ -796,14 +836,14 @@ detail, and R-class refactor backlog, **read the plan docs** —
    fixture-leftover-detection at close-docs after the M3 e2e M51
    leftover catch, MEDIUM; R-v0.9-NEW-12 Codex pre-flight
    findings-first behavior under `-xhigh` reasoning, LOW-MEDIUM).
-5. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
+6. **[`docs/v0.8-plan.md`](./docs/v0.8-plan.md)** — shipped M49 (P1
    file-upload wire fix) + M46 (multi-file `--set`) + M47 (stdin
    `--set`) + M48 (board_relation/dependency settings) + the refactor
    cluster; re-scoped off the original 2026-07 SKELETON (M44/M45)
    per the v0.7-pivot precedent. §22 R-class log (R-v0.8-NEW-*) —
    **R-v0.8-NEW-22 PROMOTED to v0.10-M53 at this session**
    (status flipped OPEN → PROMOTED 2026-05-22).
-6. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
+7. **[`docs/v0.7-plan.md`](./docs/v0.7-plan.md)** — shipped M42 +
    M43 (the v0.6.x bulk + create file `--set` carve-out folds);
    M39 (API `2026-04` pin bump) + M40 (`item set-description`) +
    M41 (`doc block-create-bulk`) **DEFERRED 2026-05-20** pending
@@ -815,18 +855,18 @@ detail, and R-class refactor backlog, **read the plan docs** —
    `.claude/rules/workflow.md` at M42 IMPL R7 + refined at R8;
    R-NEW-76 graduated from stub-anchored to wire-dispatch-anchored
    invariant at M43 IMPL).
-7. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
+8. **[`docs/v0.6-plan.md`](./docs/v0.6-plan.md)** — shipped M38
    (files-shaped friendly `--set`) with §22 R-class log
    (R-v0.6-NEW-*).
-8. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
+9. **[`docs/v0.5-plan.md`](./docs/v0.5-plan.md)** — shipped M34–M37
    with §22 R-class log (R-v0.5-NEW-*).
-9. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
+10. **[`docs/v0.4-plan.md`](./docs/v0.4-plan.md)** — shipped M29–M33
    with §22 R-class log (R-NEW-72 through R-NEW-84 graduated).
-10. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
+11. **[`docs/v0.3-plan.md`](./docs/v0.3-plan.md)** — shipped M19–M28
    with §22 R-class log (R-NEW-1 through R-NEW-43).
-11. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
+12. **[`docs/v0.2-plan.md`](./docs/v0.2-plan.md)** — shipped M8–M18
     (R20–R53).
-12. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
+13. **[`docs/v0.1-plan.md`](./docs/v0.1-plan.md)** — shipped M0–M7
     foundations.
 
 Supplementary: [`docs/output-shapes.md`](./docs/output-shapes.md)

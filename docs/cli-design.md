@@ -3395,6 +3395,43 @@ monday cache stats                                                           v0.
 # === CONFIG ===
 monday config show                        # resolved config (token redacted) v0.1
 monday config path                        # location(s) considered           v0.1
+monday config set <key> <value> [--profile <name>]                           v0.12
+                                          # Set a `[profiles.<active>.defaults]`
+                                          # key per §7.2.1 (initial: board /
+                                          # workspace / output / concurrency).
+                                          # --profile scopes the write to a
+                                          # non-active profile. Idempotent (re-
+                                          # setting same value is a no-op on
+                                          # config.toml). NOT destructive (no
+                                          # --yes gate). Token-storage rule per
+                                          # `.claude/rules/security.md`: this verb
+                                          # rejects token-shaped values at the
+                                          # parse boundary (`config_error
+                                          # details.reason:
+                                          # 'token_in_config_rejected'`); the
+                                          # CLI never persists token bytes to
+                                          # config.toml.
+monday config get [key] [--profile <name>]                                   v0.12
+                                          # Read a `[profiles.<active>.defaults]`
+                                          # key per §7.2.1, OR read the entire
+                                          # resolved defaults table when `key` is
+                                          # omitted. Output reflects the
+                                          # precedence-chain RESOLVED value (CLI
+                                          # flag is not in scope here — this is a
+                                          # config-state read, not a runtime
+                                          # resolution), so `get board` shows env-
+                                          # var > profile default > unset
+                                          # outcome. --profile scopes the read.
+                                          # Idempotent.
+monday config unset <key> [--profile <name>]                                 v0.12
+                                          # Remove a `[profiles.<active>.defaults]`
+                                          # key per §7.2.1. Idempotent — unset on
+                                          # an absent key is a no-op `ok: true`
+                                          # (mirrors `monday auth logout` on a
+                                          # missing profile). NOT destructive
+                                          # (configuration-only; no Monday wire
+                                          # surface touched). --profile scopes the
+                                          # write.
 
 # === DIAGNOSTICS (see §11.5) ===
 monday status [--no-probe]                # connectivity + auth + local-state v0.3
@@ -7267,6 +7304,12 @@ sprints_board = "987655"
 epics_board = "987656"
 bugs_board   = "987657"
 
+[profiles.work.defaults]                    # v0.12-M55-E — see §7.2.1
+board = "987654"
+workspace = "1234567"
+output = "table"
+concurrency = 4
+
 [profiles.personal]
 api_token_env = "MONDAY_API_TOKEN_PERSONAL"
 ```
@@ -7284,6 +7327,96 @@ auth-login surface throws a clear `usage_error.details.reason:
 oauth_unregistered` pointing at `MONDAY_API_TOKEN` until a future
 version registers a canonical `monday-cli` OAuth app. See §7.3 for
 the deferral block + revival steps.
+
+#### 7.2.1 Argument defaults — `[profiles.<name>.defaults]` (v0.12-M55-E)
+
+The `[profiles.<name>.defaults]` table carries scoping argument
+defaults that project onto CLI flags via the standard precedence
+chain. Distinct from `[profiles.<name>.dev]` (M26 named-noun board
+slots for the `dev` namespace) and from the top-level per-profile
+config (`default_workspace`, `timezone`, `api_version` — those
+configure SDK transport / time-zone resolution rather than projecting
+onto argv).
+
+**Initial key set (v0.12-M55-E IMPL).** Four keys; per-noun extension
+to other flags defers to v0.12.x candidate-selection (see §13).
+
+| Key | Type | Projects onto | Validation |
+|-----|------|---------------|------------|
+| `board` | string (numeric) | `--board <bid>` everywhere it's accepted | `^\d+$` BoardId-shape |
+| `workspace` | string (numeric) | `--workspace <wid>` everywhere it's accepted | `^\d+$` WorkspaceId-shape |
+| `output` | enum (`"json"` \| `"table"`) | `--output <fmt>` global flag | enum (see §3.1) |
+| `concurrency` | integer (positive) | `--concurrency <n>` on bulk verbs | `int().positive()` |
+
+Empty table (`[profiles.work.defaults]` with no keys, or table absent
+entirely) is the default — no defaults projected. Unknown keys
+reject at the parse boundary (`.strict()` on the zod schema —
+config-error not silent drop). Wrong types reject the same way
+(`board = 123` integer → config-error; must be the string form
+`board = "123"`).
+
+**Precedence chain (binding).** For every key listed above, the
+resolved value is the first non-empty source in:
+
+1. CLI flag (`--board <bid>` on the invocation)
+2. Env var (per-key — see "Env-var bindings" below)
+3. Profile default (`[profiles.<name>.defaults]` for the active
+   profile per §7.2 selection order)
+4. Unset (the flag is absent at command dispatch time; the
+   command sees no value)
+
+An explicit `--board <other>` ALWAYS wins. An explicit empty
+(`--board ""`) is a usage error at the parse boundary, not a "clear
+the default" signal — the precedence chain doesn't surface a clear-
+the-default verb on the invocation side; use `monday config unset
+board` for that.
+
+**Env-var bindings.** Per-key env vars take precedence over the
+profile default but lose to an explicit CLI flag:
+
+| Key | Env var |
+|-----|---------|
+| `board` | `MONDAY_BOARD` |
+| `workspace` | `MONDAY_WORKSPACE` |
+| `output` | `MONDAY_OUTPUT` |
+| `concurrency` | `MONDAY_CONCURRENCY` |
+
+Env-var coercion follows the §7.1 pattern — strings parse through
+the same zod validation the TOML config goes through, so a malformed
+`MONDAY_CONCURRENCY=foo` surfaces as `config_error` not a silent
+fall-through to "unset".
+
+**Carve-out from the §13 "Saved queries / aliases" non-goal.** This
+table cannot change which subcommand runs or which positional args
+are accepted — every projection is keyed to a named global or
+near-universal flag with a fixed semantic. See §13 "Saved queries /
+aliases" for the full distinction.
+
+**Agent-facing discipline.** Agents SHOULD set no defaults and pass
+every scoping argument in argv. The argv-as-source-of-truth property
+makes a `monday item list --board 123 ...` invocation observably
+identical across machines regardless of any operator's stored
+defaults. Defaults are a human-ergonomics feature (humans paying for
+typing fewer flags daily) — not an agent-ergonomics one (agents
+trade reproducibility for that typing cost the operator never sees).
+The `monday config get` verb at §4.3 surfaces the resolved default
+table so an agent can audit operator-side configuration when debugging
+unexpected flag-value behaviour.
+
+**Companion verbs.** `monday config set <key> <value>` /
+`monday config get [key]` / `monday config unset <key>` edit the
+`[profiles.<active>.defaults]` table from the CLI surface rather
+than requiring TOML hand-edits. They write the active profile per
+§7.2 selection order; an explicit `--profile <name>` flag scopes
+the write to a non-active profile. All three verbs are SAFE writes
+(no destructive gate per §3.1; `unset` on an absent key is
+idempotent no-op `ok: true`). Token-storage rule per `.claude/
+rules/security.md` is preserved — `monday config set
+api_token_env MONDAY_API_TOKEN_WORK` writes the env-var NAME but
+`monday config set api_token <literal>` rejects at the parse
+boundary (`config_error` with `details.reason:
+'token_in_config_rejected'`; the existing `profileEntrySchema`
+key-list discipline carries forward unchanged).
 
 ### 7.3 v3 — `monday auth login`
 
@@ -9174,31 +9307,26 @@ scoped idempotent changes, and post comments narrating its work.**
   the existing M9 mutation).
 - Profile-scoped argument defaults — filed at v0.6 kickoff
   candidate-selection session as a new feature candidate (NOT a
-  v0.5 slip). Extends `~/.monday-cli/config.toml` (M19/M21) with
-  a new `[profiles.<name>.defaults]` table carrying scoping
-  args (initial scope: `board`, `workspace`, `output`,
+  v0.5 slip); slipped v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11,
+  **picked up at v0.12-M55-E**. Extends `~/.monday-cli/config.toml`
+  (M19/M21) with a new `[profiles.<name>.defaults]` table carrying
+  scoping args (initial scope: `board`, `workspace`, `output`,
   `concurrency`; per-noun extension to other flags defers to
-  v0.6.x / v0.7). Precedence is the standard CLI shape — CLI
-  flag > env var > profile default > unset. Optional companion
-  `monday config set/get/unset <key> <value>` helper to edit
-  the profile file from the CLI rather than hand-editing TOML
-  (avoids fixture-coverage gaps + adds 3 verbs but no new wire
-  surface). Coexists cleanly with the M26 `[profiles.<name>.dev]`
-  table (the dev namespace continues to carry named-noun board
-  slots; the generic `[defaults]` table carries scoping args
-  shared across noun namespaces). **Prerequisite §13 carve-out
-  Decision required at pre-flight kickoff** — the current
-  "Saved queries / aliases" non-goal copy (this section, below)
-  reads as forbidding stateful command-shape mutation across
-  machines; profile-scoped defaults are adjacent enough that
-  the non-goal needs amending to distinguish aliases-as-stored-
-  command-strings (still non-goal) from defaults-as-stored-
-  flag-values (carve-out). Without that Decision, the milestone
-  can't ship cleanly. Zero new wire surface, zero new transport
-  seam; 3-4 IMPL rounds estimated. Agent-facing docs MUST pin
-  the discipline: agents should set no defaults and pass every
-  scoping arg in argv for reproducibility-across-machines;
-  defaults are a human-ergonomics feature.
+  v0.12.x). Precedence is the standard CLI shape — CLI flag > env
+  var > profile default > unset. Optional companion `monday config
+  set/get/unset <key> [value]` helper edits the profile file from
+  the CLI rather than hand-editing TOML (avoids fixture-coverage
+  gaps + adds 3 verbs under the existing `config` namespace but no
+  new wire surface). Coexists cleanly with the M26
+  `[profiles.<name>.dev]` table (the dev namespace continues to
+  carry named-noun board slots; the generic `[defaults]` table
+  carries scoping args shared across noun namespaces). §13
+  "Saved queries / aliases" non-goal amended at the v0.12-M55-E
+  pre-flight (2026-05-24) to distinguish aliases-as-stored-
+  command-strings (still non-goal — silently mutate command shape
+  across machines) from defaults-as-stored-flag-values (carve-out
+  — affect flag values only, not command shape). Zero new wire
+  surface, zero new transport seam; full spec at §7.2.
 
 ### v0.6 (next — files-shaped friendly `--set` writes)
 
@@ -9315,13 +9443,72 @@ scoped idempotent changes, and post comments narrating its work.**
     `2026-01`); see the v0.5-section entry above + §2.8 +
     §6.4 "Subitem variant".
   - Profile-scoped argument defaults — filed at v0.6 kickoff
-    candidate-selection session. Extends `~/.monday-cli/
-    config.toml` (M19/M21) with `[profiles.<name>.defaults]`
-    table carrying scoping args. Prerequisite §13 carve-out
-    Decision required at pre-flight kickoff (distinguishes
-    aliases-as-stored-command-strings from defaults-as-
-    stored-flag-values; current "Saved queries / aliases"
-    non-goal reads as forbidding both).
+    candidate-selection session; carried forward v0.6 → v0.7
+    → v0.8 → v0.9 → v0.10 → v0.11. **Picked up at
+    v0.12-M55-E** (pre-flight 2026-05-24). Extends
+    `~/.monday-cli/config.toml` (M19/M21) with
+    `[profiles.<name>.defaults]` table carrying scoping args
+    (initial: `board`, `workspace`, `output`, `concurrency`).
+    §13 "Saved queries / aliases" non-goal amended at the
+    pre-flight to distinguish aliases-as-stored-command-strings
+    (still non-goal) from defaults-as-stored-flag-values
+    (carve-out). Full spec at §7.2.
+
+### v0.12 (next — profile-scoped argument defaults)
+
+- **v0.12-M55-E — profile-scoped argument defaults.** Picked at
+  v0.12 candidate-selection (`76ddf98`, 2026-05-24) per R-NEW-75
+  after v0.11.0 shipped (npm `latest` 2026-05-23T11:50:52Z; tag
+  `v0.11.0` at `195d238`); pre-flight opens 2026-05-24. **6th-
+  consecutive pivot** in sequence (v0.7 → v0.12) — the API-version-
+  bump milestones (M39/M40/M41 on SDK 15.x; M44/M45 on SDK 16.x)
+  DEFER again as `@mondaydotcomorg/api` stays at 14.0.0 (6th
+  consecutive SDK stall). E was the only candidate on the C/D/E
+  backlog with zero external dependency at candidate-selection
+  (no Monday wire, no SDK gate, no probe); C (cross-board `item
+  move` value-overrides) stays-filed per the Q2 user binding
+  (4 slips on Monday's `ColumnMappingInput` no-value-slot
+  constraint at API `2026-01`); D (cross-board search resumable
+  cursor) stays design-blocked on per-board cursor-lifetime under
+  aggregation.
+
+  **Surface (pre-flight scope):** extends `~/.monday-cli/
+  config.toml` (M19/M21) with a new `[profiles.<name>.defaults]`
+  table carrying scoping argument defaults (initial: `board`,
+  `workspace`, `output`, `concurrency`; per-noun extension to
+  other flags defers to v0.12.x candidate-selection). Adds 3 new
+  verbs under the existing `config` namespace (`monday config show`
+  + `monday config path` already shipped at v0.1): `monday config
+  set <key> <value>` / `monday config get [key]` / `monday config
+  unset <key>` to edit the defaults table from the CLI rather than
+  hand-editing TOML. Standard CLI precedence chain — CLI flag >
+  env var > profile default > unset — preserves the load-bearing
+  argv-as-source-of-truth property for agents. Full spec at §7.2.1
+  + §4.3 CONFIG section + §13 "Saved queries / aliases" carve-out
+  amendment.
+
+  **Bounded blast radius.** Zero new Monday wire surface, zero new
+  transport seam, zero new ERROR_CODE expected (registry stays at
+  29; `config_error` covers token-in-config rejection + unknown-key
+  reject + wrong-type reject; `usage_error` covers explicit empty-
+  flag reject + bulk-precedence-conflict surfaces). +3 commands
+  (119 → 122 at IMPL close). Cross-cutting precedence-resolver
+  integration is the genuine risk surface — affects how
+  `--board`/`--workspace`/`--output`/`--concurrency` resolve at
+  every command that accepts them; the resolver-integration shape
+  is an IMPL Decision (D1) deferred to the IMPL session per the
+  pre-flight scope.
+
+  **Agent-facing discipline (binding).** Agents SHOULD set no
+  defaults and pass every scoping argument in argv. The
+  argv-as-source-of-truth property makes a `monday item list
+  --board 123 ...` invocation observably identical across machines
+  regardless of any operator's stored defaults. Defaults are a
+  human-ergonomics feature (humans paying for typing fewer flags
+  daily) — not an agent-ergonomics one (agents trade
+  reproducibility for that typing cost the operator never sees).
+  Pinned in §7.2.1 + `monday config <verb>` help text + the
+  `monday config get` output framing.
 
 ### Explicitly deferred from v0.1's stable contract
 
@@ -9353,14 +9540,45 @@ So an agent reading the contract knows what's *not* there yet:
   describe` already covers column mappings and `monday raw` covers
   the rare power-user case.
 - Saved queries / aliases (e.g. `monday alias save my-tasks "..."`).
-  The CLI reads only from env/argv, with the §8 cache as the sole
-  derived state — that statelessness is what makes `monday item
-  list | jq` predictable across machines and lets agents reason
-  about behavior from argv alone. Local aliases would silently
-  change behavior across machines; synced aliases would be a
-  hosted-service shape. Shell aliases / shell functions are the
-  established UNIX answer — the CLI doesn't need to compete with
+  Aliases SILENTLY MUTATE COMMAND SHAPE — expanding `my-tasks` into
+  `item list --board <bid> --status active --columns name,owner`
+  changes which subcommand runs, which positional args land where,
+  and which flags resolve. An agent reasoning about behaviour from
+  argv loses ground truth across machines: the same `monday my-tasks`
+  invocation performs a different operation in two shells. Synced
+  aliases would be a hosted-service shape (out of model — same
+  reasoning as webhooks above). Shell aliases / shell functions are
+  the established UNIX answer — the CLI doesn't need to compete with
   `bash`.
+
+  **Distinction from per-profile argument defaults (carve-out decided
+  at v0.12-M55-E pre-flight, 2026-05-24).** Stored defaults under
+  `[profiles.<name>.defaults]` in `~/.monday-cli/config.toml` (§7.2)
+  are NOT aliases. They resolve flag VALUES only — e.g., `board =
+  "123"` populates `--board` when it would otherwise be unset — they
+  cannot change WHICH subcommand runs or WHICH positional args are
+  accepted, and they follow the standard CLI precedence chain
+  (**CLI flag > env var > profile default > unset**) so an explicit
+  `--board <other>` always wins. The carve-out preserves the
+  load-bearing argv-as-source-of-truth property for agents: an
+  agent passing every scoping arg in argv sees identical behaviour
+  across machines regardless of any operator's stored defaults.
+  Per the §7.2 agent-discipline nudge, agents SHOULD set no
+  defaults and pass every scoping arg in argv for reproducibility;
+  defaults are a human-ergonomics feature, not an agent-ergonomics
+  one. The 3 companion verbs `monday config set/get/unset <key>
+  [value]` edit the defaults table through the CLI surface rather
+  than requiring TOML hand-edits (no new Monday wire surface; no
+  new ERROR_CODE — registry stays at 29).
+
+  **Already-shipped per-profile config slots that look like defaults
+  but aren't argv-projecting (clarification, not carve-out):**
+  `default_workspace`, `timezone`, `api_version`, `default_profile`
+  in `~/.monday-cli/config.toml` have been per-profile config since
+  v0.3-M21. They configure SDK transport / time-zone resolution /
+  active-profile selection rather than projecting onto argv flags.
+  The §7.2 `[profiles.<name>.defaults]` table is the new shape that
+  ALSO projects onto argv flags via the precedence chain above.
 - `monday undo` (replay-based reversal of recent mutations). Two
   reasons: (1) requires a local mutation log, breaking the
   statelessness above; (2) Monday's state model is authoritative
