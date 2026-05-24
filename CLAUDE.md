@@ -244,7 +244,7 @@ humans are second-class. Built incrementally via Claude Code on top of
   flight — IMPL session lands ALL runtime (resolver runtime body +
   3 verb files + cross-cutting precedence-resolver integration +
   full test surface). **Codex pre-flight R1: CONVERGED 0 P1 + 2 P2
-  + 1 P3** folded inline at `<r1-fold-sha>` — P2-1 (W11)
+  + 1 P3** folded inline at `c3fcb6d` — P2-1 (W11)
   removed misleading `monday config set api_token_env` example
   from §7.2.1 + added explicit "Scope: defaults-only" sub-
   paragraph + collapsed D3 to existing `config_error` framings
@@ -751,7 +751,7 @@ detail, and R-class refactor backlog, **read the plan docs** —
    design.md §7.2.1 + §4.3 CONFIG section + §13 v0.12 Scope
    additions; this plan-doc OPENED. Codex pre-flight review
    status: **R1 CONVERGED 0 P1 + 2 P2 + 1 P3** folded inline at
-   `<r1-fold-sha>` (P2-1 + P2-2 + P3-1).
+   `c3fcb6d` (P2-1 + P2-2 + P3-1).
    §22 R-class register: carries forward open watch-items from
    v0.8/v0.9/v0.10/v0.11 + files R-v0.12-NEW-1 (pure-docs pre-
    flight class, WATCH) + R-v0.12-NEW-2 (D1 integration-shape
