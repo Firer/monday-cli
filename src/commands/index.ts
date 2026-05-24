@@ -32,6 +32,13 @@ import type { CommandModule } from './types.js';
 // M1 commands — local-only, no Monday API access.
 import { configShowCommand } from './config/show.js';
 import { configPathCommand } from './config/path.js';
+// v0.12-M55-E — profile-scoped argument defaults companion verbs.
+// All three operate exclusively on `[profiles.<active>.defaults]`
+// per cli-design §7.2.1; the 4-key allowlist + token-storage
+// guarantee live in the verbs' parse boundaries.
+import { configSetCommand } from './config/set.js';
+import { configGetCommand } from './config/get.js';
+import { configUnsetCommand } from './config/unset.js';
 import { cacheListCommand } from './cache/list.js';
 import { cacheClearCommand } from './cache/clear.js';
 import { cacheStatsCommand } from './cache/stats.js';
@@ -344,6 +351,9 @@ export const getCommandRegistry = (): readonly CommandModule[] => {
   cached ??= [
     configShowCommand,
     configPathCommand,
+    configSetCommand,
+    configGetCommand,
+    configUnsetCommand,
     cacheListCommand,
     cacheClearCommand,
     cacheStatsCommand,

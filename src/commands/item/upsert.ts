@@ -783,7 +783,10 @@ export const itemUpsertCommand: CommandModule<ParsedInput, ItemUpsertOutput> = {
     noun
       .command('upsert')
       .description(itemUpsertCommand.summary)
-      .requiredOption('--board <bid>', 'board ID (required)')
+      .option(
+        '--board <bid>',
+        'board ID (required; may be supplied via [profiles.<active>.defaults].board or MONDAY_BOARD)',
+      )
       .requiredOption('--name <n>', 'item name (required, non-empty)')
       .requiredOption(
         '--match-by <list>',

@@ -103,7 +103,10 @@ export const docCreateInWorkspaceCommand: CommandModule<
     noun
       .command('create-in-workspace')
       .description(docCreateInWorkspaceCommand.summary)
-      .requiredOption('--workspace <wid>', 'numeric workspace ID (maps to wire `workspace_id: ID!`)')
+      .option(
+        '--workspace <wid>',
+        'numeric workspace ID (maps to wire `workspace_id: ID!`; required, may be supplied via [profiles.<active>.defaults].workspace or MONDAY_WORKSPACE)',
+      )
       .requiredOption('--name <n>', 'doc name (Monday\'s `String!` — must not be empty)')
       .option('--folder <fid>', 'optional numeric folder ID (maps to wire `folder_id: ID`); absent → doc lands at workspace root')
       .option(

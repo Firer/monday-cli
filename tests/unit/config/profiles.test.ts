@@ -8,15 +8,20 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import {
   PROFILES_CONFIG_FILE_NAME,
   PROFILES_DIR_NAME,
+  PROFILE_DEFAULTS_KEYS,
   loadProfilesConfig,
+  mutateProfileDefaultsInPlace,
+  profileDefaultsBlockSchema,
   profileDevBlockSchema,
   profileEntrySchema,
   profilesConfigSchema,
   resolveProfilesConfigPath,
   selectProfile,
+  writeProfilesConfig,
   type ProfileEntry,
   type ProfilesConfig,
   type SelectProfileResult,
@@ -468,5 +473,281 @@ describe('selectProfile', () => {
       config: undefined,
     });
     expect(result.mode).toBe('implicit_v1');
+  });
+});
+
+// =====================================================================
+// v0.12-M55-E — profile-scoped argument defaults
+// =====================================================================
+
+describe('PROFILE_DEFAULTS_KEYS — allowlist contract', () => {
+  it('enumerates exactly the 4 keys cli-design §7.2.1 pins', () => {
+    expect([...PROFILE_DEFAULTS_KEYS]).toEqual([
+      'board',
+      'workspace',
+      'output',
+      'concurrency',
+    ]);
+  });
+});
+
+describe('profileDefaultsBlockSchema', () => {
+  it('accepts a fully-populated block', () => {
+    const block = profileDefaultsBlockSchema.parse({
+      board: '987654',
+      workspace: '1234567',
+      output: 'table',
+      concurrency: 4,
+    });
+    expect(block.board).toBe('987654');
+    expect(block.concurrency).toBe(4);
+  });
+
+  it('accepts an empty block (every key optional)', () => {
+    expect(profileDefaultsBlockSchema.parse({})).toEqual({});
+  });
+
+  it('rejects unknown keys via .strict() (closes spoofing path for top-level slots)', () => {
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ api_token_env: 'X' }),
+    ).toThrow();
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ api_token: 'tok-xxxx' }),
+    ).toThrow();
+  });
+
+  it('rejects non-numeric board / workspace ID (wrong_defaults_type surface)', () => {
+    expect(() => profileDefaultsBlockSchema.parse({ board: 'foo' })).toThrow();
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ workspace: 'abc123' }),
+    ).toThrow();
+  });
+
+  it('rejects an output value outside OUTPUT_FORMATS', () => {
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ output: 'yaml' }),
+    ).toThrow();
+  });
+
+  it('accepts each of json|table|text|ndjson for output (full OUTPUT_FORMATS — narrowing was the Codex pre-flight R1 P2-2 catch)', () => {
+    for (const value of ['json', 'table', 'text', 'ndjson'] as const) {
+      const block = profileDefaultsBlockSchema.parse({ output: value });
+      expect(block.output).toBe(value);
+    }
+  });
+
+  it('rejects negative / zero / non-integer concurrency', () => {
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ concurrency: -1 }),
+    ).toThrow();
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ concurrency: 0 }),
+    ).toThrow();
+    expect(() =>
+      profileDefaultsBlockSchema.parse({ concurrency: 1.5 }),
+    ).toThrow();
+  });
+});
+
+describe('profileEntrySchema — defaults slot integration', () => {
+  it('accepts an entry with the new defaults slot alongside existing slots', () => {
+    const entry = profileEntrySchema.parse({
+      api_token_env: 'MONDAY_API_TOKEN_WORK',
+      defaults: { board: '987654', output: 'table' },
+    });
+    expect(entry.defaults?.board).toBe('987654');
+    expect(entry.defaults?.output).toBe('table');
+  });
+
+  it('accepts an entry without a defaults slot (optional, M21 backwards-compatible)', () => {
+    const entry = profileEntrySchema.parse({
+      api_token_env: 'MONDAY_API_TOKEN_WORK',
+    });
+    expect(entry.defaults).toBeUndefined();
+  });
+
+  it('rejects bare-string token in the defaults slot (token-storage rule preserved at write-back)', () => {
+    expect(() =>
+      profileEntrySchema.parse({
+        defaults: { api_token_env: 'X' },
+      }),
+    ).toThrow();
+  });
+});
+
+describe('mutateProfileDefaultsInPlace', () => {
+  const baseConfig: ProfilesConfig = {
+    profiles: {
+      work: {
+        api_token_env: 'MONDAY_API_TOKEN_WORK',
+        defaults: { board: '987654', output: 'table' },
+      },
+    },
+  };
+
+  it('set: adds a new key to an existing defaults block', () => {
+    const { next, result } = mutateProfileDefaultsInPlace(baseConfig, {
+      profile: 'work',
+      mode: 'set',
+      key: 'workspace',
+      value: '1234567',
+    });
+    expect(result.previousValue).toBeUndefined();
+    expect(next.profiles.work.defaults).toEqual({
+      board: '987654',
+      output: 'table',
+      workspace: '1234567',
+    });
+  });
+
+  it('set: overwrites an existing key and reports previous_value', () => {
+    const { next, result } = mutateProfileDefaultsInPlace(baseConfig, {
+      profile: 'work',
+      mode: 'set',
+      key: 'board',
+      value: '12345',
+    });
+    expect(result.previousValue).toBe('987654');
+    expect(next.profiles.work.defaults?.board).toBe('12345');
+  });
+
+  it('set: bootstraps a fresh profile entry when the named profile is absent', () => {
+    const { next } = mutateProfileDefaultsInPlace(undefined, {
+      profile: 'work',
+      mode: 'set',
+      key: 'board',
+      value: '12345',
+    });
+    expect(next.profiles.work.defaults?.board).toBe('12345');
+  });
+
+  it('unset: removes the key and reports its prior value', () => {
+    const { next, result } = mutateProfileDefaultsInPlace(baseConfig, {
+      profile: 'work',
+      mode: 'unset',
+      key: 'board',
+    });
+    expect(result.previousValue).toBe('987654');
+    expect(next.profiles.work.defaults).toEqual({ output: 'table' });
+  });
+
+  it('unset: drops the defaults block entirely when the last key is removed', () => {
+    const single: ProfilesConfig = {
+      profiles: {
+        work: {
+          api_token_env: 'MONDAY_API_TOKEN_WORK',
+          defaults: { board: '987654' },
+        },
+      },
+    };
+    const { next } = mutateProfileDefaultsInPlace(single, {
+      profile: 'work',
+      mode: 'unset',
+      key: 'board',
+    });
+    expect(next.profiles.work.defaults).toBeUndefined();
+  });
+
+  it('unset: idempotent on an absent key — returns previousValue undefined', () => {
+    const { next, result } = mutateProfileDefaultsInPlace(baseConfig, {
+      profile: 'work',
+      mode: 'unset',
+      key: 'concurrency',
+    });
+    expect(result.previousValue).toBeUndefined();
+    expect(next.profiles.work.defaults).toEqual({
+      board: '987654',
+      output: 'table',
+    });
+  });
+
+  it('preserves sibling slots (api_token_env, dev block) when mutating defaults', () => {
+    const withDev: ProfilesConfig = {
+      profiles: {
+        work: {
+          api_token_env: 'MONDAY_API_TOKEN_WORK',
+          dev: { tasks_board: '11', sprints_board: '22' },
+          defaults: { board: '987654' },
+        },
+      },
+    };
+    const { next } = mutateProfileDefaultsInPlace(withDev, {
+      profile: 'work',
+      mode: 'set',
+      key: 'output',
+      value: 'json',
+    });
+    expect(next.profiles.work.api_token_env).toBe('MONDAY_API_TOKEN_WORK');
+    expect(next.profiles.work.dev?.tasks_board).toBe('11');
+    expect(next.profiles.work.defaults?.output).toBe('json');
+  });
+});
+
+describe('writeProfilesConfig — atomic round-trip', () => {
+  let tmpHome: string;
+
+  beforeEach(async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    tmpHome = await mkdtemp(join(tmpdir(), 'profiles-config-write-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('round-trips a config write → loadProfilesConfig (canonical TOML)', async () => {
+    const config: ProfilesConfig = {
+      profiles: {
+        work: {
+          api_token_env: 'MONDAY_API_TOKEN_WORK',
+          defaults: { board: '987654', concurrency: 4 },
+        },
+      },
+    };
+    await writeProfilesConfig(config, { home: tmpHome });
+    const reloaded = await loadProfilesConfig({ home: tmpHome });
+    expect(reloaded?.profiles.work.defaults).toEqual({
+      board: '987654',
+      concurrency: 4,
+    });
+  });
+
+  it('writes the config file with mode 0o600 (security.md disk discipline)', async () => {
+    await writeProfilesConfig(
+      {
+        profiles: {
+          work: { defaults: { board: '987654' } },
+        },
+      },
+      { home: tmpHome },
+    );
+    const { stat } = await import('node:fs/promises');
+    const stats = await stat(
+      join(tmpHome, PROFILES_DIR_NAME, PROFILES_CONFIG_FILE_NAME),
+    );
+    // Drop the file-type bits (S_IFMT), keep the permission triplet.
+     
+    expect(stats.mode & 0o777).toBe(0o600);
+  });
+
+  it('drops empty defaults blocks at write time (clean TOML output)', async () => {
+    const { next } = mutateProfileDefaultsInPlace(
+      {
+        profiles: {
+          work: {
+            api_token_env: 'MONDAY_API_TOKEN_WORK',
+            defaults: { board: '987654' },
+          },
+        },
+      },
+      { profile: 'work', mode: 'unset', key: 'board' },
+    );
+    await writeProfilesConfig(next, { home: tmpHome });
+    const written = await readFile(
+      join(tmpHome, PROFILES_DIR_NAME, PROFILES_CONFIG_FILE_NAME),
+      'utf8',
+    );
+    expect(written).not.toContain('[profiles.work.defaults]');
+    expect(written).toContain('api_token_env');
   });
 });

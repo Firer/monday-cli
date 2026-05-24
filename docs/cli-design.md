@@ -3403,14 +3403,18 @@ monday config set <key> <value> [--profile <name>]                           v0.
                                           # non-active profile. Idempotent (re-
                                           # setting same value is a no-op on
                                           # config.toml). NOT destructive (no
-                                          # --yes gate). Token-storage rule per
-                                          # `.claude/rules/security.md`: this verb
-                                          # rejects token-shaped values at the
-                                          # parse boundary (`config_error
-                                          # details.reason:
-                                          # 'token_in_config_rejected'`); the
-                                          # CLI never persists token bytes to
-                                          # config.toml.
+                                          # --yes gate). Scope: defaults-only —
+                                          # the 4-key allowlist enforced at the
+                                          # parse boundary. Non-allowlist `<key>`
+                                          # rejects `config_error details.reason:
+                                          # 'unknown_defaults_key'`; wrong-type
+                                          # on an allowlist key rejects with
+                                          # `'wrong_defaults_type'`. Token-
+                                          # storage rule per `.claude/rules/
+                                          # security.md` preserved by
+                                          # construction — no path to top-level
+                                          # slots (api_token_env etc.) from this
+                                          # verb.
 monday config get [key] [--profile <name>]                                   v0.12
                                           # Read a `[profiles.<active>.defaults]`
                                           # key per §7.2.1, OR read the entire
@@ -7343,10 +7347,39 @@ to other flags defers to v0.12.x candidate-selection (see §13).
 
 | Key | Type | Projects onto | Validation |
 |-----|------|---------------|------------|
-| `board` | string (numeric) | `--board <bid>` everywhere it's accepted | `^\d+$` BoardId-shape |
-| `workspace` | string (numeric) | `--workspace <wid>` everywhere it's accepted | `^\d+$` WorkspaceId-shape |
-| `output` | enum (`"json"` \| `"table"` \| `"text"` \| `"ndjson"`) | `--output <fmt>` global flag | enum (matches `src/utils/output/select.ts:14`'s `OUTPUT_FORMATS` exactly — narrowing this would silently reject `MONDAY_OUTPUT=text` / `MONDAY_OUTPUT=ndjson` that the env-var path accepts today) |
-| `concurrency` | integer (positive) | `--concurrency <n>` on bulk verbs | `int().positive()` |
+| `board` | string (numeric) | `--board <bid>` on every command where the flag is unconditionally accepted or unconditionally required on a sub-shape (see "Projection scope" below) | `^\d+$` BoardId-shape |
+| `workspace` | string (numeric) | `--workspace <wid>` on `doc create-in-workspace` + `doc import-html` (the always-required workspace verbs at v0.12) | `^\d+$` WorkspaceId-shape |
+| `output` | enum (`"json"` \| `"table"` \| `"text"` \| `"ndjson"`) | `--output <fmt>` global flag, gated by absence of `--json` / `--table` / `--output` / `MONDAY_OUTPUT` | enum (matches `src/utils/output/select.ts:14`'s `OUTPUT_FORMATS` exactly — narrowing this would silently reject `MONDAY_OUTPUT=text` / `MONDAY_OUTPUT=ndjson` that the env-var path accepts today) |
+| `concurrency` | integer (positive) | `--concurrency <n>` on `item update` when `--continue-on-error` is also set (the bulk-partial-success path; single-item / fail-fast bulk paths reject `--concurrency` per existing contract) | `int().positive()` |
+
+**Projection scope (binding).** Defaults inject ONLY where the flag
+is unconditionally accepted or where a precondition pins a single
+safe sub-shape. The v0.12-M55-E IMPL coverage:
+
+- **`board` always-accepted:** `item list`, `item find`, `item upsert`.
+- **`board` preconditioned on a sibling flag/positional:**
+  - `item create` — injects when `--parent` is absent (the
+    `--parent` subitem branch is mutex with `--board`; the
+    subitems board is derived server-side).
+  - `item update`, `item clear` — inject when `--where` /
+    `--filter-json` is present (the bulk shape REQUIRES `--board`;
+    the single-item shape derives board from the item itself).
+  - `update list` — injects when no positional `[itemId]` is given
+    (the board-scan shape; the item-scoped shape is XOR with
+    `--board`).
+- **`workspace` always-accepted:** `doc create-in-workspace`,
+  `doc import-html`.
+- **`workspace` skipped (optional-restriction filters):**
+  `board list`, `board find`, `board create`, `board duplicate`,
+  `doc list` — `--workspace` is an optional scope-narrowing filter
+  on each, not a required arg; injecting a default would silently
+  narrow the result set.
+- **`concurrency`:** `item update` when `--continue-on-error` is
+  set (gated to bulk-partial-success per existing contract).
+
+Per-noun extension of the allowlist + adding additional injection
+sites for `board`/`workspace` to currently-skipped commands defers
+to v0.12.x candidate-selection (see §13).
 
 Empty table (`[profiles.work.defaults]` with no keys, or table absent
 entirely) is the default — no defaults projected. Unknown keys
@@ -7380,6 +7413,20 @@ profile default but lose to an explicit CLI flag:
 | `workspace` | `MONDAY_WORKSPACE` |
 | `output` | `MONDAY_OUTPUT` |
 | `concurrency` | `MONDAY_CONCURRENCY` |
+
+**Env-var validation is lazy at the profile-defaults layer.** A
+malformed `MONDAY_BOARD=bad` won't crash commands that don't
+resolve `board` for argument injection (e.g. `auth login`, `item
+get`, `config get output`); only commands whose applicability-
+registry entry consumes `board` validate that env. Same for
+`MONDAY_WORKSPACE`, `MONDAY_CONCURRENCY`. **Exception — `MONDAY_OUTPUT`
+is special:** the output-format selector (`src/utils/output/
+select.ts`) reads `MONDAY_OUTPUT` independently at emit time and
+validates against `OUTPUT_FORMATS` regardless of which command is
+running. A malformed `MONDAY_OUTPUT=yaml` will fail every
+invocation that doesn't override via `--json` / `--table` /
+`--output <fmt>` (which take priority over the env layer per
+`src/utils/output/select.ts:6` precedence).
 
 Env-var coercion follows the §7.1 pattern — strings parse through
 the same zod validation the TOML config goes through, so a malformed

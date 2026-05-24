@@ -181,7 +181,10 @@ export const itemListCommand: CommandModule<
     noun
       .command('list')
       .description(itemListCommand.summary)
-      .requiredOption('--board <bid>', 'board ID (required)')
+      .option(
+        '--board <bid>',
+        'board ID (required; may be supplied via [profiles.<active>.defaults].board or MONDAY_BOARD)',
+      )
       .option('--group <gid>', 'restrict to one group')
       .option(
         '--where <expr>',

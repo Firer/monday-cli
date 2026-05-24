@@ -176,7 +176,10 @@ export const itemFindCommand: CommandModule<
     noun
       .command('find <name>')
       .description(itemFindCommand.summary)
-      .requiredOption('--board <bid>', 'board ID (required)')
+      .option(
+        '--board <bid>',
+        'board ID (required; may be supplied via [profiles.<active>.defaults].board or MONDAY_BOARD)',
+      )
       .option('--group <gid>', 'restrict scan to one group')
       .option('--first', 'on multiple matches, pick the lowest-ID match')
       .option('--page-size <n>', `page size (default ${String(PAGE_SIZE)})`)

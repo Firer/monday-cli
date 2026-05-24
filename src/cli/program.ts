@@ -29,6 +29,7 @@ import {
   readCredentials,
   resolveProfileToken,
 } from '../config/credentials.js';
+import { applyAllProfileDefaults } from './profile-defaults.js';
 import type { RunContext, RunOptions } from './run.js';
 
 /**
@@ -187,13 +188,46 @@ export const buildProgram = (
     }
 
     // Profile resolution per cli-design §7.2 / §7.4 (v0.3-M21).
-    // Skipped for `auth login` / `auth logout` — those verbs are the
-    // source of credentials, not consumers; running profile
-    // resolution against a fresh-install (no token anywhere yet)
-    // would surface `config_error` BEFORE the login command had a
-    // chance to populate the cache.
+    // Skipped for two narrow surfaces:
+    //   - `auth login` / `auth logout` — those verbs are the source
+    //     of credentials, not consumers; running token resolution
+    //     against a fresh-install (no token anywhere yet) would
+    //     surface `config_error` BEFORE the login command had a
+    //     chance to populate the cache.
+    //   - `config set` / `config get` / `config unset` (v0.12-M55-E)
+    //     — the 3 new defaults companion verbs operate solely on
+    //     the config file's `[profiles.<active>.defaults]` table
+    //     and don't need a token; their _shared.ts does its own
+    //     profile-name lookup. Without this exempt, `monday config
+    //     get board --profile work` would demand a `work` token
+    //     even though the verb only reads the defaults TOML slot.
+    //
+    // Note: `config show` / `config path` STAY in the token-
+    // resolution path — they're used as test probes for the M21
+    // resolution surface (tests/integration/commands/profile-
+    // resolution.test.ts assert on the config_error exit when a
+    // probed profile's token is unresolvable). The narrow exempt
+    // preserves those assertions.
     const parent = actionCommand.parent;
-    if (parent !== null && parent.name() === 'auth') {
+    const isAuthVerb = parent !== null && parent.name() === 'auth';
+    const isConfigDefaultsVerb =
+      parent !== null &&
+      parent.name() === 'config' &&
+      (actionCommand.name() === 'set' ||
+        actionCommand.name() === 'get' ||
+        actionCommand.name() === 'unset');
+    if (isAuthVerb || isConfigDefaultsVerb) {
+      // Apply v0.12-M55-E profile defaults even on these exempt
+      // verbs — env-var bindings (MONDAY_OUTPUT etc.) still apply,
+      // and the application layer's registry won't inject into
+      // commands not in its allowlist anyway, so this is a safe
+      // pass-through.
+      applyAllProfileDefaults({
+        program,
+        actionCommand,
+        env: ctx.env,
+        profileDefaults: undefined,
+      });
       return;
     }
 
@@ -224,8 +258,18 @@ export const buildProgram = (
       envProfile === undefined &&
       config?.default_profile === undefined
     ) {
-      // Implicit-v1 path — no profile resolution needed; commands
-      // read MONDAY_API_TOKEN directly via loadConfig.
+      // Implicit-v1 path — no profile resolution needed for the token;
+      // commands read MONDAY_API_TOKEN directly via loadConfig. Even
+      // without a named profile though, the v0.12-M55-E env-var
+      // bindings (MONDAY_BOARD / MONDAY_WORKSPACE / MONDAY_OUTPUT /
+      // MONDAY_CONCURRENCY) still apply per §7.2.1 — pass undefined
+      // profileDefaults so the resolver picks up env-only values.
+      applyAllProfileDefaults({
+        program,
+        actionCommand,
+        env: ctx.env,
+        profileDefaults: undefined,
+      });
       return;
     }
 
@@ -270,6 +314,22 @@ export const buildProgram = (
         ctx.meta.setApiVersion(selection.entry.api_version);
       }
     }
+
+    // v0.12-M55-E — apply profile-scoped argument defaults via the
+    // application layer's per-command applicability registry +
+    // program-level --output gate. Reads `selection.entry.defaults`
+    // (the optional `[profiles.<active>.defaults]` table) and
+    // resolves each allowlist key via the precedence chain
+    // (env > profile > unset). Per-command injection only fires for
+    // commands in the applicability registry; mutually-exclusive +
+    // contextually-gated commands (e.g., `item create --parent`,
+    // `update list <itemId>`) skip injection by design.
+    applyAllProfileDefaults({
+      program,
+      actionCommand,
+      env: ctx.env,
+      profileDefaults: selection.entry.defaults,
+    });
   });
 
   return program;

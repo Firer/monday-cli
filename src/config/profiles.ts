@@ -26,13 +26,15 @@
  *      to the env-var-identifier regex `/^[A-Z_][A-Z0-9_]*$/u`.
  */
 
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parse as parseToml } from 'smol-toml';
+import { randomUUID } from 'node:crypto';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
 import { ConfigError, asError } from '../utils/errors.js';
 import { isENOENT } from '../utils/fs.js';
+import { OUTPUT_FORMATS } from '../utils/output/select.js';
 
 /** Filename under `~/.monday-cli/`. Pinned for HOME-scoping. */
 export const PROFILES_CONFIG_FILE_NAME = 'config.toml';
@@ -59,6 +61,68 @@ export const profileDevBlockSchema = z
 export type ProfileDevBlock = z.infer<typeof profileDevBlockSchema>;
 
 /**
+ * Optional `[profiles.<name>.defaults]` block per cli-design §7.2.1
+ * (v0.12-M55-E). Four scoping defaults that project onto matching
+ * CLI flags via the precedence chain in `src/config/profile-
+ * defaults.ts` (CLI flag > env var > profile default > unset).
+ *
+ * Strict allowlist: `.strict()` rejects unknown keys at the parse
+ * boundary, so `monday config set api_token_env <name>` (or any
+ * other non-allowlist key) surfaces `config_error` with
+ * `details.reason: 'unknown_defaults_key'` (D3 in v0.12-plan §3).
+ * Token-storage rule per `.claude/rules/security.md` preserved by
+ * construction — the schema has no path to a token-bytes slot at
+ * all (the top-level `api_token_env` remains hand-TOML-only).
+ *
+ * Per-key shapes pin the same regexes the runtime consumers use:
+ *   - `board` / `workspace` → `^\d+$` (matches `numericIdSchema` in
+ *     `src/types/ids.ts`; brand applied at the runtime consumer,
+ *     not here).
+ *   - `output` → `OUTPUT_FORMATS` enum verbatim from
+ *     `src/utils/output/select.ts` (the existing `MONDAY_OUTPUT`
+ *     env-var contract accepts all 4 values; narrowing here would
+ *     silently reject `MONDAY_OUTPUT=text|ndjson` paths).
+ *   - `concurrency` → positive integer (range-bounding to
+ *     `MIN..MAX_CONCURRENCY` defers to the per-command parse, same
+ *     shape as `--concurrency <n>` itself).
+ *
+ * Wrong types reject with `wrong_defaults_type` (D3 case (b)).
+ */
+const NUMERIC_ID_PATTERN = /^\d+$/u;
+
+export const profileDefaultsBlockSchema = z
+  .object({
+    board: z
+      .string()
+      .regex(NUMERIC_ID_PATTERN, { message: 'expected a numeric board ID' })
+      .optional(),
+    workspace: z
+      .string()
+      .regex(NUMERIC_ID_PATTERN, { message: 'expected a numeric workspace ID' })
+      .optional(),
+    output: z.enum(OUTPUT_FORMATS).optional(),
+    concurrency: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type ProfileDefaultsBlock = z.infer<typeof profileDefaultsBlockSchema>;
+
+/**
+ * The 4 allowlist keys companion verbs (`config set/get/unset`) may
+ * operate on. Mirrors `profileDefaultsBlockSchema.shape` keys; pin
+ * here so the verbs + the resolver consume a single source of truth
+ * and the parse-boundary rejection-message stays consistent.
+ */
+export const PROFILE_DEFAULTS_KEYS = [
+  'board',
+  'workspace',
+  'output',
+  'concurrency',
+] as const;
+
+export type ProfileDefaultsKey = (typeof PROFILE_DEFAULTS_KEYS)[number];
+
+/**
  * Env-var identifier shape (POSIX-style). Rejects token-looking
  * values like `tok-fixture-xxxx` or JWT-looking values like
  * `eyJhbGciOi...` so a user pasting a token under the allowed
@@ -83,6 +147,7 @@ export const profileEntrySchema = z
     default_workspace: z.string().min(1).optional(),
     timezone: z.string().min(1).optional(),
     dev: profileDevBlockSchema.optional(),
+    defaults: profileDefaultsBlockSchema.optional(),
   })
   .strict();
 
@@ -285,4 +350,146 @@ export const selectProfile = (
 
   // (4): implicit v1.
   return { mode: 'implicit_v1' };
+};
+
+/**
+ * Filesystem mode for config.toml. Mirrors `src/config/credentials.ts`
+ * + `src/api/dev-conventions.ts:saveDevMapping` discipline per
+ * `.claude/rules/security.md`: files under `~/.monday-cli/` carry
+ * user-scoped data even when not directly token-bearing.
+ */
+const CONFIG_FILE_MODE = 0o600;
+
+/**
+ * Atomically writes `~/.monday-cli/config.toml`. Mirrors the
+ * disk-discipline in `src/api/dev-conventions.ts:saveDevMapping`:
+ *   1. `mkdir({ recursive: true, mode: 0o700 })` + explicit chmod.
+ *   2. `writeFile(tmpPath, ..., { mode: 0o600 })` + explicit chmod.
+ *   3. `rename(tmpPath, finalPath)` (atomic on same FS).
+ *
+ * The full `ProfilesConfig` is re-validated through
+ * `profilesConfigSchema` before write so an in-memory mutation
+ * bypass can't slip a bad file onto disk.
+ *
+ * **TOML round-trip caveat.** `smol-toml`'s `stringify` produces
+ * canonical TOML output — comments + bespoke formatting from the
+ * original file are NOT preserved. Same trade-off as `saveDevMapping`
+ * (the CLI-managed slots are the auth, dev, and now-defaults blocks;
+ * top-level slots stay hand-TOML-editable for those who want
+ * comments).
+ */
+export const writeProfilesConfig = async (
+  next: ProfilesConfig,
+  options: ProfilesRootOptions = {},
+): Promise<void> => {
+  const validated = profilesConfigSchema.parse(next);
+  const fullPath = resolveProfilesConfigPath(options);
+  const dir = join(options.home ?? homedir(), PROFILES_DIR_NAME);
+
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700);
+  } catch (err) {
+    // Disk-full / permissions-denied path; not reproducible from a
+    // tmp-dir test.
+    /* c8 ignore start */
+    throw new ConfigError(`cannot prepare config directory ${dir}`, {
+      cause: asError(err),
+      details: { path: dir },
+    });
+    /* c8 ignore stop */
+  }
+
+  const payload = stringifyToml(validated);
+  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, payload, { mode: CONFIG_FILE_MODE });
+    await chmod(tmpPath, CONFIG_FILE_MODE);
+    await rename(tmpPath, fullPath);
+  } catch (err) {
+    // Disk-full / atomic-rename failure path; not reproducible from
+    // a tmp-dir test.
+    /* c8 ignore start */
+    await unlink(tmpPath).catch(() => undefined);
+    throw new ConfigError(`cannot write config file ${fullPath}`, {
+      cause: asError(err),
+      details: { path: fullPath },
+    });
+    /* c8 ignore stop */
+  }
+};
+
+/**
+ * Applies a `[profiles.<name>.defaults]` mutation (set or unset)
+ * to the config file. Used by `monday config set/unset` (cli-design
+ * §4.3 + §7.2.1, v0.12-M55-E). Pure transform — does NOT touch
+ * `[profiles.<name>]` top-level slots or `[profiles.<name>.dev]`.
+ *
+ * `mode: 'set'`: writes `value` at `profiles[name].defaults[key]`.
+ * `mode: 'unset'`: removes `profiles[name].defaults[key]`. If the
+ * defaults block becomes empty post-removal, the empty `defaults:
+ * {}` slot is dropped from the entry. If the profile entry then
+ * becomes empty (no api_token_env / api_version / etc.), the entry
+ * itself stays — explicit profile presence is meaningful even when
+ * empty (the profile is "known" to the config).
+ *
+ * Returns the prior value of the key (for the `--json` envelope's
+ * `previous_value` slot; `undefined` when the key was unset).
+ */
+export interface MutateProfileDefaultsInputs {
+  readonly profile: string;
+  readonly mode: 'set' | 'unset';
+  readonly key: ProfileDefaultsKey;
+  /** Required when mode === 'set'; ignored otherwise. */
+  readonly value?: string | number;
+}
+
+export interface MutateProfileDefaultsResult {
+  readonly previousValue: string | number | undefined;
+}
+
+export const mutateProfileDefaultsInPlace = (
+  config: ProfilesConfig | undefined,
+  inputs: MutateProfileDefaultsInputs,
+): { readonly next: ProfilesConfig; readonly result: MutateProfileDefaultsResult } => {
+  const base: ProfilesConfig = config ?? { profiles: {} };
+  const existingEntry: ProfileEntry = base.profiles[inputs.profile] ?? {};
+  const existingDefaults: ProfileDefaultsBlock = existingEntry.defaults ?? {};
+  const previousValue = existingDefaults[inputs.key];
+
+  let nextDefaults: ProfileDefaultsBlock;
+  if (inputs.mode === 'set') {
+    // value is required for 'set' — type-narrow at the parse boundary
+    // in the calling verb (config/set.ts inputSchema), so trust here.
+    nextDefaults = {
+      ...existingDefaults,
+      [inputs.key]: inputs.value,
+    };
+  } else {
+    const { [inputs.key]: _drop, ...rest } = existingDefaults;
+    void _drop;
+    nextDefaults = rest;
+  }
+
+  // Drop the `defaults` slot entirely when empty to keep the
+  // round-tripped TOML clean (no `[profiles.work.defaults]` header
+  // with no body underneath).
+  const nextEntry: ProfileEntry = (() => {
+    if (Object.keys(nextDefaults).length === 0) {
+      const { defaults: _drop, ...rest } = existingEntry;
+      void _drop;
+      return rest;
+    }
+    return { ...existingEntry, defaults: nextDefaults };
+  })();
+
+  const next: ProfilesConfig = {
+    ...base,
+    profiles: {
+      ...base.profiles,
+      [inputs.profile]: nextEntry,
+    },
+  };
+
+  return { next, result: { previousValue } };
 };

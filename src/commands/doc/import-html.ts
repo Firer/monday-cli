@@ -208,7 +208,10 @@ export const docImportHtmlCommand: CommandModule<
     noun
       .command('import-html')
       .description(docImportHtmlCommand.summary)
-      .requiredOption('--workspace <wid>', 'numeric workspace ID (maps to wire `workspaceId: ID!`)')
+      .option(
+        '--workspace <wid>',
+        'numeric workspace ID (maps to wire `workspaceId: ID!`; required, may be supplied via [profiles.<active>.defaults].workspace or MONDAY_WORKSPACE)',
+      )
       .option('--html <file>', 'file path containing the HTML payload (use `-` to read from stdin); mutually exclusive with --html-string')
       .option('--html-string <s>', `literal HTML payload (maps to wire \`html: String!\`); capped at ${MAX_DOC_IMPORT_PAYLOAD_BYTES.toString()} bytes UTF-8 per D13 empirical threshold; mutually exclusive with --html`)
       .option('--folder <fid>', 'optional numeric folder ID (maps to wire `folderId: ID`); absent → doc lands at workspace root')
