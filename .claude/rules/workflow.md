@@ -312,6 +312,59 @@ by construction when no deferred wire leg ships" framing, and
 R-v0.10-NEW-7's cross-reference to R-v0.9-NEW-13 for the post-
 publish placeholder backfill).
 
+## CLAUDE.md §3 plan-doc-row re-sweep at every cluster close
+
+CLAUDE.md §3's plan-doc-list rows (one numbered entry per
+`docs/v0.X-plan.md` reference) are STATUS surfaces: each row
+carries a status marker for the version's current cycle state
++ a per-cycle R-class register summary. Without a checklist-
+enforced re-sweep, rows accrete stale state across cycles —
+the close-docs commit at each cluster close flips the surface
+docs (CLAUDE.md "Current state" + "Next session" + plan-doc
+§3 IMPL-close subsection) but the §3 row for the active
+version often gets missed.
+
+**Re-sweep at every cluster close.** Before committing a
+cluster-close commit (pre-flight close, IMPL close-docs,
+release-prep close, post-publish flip, post-publish refactor-
+audit), re-read the §3 row for the version this cluster
+advanced and verify:
+
+1. **Status marker** matches post-cluster state (e.g.,
+   "🟡 PRE-FLIGHT OPEN" → "🟢 IMPL SHIPPED" at IMPL close;
+   "IMPL SHIPPED" → "✅ PUBLISHED" at post-publish flip).
+2. **Cluster-SHA references** are current (e.g., the IMPL
+   feat SHA backfilled or `<close-docs>` placeholder left
+   per R-NEW-82's close-docs convention).
+3. **Codex round counts** match the actual review outcome
+   (R1 / R2 / R3) and verdict ("CONVERGED" / "P1 open" / etc.).
+4. **R-class register summary list** carries every new R-class
+   entry filed since the row's last refresh + flips the status
+   of any R-entry that changed (RESOLVED, GRADUATED, etc.).
+5. **Forward-pointer prose** (`Next is...`, `Next session: ...`)
+   reflects the next-cluster target, not a stale prior target.
+
+Skip Codex review per R-NEW-84 — the re-sweep is mechanical
+doc-hygiene work; gates (`typecheck` + `lint` + `test`) carry
+verification.
+
+R-v0.11-NEW-7 (graduated v0.12-M55-E post-IMPL refactor-audit
+at 2nd instance: v0.10 row "Next is..." drift caught at v0.11
+post-publish refactor-audit; v0.12 row "PRE-FLIGHT OPEN"
+status-marker + R-class register drift caught at v0.12 post-
+IMPL refactor-audit). Both instances share the same root class:
+§3 rows accumulate stale state because no checklist enforces
+re-sweeping them at each cluster close. The rule makes the
+discipline explicit + checklist-enforced.
+
+Cross-refs R-NEW-82 (release-prep close-docs §1 row flip) +
+R-v0.9-NEW-13 (post-publish flip CLAUDE.md "Status" line) +
+R-v0.12-NEW-4 (§3 numbered list renumbering pain — adjacent
+hygiene class, file-able under the same re-sweep step). The
+re-sweep covers BOTH the active version's row AND prior
+versions if their trailing pointer is older than their actual
+completion state.
+
 ## Post-publish flip commit pattern
 
 After `npm publish` lands the release, write ONE small commit that

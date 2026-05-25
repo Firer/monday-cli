@@ -688,33 +688,39 @@ detail, and R-class refactor backlog, **read the plan docs** —
    default > unset). **M55-E** is the carry-forward E candidate
    filed at v0.6 kickoff (slipped v0.6 → v0.7 → v0.8 → v0.9 →
    v0.10 → v0.11, picked at v0.12 candidate-selection `76ddf98`
-   per the user binding). **🟡 PRE-FLIGHT OPEN 2026-05-24** at
-   `c2c39b5` — pure-docs pre-flight per R-v0.12-NEW-1
-   (1st instance of a candidate 4th structural class for R-v0.9-
-   NEW-2-graduated's "no deferred wire leg → no stub needed"
-   rule); §13 carve-out Decision LANDED inline (distinguishes
-   aliases-as-stored-command-strings from defaults-as-stored-
-   flag-values per the cli-design.md §13 amendment); cli-
-   design.md §7.2.1 + §4.3 CONFIG section + §13 v0.12 Scope
-   additions; this plan-doc OPENED. Codex pre-flight review
-   status: **R1 CONVERGED 0 P1 + 2 P2 + 1 P3** folded inline at
-   `c3fcb6d` (P2-1 + P2-2 + P3-1).
+   per the user binding). **🟢 IMPL SHIPPED 2026-05-25** at
+   `<close-docs>` (pre-flight `c2c39b5..bf63bb0` 7 commits per
+   R-v0.12-NEW-7's cluster-size observation; IMPL feat
+   `f83a776` + close-docs `<close-docs>`). D1 integration-shape
+   RESOLVED at IMPL kickoff via Codex DESIGN consultation
+   (R-v0.12-NEW-10) → option **(c′) applicability-aware
+   preAction injection** (Codex's recommended 5th shape over
+   the 4 pre-flight-enumerated candidates a/b/c/d, all of which
+   the in-tree Commander probe + Codex review flagged with
+   load-bearing gaps). Codex pre-flight R1 CONVERGED 0 P1 + 2
+   P2 + 1 P3 (folded `c3fcb6d`); Codex IMPL CONVERGED R2 (R1:
+   1 P1 + 1 P2 + 2 P3 all addressed; R2: 0 P1 + audit-prompt
+   overscoping pinned by 2 scope-pin tests + §7.2.1 caveat).
    §22 R-class register: carries forward open watch-items from
    v0.8/v0.9/v0.10/v0.11 + files R-v0.12-NEW-1 (pure-docs pre-
-   flight class, WATCH) + R-v0.12-NEW-2 (D1 integration-shape
-   Decision pending IMPL kickoff) + R-v0.12-NEW-3 (D3 rejection-
-   discriminator — RESOLVED at Codex R1 fold; no new
-   discriminator) + R-v0.12-NEW-4 / NEW-5 / NEW-6 (filed at
-   post-pre-flight refactor-audit `f84aaf0` — §3 numbered
-   plan-doc list renumbering pain; §13 non-goal supporting prose
-   drift; Codex pre-flight template missing pure-docs variant
-   guidance; all WATCH) + R-v0.12-NEW-7 (filed at meta-audit
-   2026-05-24 — pre-flight cluster size grew 2→6 commits at
-   v0.12 vs v0.10/v0.11 due to SHA-backfill follow-ups per
-   content commit; mitigation candidates a/b/c enumerated; WATCH).
-   M39/M40/M41 (SDK
-   15.x) + M44/M45 (SDK 16.x) stay DEFERRED — SDK still 14.0.0
-   (**6th-consecutive stall**, v0.7 → v0.12).
+   flight class, WATCH) + R-v0.12-NEW-2 (D1 integration-shape —
+   RESOLVED at IMPL kickoff with option (c′)) + R-v0.12-NEW-3
+   (D3 rejection-discriminator — RESOLVED at Codex pre-flight
+   R1 fold; no new discriminator) + R-v0.12-NEW-4 / NEW-5 /
+   NEW-6 (filed at post-pre-flight refactor-audit `f84aaf0`;
+   all WATCH) + R-v0.12-NEW-7 (filed at meta-audit; WATCH) +
+   R-v0.12-NEW-8 (filed at IMPL close-docs — applicability-
+   registry maintenance discipline, 3-step lift per new
+   defaultable command; WATCH) + R-v0.12-NEW-9 (filed at post-
+   IMPL refactor-audit — HIGH-priority atomic-write lift, 4
+   consumers ready for separate session) + R-v0.12-NEW-10
+   (Codex DESIGN consultation pattern, WATCH) + R-v0.12-NEW-11
+   (scope-pin tests for audit-prompt overscoping, WATCH).
+   **R-v0.11-NEW-7 GRADUATED at this post-IMPL audit** at 2nd-
+   instance trigger into `.claude/rules/workflow.md` as
+   "CLAUDE.md §3 plan-doc-row re-sweep at every cluster close".
+   M39/M40/M41 (SDK 15.x) + M44/M45 (SDK 16.x) stay DEFERRED —
+   SDK still 14.0.0 (**6th-consecutive stall**, v0.7 → v0.12).
 3. **[`docs/v0.11-plan.md`](./docs/v0.11-plan.md)** — shipped (npm
    `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`).
    v0.11 = the **`Item.description`
