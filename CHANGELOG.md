@@ -7,6 +7,61 @@ output envelope (`{ ok, data, meta, ... }`) and 29 stable error
 codes are part of the public contract — the SemVer rules in
 [`docs/cli-design.md`](./docs/cli-design.md) §6 govern bumps.
 
+## [0.12.0] - 2026-05-25 — Profile-scoped argument defaults
+
+Adds `monday config set/get/unset` and a `[profiles.<name>.defaults]`
+config block, so you can set a default `board`, `workspace`, `output`
+format, or `concurrency` once per profile instead of repeating the
+flag on every command. Precedence is unchanged and predictable: an
+explicit CLI flag wins, then the matching environment variable, then
+the profile default.
+
+### Breaking changes vs `0.11.0`
+
+**None.** **122 commands** shipped (was 119 at `0.11.0`) — the three
+new `monday config` verbs; **29 stable error codes** (unchanged);
+output envelope preserved byte-for-byte across `0.11.0` → `0.12.0`
+for every pre-existing verb.
+
+### What changed for users
+
+- **`monday config set <key> <value> [--profile <name>]`** writes a
+  default for one of `board`, `workspace`, `output`, or `concurrency`
+  (e.g. `monday config set board 987654`).
+- **`monday config get [key] [--profile <name>]`** reads a single
+  default back, or all four when `<key>` is omitted.
+- **`monday config unset <key> [--profile <name>]`** removes a
+  default (idempotent — removing an absent key is not an error).
+- Once set, a profile default fills in the matching argument on every
+  command that accepts it, unless an explicit flag or environment
+  variable overrides it.
+
+### Tests + quality gates
+
+- **4392 tests pass + 5 skipped** (was 4295 + 5 at `0.11.0`). All
+  green on Node 22 + 24.
+- **Coverage at branches 95.93% / functions 99.07%** against the
+  floor 95 / 95.45 / 95 / 95.
+- **Envelope-snapshot suite** — refresh probe ran clean at v0.12
+  release-prep.
+- **`npm audit` reports `0 vulnerabilities`** — no audit-fix folded
+  this cycle.
+
+### Maintenance
+
+- The atomic secure-file write (write to a tmp sibling → `chmod 0600`
+  → atomic rename) shared by the cache, the credentials store, and
+  both config writers is consolidated into one helper. No behaviour
+  change.
+
+### Documentation
+
+- **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — v0.12 plan with
+  the milestone close, per-milestone decisions, the R-class register
+  (§22), and the release exit checklist (§7).
+
+[0.12.0]: https://github.com/Firer/monday-cli/releases/tag/v0.12.0
+
 ## [0.11.0] - 2026-05-23 — Item descriptions: read item description doc-block content
 
 Adds `monday item get-description` for reading the doc-block content
