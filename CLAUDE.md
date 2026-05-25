@@ -66,9 +66,12 @@ humans are second-class. Built incrementally via Claude Code on top of
   `ee96681`, 2026-05-22T16:38:40Z); `monday-cli@0.8.0` (tag
   `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z); `monday-cli@0.7.0`
   (tag `3e46f59`, 2026-05-20T15:48:07Z).
-- **package.json version:** `0.11.0`.
-- **Live numbers:** **4388 tests pass + 5 skipped** (the **v0.12-M55-E
-  IMPL** net +93 over the v0.11.0 baseline of 4295 + 5 — full
+- **package.json version:** `0.12.0` (bumped at v0.12 release-prep;
+  npm publish pending user).
+- **Live numbers:** **4392 tests pass + 5 skipped** (the **v0.12-M55-E
+  IMPL** added +93 over the v0.11.0 baseline of 4295 + 5; the **v0.12
+  release-prep** atomic-write lift added a further +4 unit tests on
+  `atomicWriteSecureFile` → net **+97** — full
   inventory at `docs/v0.12-plan.md` §3 M55-E IMPL close per
   `feedback_public_docs_clean`; headline: 21 unit on
   `profileDefaultsBlockSchema` / `mutateProfileDefaultsInPlace` /
@@ -202,39 +205,45 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.12 release-prep cluster.** v0.12-M55-E
-  IMPL SHIPPED 2026-05-25 at `<close-docs>` — the full runtime
-  (resolver + Commander application layer + 3 new
-  `monday config set/get/unset` verbs + 5 `.requiredOption` →
-  `.option` conversions) on the `2026-01` pin. Codex IMPL
-  CONVERGED R2; D1 RESOLVED at IMPL kickoff via Codex
-  consultation → option (c′) applicability-aware preAction
-  injection (Codex's recommended 5th shape over the 4 pre-flight-
-  enumerated candidates). Per-milestone narrative + R-class
-  outcomes + the full D-list closures live in `docs/v0.12-
-  plan.md` §3 M55-E IMPL close subsection + §22 R-class register
-  per `feedback_public_docs_clean`. **Release-prep scope:**
-  version bump 0.11.0 → 0.12.0, CHANGELOG `[0.12.0]` (one user-
-  impact line per `feedback_public_docs_clean`: "Adds `monday
-  config set/get/unset` and `[profiles.<name>.defaults]` for
-  profile-scoped argument defaults — board, workspace, output,
-  concurrency."), ToC audit, deferral-slot grep (R-NEW-82;
-  expected clean by construction — v0.12-M55-E shipped no
-  deferred wire leg per R-v0.9-NEW-2-graduated's "no deferred
-  wire leg → no stub needed" rule's 4th structural class), README
-  refresh per R-v0.9-NEW-15 across the 3 surfaces, help-text
-  hygiene grep (R-v0.8-NEW-21 CLOSED-RESOLVED at v0.11; structural-
-  checklist gate), envelope-snapshot refresh probe, close-docs
-  sweep. Mirrors v0.9 / v0.10 / v0.11 4-commit shape (3rd-
-  consecutive ≤4-commit cluster precedent; R-NEW-82's "if clean,
-  skip" sub-rule applies to deferral-slip + ToC-audit when
-  CLEAN). **SDK probe at release-prep:** re-check
-  `@mondaydotcomorg/api` dist-tags — if 15.x has published
-  (baking API `2026-04`), M39/M40/M41 reopen and preempt v0.13+
-  candidate-selection. SDK at this IMPL close was still 14.0.0
+- **Next session:** **v0.12 publish cluster (pending user).**
+  The **v0.12 release-prep cluster SHIPPED 2026-05-25** — but it
+  did NOT follow the 4-commit "if clean, skip" shape, because the
+  user elected at kickoff to **bundle the R-v0.12-NEW-9 atomic-
+  write lift** into release-prep. The cluster landed in 6 commits:
+  `refactor(fs)` atomic-write lift (`3dd5478`) + README Scope flip
+  (`035c089`) + version bump 0.11.0 → 0.12.0 (`3cc582c`) +
+  CHANGELOG `[0.12.0]` (`0b49373`) + output-shapes ToC fill
+  (`3d21eab`) + close-docs sweep (`<close-docs>`). Conditional
+  commits: deferral-slot grep CLEAN-by-construction (skipped) +
+  help-text-hygiene grep CLEAN (skipped) + **ToC-audit FIRED** —
+  the config noun's `output-shapes.md` per-command reference still
+  listed only `show`/`path`, so the 3 new verbs' `data` shapes
+  were added. The atomic-write lift consolidated the tmp-rename +
+  chmod-0o600 + best-effort-unlink pattern (4 consumers: cache /
+  credentials / dev-conventions / profiles) into
+  `atomicWriteSecureFile` in `src/utils/fs.ts`; **Codex review
+  CONVERGED R1** (0 P1 / 0 P2 / 1 P3 — a test-depth gap folded
+  inline: added a rename-fails-after-tmp-created test proving the
+  cleanup unlink). R-v0.12-NEW-9 → **RESOLVED**. v0.12-M55-E IMPL
+  SHIPPED 2026-05-25 at `679bb2c` — the full runtime (resolver +
+  Commander application layer + 3 new `monday config
+  set/get/unset` verbs + 5 `.requiredOption` → `.option`
+  conversions) on the `2026-01` pin; Codex IMPL CONVERGED R2; D1
+  RESOLVED at IMPL kickoff via Codex consultation → option (c′)
+  applicability-aware preAction injection. Per-milestone narrative
+  + R-class outcomes + the full D-list closures live in
+  `docs/v0.12-plan.md` §3 M55-E IMPL close subsection + §22
+  R-class register per `feedback_public_docs_clean`. **SDK
+  re-probe at release-prep kickoff (2026-05-25):**
+  `@mondaydotcomorg/api` dist-tags still `{ latest: 14.0.0 }` — no
+  15.x publication, so M39/M40/M41 stay DEFERRED
   (**6th-consecutive stall**, v0.7 → v0.12). v0.12 is the
   6th-consecutive pivot in sequence (v0.7/v0.8/v0.9/v0.10/v0.11/
-  v0.12).
+  v0.12). **The publish cluster is the next session** (user-
+  driven; agent does NOT publish autonomously): `git push origin
+  main` → annotated `v0.12.0` tag → GitHub release → `npm publish`
+  → post-publish flip per R-v0.9-NEW-13 (backfills the
+  `<close-docs>` placeholders this cluster left).
   **Post-publish
   refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
   (release-prep cluster + post-publish flip) — process-only
@@ -677,7 +686,8 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — ACTIVE plan.
+2. **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — ACTIVE plan
+   (IMPL + release-prep SHIPPED; **publish pending user**).
    v0.12 = **profile-scoped argument defaults** on the `2026-01`
    pin: `[profiles.<name>.defaults]` table + `monday config
    set/get/unset` companion verbs (joining the existing `config
@@ -688,10 +698,16 @@ detail, and R-class refactor backlog, **read the plan docs** —
    default > unset). **M55-E** is the carry-forward E candidate
    filed at v0.6 kickoff (slipped v0.6 → v0.7 → v0.8 → v0.9 →
    v0.10 → v0.11, picked at v0.12 candidate-selection `76ddf98`
-   per the user binding). **🟢 IMPL SHIPPED 2026-05-25** at
-   `<close-docs>` (pre-flight `c2c39b5..bf63bb0` 7 commits per
-   R-v0.12-NEW-7's cluster-size observation; IMPL feat
-   `f83a776` + close-docs `<close-docs>`). D1 integration-shape
+   per the user binding). **🟢 IMPL + RELEASE-PREP SHIPPED
+   2026-05-25 (publish pending user)** (pre-flight
+   `c2c39b5..bf63bb0` 7 commits per R-v0.12-NEW-7's cluster-size
+   observation; IMPL feat `f83a776` + IMPL close-docs `679bb2c`;
+   release-prep `3dd5478..<close-docs>` — 6 commits, NOT the
+   4-commit shape because the user bundled the R-v0.12-NEW-9
+   atomic-write lift `3dd5478` (Codex CONVERGED R1, 0 P1/P2, 1 P3
+   folded) + the ToC-audit FIRED on an `output-shapes.md` config
+   gap `3d21eab`; deferral-slip + help-text-hygiene SKIPPED
+   CLEAN). D1 integration-shape
    RESOLVED at IMPL kickoff via Codex DESIGN consultation
    (R-v0.12-NEW-10) → option **(c′) applicability-aware
    preAction injection** (Codex's recommended 5th shape over
@@ -711,9 +727,10 @@ detail, and R-class refactor backlog, **read the plan docs** —
    all WATCH) + R-v0.12-NEW-7 (filed at meta-audit; WATCH) +
    R-v0.12-NEW-8 (filed at IMPL close-docs — applicability-
    registry maintenance discipline, 3-step lift per new
-   defaultable command; WATCH) + R-v0.12-NEW-9 (filed at post-
-   IMPL refactor-audit — HIGH-priority atomic-write lift, 4
-   consumers ready for separate session) + R-v0.12-NEW-10
+   defaultable command; WATCH) + R-v0.12-NEW-9 (atomic-write
+   lift — **RESOLVED at v0.12 release-prep**: bundled per user
+   election, `atomicWriteSecureFile` lifted across all 4
+   consumers, Codex CONVERGED R1) + R-v0.12-NEW-10
    (Codex DESIGN consultation pattern, WATCH) + R-v0.12-NEW-11
    (scope-pin tests for audit-prompt overscoping, WATCH).
    **R-v0.11-NEW-7 GRADUATED at this post-IMPL audit** at 2nd-
