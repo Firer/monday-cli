@@ -4,17 +4,14 @@ import {
   mkdir,
   open,
   readdir,
-  rename,
   rm,
   stat,
   unlink,
-  writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { CacheError, asError } from '../utils/errors.js';
-import { formatMode, isENOENT } from '../utils/fs.js';
+import { atomicWriteSecureFile, formatMode, isENOENT } from '../utils/fs.js';
 
 /**
  * Local cache for board metadata, the user directory, and the
@@ -280,21 +277,21 @@ export const writeEntry = async (
     data,
   };
   const payload = JSON.stringify(envelope);
-  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(tmpPath, payload, { mode: FILE_MODE });
-    // Some platforms ignore the `mode` on `writeFile` (umask). Re-
-    // chmod explicitly so we never leave the file group/world
-    // readable.
-    await chmod(tmpPath, FILE_MODE);
-    await rename(tmpPath, fullPath);
-    return { path: fullPath, sizeBytes: Buffer.byteLength(payload, 'utf8') };
-  } catch (err) {
-    await unlink(tmpPath).catch(() => undefined);
-    throw wrapFsError(err, `cannot write cache entry ${relativePath}`, {
-      path: fullPath,
-    });
-  }
+  await atomicWriteSecureFile({
+    fullPath,
+    payload,
+    mode: FILE_MODE,
+    /* c8 ignore start */
+    // Disk-full / atomic-rename failure path; the write mechanics are
+    // exercised in tests/unit/utils/fs.test.ts. This closure is the
+    // cache-specific error mapping on that path.
+    wrapError: (err) =>
+      wrapFsError(err, `cannot write cache entry ${relativePath}`, {
+        path: fullPath,
+      }),
+    /* c8 ignore stop */
+  });
+  return { path: fullPath, sizeBytes: Buffer.byteLength(payload, 'utf8') };
 };
 
 export interface CacheEntryInfo {

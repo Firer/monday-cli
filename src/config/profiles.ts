@@ -26,14 +26,13 @@
  *      to the env-var-identifier regex `/^[A-Z_][A-Z0-9_]*$/u`.
  */
 
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
 import { ConfigError, asError } from '../utils/errors.js';
-import { isENOENT } from '../utils/fs.js';
+import { atomicWriteSecureFile, isENOENT } from '../utils/fs.js';
 import { OUTPUT_FORMATS } from '../utils/output/select.js';
 
 /** Filename under `~/.monday-cli/`. Pinned for HOME-scoping. */
@@ -401,22 +400,20 @@ export const writeProfilesConfig = async (
   }
 
   const payload = stringifyToml(validated);
-  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(tmpPath, payload, { mode: CONFIG_FILE_MODE });
-    await chmod(tmpPath, CONFIG_FILE_MODE);
-    await rename(tmpPath, fullPath);
-  } catch (err) {
+  await atomicWriteSecureFile({
+    fullPath,
+    payload,
+    mode: CONFIG_FILE_MODE,
+    /* c8 ignore start */
     // Disk-full / atomic-rename failure path; not reproducible from
     // a tmp-dir test.
-    /* c8 ignore start */
-    await unlink(tmpPath).catch(() => undefined);
-    throw new ConfigError(`cannot write config file ${fullPath}`, {
-      cause: asError(err),
-      details: { path: fullPath },
-    });
+    wrapError: (err) =>
+      new ConfigError(`cannot write config file ${fullPath}`, {
+        cause: asError(err),
+        details: { path: fullPath },
+      }),
     /* c8 ignore stop */
-  }
+  });
 };
 
 /**

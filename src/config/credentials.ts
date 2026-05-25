@@ -34,13 +34,12 @@
  */
 
 import { constants as fsConstants } from 'node:fs';
-import { chmod, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ConfigError, asError } from '../utils/errors.js';
-import { formatMode, isENOENT } from '../utils/fs.js';
+import { atomicWriteSecureFile, formatMode, isENOENT } from '../utils/fs.js';
 
 /**
  * File-mode constant for the credentials file. Mirrors
@@ -280,21 +279,19 @@ export const writeCredentials = async (
   await ensureSecureDir(dir);
 
   const payload = JSON.stringify(validated, null, 2);
-  const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(tmpPath, payload, { mode: CREDENTIALS_FILE_MODE });
-    await chmod(tmpPath, CREDENTIALS_FILE_MODE);
-    await rename(tmpPath, fullPath);
-  } catch (err) {
+  await atomicWriteSecureFile({
+    fullPath,
+    payload,
+    mode: CREDENTIALS_FILE_MODE,
+    /* c8 ignore start */
     // Disk-full / atomic-rename failure path; not reproducible from a
     // unit test against a tmp dir.
-    /* c8 ignore start */
-    await unlink(tmpPath).catch(() => undefined);
-    throw wrapAsConfigError(err, `cannot write credentials file ${fullPath}`, {
-      path: fullPath,
-    });
+    wrapError: (err) =>
+      wrapAsConfigError(err, `cannot write credentials file ${fullPath}`, {
+        path: fullPath,
+      }),
     /* c8 ignore stop */
-  }
+  });
 };
 
 /**
