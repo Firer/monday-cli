@@ -313,20 +313,19 @@ See [`.env.example`](./.env.example) for all supported variables
 
 ## Scope
 
-**v0.11.0 (current).** Adds `monday item get-description` for
-reading item description doc-block content. A narrow new verb
-that surfaces Monday's `Item.description` payload (a list of doc
-blocks) without bloating every item read with heavy/nested
-content. **119 commands** across boards, items (single + bulk via
-`--where`), columns, groups, workspaces, teams, workdocs, updates,
-files, and the `monday dev` workflow namespace. No breaking
-changes vs v0.10.0.
+**v0.12.0 (current).** Adds `monday config set/get/unset` and a
+`[profiles.<name>.defaults]` config block for profile-scoped argument
+defaults — set a default `board`, `workspace`, `output` format, or
+`concurrency` once and every command picks it up (CLI flag still wins,
+then env var, then the profile default). **122 commands** across
+boards, items (single + bulk via `--where`), columns, groups,
+workspaces, teams, workdocs, updates, files, and the `monday dev`
+workflow namespace. No breaking changes vs v0.11.0.
 
 **What's next.** Roadmap headlines (see
 [`docs/cli-design.md`](./docs/cli-design.md) §13 for the full
 roadmap):
 
-- Profile-scoped argument defaults via `~/.monday-cli/config.toml`
 - Cross-board `monday item move` with column-value overrides
 - Resumable cross-board search cursor
 
