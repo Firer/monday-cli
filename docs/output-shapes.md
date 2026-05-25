@@ -61,7 +61,7 @@ no `data`); see the **Errors** section at the bottom.
 | [item (mutations)](#item-mutations) | set (friendly file `--set` v0.6-M38 + stdin `<file-col>=-` v0.8-M47), clear (single + bulk), update (single + bulk + --continue-on-error M25 + --concurrency v0.4-M30 + friendly file `--set` v0.6-M38 single + v0.7-M42 bulk + multi-file v0.8-M46 + stdin v0.8-M47), create (friendly file `--set` v0.7-M43 + multi-file v0.8-M46 + stdin v0.8-M47), archive, delete, duplicate, move, upsert (M12), time-track start (M20), time-track stop (M20), upload (v0.4-M31) |
 | [raw](#raw) | (escape hatch) |
 | [cache](#cache) | list, stats, clear |
-| [config](#config) | show, path |
+| [config](#config) | show, path, set, get, unset |
 | [schema](#schema) | (no verb) |
 | [diagnostics](#diagnostics) | status (M22), usage (M22), board favorites (M23), item search cross-board (M23) |
 | [dev](#dev) | discover, configure, doctor, sprint current/list/items, epic list/items, release list, task list/start/done/block (M26) |
@@ -3641,6 +3641,65 @@ Where the CLI looks for `.env`. Read-only diagnostic.
   ]
 }
 ```
+
+### `config set <key> <value> [--profile <name>]`
+
+Writes one profile-scoped argument default (`board`, `workspace`,
+`output`, or `concurrency`). Echoes the new value plus what it
+replaced so an agent can confirm the write without a follow-up read.
+
+```json
+{
+  "profile": "default",
+  "key": "board",
+  "value": "987654",
+  "previous_value": null
+}
+```
+
+`previous_value` is `null` when the key was previously unset.
+`value` / `previous_value` are strings for `board` / `workspace` /
+`output` and numbers for `concurrency`.
+
+### `config get [key] [--profile <name>]`
+
+Reads the resolved default for one key, or all four when `<key>` is
+omitted. `source` says where the resolved value came from —
+`env_var` (an environment override is active), `profile_default`
+(read from the config file), or `unset` (no default). A live CLI
+flag is not a source here: this reads stored config state, not a
+command invocation.
+
+```json
+{
+  "profile": "default",
+  "entries": [
+    { "key": "board",       "value": "987654", "source": "profile_default" },
+    { "key": "workspace",   "value": null,     "source": "unset" },
+    { "key": "output",      "value": "json",   "source": "env_var" },
+    { "key": "concurrency", "value": null,     "source": "unset" }
+  ]
+}
+```
+
+`profile` is `null` when no profile is active and the request
+resolves against the implicit default. `value` is `null` for any
+`unset` entry.
+
+### `config unset <key> [--profile <name>]`
+
+Removes one default. Idempotent — removing an absent key is a
+success, not an error. Echoes the removed value.
+
+```json
+{
+  "profile": "default",
+  "key": "board",
+  "previous_value": "987654"
+}
+```
+
+`previous_value` is `null` when the key was already unset.
 
 ---
 
