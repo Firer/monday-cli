@@ -11,63 +11,36 @@ humans are second-class. Built incrementally via Claude Code on top of
 
 ## Current state
 
-- **Published:** `monday-cli@0.11.0` on npm (`latest` dist-tag,
-  2026-05-23T11:50:52Z). **v0.11.0 published — release complete.**
-  Annotated `v0.11.0` tag pushed pointing at `195d238`; GitHub
-  release live at https://github.com/Firer/monday-cli/releases/tag/v0.11.0.
-  The **v0.11-M54-G `monday item get-description` narrow read verb**
-  is **LIVE in the published artifact** — surfaces Monday's
-  `Item.description { id, blocks: [DocumentBlock] }` via raw GraphQL
-  at API `2026-01` (4 of `DocumentBlock`'s 9 wire fields projected
-  — `id` / `type` / `content` / `position`); mirrors v0.9-M52's
-  `board views <bid>` carve-out shape so heavy/nested doc-block
-  content stays opt-in. **v0.11 release-prep cluster**
-  (`413d0f8..195d238`, 4 commits; mirrors the v0.9 + v0.10
-  4-commit precedent verbatim — 3rd-consecutive ≤4-commit cluster):
-  README Scope flip — flipped current to v0.11.0 with the
-  `item get-description` framing (`413d0f8`; R-v0.9-NEW-15 widened-
-  checklist's three surfaces all addressed — Scope block flipped +
-  "What's next" bullets refreshed to remove the now-shipped
-  item-descriptions-on-read line and reorder E to the top per the
-  2026-05-22 user binding, quickstart held, `**v<next> (next):**`
-  block confirmed absent post-`317ae04` collapse) / version bump
-  0.10.0 → 0.11.0 — no audit-fix folded, `npm audit` clean
-  (`664260d`) / CHANGELOG [0.11.0] one-line user-impact framing per
-  `feedback_public_docs_clean` ("Adds `monday item get-description`
-  for reading item description doc-block content", `11a3e24`) /
-  close-docs sweep (`195d238`). Envelope-snapshot refresh
-  probe ran clean (zero diff vs M54-G IMPL close, **163 snapshots**
-  — M54-G's Codex IMPL R1 P3-1 fix-up added the new verb's
-  happy-path snapshot taking 162 → 163; release-prep added none) —
-  folded into this close-docs prose per the v0.5/v0.6/v0.7/v0.8/v0.9/
-  v0.10 precedent. R-NEW-82 **9th-consecutive ratification** (zero
-  stale `deferred_to: "v0.11"` slots, by construction — M54-G is a
-  pure-additive new verb with no deferred wire leg); R-NEW-84
-  graduated-discipline applied (Codex skipped — mechanical/process-
-  only cluster); R-v0.9-NEW-15 **RE-RATIFIED** at v0.11 (2nd
-  dedicated consumer of the widened checklist; all three surfaces
-  applied verbatim). **Four R-class graduations + closures at this
-  close-docs:** R-v0.10-NEW-6 ("if clean, skip" sub-rule)
-  GRADUATED into `.claude/rules/workflow.md` R-NEW-82 body at
-  3rd-consecutive ≤4-commit cluster threshold; R-v0.9-NEW-14
-  (deletion-led/pure-refactor/pure-additive IMPLs preempt R-NEW-82
-  slip work) GRADUATED into the same R-NEW-82 body widening at
-  3rd structurally-distinct class threshold (v0.9 M50 + v0.10 M53
-  + v0.11 M54-G); R-v0.10-NEW-7 (post-publish flip rule cross-ref
-  gap) RESOLVED inline at the same workflow.md edit
-  (bidirectional cross-ref between R-NEW-82 + R-v0.9-NEW-13 now
-  in place); R-v0.8-NEW-21 (help-text hygiene release-prep grep)
-  CLOSED-RESOLVED at 4th-consecutive CLEAN sweep — closed rather
-  than graduated, the structural fix at v0.10-M53 plus
-  `feedback_public_docs_clean` user-memory + R-NEW-82's widened
-  "if clean, skip" sub-rule cover the discipline structurally.
-  Previous: `monday-cli@0.10.0` (tag `v0.10.0` at `c9eceba`,
-  2026-05-22T21:24:43Z); `monday-cli@0.9.0` (tag `v0.9.0` at
-  `ee96681`, 2026-05-22T16:38:40Z); `monday-cli@0.8.0` (tag
-  `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z); `monday-cli@0.7.0`
-  (tag `3e46f59`, 2026-05-20T15:48:07Z).
-- **package.json version:** `0.12.0` (bumped at v0.12 release-prep;
-  npm publish pending user).
+- **Published:** `monday-cli@0.12.0` on npm (`latest` dist-tag,
+  2026-05-25T21:40:27Z). **v0.12.0 published — release complete.**
+  Annotated `v0.12.0` tag pushed pointing at `08aa42e`; GitHub
+  release live at https://github.com/Firer/monday-cli/releases/tag/v0.12.0.
+  **v0.12 = profile-scoped argument defaults** — `monday config
+  set/get/unset` + a `[profiles.<name>.defaults]` TOML block carrying
+  4 scoping defaults (`board` / `workspace` / `output` /
+  `concurrency`), projected onto matching CLI flags via the standard
+  chain (CLI flag > env var > profile default > unset). The
+  **v0.12 release-prep cluster** (`3dd5478..08aa42e`, **6 commits —
+  NOT the 4-commit shape**: the user elected at kickoff to bundle
+  the R-v0.12-NEW-9 atomic-write lift (`3dd5478`, Codex CONVERGED
+  R1) so Codex DID run (R-NEW-84 skip didn't apply), and the
+  ToC-audit FIRED on an `output-shapes.md` config gap (`3d21eab`);
+  deferral-slip + help-text-hygiene SKIPPED CLEAN): atomic-write
+  lift (`3dd5478`) / README Scope flip (`035c089`) / version bump
+  0.11.0 → 0.12.0 (`3cc582c`) / CHANGELOG [0.12.0] (`0b49373`) /
+  output-shapes ToC fill (`3d21eab`) / close-docs sweep
+  (`08aa42e`). R-v0.12-NEW-9 RESOLVED (`atomicWriteSecureFile`
+  lifted across 4 consumers — cache / credentials / dev-conventions
+  / profiles); R-v0.11-NEW-7 5-point §3-row re-sweep applied at
+  close-docs. Envelope-snapshot probe clean (163, zero diff).
+  Post-publish flip applied 2026-05-25 (this commit). Previous:
+  `monday-cli@0.11.0` (tag `v0.11.0` at `195d238`,
+  2026-05-23T11:50:52Z); `monday-cli@0.10.0` (tag `v0.10.0` at
+  `c9eceba`, 2026-05-22T21:24:43Z); `monday-cli@0.9.0` (tag
+  `v0.9.0` at `ee96681`, 2026-05-22T16:38:40Z); `monday-cli@0.8.0`
+  (tag `v0.8.0` at `090fb76`, 2026-05-21T23:45:48Z).
+- **package.json version:** `0.12.0` (published to npm `latest`
+  2026-05-25T21:40:27Z).
 - **Live numbers:** **4392 tests pass + 5 skipped** (the **v0.12-M55-E
   IMPL** added +93 over the v0.11.0 baseline of 4295 + 5; the **v0.12
   release-prep** atomic-write lift added a further +4 unit tests on
@@ -205,102 +178,29 @@ humans are second-class. Built incrementally via Claude Code on top of
     HEAVY single-sourced one (`boardMetadataSchema` + `views`).
     Both correct per the runtime read; rule documents both valid
     choices.
-- **Next session:** **v0.12 publish cluster (pending user).**
-  The **v0.12 release-prep cluster SHIPPED 2026-05-25** — but it
-  did NOT follow the 4-commit "if clean, skip" shape, because the
-  user elected at kickoff to **bundle the R-v0.12-NEW-9 atomic-
-  write lift** into release-prep. The cluster landed in 6 commits:
-  `refactor(fs)` atomic-write lift (`3dd5478`) + README Scope flip
-  (`035c089`) + version bump 0.11.0 → 0.12.0 (`3cc582c`) +
-  CHANGELOG `[0.12.0]` (`0b49373`) + output-shapes ToC fill
-  (`3d21eab`) + close-docs sweep (`<close-docs>`). Conditional
-  commits: deferral-slot grep CLEAN-by-construction (skipped) +
-  help-text-hygiene grep CLEAN (skipped) + **ToC-audit FIRED** —
-  the config noun's `output-shapes.md` per-command reference still
-  listed only `show`/`path`, so the 3 new verbs' `data` shapes
-  were added. The atomic-write lift consolidated the tmp-rename +
-  chmod-0o600 + best-effort-unlink pattern (4 consumers: cache /
-  credentials / dev-conventions / profiles) into
-  `atomicWriteSecureFile` in `src/utils/fs.ts`; **Codex review
-  CONVERGED R1** (0 P1 / 0 P2 / 1 P3 — a test-depth gap folded
-  inline: added a rename-fails-after-tmp-created test proving the
-  cleanup unlink). R-v0.12-NEW-9 → **RESOLVED**. v0.12-M55-E IMPL
-  SHIPPED 2026-05-25 at `679bb2c` — the full runtime (resolver +
-  Commander application layer + 3 new `monday config
-  set/get/unset` verbs + 5 `.requiredOption` → `.option`
-  conversions) on the `2026-01` pin; Codex IMPL CONVERGED R2; D1
-  RESOLVED at IMPL kickoff via Codex consultation → option (c′)
-  applicability-aware preAction injection. Per-milestone narrative
-  + R-class outcomes + the full D-list closures live in
-  `docs/v0.12-plan.md` §3 M55-E IMPL close subsection + §22
-  R-class register per `feedback_public_docs_clean`. **SDK
-  re-probe at release-prep kickoff (2026-05-25):**
-  `@mondaydotcomorg/api` dist-tags still `{ latest: 14.0.0 }` — no
-  15.x publication, so M39/M40/M41 stay DEFERRED
-  (**6th-consecutive stall**, v0.7 → v0.12). v0.12 is the
-  6th-consecutive pivot in sequence (v0.7/v0.8/v0.9/v0.10/v0.11/
-  v0.12). **The publish cluster is the next session** (user-
-  driven; agent does NOT publish autonomously): `git push origin
-  main` → annotated `v0.12.0` tag → GitHub release → `npm publish`
-  → post-publish flip per R-v0.9-NEW-13 (backfills the
-  `<close-docs>` placeholders this cluster left).
-  **Post-publish
-  refactor-audit ran 2026-05-23** over `413d0f8..e1bf661`
-  (release-prep cluster + post-publish flip) — process-only
-  cluster, no code-lift candidates surfaced (consistent with v0.9
-  + v0.10 post-publish audits on the same shape of recency
-  window). Filed 1 new R-class watch-item (R-v0.11-NEW-7 — stale
-  "Next is..." forward-pointers accrete in CLAUDE.md §3 plan-doc-
-  list rows across cycles; demonstrated drift fixed inline at
-  this audit on the v0.10-plan row, 1st-instance); GRADUATED
-  R-v0.10-NEW-5 (`<post-publish-sha>` placeholder convention
-  parallels `<close-docs>`) at the 2nd-instance refactor-audit
-  trigger fold into `.claude/rules/workflow.md` R-v0.9-NEW-13
-  body. v0.11.0 is **PUBLISHED + release-complete** (npm
-  `latest` 2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`;
-  release-prep `413d0f8..195d238`). v0.11 feature-cluster scope
-  is fully shipped — **M54-G** `item get-description` narrow read
-  verb — and the release-prep cluster landed in 4 commits
-  (matching v0.9 + v0.10 4-commit shape; ToC audit + deferral-
-  slip + help-text-hygiene all skipped after CLEAN gates per
-  R-NEW-82's widened "if clean, skip" sub-rule). Process
-  adoptions at the v0.11 close-docs: R-NEW-82 **9th-consecutive
-  ratification** (zero stale `deferred_to: "v0.11"` slots, by
-  construction — pure-additive new verb shipped no deferred wire
-  leg) + body widened at this same close (folds R-v0.10-NEW-6 +
-  R-v0.9-NEW-14 + R-v0.10-NEW-7 graduations); R-NEW-84
-  graduated-discipline applied (Codex skipped on the mechanical/
-  process-only cluster); R-v0.9-NEW-15 RE-RATIFIED at v0.11
-  (2nd dedicated consumer of the widened README checklist);
-  R-v0.8-NEW-21 CLOSED-RESOLVED at 4th-consecutive CLEAN hygiene
-  sweep (closed rather than graduated — structural fix at v0.10-
-  M53 + `feedback_public_docs_clean` + R-NEW-82's widened
-  sub-rule cover the discipline). **✅ v0.11-M54-G SHIPPED
-  2026-05-23** — see `docs/v0.11-plan.md` §3 "M54-G — IMPL close"
-  + §3 "release-prep — close" + §22 R-class register for the
-  full narrative (per the `feedback_public_docs_clean`
-  propagation forward, the per-milestone narrative belongs in
-  the plan-docs, not here). Pre-flight `f08bfef`; SHA-backfill
-  `d1753ae`; IMPL close-docs `5738b64`; post-IMPL refactor-audit
-  `1f662af`; release-prep `413d0f8..195d238`. Codex pre-flight
-  R1 CONVERGED 0 P1; Codex IMPL R2 CONVERGED 0 P1/P2/P3 (R1 P2-1
-  absent-key shape-drift gap folded inline before R2 adding the
-  `missing_description_key` discriminator); R-class outcomes at
-  M54-G IMPL close: R-v0.9-NEW-8 RESOLVED; R-v0.11-NEW-2
-  GRADUATED into workflow.md as "Pre-flights with no deferred
-  wire leg need NO stub literal" (rule body widened to 3
-  structural classes — M50 deletion + M53 pure refactor + M54-G
-  pure-additive new verb). Net stats at the v0.11 release: zero
-  new transport seam, zero new ERROR_CODE (29 stays), +1 command
-  (119); **4295 tests + 5 skipped**; branches **95.86%**; `npm
-  audit` 0. SDK probe at the M54-G pre-flight + this release-
-  prep: `@mondaydotcomorg/api@14.0.0` — **5th-consecutive SDK
-  stall** (v0.7 → v0.11), so M39/M40/M41 (SDK 15.x → API
-  `2026-04`) + M44/M45 (SDK 16.x → API `2026-07`) stay DEFERRED;
-  v0.11 is the 5th-consecutive pivot in sequence
-  (v0.7/v0.8/v0.9/v0.10/v0.11). v0.10.0 stays PUBLISHED +
-  release-complete (npm `latest` 2026-05-22T21:24:43Z; tag
-  `v0.10.0` at `c9eceba`; release-prep `36d705d..c9eceba`).
+- **Next session:** **v0.13 candidate-selection** per R-NEW-75 —
+  2+ backlog candidates remain on `cli-design.md §13`: per-noun
+  defaults extension beyond the 4 v0.12 keys, cross-board `item
+  move` value-overrides, resumable cross-board search cursor,
+  multi-level subitem creation. **v0.12.0 is PUBLISHED +
+  release-complete** (npm `latest` 2026-05-25T21:40:27Z; tag
+  `v0.12.0` at `08aa42e`; release-prep `3dd5478..08aa42e`;
+  post-publish flip = this commit). v0.12 = profile-scoped
+  argument defaults (`monday config set/get/unset` +
+  `[profiles.<name>.defaults]`); per-milestone narrative +
+  R-class outcomes live in `docs/v0.12-plan.md` §3 + §22 per
+  `feedback_public_docs_clean`. **Optional post-publish
+  refactor-audit** before v0.13 kickoff (mirrors v0.10 `5a63a4d`
+  / v0.11 post-publish audits) over the `3dd5478..<post-publish-sha>`
+  recency window — but the cycle's one HIGH-priority code-lift
+  candidate (R-v0.12-NEW-9 atomic-write lift) already shipped
+  bundled into release-prep, so a fresh audit may surface nothing.
+  **SDK still 14.0.0** (6th-consecutive stall, v0.7 → v0.12), so
+  M39/M40/M41 (SDK 15.x → `2026-04`) + M44/M45 (SDK 16.x →
+  `2026-07`) stay DEFERRED; if 15.x publishes before v0.13
+  kickoff, M39/M40/M41 reopen and preempt candidate-selection.
+  v0.11.0 stays PUBLISHED + release-complete (npm `latest`
+  2026-05-23T11:50:52Z; tag `v0.11.0` at `195d238`).
 - **Historical context for v0.10 (previously the active milestone):**
   **R-v0.10-NEW-4 RESOLVED inline at `085e999`** —
   `--maxWorkers=2` folded into the `test:coverage` script
@@ -686,8 +586,8 @@ detail, and R-class refactor backlog, **read the plan docs** —
 1. **[`docs/cli-design.md`](./docs/cli-design.md)** — canonical
    contract: command surface, output envelope, 29 stable error codes,
    deferral list (§13), every binding decision.
-2. **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — ACTIVE plan
-   (IMPL + release-prep SHIPPED; **publish pending user**).
+2. **[`docs/v0.12-plan.md`](./docs/v0.12-plan.md)** — shipped (npm
+   `latest` 2026-05-25T21:40:27Z; tag `v0.12.0` at `08aa42e`).
    v0.12 = **profile-scoped argument defaults** on the `2026-01`
    pin: `[profiles.<name>.defaults]` table + `monday config
    set/get/unset` companion verbs (joining the existing `config
@@ -698,11 +598,10 @@ detail, and R-class refactor backlog, **read the plan docs** —
    default > unset). **M55-E** is the carry-forward E candidate
    filed at v0.6 kickoff (slipped v0.6 → v0.7 → v0.8 → v0.9 →
    v0.10 → v0.11, picked at v0.12 candidate-selection `76ddf98`
-   per the user binding). **🟢 IMPL + RELEASE-PREP SHIPPED
-   2026-05-25 (publish pending user)** (pre-flight
+   per the user binding). **✅ PUBLISHED 2026-05-25** (pre-flight
    `c2c39b5..bf63bb0` 7 commits per R-v0.12-NEW-7's cluster-size
    observation; IMPL feat `f83a776` + IMPL close-docs `679bb2c`;
-   release-prep `3dd5478..<close-docs>` — 6 commits, NOT the
+   release-prep `3dd5478..08aa42e` — 6 commits, NOT the
    4-commit shape because the user bundled the R-v0.12-NEW-9
    atomic-write lift `3dd5478` (Codex CONVERGED R1, 0 P1/P2, 1 P3
    folded) + the ToC-audit FIRED on an `output-shapes.md` config
